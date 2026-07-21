@@ -1,0 +1,27 @@
+{
+  "extends": "../../temp-tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/__tests__",
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../config"
+    },
+    {
+      "path": "../installer"
+    }
+  ]
+}

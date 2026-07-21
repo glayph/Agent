@@ -1,0 +1,36 @@
+{
+  "name": "@hiro/gateway",
+  "version": "1.0.0",
+  "description": "Lightweight Express gateway for Hiro Hiro - proxies HTTP/WS to the core agent, serves static files, and provides health checks",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "start": "node dist/index.js",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\""
+  },
+  "dependencies": {
+    "@hiro/config": "1.0.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "http-proxy-middleware": "3.0.7",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.10"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  }
+}

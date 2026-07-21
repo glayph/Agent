@@ -1,0 +1,370 @@
+schema_version: 1
+agent:
+  name: Miki
+  project: Hiro
+  persona: >
+    You are Miki, Hiro's English-only assistant.
+
+    You operate as a computer-based agent with full system access. You can read, write, and delete
+    files anywhere on the filesystem, launch applications, control windows, use the keyboard, manage
+    processes, and automate the desktop. Use tools purposefully, keep actions auditable, and always
+    verify your results. You have access to every drive, directory, and application on this computer.
+  language: en
+  timezone: Asia/Dhaka
+  max_tokens_per_cycle: 4096
+  resource:
+    mode: balanced
+    message_history_limit: 15
+    max_context_chars: 80000
+    system_index_limit: 6
+    system_index_cache_ttl_ms: 15000
+    tool_warmup_enabled: true
+    quality_retry_limit: 1
+  browser:
+    max_retries: 2
+    clear_state_every_n_navigations: 5
+    chrome_path: null
+  memory:
+    short_term_limit: 20
+    long_term_enabled: true
+    personality_enabled: true
+    procedural_enabled: true
+    auto_summarize: true
+    message_retention_days: null
+    vector_search_threshold: 0.5
+    consolidation_batch_size: 5
+    consolidation_debounce_ms: 60000
+    max_context_memories: 5
+    max_context_facts: 5
+    max_context_procedures: 5
+    max_context_chars: 6000
+    prune_low_value_facts: true
+    fact_prune_threshold: 0.15
+    fact_prune_min_age_days: 30
+  visual:
+    screen_cooldown_seconds: 10
+  tools:
+    auto_approve_safe: true
+    require_confirm_destructive: true
+  security:
+    bypass_restrictions: true
+    system_access: full
+    sandbox_mode: false
+    risk_acceptance: true
+    privileged_account_required: false
+    audit_logging: true
+    approval_note: Full system access enabled by default. The agent operates as a computer-based agent across the entire OS.
+self_improvement:
+  enabled: true
+  reflection_interval_minutes: 60
+  max_reflections_per_day: 12
+  optimization_interval_minutes: 180
+  prompt_tuning_interval_minutes: 120
+  auto_apply_optimizations: false
+  guardrails:
+    enabled: true
+    max_prompt_drift_percent: 20
+concurrency:
+  maxConcurrentTasks: 3
+  maxParallelToolCalls: 8
+  toolLockTimeoutMs: 30000
+  taskQueueSize: 50
+  schedulerIntervalMs: 100
+  maxScheduledTaskAttempts: 3
+  retryBaseDelayMs: 60000
+  retryMaxDelayMs: 900000
+  recoveryStaleAfterMs: 300000
+heartbeat:
+  enabled: true
+  interval_seconds: 30
+  auto_actions:
+    enabled: false
+    max_actions_per_cycle: 0
+  resource_limits:
+    max_tokens_per_cycle: 1000
+    max_idle_minutes: 5
+skill_governance:
+  enabled: false
+  validator:
+    check_syntax: true
+    check_dangerous_patterns: true
+    test_execution: true
+agents:
+  defaults:
+    system_access: full
+    restrict_to_workspace: false
+    split_on_marker: true
+    max_tokens: 4096
+    context_window: 0
+    max_tool_iterations: 50
+    summarize_message_threshold: 20
+    summarize_token_percent: 75
+    tool_feedback:
+      enabled: true
+      max_args_length: 300
+      separate_messages: true
+    turn_profile:
+      enabled: true
+      history:
+        mode: default
+      system_prompt:
+        mode: default
+      skills:
+        mode: custom
+        allow: []
+      tools:
+        mode: default
+  router:
+    enabled: true
+    default_agent: miki
+    min_score: 2
+  specialists:
+    general:
+      name: General Coordinator
+      description: Coordinates ordinary requests and preserves conversational context.
+      persona: Choose the lightest reliable path and escalate only when specialist evidence is strong.
+      capabilities:
+        - coordination
+        - triage
+      signals:
+        - low_complexity
+      complexities:
+        - simple
+        - standard
+        - complex
+      priority: 0
+    engineer:
+      name: Software Engineer
+      description: Implements, debugs, tests, and verifies code or runtime changes.
+      persona: Prefer scoped implementation, type safety, tests, and concrete verification evidence.
+      capabilities:
+        - code
+        - debug
+        - test
+        - integration
+      keywords:
+        - code
+        - fix
+        - implement
+        - refactor
+        - runtime
+        - test
+      signals:
+        - implementation_intent
+        - technical_syntax
+        - verification_needed
+      complexities:
+        - standard
+        - complex
+      tools:
+        - shell_execute
+        - file_read
+        - file_write
+      priority: 8
+    researcher:
+      name: Research Analyst
+      description: Gathers evidence, compares options, and separates facts from inference.
+      persona: Prioritize source quality, cite evidence, and avoid stale assumptions.
+      capabilities:
+        - research
+        - compare
+        - audit
+      keywords:
+        - latest
+        - current
+        - compare
+        - research
+        - audit
+      signals:
+        - verification_needed
+      complexities:
+        - standard
+        - complex
+      tools:
+        - web_search
+        - scrape_page
+      priority: 4
+    planner:
+      name: Workflow Planner
+      description: Breaks complex ecosystem goals into sequenced work with checkpoints.
+      persona: Decompose complex work into explicit phases and keep verification tied to milestones.
+      capabilities:
+        - planning
+        - workflow
+        - architecture
+      keywords:
+        - architecture
+        - goal
+        - plan
+        - roadmap
+        - workflow
+        - ecosystem
+        - production
+      signals:
+        - complexity_terms
+        - multi_step_language
+      complexities:
+        - complex
+      tools:
+        - project_workflow_create
+      priority: 6
+    miki:
+      name: Miki
+      description: Routes every task through Hiro's single-agent runtime profile.
+      persona: >-
+        Choose the lightest reliable path, gather only relevant context, apply scoped changes, and
+        verify meaningful results before final output.
+      capabilities:
+        - coordination
+        - triage
+        - code
+        - debug
+        - test
+        - integration
+        - research
+        - compare
+        - audit
+        - planning
+        - workflow
+        - architecture
+      keywords:
+        - architecture
+        - audit
+        - code
+        - compare
+        - current
+        - fix
+        - goal
+        - implement
+        - latest
+        - plan
+        - production
+        - refactor
+        - research
+        - roadmap
+        - runtime
+        - test
+        - workflow
+      signals:
+        - low_complexity
+        - implementation_intent
+        - technical_syntax
+        - verification_needed
+        - complexity_terms
+        - multi_step_language
+      complexities:
+        - simple
+        - standard
+        - complex
+      tools:
+        - shell_execute
+        - file_read
+        - file_write
+        - web_search
+        - scrape_page
+        - project_workflow_create
+      priority: 10
+session:
+  dm_scope: per-channel-peer
+evolution:
+  enabled: true
+  mode: observe
+  min_task_count: 2
+  min_success_ratio: 0.7
+  cold_path_trigger: after_turn
+  cold_path_times: []
+devices:
+  enabled: true
+  monitor_usb: true
+channels:
+  telegram:
+    enabled: true
+    type: telegram
+  discord:
+    enabled: true
+    type: discord
+  slack:
+    enabled: true
+    type: slack
+  feishu:
+    enabled: true
+    type: feishu
+  dingtalk:
+    enabled: true
+    type: dingtalk
+  qq:
+    enabled: true
+    type: qq
+  weixin:
+    enabled: true
+    type: weixin
+  wecom:
+    enabled: true
+    type: wecom
+  line:
+    enabled: true
+    type: line
+  onebot:
+    enabled: true
+    type: onebot
+  whatsapp:
+    enabled: true
+    type: whatsapp
+  pico:
+    enabled: true
+    type: pico
+  matrix:
+    enabled: true
+    type: matrix
+  irc:
+    enabled: true
+    type: irc
+  mqtt:
+    enabled: true
+    type: mqtt
+channel_list:
+  telegram:
+    enabled: true
+    type: telegram
+  discord:
+    enabled: true
+    type: discord
+  slack:
+    enabled: true
+    type: slack
+  feishu:
+    enabled: true
+    type: feishu
+  dingtalk:
+    enabled: true
+    type: dingtalk
+  qq:
+    enabled: true
+    type: qq
+  weixin:
+    enabled: true
+    type: weixin
+  wecom:
+    enabled: true
+    type: wecom
+  line:
+    enabled: true
+    type: line
+  onebot:
+    enabled: true
+    type: onebot
+  whatsapp:
+    enabled: true
+    type: whatsapp
+  pico:
+    enabled: true
+    type: pico
+  matrix:
+    enabled: true
+    type: matrix
+  irc:
+    enabled: true
+    type: irc
+  mqtt:
+    enabled: true
+    type: mqtt

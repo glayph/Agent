@@ -1,0 +1,21 @@
+{
+  "id": "github/codebase-inspection",
+  "name": "GitHub Codebase Inspection",
+  "description": "Inspect and analyze GitHub repositories with code parsing, dependency detection, and architecture overview",
+  "category": "github",
+  "tags": ["github", "code-analysis", "repositories", "inspection"],
+  "author": "Hiro",
+  "version": "1.0.0",
+  "enabled": true,
+  "dependencies": ["github-auth"],
+  "tools": [
+    {
+      "name": "github_inspect_repo",
+      "description": "Inspect a GitHub repository structure and extract metadata"
+    },
+    {
+      "name": "github_analyze_code",
+      "description": "Analyze code patterns and dependencies"
+    }
+  ]
+}

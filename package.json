@@ -1,0 +1,113 @@
+{
+  "name": "hiro",
+  "version": "1.0.0",
+  "description": "Hiro - autonomous AI agent with full computer control (TypeScript)",
+  "license": "MIT",
+  "author": "miki",
+  "type": "module",
+  "main": "dist/runtime/packages/core/dist/api/index.js",
+  "bin": {
+    "Hiro": "bin/Hiro.js",
+    "Agent": "bin/Hiro.js"
+  },
+  "files": [
+    "dist/runtime/",
+    "bin/",
+    "config/",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:all": "turbo run build",
+    "build": "npm run build:all",
+    "build:serial": "node scripts/build-release-artifacts.mjs",
+    "build:webui": "node scripts/frontend-pnpm.mjs build",
+    "build:webui:backend": "npm run build:webui && npm run sync:webui:backend",
+    "sync:webui:backend": "node scripts/sync-webui-backend.mjs",
+    "build:go-backend": "node scripts/build-go-backend.mjs",
+    "build:cli": "node scripts/build-cli.mjs",
+    "prepare:runtime": "node scripts/prepare-runtime-package.mjs",
+    "dev": "node scripts/build-runtime-if-stale.mjs && node bin/Hiro.js",
+    "dev:node": "node scripts/build-runtime-if-stale.mjs && node packages/gateway/dist/index.js",
+    "start": "node packages/gateway/dist/index.js",
+    "doctor": "node bin/Hiro.js doctor",
+    "test": "jest",
+    "test:js": "jest --runInBand",
+    "test:go": "node scripts/run-go-tests.mjs",
+    "test:frontend": "node scripts/frontend-pnpm.mjs test",
+    "test:turbo": "turbo run test",
+    "verify": "node scripts/run-verify.mjs",
+    "verify:release": "node scripts/run-release-verify.mjs",
+    "audit:deps": "npm audit --audit-level=moderate && node scripts/frontend-pnpm.mjs audit --audit-level moderate",
+    "audit:deps:prod": "npm audit --omit=dev --audit-level=moderate && node scripts/frontend-pnpm.mjs audit --prod --audit-level moderate",
+    "lint": "eslint \"packages/**/*.ts\" --ignore-pattern \"packages/ui/frontend/**\" --max-warnings=0 && node scripts/frontend-pnpm.mjs lint",
+    "lint:turbo": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "sanitize:local-data": "node scripts/sanitize-local-data.mjs",
+    "clean": "tsc --build --clean && node scripts/clean-build-artifacts.mjs",
+    "clean:turbo": "turbo run clean",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.11.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "http-proxy-middleware": "^3.0.0",
+    "js-yaml": "^4.1.0",
+    "openai": "4.104.0",
+    "playwright": "^1.44.0",
+    "tar": "^7.4.0",
+    "telegraf": "^4.16.0",
+    "ts-node": "^10.9.2",
+    "turndown": "^7.2.4",
+    "ws": "^8.17.0",
+    "zod": "^3.25.76"
+  },
+  "overrides": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/http-proxy-middleware": "^1.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/markdown-it": "^13.0.2",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@types/turndown": "^5.0.6",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
+    "eslint": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-formatter-compact": "^9.0.1",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.6.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.8.3",
+    "ts-jest": "^29.1.0",
+    "turbo": "^2.10.5",
+    "typescript": "^6.0.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  },
+  "packageManager": "npm@10.8.2",
+  "workspaces": [
+    "packages/*",
+    "packages/cli"
+  ],
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
+  }
+}

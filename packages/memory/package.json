@@ -1,0 +1,28 @@
+{
+  "name": "graphrag-memory",
+  "version": "1.0.0",
+  "description": "GraphRAG Memory System for Agentic AI - Temporal Knowledge Graph with Intelligent Chunking and Optimized Data Storage",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./nodegraphrag": "./src/nodegraphrag.js",
+    "./memory-manager": "./src/core/memory-manager.js",
+    "./config": "./src/config.js",
+    "./server": "./src/api/server.js"
+  },
+  "scripts": {
+    "build": "echo 'No build step needed'",
+    "start": "node src/api/server.js",
+    "dev": "node --watch src/api/server.js",
+    "test": "node src/test/test-runner.js",
+    "cli": "node src/cli.js",
+    "optimize": "node -e \"const mm = new (require('./src/core/memory-manager'))(); mm.initialize('./data').then(() => mm.optimize()).then(r => { console.log(r); process.exit(); })\""
+  },
+  "keywords": ["graphrag", "memory", "agentic-ai", "knowledge-graph", "temporal", "chunking", "vector-search"],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "ws": "^8.18.0"
+  }
+}

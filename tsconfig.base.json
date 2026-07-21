@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": false,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "bundler",
+
+    "paths": {
+      "@hiro/config": ["./packages/config/src/index.ts"],
+      "@hiro/config/security": ["./packages/config/src/security.ts"],
+      "@hiro/installer": ["./packages/installer/src/index.ts"],
+      "@hiro/core": ["./packages/core/src/index.ts"],
+      "@hiro/gateway": ["./packages/gateway/src/index.ts"]
+    },
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "savedAt": "2026-07-20T10:37:45.789Z",
+  "nodes": [
+    {
+      "id": "openai-inc",
+      "type": "entity",
+      "data": {
+        "label": "OpenAI Inc"
+      },
+      "createdAt": "2026-07-20T10:37:45.779Z",
+      "updatedAt": "2026-07-20T10:37:45.779Z",
+      "accessCount": 3,
+      "lastAccessed": "2026-07-20T10:37:45.782Z",
+      "communityId": "mem-fact"
+    },
+    {
+      "id": "mem-fact",
+      "type": "memory",
+      "data": {
+        "content": "Company news"
+      },
+      "createdAt": "2026-07-20T10:37:45.779Z",
+      "updatedAt": "2026-07-20T10:37:45.779Z",
+      "accessCount": 1,
+      "lastAccessed": "2026-07-20T10:37:45.782Z",
+      "communityId": "mem-fact"
+    }
+  ],
+  "edges": [
+    {
+      "source": "mem-fact",
+      "target": "openai-inc",
+      "type": "references",
+      "weight": 1.3,
+      "metadata": {},
+      "createdAt": "2026-07-20T10:37:45.779Z"
+    }
+  ]
+}

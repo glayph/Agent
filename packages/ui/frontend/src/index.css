@@ -1,0 +1,1047 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "./theme/material-theme.css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+/* =============================================================================
+   THEME TOKENS
+   Material Design 3 integration with existing system
+   ============================================================================= */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+  --radius-2xl: calc(var(--radius) + 4px);
+  --radius-3xl: calc(var(--radius) + 8px);
+  --radius-4xl: calc(var(--radius) + 12px);
+  
+  /* Legacy color variables mapped to Material Design tokens */
+  --color-background: var(--md-sys-color-background);
+  --color-foreground: var(--md-sys-color-on-background);
+  --color-card: var(--md-sys-color-surface);
+  --color-card-foreground: var(--md-sys-color-on-surface);
+  --color-popover: var(--md-sys-color-surface);
+  --color-popover-foreground: var(--md-sys-color-on-surface);
+  --color-primary: var(--md-sys-color-primary);
+  --color-primary-foreground: var(--md-sys-color-on-primary);
+  --color-secondary: var(--md-sys-color-secondary);
+  --color-secondary-foreground: var(--md-sys-color-on-secondary);
+  --color-muted: var(--md-sys-color-surface-variant);
+  --color-muted-foreground: var(--md-sys-color-on-surface-variant);
+  --color-accent: var(--md-sys-color-primary-container);
+  --color-accent-foreground: var(--md-sys-color-on-primary-container);
+  --color-destructive: var(--md-sys-color-error);
+  --color-destructive-foreground: var(--md-sys-color-on-error);
+  --color-border: var(--md-sys-color-outline);
+  --color-input: var(--md-sys-color-outline);
+  --color-ring: var(--md-sys-color-primary);
+  
+  /* Chart colors using Material palette */
+  --color-chart-1: var(--md-sys-color-primary);
+  --color-chart-2: var(--md-sys-color-secondary);
+  --color-chart-3: var(--md-sys-color-tertiary);
+  --color-chart-4: var(--md-sys-color-surface-variant);
+  --color-chart-5: var(--md-sys-color-outline);
+  
+  /* Sidebar colors */
+  --color-sidebar: var(--md-sys-color-surface);
+  --color-sidebar-foreground: var(--md-sys-color-on-surface);
+  --color-sidebar-primary: var(--md-sys-color-primary);
+  --color-sidebar-primary-foreground: var(--md-sys-color-on-primary);
+  --color-sidebar-accent: var(--md-sys-color-surface-variant);
+  --color-sidebar-accent-foreground: var(--md-sys-color-on-surface-variant);
+  --color-sidebar-border: var(--md-sys-color-outline);
+  --color-sidebar-ring: var(--md-sys-color-primary);
+  
+  /* Status colors (custom - keeping existing for now) */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+}
+
+/* =============================================================================
+   LIGHT MODE — Material Design 3 Light Theme
+   ============================================================================= */
+:root {
+  --radius: 0.5rem;
+
+  /* Core surface - mapped from Material tokens */
+  --background:       var(--md-sys-color-background);
+  --foreground:       var(--md-sys-color-on-background);
+
+  /* Cards / panels */
+  --card:             var(--md-sys-color-surface);
+  --card-foreground:  var(--md-sys-color-on-surface);
+
+  /* Popovers */
+  --popover:          var(--md-sys-color-surface);
+  --popover-foreground: var(--md-sys-color-on-surface);
+
+  /* Primary - Material Design primary */
+  --primary:          var(--md-sys-color-primary);
+  --primary-foreground: var(--md-sys-color-on-primary);
+
+  /* Secondary */
+  --secondary:        var(--md-sys-color-secondary);
+  --secondary-foreground: var(--md-sys-color-on-secondary);
+
+  /* Muted */
+  --muted:            var(--md-sys-color-surface-variant);
+  --muted-foreground: var(--md-sys-color-on-surface-variant);
+
+  /* Accent */
+  --accent:           var(--md-sys-color-primary-container);
+  --accent-foreground: var(--md-sys-color-on-primary-container);
+
+  /* Destructive */
+  --destructive:      var(--md-sys-color-error);
+  --destructive-foreground: var(--md-sys-color-on-error);
+
+  /* Borders & inputs */
+  --border:           var(--md-sys-color-outline);
+  --input:            var(--md-sys-color-outline);
+  --ring:             var(--md-sys-color-primary);
+
+  /* Status */
+  --success:          #22c55e;
+  --warning:          #f59e0b;
+
+  /* Charts */
+  --chart-1: var(--md-sys-color-primary);
+  --chart-2: var(--md-sys-color-secondary);
+  --chart-3: var(--md-sys-color-tertiary);
+  --chart-4: var(--md-sys-color-surface-variant);
+  --chart-5: var(--md-sys-color-outline);
+
+  /* Sidebar */
+  --sidebar:                      var(--md-sys-color-surface);
+  --sidebar-foreground:           var(--md-sys-color-on-surface);
+  --sidebar-primary:              var(--md-sys-color-primary);
+  --sidebar-primary-foreground:   var(--md-sys-color-on-primary);
+  --sidebar-accent:               var(--md-sys-color-surface-variant);
+  --sidebar-accent-foreground:    var(--md-sys-color-on-surface-variant);
+  --sidebar-border:               var(--md-sys-color-outline);
+  --sidebar-ring:                 var(--md-sys-color-primary);
+
+  /* Chat layout */
+  --chat-inline-padding: clamp(0.75rem, 2vw, 4rem);
+  --chat-content-width: clamp(20rem, 72vw, 53rem);
+  --chat-message-max: min(100%, 46rem);
+  --chat-user-message-max: min(72%, 28rem);
+  --chat-composer-min-height: clamp(3rem, 5svh, 3.75rem);
+  --chat-composer-text-max-height: clamp(4rem, 18svh, 9rem);
+  --chat-surface:           #ffffff;
+  --chat-assistant-text:    #09090b;
+  --chat-agent-bubble:      transparent;
+  --chat-agent-border:      transparent;
+  --chat-user-bubble:       #09090b;
+  --chat-user-border:       #27272a;
+  --chat-user-text:         #fafafa;
+  --chat-user-shadow:       0 2px 12px rgba(0,0,0,0.08);
+  --chat-composer-bg:       transparent;
+  --chat-composer-bg:       rgba(249,250,251,0.6);
+  --chat-composer-border:   rgba(15,23,42,0.06);
+  --chat-composer-focus-border: rgba(59,130,246,0.9);
+  --chat-composer-shadow:   0 1px 2px rgba(16,24,40,0.04);
+  --chat-composer-focus-shadow: 0 6px 20px rgba(59,130,246,0.12);
+  --chat-bubble-label:      #f4f4f5;
+  --chat-bubble-meta:       #a1a1aa;
+  --chat-alert-bg:          #fef9c3;
+  --chat-alert-border:      #fde047;
+  --chat-alert-text:        #713f12;
+  --chat-alert-icon:        #ca8a04;
+
+  /* Motion — fast, precise, GPU-composited */
+  --motion-duration-instant: 80ms;
+  --motion-duration-fast:    140ms;
+  --motion-duration-base:    220ms;
+  --motion-duration-slow:    360ms;
+  --motion-duration-glide:   520ms;
+  --motion-ease-standard:    cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-emphasized:  cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-spring:      cubic-bezier(0.22, 1.1, 0.2, 1);
+  --motion-lift:             -1px;
+  --motion-press-scale:      0.97;
+  --motion-hover-scale:      1.02;
+  --motion-panel-glow:       color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+/* =============================================================================
+   DARK MODE — Material Design 3 Dark Theme
+   ============================================================================= */
+.dark {
+  --background:       var(--md-sys-color-background);
+  --foreground:       var(--md-sys-color-on-background);
+  --card:             var(--md-sys-color-surface);
+  --card-foreground:  var(--md-sys-color-on-surface);
+  --popover:          var(--md-sys-color-surface);
+  --popover-foreground: var(--md-sys-color-on-surface);
+  --primary:          var(--md-sys-color-primary);
+  --primary-foreground: var(--md-sys-color-on-primary);
+  --secondary:        var(--md-sys-color-secondary);
+  --secondary-foreground: var(--md-sys-color-on-secondary);
+  --muted:            var(--md-sys-color-surface-variant);
+  --muted-foreground: var(--md-sys-color-on-surface-variant);
+  --accent:           var(--md-sys-color-primary-container);
+  --accent-foreground: var(--md-sys-color-on-primary-container);
+  --destructive:      var(--md-sys-color-error);
+  --destructive-foreground: var(--md-sys-color-on-error);
+  --border:           var(--md-sys-color-outline);
+  --input:            var(--md-sys-color-outline);
+  --ring:             var(--md-sys-color-primary);
+  --success:          #4ade80;
+  --warning:          #fbbf24;
+  --chart-1: var(--md-sys-color-primary);
+  --chart-2: var(--md-sys-color-secondary);
+  --chart-3: var(--md-sys-color-tertiary);
+  --chart-4: var(--md-sys-color-surface-variant);
+  --chart-5: var(--md-sys-color-outline);
+  --sidebar:                    var(--md-sys-color-surface);
+  --sidebar-foreground:         var(--md-sys-color-on-surface);
+  --sidebar-primary:            var(--md-sys-color-primary);
+  --sidebar-primary-foreground: var(--md-sys-color-on-primary);
+  --sidebar-accent:             var(--md-sys-color-surface-variant);
+  --sidebar-accent-foreground:  var(--md-sys-color-on-surface-variant);
+  --sidebar-border:             var(--md-sys-color-outline);
+  --sidebar-ring:               var(--md-sys-color-primary);
+  --chat-surface:           #09090b;
+  --chat-assistant-text:    #fafafa;
+  --chat-agent-bubble:      transparent;
+  --chat-agent-border:      transparent;
+  --chat-user-bubble:       #fafafa;
+  --chat-user-border:       #e4e4e7;
+  --chat-user-text:         #09090b;
+  --chat-user-shadow:       0 2px 16px rgba(0,0,0,0.4);
+  --chat-composer-bg:       transparent;
+  --chat-composer-bg:       rgba(255,255,255,0.03);
+  --chat-composer-border:   rgba(255,255,255,0.04);
+  --chat-composer-focus-border: rgba(99,102,241,0.9);
+  --chat-composer-shadow:   0 1px 4px rgba(0,0,0,0.36);
+  --chat-composer-focus-shadow: 0 8px 30px rgba(99,102,241,0.12);
+  --chat-bubble-label:      #27272a;
+  --chat-bubble-meta:       #71717a;
+  --chat-alert-bg:          #1c1402;
+  --chat-alert-border:      #78350f;
+  --chat-alert-text:        #fde68a;
+  --chat-alert-icon:        #f59e0b;
+}
+
+/* =============================================================================
+   BASE LAYER
+   ============================================================================= */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    -ms-overflow-style: auto;
+    box-sizing: border-box;
+  }
+
+  *::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 999px;
+  }
+
+  /* Hide scrollbars on most UI surfaces */
+  [data-slot="scroll-area-scrollbar"],
+  [data-sidebar],
+  [cmdk-list] {
+    scrollbar-width: none;
+  }
+
+  [data-slot="scroll-area-scrollbar"]::-webkit-scrollbar,
+  [data-sidebar]::-webkit-scrollbar,
+  [cmdk-list]::-webkit-scrollbar {
+    display: none;
+  }
+
+  html {
+    background: var(--background);
+    color-scheme: light;
+    /* Prevent layout shifts from scrollbar appearing */
+    scrollbar-gutter: stable;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    min-width: 320px;
+    overflow-x: hidden;
+    font-family:
+      "Inter Variable",
+      Inter,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    font-weight: 400;
+    font-feature-settings: "cv11", "ss01";
+    font-variation-settings: "opsz" 32;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Theme transition — only background/color, not all props */
+    transition:
+      background-color var(--motion-duration-slow) var(--motion-ease-standard),
+      color var(--motion-duration-slow) var(--motion-ease-standard);
+  }
+
+  h1 {
+    font-size: 1.875rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+
+  h3 {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 20%, transparent);
+    color: var(--foreground);
+  }
+
+  button,
+  [role="button"],
+  a,
+  input,
+  textarea,
+  select {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* =============================================================================
+   SIDEBAR SYSTEM
+   ============================================================================= */
+[data-slot="sidebar-container"] {
+  top: 0 !important;
+  height: 100svh !important;
+  transition-duration: var(--motion-duration-slow) !important;
+  transition-timing-function: var(--motion-ease-emphasized) !important;
+}
+
+[data-slot="sidebar-gap"] {
+  height: 100svh;
+}
+
+[data-slot="sidebar-inner"] {
+  border-right: 1px solid var(--sidebar-border);
+  background: var(--sidebar);
+  transition:
+    background-color var(--motion-duration-slow) var(--motion-ease-standard),
+    border-color var(--motion-duration-slow) var(--motion-ease-standard);
+}
+
+/* =============================================================================
+   OVERLAY & DIALOG SYSTEM
+   ============================================================================= */
+[data-slot="dialog-overlay"],
+[data-slot="sheet-overlay"],
+[data-slot="alert-dialog-overlay"] {
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(4px) saturate(1.2);
+  -webkit-backdrop-filter: blur(4px) saturate(1.2);
+  animation-duration: var(--motion-duration-base) !important;
+  animation-timing-function: var(--motion-ease-standard) !important;
+}
+
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.04),
+    0 8px 32px rgba(0,0,0,0.12),
+    0 2px 8px rgba(0,0,0,0.06);
+  animation-duration: var(--motion-duration-base) !important;
+  animation-timing-function: var(--motion-ease-emphasized) !important;
+}
+
+.dark [data-slot="dialog-content"],
+.dark [data-slot="alert-dialog-content"] {
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.06),
+    0 8px 32px rgba(0,0,0,0.48),
+    0 2px 8px rgba(0,0,0,0.32);
+}
+
+[data-slot="sheet-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="popover-content"],
+[data-slot="tooltip-content"] {
+  animation-duration: var(--motion-duration-base) !important;
+  animation-timing-function: var(--motion-ease-emphasized) !important;
+}
+
+/* =============================================================================
+   TOOLTIP SYSTEM
+   ============================================================================= */
+[data-slot="tooltip-content"] {
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  box-shadow:
+    0 2px 8px rgba(0,0,0,0.08),
+    0 0 0 1px rgba(0,0,0,0.04);
+  letter-spacing: 0.01em;
+  transform-origin: var(--radix-tooltip-content-transform-origin);
+}
+
+.dark [data-slot="tooltip-content"] {
+  box-shadow:
+    0 2px 8px rgba(0,0,0,0.32),
+    0 0 0 1px rgba(255,255,255,0.04);
+}
+
+[data-slot="tooltip-content"] > svg {
+  fill: var(--popover);
+  background: var(--popover);
+}
+
+/* =============================================================================
+   DROPDOWN / MENU SYSTEM
+   ============================================================================= */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="popover-content"],
+[data-slot="command"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 4px 16px rgba(0,0,0,0.08),
+    0 1px 4px rgba(0,0,0,0.04);
+}
+
+.dark [data-slot="dropdown-menu-content"],
+.dark [data-slot="dropdown-menu-sub-content"],
+.dark [data-slot="popover-content"],
+.dark [data-slot="command"] {
+  box-shadow:
+    0 4px 24px rgba(0,0,0,0.4),
+    0 1px 6px rgba(0,0,0,0.24);
+}
+
+/* =============================================================================
+   SHADOW RESET — Use strategic shadows, not generic utility shadows
+   ============================================================================= */
+.shadow-xs,
+.shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.06) !important; }
+.shadow-md { box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
+.shadow-lg { box-shadow: 0 4px 16px rgba(0,0,0,0.10) !important; }
+.shadow-xl { box-shadow: 0 8px 32px rgba(0,0,0,0.12) !important; }
+.shadow-2xl { box-shadow: 0 16px 48px rgba(0,0,0,0.14) !important; }
+
+.dark .shadow-xs,
+.dark .shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.24) !important; }
+.dark .shadow-md { box-shadow: 0 2px 10px rgba(0,0,0,0.32) !important; }
+.dark .shadow-lg { box-shadow: 0 4px 20px rgba(0,0,0,0.40) !important; }
+.dark .shadow-xl { box-shadow: 0 8px 36px rgba(0,0,0,0.48) !important; }
+.dark .shadow-2xl { box-shadow: 0 16px 60px rgba(0,0,0,0.56) !important; }
+
+/* =============================================================================
+   APP SHELL
+   ============================================================================= */
+[data-app-shell="content"] {
+  isolation: isolate;
+  /* Promote to its own GPU compositing layer */
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+[data-app-shell="content"] [data-motion-surface="route"] > .bg-background {
+  background-color: transparent;
+}
+
+/* =============================================================================
+   APP BACKGROUND — Minimal clean noise, no color tint in classic mode
+   ============================================================================= */
+.app-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: paint;
+  /* Clean single-color with very subtle noise texture */
+  background: var(--background);
+}
+
+/* Subtle dot grid for depth, no color tint */
+.app-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: radial-gradient(
+    circle,
+    var(--foreground) 0 0.75px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse at 50% 50%, black 30%, transparent 80%);
+}
+
+.dark .app-background::after {
+  opacity: 0.06;
+}
+
+.app-background::before,
+.app-background [data-bg-layer] {
+  position: absolute;
+  inset: 0;
+}
+
+/* Remove aurora and mesh layers for clean theme */
+.app-background [data-bg-layer="aurora"],
+.app-background [data-bg-layer="grid"] {
+  display: none;
+}
+
+.app-background__mesh {
+  display: none;
+}
+
+/* =============================================================================
+   MOTION SYSTEM — GPU-accelerated, 60fps
+   Only animate transform & opacity (compositor properties)
+   ============================================================================= */
+
+/* Route surface */
+[data-motion-surface="route"] {
+  transform-origin: 50% 12%;
+}
+
+/* Interactive elements — GPU-promoted via will-change */
+[data-slot="button"],
+.motion-dock-item,
+[data-sidebar="trigger"],
+[data-sidebar="menu-button"],
+[data-sidebar="menu-action"],
+[cmdk-item] {
+  transition-property: transform, opacity, background-color, border-color, color;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: var(--motion-ease-standard);
+  /* GPU compositing hint — only during interaction */
+}
+
+/* Dock item glow shimmer on hover */
+.motion-dock-item {
+  position: relative;
+  overflow: hidden;
+  transform-origin: center;
+}
+
+.motion-dock-item::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 0%,
+    color-mix(in srgb, var(--foreground) 8%, transparent),
+    transparent 65%
+  );
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.motion-dock-item:not(:disabled):hover {
+  transform: translateY(var(--motion-lift)) scale(var(--motion-hover-scale));
+}
+
+.motion-dock-item:not(:disabled):hover::before {
+  opacity: 1;
+}
+
+[data-sidebar="menu-button"]:not(:disabled):hover {
+  transform: translateY(var(--motion-lift)) scale(var(--motion-hover-scale));
+}
+
+[cmdk-item][data-selected="true"] {
+  transform: translateY(var(--motion-lift)) scale(var(--motion-hover-scale));
+}
+
+.motion-dock-item:not(:disabled):active,
+[data-sidebar="menu-button"]:not(:disabled):active,
+[cmdk-item][aria-selected="true"]:active {
+  transform: translateY(1px) scale(var(--motion-press-scale));
+  transition-duration: var(--motion-duration-instant);
+}
+
+/* Active state indicator dot */
+.motion-dock-item[data-active="true"] {
+  transform: scale(1.04);
+}
+
+.motion-dock-item[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  left: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.5;
+  animation: dockIndicatorIn var(--motion-duration-base) var(--motion-ease-spring) both;
+}
+
+/* Panels & cards */
+.motion-panel,
+[data-slot="card"],
+[data-slot="dialog-content"],
+[data-slot="sheet-content"],
+[data-slot="popover-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="command"] {
+  transition:
+    border-color var(--motion-duration-base) var(--motion-ease-standard),
+    background-color var(--motion-duration-slow) var(--motion-ease-standard),
+    color var(--motion-duration-slow) var(--motion-ease-standard);
+}
+
+.motion-panel:hover {
+  border-color: color-mix(in srgb, var(--foreground) 18%, var(--border));
+}
+
+/* Form inputs */
+[data-slot="input"],
+[data-slot="textarea"],
+[cmdk-input],
+input,
+textarea,
+select {
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-standard),
+    background-color var(--motion-duration-base) var(--motion-ease-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+[data-slot="input"]:focus-visible,
+[data-slot="textarea"]:focus-visible,
+[cmdk-input]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 50%, transparent);
+}
+
+/* =============================================================================
+   SHIMMER LOADING STATE
+   ============================================================================= */
+.motion-shimmer {
+  position: relative;
+  isolation: isolate;
+  background: var(--muted);
+  overflow: hidden;
+}
+
+.motion-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    color-mix(in srgb, var(--background) 60%, transparent) 48%,
+    transparent 64%
+  );
+  background-size: 240% 100%;
+  animation: shimmer var(--motion-duration-glide) linear infinite;
+}
+
+/* =============================================================================
+   COMMAND PALETTE
+   ============================================================================= */
+.app-command-palette [cmdk-list] {
+  scrollbar-width: none;
+}
+
+.app-command-palette [cmdk-list]::-webkit-scrollbar {
+  display: none;
+}
+
+.app-command-palette [cmdk-item][data-selected="true"],
+.app-command-palette [cmdk-item][aria-selected="true"]:active {
+  transform: none;
+}
+
+/* =============================================================================
+   TOAST / SONNER
+   ============================================================================= */
+[data-sonner-toaster] [data-sonner-toast] {
+  animation-duration: var(--motion-duration-base) !important;
+  animation-timing-function: var(--motion-ease-emphasized) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow:
+    0 4px 16px rgba(0,0,0,0.08),
+    0 1px 4px rgba(0,0,0,0.04) !important;
+}
+
+.dark [data-sonner-toaster] [data-sonner-toast] {
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.40),
+    0 1px 6px rgba(0,0,0,0.24) !important;
+}
+
+/* =============================================================================
+   STATUS COLOR OVERRIDES — Map to success/warning/destructive tokens
+   ============================================================================= */
+[class*="text-green-"] { color: var(--success) !important; }
+[class*="bg-green-500"] { background-color: var(--success) !important; }
+[class*="bg-green-500/"],
+[class*="bg-green-600/"] {
+  background-color: color-mix(in srgb, var(--success) 10%, transparent) !important;
+}
+
+[class*="text-amber-"],
+[class*="text-yellow-"] { color: var(--warning) !important; }
+[class*="bg-amber-"],
+[class*="bg-yellow-"] {
+  background-color: color-mix(in srgb, var(--warning) 10%, transparent) !important;
+}
+[class*="border-amber-"],
+[class*="border-yellow-"] {
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent) !important;
+}
+
+[class*="text-orange-"] { color: var(--destructive) !important; }
+[class*="bg-orange-"] {
+  background-color: color-mix(in srgb, var(--destructive) 10%, transparent) !important;
+}
+[class*="border-orange-"] {
+  border-color: color-mix(in srgb, var(--destructive) 30%, transparent) !important;
+}
+
+/* =============================================================================
+   CONTENT VISIBILITY — Chat message performance
+   ============================================================================= */
+@supports (content-visibility: auto) {
+  [data-chat-message] {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 6rem;
+  }
+
+  [data-chat-message="assistant"] {
+    contain-intrinsic-size: auto 9rem;
+  }
+}
+
+/* =============================================================================
+   MOBILE — Touch devices
+   ============================================================================= */
+@media (hover: none), (pointer: coarse) {
+  [data-chat-message-actions] {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+/* =============================================================================
+   LAUNCHER AUTH SHELL
+   ============================================================================= */
+#root {
+  min-height: 100svh;
+}
+
+#root:has([data-launcher-auth-shell="true"]) {
+  animation: none;
+}
+
+[data-launcher-auth-card="true"] {
+  border-color: rgb(255 255 255 / 0.18) !important;
+  background: rgb(255 255 255 / 0.08) !important;
+  color: rgb(255 255 255);
+  box-shadow:
+    0 24px 64px rgb(0 0 0 / 0.24),
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    inset 0 1px 0 rgb(255 255 255 / 0.12) !important;
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+}
+
+[data-launcher-auth-card="true"]:hover {
+  background: rgb(255 255 255 / 0.12) !important;
+  transform: translateY(-1px);
+}
+
+[data-launcher-auth-card="true"] [data-slot="card-description"] {
+  color: rgb(255 255 255 / 0.7);
+}
+
+[data-launcher-auth-card="true"] [data-slot="input"] {
+  border-color: rgb(255 255 255 / 0.16);
+  background: rgba(0, 0, 0, 0.28);
+  color: rgb(255 255 255);
+}
+
+[data-launcher-auth-card="true"] [data-slot="input"]::placeholder {
+  color: rgb(255 255 255 / 0.4);
+}
+
+[data-launcher-auth-card="true"] [data-slot="input"]:focus-visible {
+  border-color: rgb(255 255 255 / 0.5);
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.12);
+}
+
+/* =============================================================================
+   CARD SYSTEM — Clean elevated look
+   ============================================================================= */
+[data-slot="card"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+/* Subtle top-highlight line for depth in dark mode */
+.dark [data-slot="card"] {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+/* =============================================================================
+   AGENT DASHBOARD SPECIFIC
+   ============================================================================= */
+.agent-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  padding: 1.25rem;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-standard),
+    transform var(--motion-duration-fast) var(--motion-ease-standard);
+  will-change: transform;
+}
+
+.agent-card:hover {
+  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+
+.dark .agent-card:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.32);
+}
+
+.agent-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agent-status-dot[data-status="running"] {
+  background: var(--success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 20%, transparent);
+  animation: statusPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.agent-status-dot[data-status="idle"] {
+  background: var(--muted-foreground);
+}
+
+.agent-status-dot[data-status="error"] {
+  background: var(--destructive);
+}
+
+/* Swarm metrics panel */
+.swarm-metric {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.swarm-metric:hover {
+  border-color: color-mix(in srgb, var(--foreground) 15%, var(--border));
+}
+
+.swarm-metric__value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--foreground);
+}
+
+.swarm-metric__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Message trace timeline */
+.message-trace-item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.message-trace-item:last-child {
+  border-bottom: none;
+}
+
+.message-trace-type {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: calc(var(--radius) - 3px);
+  border: 1px solid;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+
+.message-trace-type[data-type="task_delegate"] {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.message-trace-type[data-type="task_result"] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+  background: color-mix(in srgb, var(--success) 6%, transparent);
+}
+
+.message-trace-type[data-type="error"] {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 30%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 6%, transparent);
+}
+
+/* =============================================================================
+   PERFORMANCE — Reduce paint / repaint areas
+   ============================================================================= */
+/* Sidebar stays in its own compositing layer */
+[data-slot="sidebar-inner"] {
+  contain: layout style paint;
+}
+
+/* Chat area — optimize for long message lists */
+[data-chat-surface] {
+  contain: layout style;
+}
+
+/* =============================================================================
+   KEYFRAME ANIMATIONS
+   ============================================================================= */
+@keyframes shimmer {
+  0%   { background-position: 240% 0; }
+  100% { background-position: -240% 0; }
+}
+
+@keyframes dockIndicatorIn {
+  0%   { opacity: 0; transform: scaleX(0.3) translateZ(0); }
+  100% { opacity: 0.5; transform: scaleX(1) translateZ(0); }
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px) translateZ(0); }
+  to   { opacity: 1; transform: translateY(0) translateZ(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px) translateZ(0); }
+  to   { opacity: 1; transform: translateY(0) translateZ(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--motion-duration-base) var(--motion-ease-emphasized) both;
+}
+
+.animate-slide-up {
+  animation: slideUp var(--motion-duration-base) var(--motion-ease-emphasized) both;
+}
+
+/* =============================================================================
+   REDUCED MOTION — Respect user preference
+   ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  [data-motion-surface="route"],
+  [data-motion-surface="route"] > *,
+  [data-slot="button"],
+  .motion-dock-item,
+  [data-sidebar="menu-button"],
+  [cmdk-item],
+  .motion-panel,
+  [data-slot="card"],
+  .agent-card {
+    filter: none !important;
+    transform: none !important;
+  }
+
+  .app-background *,
+  .app-background::before,
+  .app-background::after {
+    animation: none !important;
+  }
+
+  .motion-shimmer::after {
+    animation: none !important;
+  }
+}

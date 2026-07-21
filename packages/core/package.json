@@ -1,0 +1,50 @@
+{
+  "name": "@hiro/core",
+  "version": "1.0.0",
+  "description": "Core agent engine for Hiro Hiro - orchestrator, memory, LLM, tools, self-improvement, and governance",
+  "type": "module",
+  "main": "dist/api/index.js",
+  "types": "dist/api/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/api/index.js",
+      "types": "./dist/api/index.d.ts"
+    },
+    "./agent": {
+      "import": "./dist/agent.js",
+      "types": "./dist/agent.d.ts"
+    },
+    "./safety": {
+      "import": "./dist/safety/index.js",
+      "types": "./dist/safety/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "start": "node dist/api/index.js",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@hiro/config": "1.0.0",
+    "@hiro/installer": "1.0.0",
+    "better-sqlite3": "^12.10.0",
+    "openai": "^4.52.0",
+    "playwright": "^1.44.0",
+    "qrcode": "^1.5.4",
+    "telegraf": "^4.16.0",
+    "turndown": "^7.2.4",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/node": "^20.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/turndown": "^5.0.6"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  }
+}

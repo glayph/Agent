@@ -1,0 +1,28 @@
+{
+  "name": "@hiro/cli",
+  "version": "1.0.0",
+  "description": "Hiro CLI entry point for npm package distribution",
+  "main": "agent.js",
+  "type": "module",
+  "bin": {
+    "agent": "agent.js",
+    "Hiro": "agent.js"
+  },
+  "scripts": {
+    "start": "node agent.js start",
+    "doctor": "node agent.js doctor",
+    "version": "node agent.js version",
+    "help": "node agent.js help"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "http-proxy-middleware": "^3.0.0",
+    "ws": "^8.17.0",
+    "zod": "^3.25.76"
+  }
+}

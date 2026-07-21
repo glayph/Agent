@@ -1,0 +1,85 @@
+permissions:
+  shell_execute:
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: true
+    allow_system_paths: false
+    max_timeout_seconds: 300
+    max_output_bytes: 10485760
+  file_read:
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: true
+    allow_absolute_paths: false
+    max_file_size_mb: 100
+  file_write:
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: true
+    allow_absolute_paths: false
+  file_delete:
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: true
+    allow_absolute_paths: false
+  computer_use:
+    level: TRUSTED_FULL_ACCESS
+    mouse_input: true
+    accessibility_first: true
+    allow_app_launch: true
+    allow_screenshots: true
+    allow_keyboard: true
+    allow_clipboard: true
+    max_observe_elements: 300
+tool_state:
+  tool_search_tool_regex: true
+  shell_execute: true
+disabled_tools: []
+runtime:
+  cron:
+    allow_command: false
+    exec_timeout_minutes: 5
+  exec:
+    enabled: true
+    allow_remote: true
+    enable_deny_patterns: false
+    custom_allow_patterns: []
+    custom_deny_patterns: []
+    timeout_seconds: 0
+  mcp:
+    enabled: true
+    discovery:
+      enabled: true
+      ttl: 5
+      max_search_results: 5
+      use_bm25: true
+      use_regex: true
+    servers: {}
+web_search:
+  provider: native
+  current_service: native
+  prefer_native: true
+  providers:
+    - id: native
+      label: Native Web Search
+      configured: true
+      current: true
+      requires_auth: false
+    - id: tavily
+      label: Tavily
+      configured: false
+      current: false
+      requires_auth: true
+    - id: serpapi
+      label: SerpAPI
+      configured: false
+      current: false
+      requires_auth: true
+  settings:
+    native:
+      enabled: true
+      max_results: 5
+    tavily:
+      enabled: false
+      max_results: 5
+      api_key_set: false
+    serpapi:
+      enabled: false
+      max_results: 5
+      api_key_set: false
