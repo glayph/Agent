@@ -758,41 +758,23 @@ export class AgentOrchestrator {
         .pop();
       if (lastUserMsg && typeof lastUserMsg.content === "string") {
         let contextStr: string | null = null;
+        let tkgContext: { context: string } | null = null;
 
-        // Try in-process NodeGraphRAG first (fast, avoids HTTP). Fallback to HTTP API if unavailable.
+        // Try TKG v2 HTTP API first (context, anchor, special events)
         try {
-          const { NodeGraphRAG } = await import("../../memory");
-          if (NodeGraphRAG) {
-            // reuse a global singleton to avoid re-initializing repeatedly
-            // @ts-ignore
-            if (!global.__nodeGraphRAGInstance) {
-              // @ts-ignore
-              global.__nodeGraphRAGInstance = new NodeGraphRAG({
-                dataDir: undefined,
-                autoSaveIntervalMs: 0,
-              });
-              // @ts-ignore
-              await global.__nodeGraphRAGInstance.initialize();
-            }
-
-            // race with timeout (3s)
-            // @ts-ignore
-            const ctxPromise = global.__nodeGraphRAGInstance.getContext(
-              lastUserMsg.content,
-            );
-            let timeoutId: ReturnType<typeof setTimeout> | undefined;
-            const timeout = new Promise<null>(
-              (resolve) => (timeoutId = setTimeout(() => resolve(null), 3000)),
-            );
-            // @ts-ignore
-            contextStr = await Promise.race([ctxPromise, timeout]);
-            if (timeoutId !== undefined) clearTimeout(timeoutId);
+          const memRes = await fetch(
+            `http://localhost:3777/api/v2/context?query=${encodeURIComponent(lastUserMsg.content)}&maxEvents=25`,
+            { signal: AbortSignal.timeout(3000) },
+          );
+          if (memRes.ok) {
+            tkgContext = await memRes.json() as { context: string };
+            contextStr = tkgContext.context;
           }
         } catch {
-          // ignore -> fall back to HTTP below
-          contextStr = null;
+          // v2 fallback -> try v1 below
         }
 
+        // Fallback to v1 context API
         if (!contextStr) {
           try {
             const memRes = await fetch("http://localhost:3777/api/context", {
@@ -812,7 +794,7 @@ export class AgentOrchestrator {
         if (contextStr) {
           processedMessages.push({
             role: "system",
-            content: "Memory Context:\n" + contextStr,
+            content: contextStr,
           } as ChatMessage);
         }
       }
@@ -843,13 +825,41 @@ export class AgentOrchestrator {
         const assistantMsg = response.choices?.[0]?.message?.content;
         if (assistantMsg) {
           const lastUserMsg = messages.filter((m) => m.role === "user").pop();
-          const interactionLog = `User: ${lastUserMsg?.content || ""}\nAgent: ${assistantMsg}`;
+          const userContent = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
+
+          // Write to TKG v2 event stream
+          await fetch("http://localhost:3777/api/v2/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: userContent,
+              source: "user",
+              event_type: "message",
+              metadata: { role: "user" }
+            }),
+            signal: AbortSignal.timeout(3000),
+          }).catch(() => {});
+
+          await fetch("http://localhost:3777/api/v2/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: assistantMsg,
+              source: "agent",
+              event_type: "message",
+              metadata: { role: "assistant" }
+            }),
+            signal: AbortSignal.timeout(3000),
+          }).catch(() => {});
+
+          // Also write to legacy v1 API for backward compatibility
+          const interactionLog = `User: ${userContent}\nAgent: ${assistantMsg}`;
           await fetch("http://localhost:3777/api/memory", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content: interactionLog }),
             signal: AbortSignal.timeout(3000),
-          });
+          }).catch(() => {});
         }
       } catch (e) {
         console.warn(

@@ -82,7 +82,32 @@ const DEFAULT_RETRY_POLICY: ToolRetryPolicy = {
   maxDelayMs: 5_000,
 };
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = (() => {
+  const raw = process.env["TOOL_CALL_TIMEOUT_MS"];
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 120_000;
+})();
+
+/**
+ * Executes a tool function wrapped in a wall-clock timeout (default 120s).
+ */
+export async function withToolTimeout<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fn(controller.signal);
+  } catch (err: unknown) {
+    if (controller.signal.aborted) {
+      throw new Error(`Tool call timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function stringArg(
   args: Record<string, unknown>,

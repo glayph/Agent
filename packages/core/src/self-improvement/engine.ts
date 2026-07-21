@@ -30,6 +30,7 @@ export class SelfImprovementEngine {
     this.enabled = config?.enabled ?? false;
   }
 
+  // Self-improvement engine is disabled by default (no-op stubs for YAGNI).
   _reflectionDue(): boolean { return false; }
 
   _tuningDue(): boolean { return false; }

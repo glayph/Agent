@@ -1,7 +1,7 @@
 {
   "name": "@hiro/gateway",
   "version": "1.0.0",
-  "description": "Lightweight Express gateway for Hiro Hiro - proxies HTTP/WS to the core agent, serves static files, and provides health checks",
+  "description": "Lightweight Express gateway for Hiro - proxies HTTP/WS to the core agent, serves static files, and provides health checks",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

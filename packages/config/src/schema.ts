@@ -219,11 +219,13 @@ const AgentBlockSchema = z
     memory: AgentMemorySchema.optional(),
     security: z
       .object({
-        bypass_restrictions: z.boolean().optional(),
+        // Safe-by-default: bypass_restrictions and sandbox_mode are explicitly
+        // defaulted here so that omitting them from agent.yaml is safe.
+        bypass_restrictions: z.boolean().default(false),
         system_access: z
           .enum(["full", "workspace_only", "isolated"])
-          .optional(),
-        sandbox_mode: z.boolean().optional(),
+          .default("workspace_only"),
+        sandbox_mode: z.boolean().default(true),
         risk_acceptance: z.boolean().optional(),
         privileged_account_required: z.boolean().optional(),
         audit_logging: z.boolean().optional(),

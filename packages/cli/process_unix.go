@@ -10,7 +10,7 @@ import (
 )
 
 func applyProcessAttrs(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
 func terminateProcessTree(cmd *exec.Cmd, timeout time.Duration) error {

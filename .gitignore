@@ -70,6 +70,7 @@ vendor/
 
 # Package archives
 *.tgz
+test-hiro/
 *.tar
 *.tar.gz
 *.zip
@@ -107,7 +108,9 @@ Desktop.ini
 *.swp
 *.swo
 *.bak
+*.backup
 *.orig
+*.sh
 *~
 .idea/
 .vscode/

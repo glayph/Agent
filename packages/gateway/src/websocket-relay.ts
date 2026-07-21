@@ -4,6 +4,13 @@ import type { Duplex } from "stream";
 
 const MAX_PAYLOAD = 5 * 1024 * 1024;
 const MAX_EARLY_MESSAGES = 100;
+/** Default WebSocket idle timeout: 30 minutes. Override via WS_IDLE_TIMEOUT_MS. */
+const WS_IDLE_TIMEOUT_MS = (() => {
+  const raw = process.env["WS_IDLE_TIMEOUT_MS"];
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 30 * 60 * 1000;
+})();
+const WS_IDLE_CHECK_INTERVAL_MS = 60 * 1000; // check every 60s
 
 export function createRelayWebSocketServer() {
   return new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
@@ -53,12 +60,28 @@ export function relayWs(
   const earlyMessages: Buffer[] = [];
   activeConnections.add(clientWs);
 
+  let lastActivity = Date.now();
+
   const cleanup = () => {
     activeConnections.delete(clientWs);
     try { coreWs.close(); } catch { /* ignore */ }
+    clearInterval(idleTimer);
   };
 
+  // Idle timeout: close connection if no messages in WS_IDLE_TIMEOUT_MS
+  const idleTimer = setInterval(() => {
+    if (Date.now() - lastActivity > WS_IDLE_TIMEOUT_MS) {
+      try {
+        clientWs.close(1001, "Idle timeout");
+      } catch { /* ignore */ }
+      cleanup();
+    }
+  }, WS_IDLE_CHECK_INTERVAL_MS);
+  // Don't keep Node alive solely for idle timers
+  (idleTimer as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.();
+
   clientWs.on("message", (data) => {
+    lastActivity = Date.now();
     if (coreWs.readyState === WSWebSocket.OPEN) {
       coreWs.send(data);
     } else if (earlyMessages.length < MAX_EARLY_MESSAGES) {
@@ -74,14 +97,15 @@ export function relayWs(
     }
     earlyMessages.length = 0;
     coreWs.on("message", (data) => {
+      lastActivity = Date.now();
       if (clientWs.readyState === WSWebSocket.OPEN) clientWs.send(data);
     });
   });
 
   clientWs.on("close", cleanup);
   clientWs.on("error", cleanup);
-  coreWs.on("close", () => activeConnections.delete(clientWs));
-  coreWs.on("error", () => activeConnections.delete(clientWs));
+  coreWs.on("close", () => { activeConnections.delete(clientWs); clearInterval(idleTimer); });
+  coreWs.on("error", () => { activeConnections.delete(clientWs); clearInterval(idleTimer); });
 }
 
 export function closeWebSocketServer(wss: WebSocketServer): Promise<void> {
@@ -92,3 +116,4 @@ export function closeWebSocketServer(wss: WebSocketServer): Promise<void> {
     wss.close(() => resolve());
   });
 }
+

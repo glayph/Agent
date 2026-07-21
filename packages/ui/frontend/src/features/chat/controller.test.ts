@@ -1,13 +1,47 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { editChatMessage } from "./controller"
+import {
+  connectChat,
+  editChatMessage,
+  setWebSocketFactory,
+} from "./controller"
 import { getChatState, updateChatStore } from "@/store/chat"
+import { gatewayAtom } from "@/store/gateway"
+import { getDefaultStore } from "jotai"
 
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
   },
 }))
+
+class MockWebSocket {
+  url: string
+  readyState = 0 // CONNECTING
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  onerror: (() => void) | null = null
+  sentData: string[] = []
+
+  constructor(url: string) {
+    this.url = url
+  }
+
+  send(data: string) {
+    this.sentData.push(data)
+  }
+
+  close() {
+    this.readyState = 3 // CLOSED
+    if (this.onclose) this.onclose()
+  }
+
+  simulateOpen() {
+    this.readyState = 1 // OPEN
+    if (this.onopen) this.onopen()
+  }
+}
 
 function resetChatState() {
   updateChatStore({
@@ -27,10 +61,10 @@ function resetChatState() {
         modelName: "gpt-4o",
       },
     ],
-    connectionState: "connected",
+    connectionState: "disconnected",
     isTyping: false,
     activeSessionId: "session-1",
-    hasHydratedActiveSession: true,
+    hasHydratedActiveSession: false,
     contextUsage: undefined,
   })
 }
@@ -94,5 +128,38 @@ describe("chat controller message editing", () => {
       "Original",
       "Answer",
     ])
+  })
+})
+
+describe("chat controller WebSocket dependency injection", () => {
+  let createdSockets: MockWebSocket[] = []
+
+  beforeEach(() => {
+    resetChatState()
+    createdSockets = []
+    const store = getDefaultStore()
+    store.set(gatewayAtom, { status: "running", canStart: true, restartRequired: false, pendingRestartFields: [] })
+
+    setWebSocketFactory((url: string) => {
+      const mock = new MockWebSocket(url)
+      createdSockets.push(mock)
+      return mock as unknown as WebSocket
+    })
+  })
+
+  afterEach(() => {
+    setWebSocketFactory(null)
+  })
+
+  it("connects to WebSocket endpoint with session_id parameter and updates connectionState", async () => {
+    updateChatStore({ hasHydratedActiveSession: true })
+    await connectChat()
+
+    expect(createdSockets).toHaveLength(1)
+    expect(createdSockets[0].url).toContain("/pico/ws?session_id=")
+    expect(getChatState().connectionState).toBe("connecting")
+
+    createdSockets[0].simulateOpen()
+    expect(getChatState().connectionState).toBe("connected")
   })
 })

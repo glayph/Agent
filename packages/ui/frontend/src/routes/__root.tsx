@@ -3,7 +3,7 @@ import { Outlet, createRootRoute, useRouterState } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { getLauncherAuthStatus } from "@/api/launcher-auth"
-import { AppLayout } from "@/components/app-layout"
+import { AppLayout } from "@/app/layout/app-layout"
 import { initializeChatStore } from "@/features/chat/controller"
 import { isLauncherAuthPathname } from "@/lib/launcher-login-path"
 

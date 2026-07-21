@@ -173,14 +173,40 @@ export class SkillLoader {
   }
 
   /**
-   * Find the main index file of a skill
+   * Find the main index or entry file of a skill.
+   * Checks index.ts, index.js, index.mjs, index.cjs, main.ts, main.js,
+   * package.json main entry, or SKILL.md.
    */
-  private findSkillIndex(skillPath: string): string | null {
-    const indexPath = path.join(skillPath, "index.ts");
-    const indexJsPath = path.join(skillPath, "index.js");
-    if (fs.existsSync(indexPath)) return indexPath;
-    if (fs.existsSync(indexJsPath)) return indexJsPath;
-    return null;
+  private findSkillIndex(skillPath: string): string {
+    const candidates = [
+      path.join(skillPath, "index.ts"),
+      path.join(skillPath, "index.js"),
+      path.join(skillPath, "index.mjs"),
+      path.join(skillPath, "index.cjs"),
+      path.join(skillPath, "main.ts"),
+      path.join(skillPath, "main.js"),
+      path.join(skillPath, "SKILL.md"),
+    ];
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+
+    // Check package.json main if present
+    const pkgPath = path.join(skillPath, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+        if (pkg.main && typeof pkg.main === "string") {
+          const resolvedMain = path.resolve(skillPath, pkg.main);
+          if (fs.existsSync(resolvedMain)) return resolvedMain;
+        }
+      } catch {
+        // ignore JSON parse errors
+      }
+    }
+
+    return skillPath;
   }
 
   /**

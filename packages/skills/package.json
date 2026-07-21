@@ -1,7 +1,7 @@
 {
   "name": "@hiro/skills",
   "version": "1.0.0",
-  "description": "Pre-bundled skills for Hiro Hiro",
+  "description": "Pre-bundled skills for Hiro",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

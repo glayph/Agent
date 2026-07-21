@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "url";
 import { resolveLiteLLMMasterKey } from "@hiro/config/security";
+import { createRotatingLogStream } from "./log-rotation.js";
 
 export interface LiteLLMCommand {
   command: string;
@@ -118,10 +119,24 @@ export interface LiteLLMState {
   lastError: string | null;
   lastExitCode: number | null;
   startedAt: string | null;
+  /** Auto-restart tracking */
+  restartAttempts: number;
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  supervisorEnabled: boolean;
+  onAutoRestart?: () => void;
 }
 
 export function createLiteLLMState(): LiteLLMState {
-  return { process: null, status: "stopped", lastError: null, lastExitCode: null, startedAt: null };
+  return {
+    process: null,
+    status: "stopped",
+    lastError: null,
+    lastExitCode: null,
+    startedAt: null,
+    restartAttempts: 0,
+    restartTimer: null,
+    supervisorEnabled: true,
+  };
 }
 
 export function resolveLiteLLMConfigPath(workspaceDir: string): string {
@@ -148,7 +163,7 @@ export function startLiteLLM(
   const logFile = liteLLMLogFile(config.workspaceDir);
   const logDir = path.dirname(logFile);
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-  const logStream = fs.createWriteStream(logFile, { flags: "a" });
+  const logStream = createRotatingLogStream(logFile);
   const masterKey = resolveLiteLLMMasterKey({ workspaceDir: config.workspaceDir });
 
   logStream.write(`\n--- Gateway spawning LiteLLM Proxy at ${new Date().toISOString()} ---\n`);
@@ -188,6 +203,10 @@ export function startLiteLLM(
     state.lastExitCode = code;
     logStream.write(`\n--- LiteLLM exited code ${code} at ${new Date().toISOString()} ---\n`);
     logStream.end();
+    // Auto-restart if supervisor is enabled and exit was unexpected
+    if (state.supervisorEnabled && code !== 0 && code !== null) {
+      scheduleLiteLLMRestart(state, config, log);
+    }
   });
 
   proc.on("error", (err: Error) => {
@@ -195,6 +214,9 @@ export function startLiteLLM(
     state.status = "error";
     state.lastError = err.message;
     logStream.write(`\n--- LiteLLM spawn error: ${err.message} ---\n`);
+    if (state.supervisorEnabled) {
+      scheduleLiteLLMRestart(state, config, log);
+    }
   });
 
   state.process = proc;
@@ -273,4 +295,79 @@ export async function restartLiteLLM(
   }
   state.process = startLiteLLM(state, config, log);
   await waitForLiteLLM(config.litellmPort, log, 15000);
+}
+
+// ── LiteLLM Automatic Restart Supervisor ─────────────────────────────────────
+
+/**
+ * Maximum LiteLLM restart attempts. 0 = unbounded.
+ * Controlled by LITELLM_MAX_RESTARTS env var.
+ */
+function maxLiteLLMRestarts(): number {
+  const raw = process.env["LITELLM_MAX_RESTARTS"];
+  if (!raw || !raw.trim()) return 0; // unbounded by default
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Schedule an automatic LiteLLM restart with exponential backoff.
+ * Backoff: 5s * 2^attempt, capped at 5 minutes.
+ * Respects LITELLM_MAX_RESTARTS (0 = unbounded).
+ */
+export function scheduleLiteLLMRestart(
+  state: LiteLLMState,
+  config: LiteLLMConfig,
+  log: (...args: unknown[]) => void,
+): void {
+  if (state.restartTimer) return; // already scheduled
+  const maxRestarts = maxLiteLLMRestarts();
+  if (maxRestarts > 0 && state.restartAttempts >= maxRestarts) {
+    log(`LiteLLM auto-restart limit reached (${maxRestarts}). Giving up.`);
+    state.status = "error";
+    return;
+  }
+  state.restartAttempts++;
+  // Backoff: 5s, 10s, 20s, 40s … capped at 5 minutes
+  const backoffMs = Math.min(5000 * Math.pow(2, state.restartAttempts - 1), 5 * 60 * 1000);
+  log(`LiteLLM crashed — scheduling restart in ${Math.round(backoffMs / 1000)}s (attempt ${state.restartAttempts})`);
+  state.status = "restarting";
+
+  state.restartTimer = setTimeout(async () => {
+    state.restartTimer = null;
+    if (!state.supervisorEnabled) return;
+    log(`LiteLLM auto-restart attempt ${state.restartAttempts} starting…`);
+    try {
+      state.process = startLiteLLM(state, config, log);
+      await waitForLiteLLM(config.litellmPort, log, 30000);
+      // Verify it's actually healthy
+      const masterKey = resolveLiteLLMMasterKey({ workspaceDir: config.workspaceDir });
+      const probe = await probeLiteLLM(config.litellmPort, masterKey);
+      if (probe.healthy) {
+        log(`LiteLLM auto-restart succeeded (attempt ${state.restartAttempts})`);
+        state.restartAttempts = 0; // reset on success
+        state.status = "running";
+        state.onAutoRestart?.();
+      } else {
+        log(`LiteLLM restarted but not healthy: ${probe.error}`);
+        scheduleLiteLLMRestart(state, config, log);
+      }
+    } catch (err) {
+      log(`LiteLLM auto-restart failed: ${err instanceof Error ? err.message : String(err)}`);
+      scheduleLiteLLMRestart(state, config, log);
+    }
+  }, backoffMs);
+  // Don't keep Node alive solely for this timer
+  (state.restartTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+}
+
+/**
+ * Disable the LiteLLM supervisor (e.g., during gateway shutdown).
+ */
+export function stopLiteLLMSupervisor(state: LiteLLMState): void {
+  state.supervisorEnabled = false;
+  if (state.restartTimer) {
+    clearTimeout(state.restartTimer);
+    state.restartTimer = null;
+  }
 }

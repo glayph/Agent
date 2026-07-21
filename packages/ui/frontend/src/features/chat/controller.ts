@@ -36,6 +36,12 @@ let reconnectTimer: number | null = null
 let reconnectAttempts = 0
 let shouldMaintainConnection = false
 
+let customWsFactory: ((url: string) => WebSocket) | null = null
+
+export function setWebSocketFactory(factory: ((url: string) => WebSocket) | null) {
+  customWsFactory = factory
+}
+
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
@@ -139,10 +145,12 @@ export async function connectChat() {
       return
     }
 
-    const wsScheme = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${wsScheme}//${window.location.host}/pico/ws`
+    const isHttps = typeof window !== "undefined" && window.location?.protocol === "https:"
+    const host = typeof window !== "undefined" && window.location?.host ? window.location.host : "localhost:18800"
+    const wsScheme = isHttps ? "wss:" : "ws:"
+    const wsUrl = `${wsScheme}//${host}/pico/ws`
     const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}`
-    const socket = new WebSocket(url)
+    const socket = customWsFactory ? customWsFactory(url) : new WebSocket(url)
 
     if (generation !== connectionGeneration) {
       isConnecting = false

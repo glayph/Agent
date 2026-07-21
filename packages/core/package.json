@@ -1,7 +1,7 @@
 {
   "name": "@hiro/core",
   "version": "1.0.0",
-  "description": "Core agent engine for Hiro Hiro - orchestrator, memory, LLM, tools, self-improvement, and governance",
+  "description": "Core agent engine for Hiro - orchestrator, memory, LLM, tools, self-improvement, and governance",
   "type": "module",
   "main": "dist/api/index.js",
   "types": "dist/api/index.d.ts",

@@ -92,6 +92,12 @@ export async function restartGateway(): Promise<GatewayActionResponse> {
   })
 }
 
+export async function shutdownGateway(): Promise<GatewayActionResponse> {
+  return request<GatewayActionResponse>("/gateway/shutdown", {
+    method: "POST",
+  })
+}
+
 export async function clearGatewayLogs(): Promise<GatewayActionResponse> {
   return request<GatewayActionResponse>("/api/gateway/logs", {
     method: "DELETE",

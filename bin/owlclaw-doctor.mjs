@@ -59,14 +59,15 @@ function commandVersion(command, commandArgs) {
   const result = childProcess.spawnSync(command, commandArgs, {
     cwd: PROJECT_ROOT,
     encoding: "utf-8",
-    shell: false,
+    shell: process.platform === "win32",
     timeout: 10000,
   });
   return result.status === 0 ? String(result.stdout || result.stderr).trim() : null;
 }
 
 function npmCommand() {
-  return { command: "npm", args: [] };
+  const isWin = process.platform === "win32";
+  return { command: isWin ? "npm.cmd" : "npm", args: [] };
 }
 
 function writableDir(dir) {
@@ -273,6 +274,22 @@ async function runDoctor() {
   }
 
   checks.push(await secretVaultCheck());
+
+  // LiteLLM availability check
+  const litellmVersion = commandVersion("litellm", ["--version"]);
+  if (litellmVersion) {
+    checks.push(check("litellm_binary", "LiteLLM availability", "pass", `LiteLLM available: ${litellmVersion}`));
+  } else {
+    checks.push(check("litellm_binary", "LiteLLM availability", "warn", "LiteLLM not found in PATH; local fallback / OpenAI API direct mode active."));
+  }
+
+  // Package js-yaml hoisting check
+  const staleJsYaml = path.join(PROJECT_ROOT, "packages", "config", "node_modules", "js-yaml");
+  if (fs.existsSync(staleJsYaml)) {
+    checks.push(check("js_yaml_hoisting", "js-yaml ESM resolution", "fail", "Stale packages/config/node_modules/js-yaml found. Remove it to fix ESM resolution."));
+  } else {
+    checks.push(check("js_yaml_hoisting", "js-yaml ESM resolution", "pass", "js-yaml resolution clean."));
+  }
 
   if (args.has("--migrations")) {
     checks.push(

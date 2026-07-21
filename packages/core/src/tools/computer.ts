@@ -96,6 +96,12 @@ public static class HiroNativeWin32 {
 
   [DllImport("user32.dll")]
   public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+  [DllImport("user32.dll")]
+  public static extern bool SetCursorPos(int X, int Y);
+
+  [DllImport("user32.dll")]
+  public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
 }
 "@ | Out-Null
   }
@@ -477,6 +483,61 @@ function Focus-HiroWindow {
   return Get-HiroElementInfo $Window 0 "focused" $handle $Window.Current.Name
 }
 
+function Click-HiroAt {
+  param([int]$X, [int]$Y, [string]$Button = "left", [bool]$DoubleClick = $false)
+  [HiroNativeWin32]::SetCursorPos($X, $Y) | Out-Null
+  Start-Sleep -Milliseconds 50
+
+  $down = 0x0002 # MOUSEEVENTF_LEFTDOWN
+  $up   = 0x0004 # MOUSEEVENTF_LEFTUP
+  if ($Button -eq "right") {
+    $down = 0x0008
+    $up   = 0x0010
+  } elseif ($Button -eq "middle") {
+    $down = 0x0020
+    $up   = 0x0040
+  }
+
+  [HiroNativeWin32]::mouse_event([uint32]$down, 0, 0, 0, [UIntPtr]::Zero)
+  [HiroNativeWin32]::mouse_event([uint32]$up, 0, 0, 0, [UIntPtr]::Zero)
+
+  if ($DoubleClick) {
+    Start-Sleep -Milliseconds 80
+    [HiroNativeWin32]::mouse_event([uint32]$down, 0, 0, 0, [UIntPtr]::Zero)
+    [HiroNativeWin32]::mouse_event([uint32]$up, 0, 0, 0, [UIntPtr]::Zero)
+  }
+  Start-Sleep -Milliseconds 100
+}
+
+function Drag-HiroMouse {
+  param([int]$FromX, [int]$FromY, [int]$ToX, [int]$ToY)
+  [HiroNativeWin32]::SetCursorPos($FromX, $FromY) | Out-Null
+  Start-Sleep -Milliseconds 50
+  [HiroNativeWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) # Left down
+  Start-Sleep -Milliseconds 100
+
+  $steps = 15
+  for ($i = 1; $i -le $steps; $i++) {
+    $currX = [int]($FromX + ($ToX - $FromX) * ($i / $steps))
+    $currY = [int]($FromY + ($ToY - $FromY) * ($i / $steps))
+    [HiroNativeWin32]::SetCursorPos($currX, $currY) | Out-Null
+    Start-Sleep -Milliseconds 15
+  }
+
+  [HiroNativeWin32]::SetCursorPos($ToX, $ToY) | Out-Null
+  Start-Sleep -Milliseconds 50
+  [HiroNativeWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) # Left up
+  Start-Sleep -Milliseconds 100
+}
+
+function Scroll-HiroMouse {
+  param([string]$Direction = "down", [int]$Amount = 3)
+  $clicks = if ($Amount -gt 0) { $Amount } else { 3 }
+  $delta = if ($Direction -eq "up" -or $Direction -eq "left") { 120 * $clicks } else { -120 * $clicks }
+  [HiroNativeWin32]::mouse_event(0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero) # MOUSEEVENTF_WHEEL
+  Start-Sleep -Milliseconds 100
+}
+
 function Invoke-HiroComputer {
   param([string]$PayloadJson)
 
@@ -615,6 +676,81 @@ function Invoke-HiroComputer {
         }
       }
       return New-HiroResult $true $action ([ordered]@{ displays = @($displays); count = $displays.Count }) "Listed display information." $null
+    }
+
+    if ($action -eq "list_windows") {
+      $windows = @()
+      try {
+        Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne "" } | ForEach-Object {
+          $rect = [ordered]@{ left=0; top=0; width=0; height=0 }
+          try {
+            $handle = $_.MainWindowHandle
+            $element = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+            if ($null -ne $element) {
+              $r = $element.Current.BoundingRectangle
+              $rect.left = [int]$r.Left
+              $rect.top = [int]$r.Top
+              $rect.width = [int]$r.Width
+              $rect.height = [int]$r.Height
+            }
+          } catch {}
+          $windows += [ordered]@{
+            title = $_.MainWindowTitle
+            processName = $_.ProcessName
+            pid = $_.Id
+            handle = [int64]$_.MainWindowHandle
+            bounds = $rect
+          }
+        }
+      } catch {}
+      return New-HiroResult $true "list_windows" $windows "Found $($windows.Count) windows" $null
+    }
+
+    if ($action -eq "click_at") {
+      $x = [int](Get-HiroProperty $payload "x")
+      $y = [int](Get-HiroProperty $payload "y")
+      $button = [string](Get-HiroProperty $payload "button")
+      if (-not $button) { $button = "left" }
+      $doubleClick = [bool](Get-HiroProperty $payload "doubleClick")
+      Click-HiroAt $x $y $button $doubleClick
+      return New-HiroResult $true $action ([ordered]@{ x = $x; y = $y; button = $button; doubleClick = $doubleClick }) "Clicked coordinates ($x, $y)." $null
+    }
+
+    if ($action -eq "drag") {
+      $fromX = [int](Get-HiroProperty $payload "fromX")
+      $fromY = [int](Get-HiroProperty $payload "fromY")
+      $toX = [int](Get-HiroProperty $payload "toX")
+      $toY = [int](Get-HiroProperty $payload "toY")
+      Drag-HiroMouse $fromX $fromY $toX $toY
+      return New-HiroResult $true $action ([ordered]@{ fromX = $fromX; fromY = $fromY; toX = $toX; toY = $toY }) "Dragged mouse from ($fromX, $fromY) to ($toX, $toY)." $null
+    }
+
+    if ($action -eq "scroll") {
+      $direction = [string](Get-HiroProperty $payload "direction")
+      if (-not $direction) { $direction = "down" }
+      $amount = [int](Get-HiroProperty $payload "amount")
+      if ($amount -le 0) { $amount = 3 }
+      Scroll-HiroMouse $direction $amount
+      return New-HiroResult $true $action ([ordered]@{ direction = $direction; amount = $amount }) "Scrolled $direction by $amount." $null
+    }
+
+    if ($action -eq "terminate_app") {
+      $targetPid = Get-HiroProperty $payload "pid"
+      $processName = [string](Get-HiroProperty $payload "processName")
+      $terminated = 0
+      if ($targetPid) {
+        Stop-Process -Id [int]$targetPid -Force -ErrorAction Stop
+        $terminated = 1
+      } elseif ($processName) {
+        $procs = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        if ($procs) {
+          $procs | Stop-Process -Force -ErrorAction Stop
+          $terminated = $procs.Count
+        }
+      } else {
+        throw "pid or processName is required to terminate application."
+      }
+      return New-HiroResult $true $action ([ordered]@{ pid = $targetPid; processName = $processName; terminatedCount = $terminated }) "Application terminated." $null
     }
 
     throw "Unsupported computer action: $action"
@@ -1066,7 +1202,7 @@ export class ComputerAgent {
     }
   }
 
-  async screenshot(_args: Record<string, unknown>): Promise<string> {
+  async screenshot(args: Record<string, unknown> = {}): Promise<string> {
     try {
       const result = await this.runPowerShell<{
         screenshot: string;
@@ -1074,9 +1210,93 @@ export class ComputerAgent {
         height: number;
         format: string;
       }>("screenshot", {});
+      const showGrid = Boolean(args["grid"] ?? args["draw_grid"] ?? args["drawGrid"]);
+      if (showGrid && result.ok && result.data?.screenshot) {
+        try {
+          const { drawGridOverlay } = await import("./computer-grid.js");
+          const rawPng = Buffer.from(result.data.screenshot, "base64");
+          // Superimpose grid overlay
+          const gridStep = typeof args["grid_step"] === "number" ? args["grid_step"] : 100;
+          const gridPng = drawGridOverlay(rawPng, result.data.width, result.data.height, gridStep);
+          result.data.screenshot = gridPng.toString("base64");
+        } catch {
+          // If grid drawing fails, return clean screenshot
+        }
+      }
       return this.formatResult(result);
     } catch (err) {
       return this.formatError("screenshot", err);
+    }
+  }
+
+  async clickAt(args: Record<string, unknown>): Promise<string> {
+    try {
+      const x = asNumber(args["x"]);
+      const y = asNumber(args["y"]);
+      if (x == null || y == null) throw new Error("x and y coordinates are required.");
+      const button = asString(args["button"]) || "left";
+      const doubleClick = Boolean(args["double_click"] ?? args["doubleClick"]);
+      const result = await this.runPowerShell("click_at", {
+        x: Math.round(x),
+        y: Math.round(y),
+        button,
+        doubleClick,
+      });
+      return this.formatResult(result);
+    } catch (err) {
+      return this.formatError("click_at", err);
+    }
+  }
+
+  async drag(args: Record<string, unknown>): Promise<string> {
+    try {
+      const fromX = asNumber(args["from_x"] ?? args["fromX"] ?? args["x1"]);
+      const fromY = asNumber(args["from_y"] ?? args["fromY"] ?? args["y1"]);
+      const toX = asNumber(args["to_x"] ?? args["toX"] ?? args["x2"]);
+      const toY = asNumber(args["to_y"] ?? args["toY"] ?? args["y2"]);
+      if (fromX == null || fromY == null || toX == null || toY == null) {
+        throw new Error("from_x, from_y, to_x, to_y are required for drag.");
+      }
+      const result = await this.runPowerShell("drag", {
+        fromX: Math.round(fromX),
+        fromY: Math.round(fromY),
+        toX: Math.round(toX),
+        toY: Math.round(toY),
+      });
+      return this.formatResult(result);
+    } catch (err) {
+      return this.formatError("drag", err);
+    }
+  }
+
+  async scroll(args: Record<string, unknown>): Promise<string> {
+    try {
+      const direction = asString(args["direction"]) || "down";
+      const amount = asNumber(args["amount"]) || 3;
+      const result = await this.runPowerShell("scroll", {
+        direction,
+        amount: Math.round(amount),
+      });
+      return this.formatResult(result);
+    } catch (err) {
+      return this.formatError("scroll", err);
+    }
+  }
+
+  async terminateApp(args: Record<string, unknown>): Promise<string> {
+    try {
+      const pid = asNumber(args["pid"]);
+      const processName = asString(args["process_name"] ?? args["processName"] ?? args["app"]);
+      if (pid == null && !processName) {
+        throw new Error("pid or process_name is required.");
+      }
+      const result = await this.runPowerShell("terminate_app", {
+        pid,
+        processName,
+      });
+      return this.formatResult(result);
+    } catch (err) {
+      return this.formatError("terminate_app", err);
     }
   }
 
@@ -1105,6 +1325,42 @@ export class ComputerAgent {
     } catch (err) {
       return this.formatError("list_displays", err);
     }
+  }
+
+  /**
+   * Lists all visible windows with their titles, process names, handles, and bounds.
+   */
+  public async listWindows(
+    _args: Record<string, unknown>,
+  ): Promise<string> {
+    if (process.platform === "win32") {
+      return this.formatResult(
+        await this.runPowerShell("list_windows", {}),
+      );
+    }
+    if (process.platform === "linux") {
+      try {
+        const { stdout } = await execFileText("wmctrl", ["-l", "-p"], { timeout: 15000, maxBuffer: 1024 * 1024 });
+        return JSON.stringify({ ok: true, action: "list_windows", data: stdout.trim() });
+      } catch {
+        try {
+          const { stdout } = await execFileText("xdotool", ["search", "--onlyvisible", "--name", ""], { timeout: 15000, maxBuffer: 1024 * 1024 });
+          return JSON.stringify({ ok: true, action: "list_windows", data: stdout.trim() });
+        } catch {
+          return JSON.stringify({ ok: false, action: "list_windows", error: "wmctrl and xdotool not available" });
+        }
+      }
+    }
+    if (process.platform === "darwin") {
+      try {
+        const script = `tell application "System Events" to get {name, title} of every process whose visible is true`;
+        const { stdout } = await execFileText("osascript", ["-e", script], { timeout: 15000, maxBuffer: 1024 * 1024 });
+        return JSON.stringify({ ok: true, action: "list_windows", data: stdout.trim() });
+      } catch (e) {
+        return JSON.stringify({ ok: false, action: "list_windows", error: String(e) });
+      }
+    }
+    return JSON.stringify({ ok: false, action: "list_windows", error: "Unsupported platform" });
   }
 
   async verify(args: Record<string, unknown>): Promise<string> {

@@ -249,6 +249,48 @@ export async function handleComputerListDisplays(
   return await this.computer.listDisplays(args);
 }
 
+export async function handleComputerClickAt(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return await this.computer.clickAt(args);
+}
+
+export async function handleComputerDrag(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return await this.computer.drag(args);
+}
+
+export async function handleComputerScroll(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return await this.computer.scroll(args);
+}
+
+export async function handleComputerTerminateApp(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return await this.computer.terminateApp(args);
+}
+
+export async function handleComputerListWindows(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return await this.computer.listWindows(args);
+}
+
+export async function handleComputerGridScreenshot(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return await this.computer.screenshot({ ...args, grid: true });
+}
+
 // Scraper Handlers
 export async function handleScrapePage(
   this: ToolHandlerContext,

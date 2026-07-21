@@ -2,7 +2,7 @@
 
 [README](README.md) | [Documentation](Documentation.md)
 
-Hiro Hiro is built as a practical local assistant runtime. The feature
+Hiro is built as a practical local assistant runtime. The feature
 set is grouped around running the agent, inspecting what it did, configuring the
 model/tool surface, and keeping the local environment recoverable.
 

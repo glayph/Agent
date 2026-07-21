@@ -6,10 +6,15 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"syscall"
 	"time"
 )
 
-func applyProcessAttrs(_ *exec.Cmd) {}
+func applyProcessAttrs(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | 0x00000008, // CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+	}
+}
 
 func terminateProcessTree(cmd *exec.Cmd, timeout time.Duration) error {
 	if cmd == nil || cmd.Process == nil {

@@ -1,8 +1,8 @@
-![Hiro Hiro](docs/theme.png)
+![Hiro](docs/theme.png)
 
-# Hiro Hiro
+# Hiro
 
-Hiro Hiro is a local-first assistant runtime for developers who want
+Hiro is a local-first assistant runtime for developers who want
 an inspectable, configurable, and recoverable workspace agent. It is built as
 an integrated local stack that runs from a single repository and provides the
 following runtime components:
@@ -31,7 +31,7 @@ runtime behavior is designed to be visible and recoverable rather than hidden.
 
 ## What This Project Provides
 
-Hiro Hiro is not just a chat application. It is a full local agent
+Hiro is not just a chat application. It is a full local agent
 runtime with separate operational layers:
 
 - `bin/Hiro.js` and `packages/Hiro-cli`: startup, process supervision,

@@ -21,7 +21,7 @@ import {
   getAppConfig,
   getChannelsCatalog,
 } from "@/api/channels"
-import { getChannelDisplayName } from "@/components/channels/channel-display-name"
+import { getChannelDisplayName } from "@/features/channels/components/channel-display-name"
 import { gatewayAtom } from "@/store/gateway"
 
 const CHANNEL_IMPORTANCE_TAIL = [

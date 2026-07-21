@@ -1,14 +1,14 @@
-# Hiro Hiro Documentation
+# Hiro Documentation
 
 [README](README.md) | [Feature Notes](feature.md) | [Release Checklist](RELEASE_CHECKLIST.md) | [Troubleshooting Matrix](TROUBLESHOOTING_MATRIX.md)
 
-This document is the central guide for the Hiro Hiro repository. It
+This document is the central guide for the Hiro repository. It
 consolidates setup, runtime architecture, deployment guidance, channel
 configuration, and MCP client setup into one reference document.
 
 ## Overview
 
-Hiro Hiro is a local agent stack built around a TypeScript runtime and
+Hiro is a local agent stack built around a TypeScript runtime and
 a browser dashboard. The runtime is launched from the repository root, starts
 the gateway, brings up the core API and LiteLLM proxy, then serves the dashboard
 and API surfaces from one local entry point.

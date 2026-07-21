@@ -13,6 +13,14 @@ export interface IOrchestrator {
   runtimePaths: RuntimePaths;
   modelName: string;
   concurrentManager: ConcurrentTaskManager;
+  /**
+   * Optional reference to the SQLite database for periodic maintenance.
+   * Must expose a `prepare(sql).run()` / `exec(sql)` interface (better-sqlite3).
+   */
+  db?: {
+    prepare: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => unknown };
+    exec?: (sql: string) => void;
+  };
   tools?: {
     profileManager?: { cleanupStale: (running: boolean) => void };
     browser?: { browser: unknown | null };
@@ -68,6 +76,11 @@ export class HeartbeatEngine {
   private _recoveryCount = 0;
   private _abortController: AbortController | null = null;
   private _shellExecutor: ShellExecutor | null = null;
+  /** Tracks which cycle the last SQLite maintenance tasks ran. */
+  private _lastCheckpointCycle = 0;
+  private _lastIntegrityCycle = 0;
+  private _lastVacuumCycle = 0;
+  private _lastBackupCycle = 0;
 
   constructor(
     orchestrator: IOrchestrator,
@@ -190,6 +203,12 @@ export class HeartbeatEngine {
         suggestedConcurrency,
       );
     }
+
+    // ── SQLite maintenance ──────────────────────────────────────────────────
+    await this._sqliteMaintenance(idleMins);
+
+    // ── Auto Backup (~every 6 hours / 720 cycles) ─────────────────────────
+    await this._autoBackup();
   }
 
   private async _assessSystemState(): Promise<Record<string, unknown>> {
@@ -203,6 +222,83 @@ export class HeartbeatEngine {
       platform: os.platform(),
       hostname: os.hostname(),
     };
+  }
+
+  // ── SQLite Maintenance ─────────────────────────────────────────────────────
+  //
+  // Runs periodically to keep the SQLite WAL file trimmed and detect corruption
+  // early. All operations are best-effort; failures are logged but do not crash
+  // the heartbeat.
+  //
+  // Schedule (at 30s interval, one cycle = 30s):
+  //   WAL checkpoint : every 120 cycles ≈ 1 hour
+  //   integrity_check: every 2880 cycles ≈ once/day
+  //   VACUUM         : every 2880 cycles when idle > 30 min
+
+  private async _sqliteMaintenance(idleMins: number): Promise<void> {
+    const db = this.orchestrator.db;
+    if (!db) return;
+
+    const CHECKPOINT_INTERVAL = 120;   // cycles
+    const DAILY_INTERVAL      = 2880;  // cycles
+
+    // WAL checkpoint (~1h)
+    if (this._cycle - this._lastCheckpointCycle >= CHECKPOINT_INTERVAL) {
+      this._lastCheckpointCycle = this._cycle;
+      try {
+        db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").run();
+        console.log("[Heartbeat] SQLite WAL checkpoint complete.");
+      } catch (e) {
+        console.warn("[Heartbeat] WAL checkpoint failed:", getErrorMessage(e));
+      }
+    }
+
+    // Integrity check (~daily)
+    if (this._cycle - this._lastIntegrityCycle >= DAILY_INTERVAL) {
+      this._lastIntegrityCycle = this._cycle;
+      try {
+        const result = db.prepare("PRAGMA integrity_check").get() as { integrity_check: string } | undefined;
+        const status = result?.integrity_check ?? "unknown";
+        if (status === "ok") {
+          console.log("[Heartbeat] SQLite integrity check: ok");
+        } else {
+          console.error(`[Heartbeat] SQLite integrity check FAILED: ${status}`);
+        }
+      } catch (e) {
+        console.warn("[Heartbeat] Integrity check failed:", getErrorMessage(e));
+      }
+    }
+
+    // VACUUM (~daily, only when idle > 30 min to avoid disrupting active work)
+    if (
+      idleMins > 30 &&
+      this._cycle - this._lastVacuumCycle >= DAILY_INTERVAL
+    ) {
+      this._lastVacuumCycle = this._cycle;
+      try {
+        db.prepare("VACUUM").run();
+        console.log("[Heartbeat] SQLite VACUUM complete.");
+      } catch (e) {
+        console.warn("[Heartbeat] VACUUM failed:", getErrorMessage(e));
+      }
+    }
+  }
+
+  // ── Auto Backup ────────────────────────────────────────────────────────────
+  // Creates a scheduled backup every ~6 hours (720 cycles of 30s)
+  private async _autoBackup(): Promise<void> {
+    const AUTO_BACKUP_INTERVAL = 720; // 720 cycles * 30s = 6 hours
+    if (this._cycle - this._lastBackupCycle < AUTO_BACKUP_INTERVAL) return;
+    this._lastBackupCycle = this._cycle;
+
+    try {
+      const { createBackupManager } = await import("./safety/backup.js");
+      const bm = createBackupManager(this.orchestrator.runtimePaths);
+      bm.createBackup("scheduled-6h", { includeOperationalData: false });
+      console.log("[Heartbeat] Automated 6-hour backup created successfully.");
+    } catch (e) {
+      console.warn("[Heartbeat] Auto-backup failed:", getErrorMessage(e));
+    }
   }
 
   /**

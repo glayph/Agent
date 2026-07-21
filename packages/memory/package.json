@@ -1,14 +1,19 @@
 {
   "name": "graphrag-memory",
-  "version": "1.0.0",
-  "description": "GraphRAG Memory System for Agentic AI - Temporal Knowledge Graph with Intelligent Chunking and Optimized Data Storage",
+  "version": "2.0.0",
+  "description": "Temporal Knowledge Graph & Event-Driven Stream Architecture - Next-gen memory for 24/7 autonomous agents",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
     "./nodegraphrag": "./src/nodegraphrag.js",
     "./memory-manager": "./src/core/memory-manager.js",
     "./config": "./src/config.js",
-    "./server": "./src/api/server.js"
+    "./server": "./src/api/server.js",
+    "./temporal-knowledge-graph": "./src/temporal-knowledge-graph.js",
+    "./working-memory-anchor": "./src/working-memory-anchor.js",
+    "./special-event-highlighter": "./src/special-event-highlighter.js",
+    "./memory-consolidation-daemon": "./src/memory-consolidation-daemon.js",
+    "./agent-memory-integration": "./src/agent-memory-integration.js"
   },
   "scripts": {
     "build": "echo 'No build step needed'",
@@ -16,13 +21,15 @@
     "dev": "node --watch src/api/server.js",
     "test": "node src/test/test-runner.js",
     "cli": "node src/cli.js",
-    "optimize": "node -e \"const mm = new (require('./src/core/memory-manager'))(); mm.initialize('./data').then(() => mm.optimize()).then(r => { console.log(r); process.exit(); })\""
+    "optimize": "node -e \"const mm = new (require('./src/core/memory-manager'))(); mm.initialize('./data').then(() => mm.optimize()).then(r => { console.log(r); process.exit(); })\"",
+    "migrate": "node src/scripts/migrate-to-tkg.js"
   },
-  "keywords": ["graphrag", "memory", "agentic-ai", "knowledge-graph", "temporal", "chunking", "vector-search"],
+  "keywords": ["graphrag", "memory", "agentic-ai", "knowledge-graph", "temporal", "knowledge-graph", "event-driven", "autonomous-agent"],
   "license": "MIT",
   "dependencies": {
     "express": "^4.21.0",
     "cors": "^2.8.5",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "better-sqlite3": "^12.11.1"
   }
 }

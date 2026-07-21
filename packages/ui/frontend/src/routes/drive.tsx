@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { DrivePage } from "@/components/drive/drive-page"
+import { DrivePage } from "@/pages/drive-page"
 
 export const Route = createFileRoute("/drive")({
   component: DrivePage,

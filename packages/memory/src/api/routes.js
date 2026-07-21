@@ -1,15 +1,15 @@
 'use strict';
 
 /**
- * GraphRAG Memory System - API Routes
+ * GraphRAG Memory System - API Routes (v1 + v2 TKG)
  * 
- * RESTful API endpoints for memory operations, search,
- * graph queries, timeline, optimization, and data import/export.
+ * Includes classic MemoryManager routes + new Temporal Knowledge Graph endpoints
  * 
  * @param {import('express').Application} app - Express application
  * @param {import('../core/memory-manager')} memoryManager - Memory manager instance
+ * @param {Object} [tkgService] - TemporalKnowledgeGraph instance (v2)
  */
-function setupRoutes(app, memoryManager) {
+function setupRoutes(app, memoryManager, tkgService) {
 
   // ════════════════════════════════════════════
   // MEMORY CRUD
@@ -429,6 +429,232 @@ function setupRoutes(app, memoryManager) {
     try {
       await memoryManager.backup(memoryManager.config.backupDir);
       res.json({ message: 'Backup created successfully' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ════════════════════════════════════════════
+  // V2 TEMPORAL KNOWLEDGE GRAPH API
+  // Only mounted if tkgService is provided
+  // ════════════════════════════════════════════
+
+  if (!tkgService) return;
+
+  /**
+   * POST /api/v2/event
+   * Write an event to the current hourly chunk
+   */
+  app.post('/api/v2/event', async (req, res) => {
+    try {
+      const result = tkgService.writeEvent(req.body);
+      res.status(201).json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/anchor
+   * Get the current working memory anchor
+   */
+  app.get('/api/v2/anchor', async (req, res) => {
+    try {
+      const anchor = tkgService.getWorkingAnchor();
+      res.json(anchor);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * PUT /api/v2/anchor
+   * Update the working memory anchor
+   */
+  app.put('/api/v2/anchor', async (req, res) => {
+    try {
+      const anchor = tkgService.getOrSetWorkingAnchor(req.body);
+      res.json(anchor);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/chunks
+   * Get hourly chunks in a range
+   * Query: ?start=2026-07-21T00&end=2026-07-21T23
+   */
+  app.get('/api/v2/chunks', async (req, res) => {
+    try {
+      const { start, end } = req.query;
+      if (start && end) {
+        const chunks = tkgService.getHoursInRange(start, end);
+        return res.json({ chunks, count: chunks.length });
+      }
+      const chunk = tkgService.getOrCreateCurrentChunk();
+      res.json({ chunk });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/chunks/missing
+   * Find and fill missing empty chunks
+   * Query: ?start=2026-07-21T00&end=2026-07-21T23
+   */
+  app.post('/api/v2/chunks/fill-empty', async (req, res) => {
+    try {
+      const { start, end } = req.body;
+      const created = tkgService.fillMissingEmptyChunks(start, end);
+      res.json({ filled: created.length, chunks: created });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/chunks/:id/events
+   * Get all events in a chunk
+   */
+  app.get('/api/v2/chunks/:id/events', async (req, res) => {
+    try {
+      const events = tkgService.getEventsInChunk(req.params.id);
+      res.json({ chunkId: req.params.id, count: events.length, events });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/events/recent
+   * Get recent events
+   * Query: ?hours=24
+   */
+  app.get('/api/v2/events/recent', async (req, res) => {
+    try {
+      const hours = parseInt(req.query.hours) || 24;
+      const events = tkgService.getRecentEvents(hours);
+      res.json({ hours, count: events.length, events });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/special-events
+   * Get special highlighted events
+   * Query: ?unresolved=true&limit=20
+   */
+  app.get('/api/v2/special-events', async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 20;
+      const unresolvedOnly = req.query.unresolved === 'true';
+      const events = tkgService.getSpecialEvents(limit, unresolvedOnly);
+      res.json({ count: events.length, events });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/v2/special-events/:id/resolve
+   * Mark a special event as resolved
+   */
+  app.post('/api/v2/special-events/:id/resolve', async (req, res) => {
+    try {
+      tkgService.resolveSpecialEvent(req.params.id);
+      res.json({ message: 'Event resolved' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/v2/entities
+   * Add or ensure an entity exists
+   */
+  app.post('/api/v2/entities', async (req, res) => {
+    try {
+      const { name, type, attributes } = req.body;
+      if (!name) return res.status(400).json({ error: 'name is required' });
+      const id = tkgService._ensureEntity({ name, type, attributes });
+      res.status(201).json({ id, message: 'Entity created/updated' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/v2/relations
+   * Add an entity relationship
+   */
+  app.post('/api/v2/relations', async (req, res) => {
+    try {
+      const { sourceId, targetId, relationType, metadata } = req.body;
+      if (!sourceId || !targetId || !relationType) {
+        return res.status(400).json({ error: 'sourceId, targetId, and relationType are required' });
+      }
+      const id = tkgService.addEntityRelation(sourceId, targetId, relationType, metadata || {});
+      res.status(201).json({ id, message: 'Relation added' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/v2/query
+   * Query the temporal knowledge graph
+   */
+  app.post('/api/v2/query', async (req, res) => {
+    try {
+      const { query, timeRange } = req.body;
+      if (!query) return res.status(400).json({ error: 'query is required' });
+      const results = tkgService.queryTemporalGraph(query, timeRange);
+      res.json(results);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/context
+   * Get assembled context window for agent
+   * Query: ?query=text&maxEvents=20
+   */
+  app.get('/api/v2/context', async (req, res) => {
+    try {
+      const query = req.query.query || '';
+      const maxEvents = parseInt(req.query.maxEvents) || 20;
+      const context = tkgService.getContextWindow(query, maxEvents);
+      res.json({ context, tokenEstimate: Math.ceil(context.length / 4) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/v2/consolidate
+   * Run memory consolidation
+   */
+  app.post('/api/v2/consolidate', async (req, res) => {
+    try {
+      const report = tkgService.runConsolidation();
+      res.json({ message: 'Consolidation complete', report });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v2/stats
+   * Get TKG statistics
+   */
+  app.get('/api/v2/stats', async (req, res) => {
+    try {
+      const stats = tkgService.getStats();
+      res.json(stats);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

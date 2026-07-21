@@ -87,15 +87,34 @@ export class Watchdog {
     }
 
     if (!probe.healthy && failures >= this.normalizedFailureThreshold) {
-      this.safeMode.enter({
+      const reasonObj = {
         module: `watchdog:${serviceName}`,
         reason: status.lastMessage,
-        severity: "warning",
+        severity: "warning" as const,
         recommendation:
           probe.restartable === false
             ? "Fix the service configuration and restart manually."
             : "Watchdog stopped the restart loop; inspect logs and restart after fixing the cause.",
-      });
+      };
+      this.safeMode.enter(reasonObj);
+
+      // Alerting: Dispatch webhook notification if WATCHDOG_WEBHOOK_URL is set
+      const webhookUrl = process.env["WATCHDOG_WEBHOOK_URL"];
+      if (webhookUrl && webhookUrl.trim()) {
+        fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: "watchdog_safe_mode",
+            service: serviceName,
+            failures,
+            reason: status.lastMessage,
+            timestamp: now.toISOString(),
+          }),
+        }).catch((err) =>
+          console.warn("[Watchdog] Failed to send webhook alert:", err),
+        );
+      }
     }
 
     return { ...status };

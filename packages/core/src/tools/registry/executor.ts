@@ -29,6 +29,12 @@ import {
   handleComputerListProcesses,
   handleComputerGetSystemInfo,
   handleComputerListDisplays,
+  handleComputerClickAt,
+  handleComputerDrag,
+  handleComputerScroll,
+  handleComputerTerminateApp,
+  handleComputerListWindows,
+  handleComputerGridScreenshot,
   handleScrapePage,
   handleScrapeSelectors,
   handleScrapePaginated,
@@ -314,6 +320,12 @@ export class ToolRegistry {
       "computer_list_displays",
       handleComputerListDisplays.bind(this),
     );
+    this.registerHandler("computer_click_at", handleComputerClickAt.bind(this));
+    this.registerHandler("computer_drag", handleComputerDrag.bind(this));
+    this.registerHandler("computer_scroll", handleComputerScroll.bind(this));
+    this.registerHandler("computer_terminate_app", handleComputerTerminateApp.bind(this));
+    this.registerHandler("computer_list_windows", handleComputerListWindows.bind(this));
+    this.registerHandler("computer_grid_screenshot", handleComputerGridScreenshot.bind(this));
     this.registerHandler("scrape_page", handleScrapePage.bind(this));
     this.registerHandler("scrape_selectors", handleScrapeSelectors.bind(this));
     this.registerHandler("scrape_paginated", handleScrapePaginated.bind(this));

@@ -244,7 +244,7 @@ const scopedDevExcludes = new Set([
   "testing-library", "storybook",
 ]);
 // Directories inside node_modules that are never needed at runtime
-const alwaysExcludeNames = new Set([".cache", ".turbo", ".git", ".github"]);
+const alwaysExcludeNames = new Set([".cache", ".turbo", ".git", ".github", ".ignored", ".pnpm"]);
 
 let copiedCount = 0;
 for (const entry of fs.readdirSync(rootNm, { withFileTypes: true })) {

@@ -1,3 +1,5 @@
+import { toast } from "sonner"
+
 import { isLauncherAuthPathname } from "@/lib/launcher-login-path"
 
 function isLauncherAuthPath(): boolean {
@@ -16,27 +18,43 @@ function isLauncherAuthPath(): boolean {
   }
 }
 
+export interface LauncherFetchOptions extends RequestInit {
+  showErrorToast?: boolean
+}
+
 /**
- * Same-origin fetch that sends cookies; redirects to launcher login on 401 JSON responses.
- * Skips redirect while already on an auth page (login or setup) to avoid reload loops.
+ * Same-origin fetch that sends cookies; redirects to launcher login on 401 JSON responses,
+ * and displays error toasts on unexpected 5xx or 4xx responses when enabled.
  */
 export async function launcherFetch(
   input: RequestInfo | URL,
-  init?: RequestInit,
+  init?: LauncherFetchOptions,
 ): Promise<Response> {
-  const res = await fetch(input, {
-    credentials: "same-origin",
-    ...init,
-  })
-  if (res.status === 401) {
-    const ct = res.headers.get("content-type") || ""
-    if (
-      ct.includes("application/json") &&
-      typeof globalThis.location !== "undefined" &&
-      !isLauncherAuthPath()
-    ) {
-      globalThis.location.assign("/launcher-login")
+  const { showErrorToast, ...fetchInit } = init || {}
+  try {
+    const res = await fetch(input, {
+      credentials: "same-origin",
+      ...fetchInit,
+    })
+
+    if (res.status === 401) {
+      const ct = res.headers.get("content-type") || ""
+      if (
+        ct.includes("application/json") &&
+        typeof globalThis.location !== "undefined" &&
+        !isLauncherAuthPath()
+      ) {
+        globalThis.location.assign("/launcher-login")
+      }
+    } else if (showErrorToast && (res.status >= 400 || res.status >= 500)) {
+      toast.error(`API Error (${res.status}): ${res.statusText || "Request failed"}`)
     }
+
+    return res
+  } catch (error) {
+    if (showErrorToast) {
+      toast.error("Network error: Please check your connection.")
+    }
+    throw error
   }
-  return res
 }

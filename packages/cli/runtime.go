@@ -108,6 +108,10 @@ func (r *Runtime) startRuntime() error {
 	r.mu.Lock()
 	r.cmd = cmd
 	r.appendLocked(fmt.Sprintf("Runtime PID: %d", cmd.Process.Pid))
+	// Write PID file for daemon mode
+	pidDir := filepath.Join(r.cfg.WorkspaceDir, "data")
+	_ = os.MkdirAll(pidDir, 0755)
+	_ = os.WriteFile(filepath.Join(pidDir, "gateway.pid"), []byte(strconv.Itoa(cmd.Process.Pid)), 0644)
 	r.mu.Unlock()
 
 	go r.scan(stdout)
@@ -135,7 +139,44 @@ func (r *Runtime) Stop() error {
 	return r.stop()
 }
 
-func (r *Runtime) stop() error {
+// StopDaemon sends a shutdown request to the running gateway backend.
+// Used by 'hiro stop' command.
+func (r *Runtime) StopDaemon() error {
+	// Try reading PID file
+	pidFile := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway.pid")
+	pidBytes, err := os.ReadFile(pidFile)
+	if err != nil {
+		return fmt.Errorf("no running backend found (PID file missing: %s)", pidFile)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+
+	// Send shutdown request via HTTP
+	hostPort := net.JoinHostPort(r.cfg.Host, fmt.Sprintf("%d", r.cfg.Port))
+	shutdownURL := fmt.Sprintf("http://%s/gateway/shutdown", hostPort)
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(shutdownURL, "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to backend (PID %d): %w", pid, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		fmt.Printf("Hiro backend (PID %d) is shutting down...\n", pid)
+		// Clean up PID file
+		_ = os.Remove(pidFile)
+		return nil
+	}
+	return fmt.Errorf("shutdown request failed with status %d", resp.StatusCode)
+}
+
+// ForceStop terminates the backend process tree. Used for restart operations.
+func (r *Runtime) ForceStop() error {
+	r.opMu.Lock()
+	defer r.opMu.Unlock()
+	return r.forceStop()
+}
+
+func (r *Runtime) forceStop() error {
 	r.mu.Lock()
 	cmd := r.cmd
 	cancel := r.cancel
@@ -146,7 +187,7 @@ func (r *Runtime) stop() error {
 		return nil
 	}
 	r.state = stateStopping
-	r.appendLocked("Stopping Hiro runtime...")
+	r.appendLocked("Force stopping Hiro runtime...")
 	r.mu.Unlock()
 
 	if err := terminateProcessTree(cmd, 4*time.Second); err != nil {
@@ -173,6 +214,38 @@ func (r *Runtime) stop() error {
 	return nil
 }
 
+func (r *Runtime) stop() error {
+	r.mu.Lock()
+	cmd := r.cmd
+	cancel := r.cancel
+	done := r.done
+	if cmd == nil {
+		r.state = stateStopped
+		r.mu.Unlock()
+		return nil
+	}
+	// Detach: leave backend running, just release our handle
+	pid := 0
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
+	}
+	r.state = stateStopped
+	r.cmd = nil
+	r.cancel = nil
+	if done != nil {
+		close(done)
+		r.done = nil
+	}
+	r.appendLocked(fmt.Sprintf("Detached from backend (PID: %d). Backend continues running.", pid))
+	r.mu.Unlock()
+
+	// Cancel context but do NOT kill the process tree
+	if cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
 func (r *Runtime) Restart() error {
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
@@ -185,7 +258,7 @@ func (r *Runtime) Restart() error {
 	r.state = stateRestarting
 	r.appendLocked("Restart requested.")
 	r.mu.Unlock()
-	if err := r.stop(); err != nil {
+	if err := r.forceStop(); err != nil {
 		return err
 	}
 	time.Sleep(350 * time.Millisecond)

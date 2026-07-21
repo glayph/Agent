@@ -20,8 +20,29 @@
 // - For Windows installer: launches the native Hiro.exe wrapper
 // - With --tray flag: launches in system tray mode for minimalist operation
 
-const process = require("process");
-const path = require("path");
+import process from "node:process";
+import { join, dirname } from "node:path";
+import fs from "node:fs";
+import child_process from "node:child_process";
+import net from "node:net";
+
+// Helper function to convert import.meta.url to file path
+const fileURLToPath = (url) => {
+  if (url.startsWith('file://')) {
+    let filePath = url.replace('file://', '');
+    if (process.platform === 'win32') {
+      filePath = filePath.replace(/\//g, '\\\\');
+    }
+    return filePath;
+  }
+  return url;
+};
+
+// Get current directory for resolving paths
+const getCurrentDir = () => {
+  const moduleUrl = import.meta?.url || '';
+  return moduleUrl ? fileURLToPath(moduleUrl) : process.cwd();
+};
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -80,12 +101,11 @@ async function startDashboard() {
   // Determine if we're launching with installer or normal mode
   if (isWindowsInstaller && !isTrayMode) {
     // Use the native Hiro.exe wrapper for Windows installer
-    const { spawn } = require("child_process");
-    const exePath = path.join(__dirname, "..", "..", "installer", "windows", "launcher-go", "Hiro.exe");
+    const exePath = join(getCurrentDir(), "..", "..", "installer", "windows", "launcher-go", "Hiro.exe");
 
-    if (require("fs").existsSync(exePath)) {
+    if (fs.existsSync(exePath)) {
       console.log("Launching dashboard via Windows installer wrapper...");
-      const child = spawn(exePath, ["--dashboard"], {
+      const child = child_process.spawn(exePath, ["--dashboard"], {
         detached: true,
         stdio: "ignore",
         windowsHide: true,
@@ -105,15 +125,14 @@ async function startDashboard() {
   }
 
   // Launch the gateway directly
-  const gatewayPath = path.join(__dirname, "..", "..", "packages", "gateway", "dist", "index.js");
+  const gatewayPath = join(getCurrentDir(), "..", "..", "packages", "gateway", "dist", "index.js");
 
-  if (require("fs").existsSync(gatewayPath)) {
+  if (fs.existsSync(gatewayPath)) {
     console.log("Launching gateway from:", gatewayPath);
-    const { spawn } = require("child_process");
-    const child = spawn(process.execPath, [gatewayPath], {
+    const child = child_process.spawn(process.execPath, [gatewayPath], {
       detached: true,
       stdio: "inherit",
-      cwd: path.dirname(gatewayPath),
+      cwd: dirname(gatewayPath),
     });
 
     child.unref();
@@ -128,8 +147,6 @@ async function startDashboard() {
 async function runDoctor() {
   console.log("=== Nexus System Diagnostic ===\\n");
 
-  const fs = require("fs");
-
   console.log("1. Checking Node.js environment...");
   try {
     const nodePath = process.execPath;
@@ -142,23 +159,22 @@ async function runDoctor() {
 
   console.log("2. Checking project structure...");
   const requiredPaths = [
-    path.join(__dirname, "..", "..", "README.md"),
-    path.join(__dirname, "..", "..", "package.json"),
-    path.join(__dirname, "..", "..", "packages", "gateway", "dist", "index.js"),
+    join(getCurrentDir(), "..", "..", "README.md"),
+    join(getCurrentDir(), "..", "..", "package.json"),
+    join(getCurrentDir(), "..", "..", "packages", "gateway", "dist", "index.js"),
   ];
 
   for (const p of requiredPaths) {
     if (fs.existsSync(p)) {
-      console.log("   ✓", p.split("/").pop());
+      console.log("   ✓", p.split('/').pop());
     } else {
-      console.log("   ✗", p.split("/").pop(), "(missing)");
+      console.log("   ✗", p.split('/').pop(), "(missing)");
     }
   }
 
   console.log("\\n3. Check optional components...");
 
   try {
-    const net = require("net");
     const socket = new net.Socket();
     socket.setTimeout(3000);
     console.log("   ✓ Network stack available");
@@ -184,11 +200,10 @@ async function installPackage() {
 
   console.log("Installing Nexus from npm package...");
 
-  const fs = require("fs");
   const dirs = ["data", "logs", "config"];
 
   for (const dir of dirs) {
-    const dirPath = path.join(process.cwd(), dir);
+    const dirPath = join(process.cwd(), dir);
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
       console.log("   Created directory:", dir);
@@ -216,11 +231,9 @@ async function uninstallPackage() {
 
   console.log("Uninstalling Nexus...");
 
-  const fs = require("fs");
-
   const sensitivePaths = ["data", "logs"];
   for (const p of sensitivePaths) {
-    const fullPath = path.join(process.cwd(), p);
+    const fullPath = join(process.cwd(), p);
     if (fs.existsSync(fullPath)) {
       console.log("   Would clean:", fullPath);
     }
@@ -233,8 +246,8 @@ async function showVersion() {
   console.log("=== Nexus Version Information ===\\n");
 
   try {
-    const pkgPath = path.join(__dirname, "..", "..", "package.json");
-    const pkg = JSON.parse(require("fs").readFileSync(pkgPath, "utf8"));
+    const pkgPath = join(getCurrentDir(), "..", "..", "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 
     console.log("Package Name:     ", pkg.name);
     console.log("Version:          ", pkg.version);

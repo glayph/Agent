@@ -25,6 +25,7 @@ import {
   resolveLiteLLMConfigPath,
   liteLLMLogFile,
   liteLLMBaseUrl,
+  stopLiteLLMSupervisor,
   type LiteLLMState,
   type LiteLLMConfig,
 } from "./litellm-manager.js";
@@ -38,6 +39,8 @@ import {
   closeWebSocketServer,
 } from "./websocket-relay.js";
 import { closeHttpServer, terminateProcessTree } from "./shutdown.js";
+import { createRotatingLogStream } from "./log-rotation.js";
+import { SlidingWindowRateLimiter } from "./rate-limiter.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -79,7 +82,8 @@ const config = {
     booleanEnv("Hiro_ENABLE_LITELLM", true) &&
     !booleanEnv("Hiro_DISABLE_LITELLM", false),
   enableMcp: env("ENABLE_MCP", "true") !== "false",
-  maxCoreRestarts: 5,
+  // 0 = unbounded restarts (with capped exponential backoff)
+  maxCoreRestarts: positiveIntEnv("CORE_MAX_RESTARTS", 0),
   coreStartupTimeout: positiveIntEnv("CORE_STARTUP_TIMEOUT", 60000),
   coreHealthInterval: positiveIntEnv("CORE_HEALTH_INTERVAL", 15000),
   coreHealthTimeout: positiveIntEnv("CORE_HEALTH_TIMEOUT", 5000),
@@ -166,7 +170,7 @@ function startCore(): child_process.ChildProcess {
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
   }
-  const logStream = fs.createWriteStream(logFile, { flags: "a" });
+  const logStream = createRotatingLogStream(logFile);
 
   logStream.write(
     `\n--- Gateway spawning core at ${new Date().toISOString()} ---\n`,
@@ -230,12 +234,14 @@ function attemptCoreRestart(): void {
   if (shutdownInProgress || coreRestartTimer) {
     return;
   }
-  if (coreRestartAttempts >= config.maxCoreRestarts) {
-    log.error("Max core restarts reached. Giving up.");
+  // config.maxCoreRestarts === 0 means unbounded
+  if (config.maxCoreRestarts > 0 && coreRestartAttempts >= config.maxCoreRestarts) {
+    log.error(`Max core restarts (${config.maxCoreRestarts}) reached. Giving up. Set CORE_MAX_RESTARTS=0 for unbounded.`);
     return;
   }
   coreRestartAttempts++;
-  const backoff = Math.min(Math.pow(2, coreRestartAttempts) * 1000, 30000);
+  // Backoff: 2s, 4s, 8s … capped at 5 minutes
+  const backoff = Math.min(Math.pow(2, coreRestartAttempts) * 1000, 5 * 60 * 1000);
   log.info(`Restarting core in ${backoff}ms (attempt ${coreRestartAttempts})`);
   coreRestartTimer = setTimeout(async () => {
     coreRestartTimer = null;
@@ -600,6 +606,13 @@ app.post("/gateway/litellm/restart", async (_req, res) => {
   }
 });
 
+app.post("/gateway/shutdown", (_req, res) => {
+  res.json({ ok: true, message: "Gateway and backend services shutting down..." });
+  setTimeout(() => {
+    shutdown("API_SHUTDOWN", 0);
+  }, 500);
+});
+
 // ── API proxy to core ────────────────────────────────────────────────────────
 
 const coreProxyTarget = `http://127.0.0.1:${config.corePort}`;
@@ -616,9 +629,31 @@ const apiProxy = createProxyMiddleware({
 
 app.use("/api", apiProxy);
 
+// Rate limiters for channel webhooks and WebSocket upgrades (30 req/min by default)
+const channelRateLimiter = new SlidingWindowRateLimiter({
+  windowMs: positiveIntEnv("RATE_LIMIT_WINDOW_MS", 60000),
+  maxRequests: positiveIntEnv("RATE_LIMIT_MAX_REQUESTS", 30),
+});
+const wsRateLimiter = new SlidingWindowRateLimiter({
+  windowMs: positiveIntEnv("RATE_LIMIT_WINDOW_MS", 60000),
+  maxRequests: positiveIntEnv("RATE_LIMIT_MAX_REQUESTS", 30),
+});
+setInterval(() => {
+  channelRateLimiter.cleanup();
+  wsRateLimiter.cleanup();
+}, 60000).unref();
+
 // Public channel webhooks terminate at the gateway and are proxied to core.
 app.use(
   "/webhooks",
+  (req, res, next) => {
+    const clientKey = (req.ip || req.socket.remoteAddress || "unknown") + ":" + req.path;
+    if (!channelRateLimiter.isAllowed(clientKey)) {
+      res.status(429).json({ error: "Too many requests. Rate limit exceeded." });
+      return;
+    }
+    next();
+  },
   createProxyMiddleware({
     target: coreProxyTarget,
     changeOrigin: false,
@@ -686,6 +721,11 @@ server.on("upgrade", (request, socket, head) => {
     (p) => url === p || url.startsWith(p + "?") || url.startsWith(p + "#"),
   );
   if (matched) {
+    const clientIp = request.socket.remoteAddress || "unknown";
+    if (!wsRateLimiter.isAllowed(clientIp)) {
+      rejectWsUpgrade(socket, 403, "Rate limit exceeded");
+      return;
+    }
     if (!hasWsAuthMaterial(request)) {
       rejectWsUpgrade(socket, 401, "Unauthorized");
       return;
@@ -744,11 +784,20 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     coreProcess = null;
   }
 
-  // 3b. Kill LiteLLM Proxy
+  // 3b. Kill LiteLLM Proxy (disable supervisor first to prevent auto-restart race)
   if (litellmState.process) {
+    stopLiteLLMSupervisor(litellmState);
     await terminateProcessTree(litellmState.process, 1000);
     litellmState.process = null;
   }
+
+  // Clean up PID file
+  try {
+    const pidFile = path.join(workspaceDir, "data", "gateway.pid");
+    if (fs.existsSync(pidFile)) {
+      fs.unlinkSync(pidFile);
+    }
+  } catch {}
 
   log.info("Shutdown complete");
   process.exit(exitCode);
@@ -805,6 +854,11 @@ async function main(): Promise<void> {
   });
 
   server.listen(config.gatewayPort, config.gatewayHost, () => {
+    try {
+      fs.writeFileSync(path.join(workspaceDir, "data", "gateway.pid"), process.pid.toString());
+    } catch (err) {
+      log.warn("Failed to write PID file:", err);
+    }
     log.info(
       `Gateway listening on http://${config.gatewayHost}:${config.gatewayPort}`,
     );

@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useCallback } from "react"
 
-import { RunsPage } from "@/components/agent/runs/runs-page"
+import { RunsPage } from "@/features/agent/runs/runs-page"
 import {
   type AgentRunsSearchState,
   normalizeAgentRunsSearch,
-} from "@/components/agent/runs/runs-page-model"
+} from "@/features/agent/runs/runs-page-model"
 
 export const Route = createFileRoute("/agent/runs")({
   validateSearch: (search) => normalizeAgentRunsSearch(search),
