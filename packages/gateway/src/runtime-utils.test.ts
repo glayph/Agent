@@ -33,23 +33,30 @@ describe("gateway runtime utilities", () => {
     expect(rewriteMcpProxyPath("/tools/list")).toBe("/mcp/tools/list");
   });
 
-  test("resolves a Windows LiteLLM executable without shell", () => {
-    const appData = "C:\\Users\\Agent\\AppData\\Roaming";
-    const expected = path.win32.join(
-      appData,
-      "Python",
-      "Python313",
-      "Scripts",
-      "litellm.exe",
-    );
+  test("resolves litellm via Hiro_PYTHON_DIR env var (Windows)", () => {
+    const pythonDir = "C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Python314";
+    const expected = path.win32.join(pythonDir, "Scripts", "litellm.exe");
 
     expect(
       resolveLiteLLMCommand({
         platform: "win32",
-        env: { APPDATA: appData, PATH: "" },
+        env: { Hiro_PYTHON_DIR: pythonDir, PATH: "" },
         fileExists: (candidate) => candidate === expected,
       }),
     ).toEqual({ command: expected, shell: false });
+  });
+
+  test("resolves litellm via Hiro_PYTHON_DIR .cmd script (Windows, uses shell)", () => {
+    const pythonDir = "C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Python314";
+    const expected = path.win32.join(pythonDir, "Scripts", "litellm.cmd");
+
+    expect(
+      resolveLiteLLMCommand({
+        platform: "win32",
+        env: { Hiro_PYTHON_DIR: pythonDir, PATH: "" },
+        fileExists: (candidate) => candidate === expected,
+      }),
+    ).toEqual({ command: expected, shell: true });
   });
 
   test("resolves a PATH LiteLLM executable without shell", () => {

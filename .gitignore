@@ -4,6 +4,7 @@ node_modules/
 packages/ui/frontend/node_modules/
 packages/ui/frontend/node_modules/node_modules/
 .pnpm-store/
+.opencode
 
 # Build output
 dist/

@@ -53,7 +53,7 @@ function runtimePath(relativePath) {
 
 function cliPath() {
   return runtimeRoot === PROJECT_ROOT
-    ? path.join(PROJECT_ROOT, "packages", "Hiro-cli", "dist", "bin", CLI_EXE)
+    ? path.join(PROJECT_ROOT, "packages", "cli", "dist", "bin", CLI_EXE)
     : runtimePath(path.join("bin", CLI_EXE));
 }
 
@@ -118,7 +118,7 @@ function start(argv) {
     Hiro_PACKAGE_VERSION: readPackage().version || "1.0.0",
   };
 
-  memoryChild = fork(path.join(PROJECT_ROOT, "packages", "Hiro-memory", "src", "api", "server.js"));
+  memoryChild = fork(path.join(PROJECT_ROOT, "packages", "memory", "src", "api", "server.js"));
 
   child = spawn(executable, argv, {
     cwd: PROJECT_ROOT,

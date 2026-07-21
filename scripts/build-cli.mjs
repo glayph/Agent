@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
-const cliDir = path.join(root, "packages", "Hiro-cli");
+const cliDir = path.join(root, "packages", "cli");
 const outDir = path.join(cliDir, "dist", "bin");
 const exe = "Hiro-cli";
 

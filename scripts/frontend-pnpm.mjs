@@ -105,6 +105,13 @@ function runCorepackPnpm(pnpmArgs) {
       cwd: root,
       stdio: "inherit",
       shell: false,
+      env: {
+        ...process.env,
+        // Disable corepack strict mode so root packageManager:npm doesn't
+        // block pnpm from running inside packages/ui/frontend (which
+        // declares packageManager:pnpm in its own package.json).
+        COREPACK_ENABLE_STRICT: "0",
+      },
     },
   );
   if (result.error) {

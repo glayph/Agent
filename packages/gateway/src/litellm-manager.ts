@@ -54,12 +54,39 @@ export function resolveLiteLLMCommand(options: ResolveLiteLLMCommandOptions = {}
       candidates.push(pathApi.join(env.Hiro_PYTHON_DIR, "Scripts", "litellm.cmd"));
       candidates.push(pathApi.join(env.Hiro_PYTHON_DIR, "Scripts", "litellm.bat"));
     }
+    // Dynamically scan APPDATA\Python\Python3XX\Scripts\ for any installed Python version
     if (env.APPDATA) {
-      candidates.push(pathApi.join(env.APPDATA, "Python", "Python313", "Scripts", "litellm.exe"));
-      candidates.push(pathApi.join(env.APPDATA, "Python", "Scripts", "litellm.exe"));
+      const pythonBase = pathApi.join(env.APPDATA, "Python");
+      try {
+        const entries = fs.readdirSync(pythonBase, { withFileTypes: true });
+        const versionDirs = entries
+          .filter((e: fs.Dirent) => e.isDirectory() && /^Python3\d+$/i.test(e.name))
+          .map((e: fs.Dirent) => pathApi.join(pythonBase, e.name))
+          .sort()
+          .reverse(); // newest version first
+        for (const versionDir of versionDirs) {
+          candidates.push(pathApi.join(versionDir, "Scripts", "litellm.exe"));
+          candidates.push(pathApi.join(versionDir, "Scripts", "litellm.cmd"));
+          candidates.push(pathApi.join(versionDir, "Scripts", "litellm.bat"));
+        }
+      } catch { /* APPDATA\Python may not exist */ }
+      // Also try flat APPDATA\Python\Scripts layout
+      candidates.push(pathApi.join(pythonBase, "Scripts", "litellm.exe"));
     }
+    // Dynamically scan LOCALAPPDATA\Programs\Python\Python3XX\Scripts\
     if (env.LOCALAPPDATA) {
-      candidates.push(pathApi.join(env.LOCALAPPDATA, "Programs", "Python", "Python313", "Scripts", "litellm.exe"));
+      const pythonBase = pathApi.join(env.LOCALAPPDATA, "Programs", "Python");
+      try {
+        const entries = fs.readdirSync(pythonBase, { withFileTypes: true });
+        const versionDirs = entries
+          .filter((e: fs.Dirent) => e.isDirectory() && /^Python3\d+$/i.test(e.name))
+          .map((e: fs.Dirent) => pathApi.join(pythonBase, e.name))
+          .sort()
+          .reverse();
+        for (const versionDir of versionDirs) {
+          candidates.push(pathApi.join(versionDir, "Scripts", "litellm.exe"));
+        }
+      } catch { /* LOCALAPPDATA\Programs\Python may not exist */ }
     }
   }
 

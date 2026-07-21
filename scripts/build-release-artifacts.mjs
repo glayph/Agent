@@ -2,9 +2,9 @@
 /**
  * build-release-artifacts.mjs
  *
- * Full build pipeline for Hiro Hiro:
+ * Full build pipeline for Hiro:
  *   1. TypeScript compilation (tsc -b with project references)
- *   2. Go backend (Hiro-web) + CLI (Hiro-cli) binaries
+ *   2. Go backend (ui/backend) + CLI (Hiro-cli) binaries
  *   3. React frontend (Vite via pnpm)
  *   4. Runtime package assembly (prepare-runtime-package.mjs)
  */
@@ -77,7 +77,7 @@ function buildGoBackend() {
 }
 
 function buildGoCli() {
-  const cliDir = path.join(root, "packages", "Hiro-cli");
+  const cliDir = path.join(root, "packages", "cli");
   const outDir = path.join(cliDir, "dist", "bin");
   const exe = "Hiro-cli";
 
@@ -128,7 +128,7 @@ function prepareRuntime() {
 // ── Main ───────────────────────────────────────────────────────────────────────
 function main() {
   const startTime = Date.now();
-  log("Starting full build for Hiro Hiro...");
+  log("Starting full build for Hiro...");
 
   buildTypeScript();
   buildGoBackend();

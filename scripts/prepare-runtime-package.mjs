@@ -234,13 +234,22 @@ const rootNm = path.join(root, "node_modules");
 const stagingNm = path.join(stagingRoot, "node_modules");
 const devExcludePrefixes = new Set([
   "prettier", "eslint", "jest", "nodemon", "rimraf",
-  "rollup", "vite", "vitest", "babel",
+  "rollup", "vite", "vitest", "babel", "typescript",
+  "turbo", "ts-jest", "ts-node",
+  // Also skip large test/build tooling
+  "webpack", "esbuild", "parcel", "swc",
 ]);
 const scopedDevExcludes = new Set([
   "types", "typescript-eslint", "eslint", "jest", "babel", "vitejs", "trivago",
+  "testing-library", "storybook",
 ]);
+// Directories inside node_modules that are never needed at runtime
+const alwaysExcludeNames = new Set([".cache", ".turbo", ".git", ".github"]);
+
+let copiedCount = 0;
 for (const entry of fs.readdirSync(rootNm, { withFileTypes: true })) {
   if (entry.name === ".bin" || !entry.isDirectory()) continue;
+  if (alwaysExcludeNames.has(entry.name)) continue;
   // Skip known dev-only packages
   if (devExcludePrefixes.has(entry.name)) continue;
   // Skip dev-only scoped packages
@@ -257,8 +266,13 @@ for (const entry of fs.readdirSync(rootNm, { withFileTypes: true })) {
   const dest = path.join(stagingNm, entry.name);
   if (!fs.existsSync(dest)) {  // skip if already copied by workspace package step
     copyRecursive(src, dest);
+    copiedCount++;
+    if (copiedCount % 10 === 0) {
+      process.stdout.write(`  Copied ${copiedCount} node_modules packages...\r`);
+    }
   }
 }
+process.stdout.write(`  Copied ${copiedCount} node_modules packages.     \n`);
 
 copyRecursive(
   path.join(root, "packages", "ui", "frontend", "dist"),

@@ -8,7 +8,7 @@
   "main": "dist/runtime/packages/core/dist/api/index.js",
   "bin": {
     "Hiro": "bin/Hiro.js",
-    "Agent": "bin/Hiro.js"
+    "Agent": "bin/Agent.js"
   },
   "files": [
     "dist/runtime/",
