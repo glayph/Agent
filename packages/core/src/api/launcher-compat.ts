@@ -1993,7 +1993,17 @@ function noteLoginFailure(req: Request): void {
   existing.count += 1;
 }
 
+function sanitizeEnvValue(value: string): string {
+  // Reject CR/LF to prevent .env newline injection attacks
+  if (/[
+]/.test(value)) {
+    throw new Error(`Invalid .env value: contains newline characters`);
+  }
+  return value.trim();
+}
+
 function updateEnvVar(paths: RuntimePaths, key: string, value: string): void {
+  value = sanitizeEnvValue(value);
   const envPath = path.join(paths.configDir, ".env");
   let content = "";
   try {
