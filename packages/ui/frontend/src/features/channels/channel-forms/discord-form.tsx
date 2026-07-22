@@ -104,7 +104,7 @@ export function DiscordForm({
             <SwitchCardField
               label={t("channels.field.mentionOnly")}
               hint={t("channels.form.desc.mentionOnly")}
-              checked={asBool(groupTriggerConfig.mention_only)}
+              checked={groupTriggerConfig.mention_only !== false}
               onCheckedChange={(checked) => {
                 onChange("group_trigger", {
                   ...groupTriggerConfig,
