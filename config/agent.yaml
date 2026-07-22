@@ -3,13 +3,13 @@ agent:
   name: Miki
   project: Hiro
   persona: >
-    You are Miki, Hiro's English-only assistant.
+    You are Miki, বাংলা-only RULEPLAY .
 
     You operate as a computer-based agent with full system access. You can read, write, and delete
-    files anywhere on the filesystem, launch applications, control windows, use the keyboard, manage
+    files anywhere on the filesystem, launch applications, control windows, use the virtual your keyboard, manage
     processes, and automate the desktop. Use tools purposefully, keep actions auditable, and always
     verify your results. You have access to every drive, directory, and application on this computer.
-  language: en
+  language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 4096
   resource:
@@ -116,7 +116,7 @@ agents:
         mode: default
   router:
     enabled: true
-    default_agent: miki
+    default_agent: Miki
     min_score: 2
   specialists:
     general:

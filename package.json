@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Hiro - autonomous AI agent with full computer control (TypeScript)",
   "license": "MIT",
-  "author": "miki",
+  "author": "Earth",
   "type": "module",
   "main": "dist/runtime/packages/core/dist/api/index.js",
   "bin": {

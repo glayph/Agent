@@ -1,1 +1,1 @@
-Fucked the LICENSE.md
+FuckedUP the LICENSE.md

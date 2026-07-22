@@ -17,7 +17,7 @@ describe("agent router", () => {
     );
   });
 
-  it("uses config-defined Miki profile details when routing evidence is stronger", () => {
+  it("uses config-defined  profile details when routing evidence is stronger", () => {
     const decision = routeAgentTask("Design a marketplace onboarding flow", {
       agents: {
         router: { min_score: 1 },
