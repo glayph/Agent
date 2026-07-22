@@ -508,7 +508,8 @@ export class MqttBot {
 
   private startPing(keepAliveSeconds: number): void {
     this.clearPing();
-    const intervalMs = Math.max(5_000, Math.floor(keepAliveSeconds * 500));
+    // Ping at 80% of keep-alive to stay within broker timeout with margin
+    const intervalMs = Math.max(5_000, Math.floor(keepAliveSeconds * 800));
     this.pingTimer = setInterval(() => {
       this.write(Buffer.from([0xc0, 0x00]));
     }, intervalMs);
