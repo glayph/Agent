@@ -342,8 +342,7 @@ export interface EngineStatus {
   enabled: boolean;
   rules_count: number;
   active_plan:
-    | { title: string; total_steps: number; completed: number }
-    | undefined;
+    { title: string; total_steps: number; completed: number } | undefined;
 }
 
 export class SkillGovernanceEngine {

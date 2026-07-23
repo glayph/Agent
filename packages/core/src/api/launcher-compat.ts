@@ -3069,26 +3069,25 @@ async function fetchModelsFromProvider(
       ? body.models
       : [];
   const models = rawModels
-    .map(
-      (item: unknown): ProviderModelResult =>
-        typeof item === "string"
-          ? { id: item }
-          : item && typeof item === "object"
-            ? {
-                id: String(
-                  (item as { id?: unknown; name?: unknown }).id ||
-                    (item as { id?: unknown; name?: unknown }).name ||
-                    "",
-                ),
-                owned_by:
-                  typeof (item as { owned_by?: unknown }).owned_by === "string"
-                    ? (item as { owned_by: string }).owned_by
-                    : undefined,
-                extra: item as JsonRecord,
-              }
-            : {
-                id: "",
-              },
+    .map((item: unknown): ProviderModelResult =>
+      typeof item === "string"
+        ? { id: item }
+        : item && typeof item === "object"
+          ? {
+              id: String(
+                (item as { id?: unknown; name?: unknown }).id ||
+                  (item as { id?: unknown; name?: unknown }).name ||
+                  "",
+              ),
+              owned_by:
+                typeof (item as { owned_by?: unknown }).owned_by === "string"
+                  ? (item as { owned_by: string }).owned_by
+                  : undefined,
+              extra: item as JsonRecord,
+            }
+          : {
+              id: "",
+            },
     )
     .filter((item: { id: string }) => item.id);
   return models.length > 0

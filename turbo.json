@@ -2,8 +2,16 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".tsbuildinfo"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".tsbuildinfo"
+      ]
+    },
+    "graphrag-memory#build": {
+      "outputs": []
     },
     "typecheck": {
       "outputs": []
@@ -12,7 +20,9 @@
       "outputs": []
     },
     "test": {
-      "outputs": ["coverage/**"],
+      "outputs": [
+        "coverage/**"
+      ],
       "dependsOn": []
     },
     "dev": {
@@ -23,5 +33,9 @@
       "cache": false
     }
   },
-  "globalEnv": ["NODE_ENV", "Hiro_RUNTIME_ROOT", "Hiro_WORKSPACE_DIR"]
+  "globalEnv": [
+    "NODE_ENV",
+    "Hiro_RUNTIME_ROOT",
+    "Hiro_WORKSPACE_DIR"
+  ]
 }

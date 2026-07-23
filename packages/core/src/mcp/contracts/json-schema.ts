@@ -44,8 +44,7 @@ export function jsonSchemaToShape(
   schema: Record<string, unknown>,
 ): Record<string, z.ZodTypeAny> {
   const props = schema.properties as
-    | Record<string, Record<string, unknown>>
-    | undefined;
+    Record<string, Record<string, unknown>> | undefined;
   if (!props) return {};
   const required = new Set<string>((schema.required as string[]) || []);
   const shape: Record<string, z.ZodTypeAny> = {};

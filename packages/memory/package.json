@@ -24,12 +24,24 @@
     "optimize": "node -e \"const mm = new (require('./src/core/memory-manager'))(); mm.initialize('./data').then(() => mm.optimize()).then(r => { console.log(r); process.exit(); })\"",
     "migrate": "node src/scripts/migrate-to-tkg.js"
   },
-  "keywords": ["graphrag", "memory", "agentic-ai", "knowledge-graph", "temporal", "knowledge-graph", "event-driven", "autonomous-agent"],
+  "keywords": [
+    "graphrag",
+    "memory",
+    "agentic-ai",
+    "knowledge-graph",
+    "temporal",
+    "knowledge-graph",
+    "event-driven",
+    "autonomous-agent"
+  ],
   "license": "MIT",
   "dependencies": {
     "express": "^4.21.0",
     "cors": "^2.8.5",
     "ws": "^8.18.0",
     "better-sqlite3": "^12.11.1"
+  },
+  "turbo": {
+    "outputs": []
   }
 }

@@ -95,8 +95,7 @@ export class HeartbeatEngine {
     this.config = config;
     this._lastUserInteraction = Date.now() / 1000;
     const resourceLimits = config.resource_limits as
-      | { max_tokens_per_cycle?: number }
-      | undefined;
+      { max_tokens_per_cycle?: number } | undefined;
     this._nominalBudget = resourceLimits?.max_tokens_per_cycle ?? 1000;
     this._nominalBudget = Math.max(this._nominalBudget, 1);
     this._tokenBudget = this._nominalBudget; // will be recalibrated each pulse
@@ -262,8 +261,7 @@ export class HeartbeatEngine {
       this._lastIntegrityCycle = this._cycle;
       try {
         const result = db.prepare("PRAGMA integrity_check").get() as
-          | { integrity_check: string }
-          | undefined;
+          { integrity_check: string } | undefined;
         const status = result?.integrity_check ?? "unknown";
         if (status === "ok") {
           console.log("[Heartbeat] SQLite integrity check: ok");

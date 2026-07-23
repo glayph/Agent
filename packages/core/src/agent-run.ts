@@ -6,11 +6,7 @@ import { redactSecrets } from "@hiro/config";
 import { normalizeAgentError, type NormalizedAgentError } from "./errors.js";
 
 export type TaskGraphStepStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+  "pending" | "running" | "completed" | "failed" | "skipped";
 
 export interface VerificationEvidence {
   kind: "command" | "file" | "api" | "manual" | "metric";

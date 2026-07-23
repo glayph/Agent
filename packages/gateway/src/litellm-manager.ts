@@ -127,11 +127,7 @@ export function resolveLiteLLMCommand(
 }
 
 export type LiteLLMStatus =
-  | "starting"
-  | "running"
-  | "stopped"
-  | "error"
-  | "restarting";
+  "starting" | "running" | "stopped" | "error" | "restarting";
 
 export interface LiteLLMConfig {
   workspaceDir: string;
