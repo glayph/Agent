@@ -125,3 +125,11 @@ Hiro
 
 # continue
 prompt.md
+
+# System/environment files (not part of project)
+.config/
+.npm-global/
+.npm/
+.npmrc
+.wget-hsts
+node_modules/
