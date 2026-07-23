@@ -1,6 +1,6 @@
 {
   "name": "hiro",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Hiro - autonomous AI agent with full computer control (TypeScript)",
   "license": "MIT",
   "author": "Earth",
@@ -46,9 +46,7 @@
     "typecheck": "turbo run typecheck",
     "sanitize:local-data": "node scripts/sanitize-local-data.mjs",
     "clean": "tsc --build --clean && node scripts/clean-build-artifacts.mjs",
-    "clean:turbo": "turbo run clean",
-    "prepack": "npm run build",
-    "prepublishOnly": "npm run build"
+    "clean:turbo": "turbo run clean"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
