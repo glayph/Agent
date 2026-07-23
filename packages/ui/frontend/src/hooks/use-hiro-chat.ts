@@ -1,1 +1,1 @@
-export { formatMessageTime, usehiroChat as useHiroChat } from "./use-pico-chat"
+export { formatMessageTime, useHiroChat } from "./use-pico-chat"
