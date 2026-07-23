@@ -1,14 +1,14 @@
 import { launcherFetch } from "@/api/http"
 
-// API client for Pico Channel configuration.
+// API client for hiro Channel configuration.
 
-interface PicoInfoResponse {
+interface hiroInfoResponse {
   ws_url: string
   enabled: boolean
   configured?: boolean
 }
 
-interface PicoSetupResponse {
+interface hiroSetupResponse {
   ws_url: string
   enabled: boolean
   configured?: boolean
@@ -25,16 +25,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function getPicoInfo(): Promise<PicoInfoResponse> {
-  return request<PicoInfoResponse>("/api/pico/info")
+export async function gethiroInfo(): Promise<hiroInfoResponse> {
+  return request<hiroInfoResponse>("/api/hiro/info")
 }
 
-export async function regenPicoToken(): Promise<PicoInfoResponse> {
-  return request<PicoInfoResponse>("/api/pico/token", { method: "POST" })
+export async function regenhiroToken(): Promise<hiroInfoResponse> {
+  return request<hiroInfoResponse>("/api/hiro/token", { method: "POST" })
 }
 
-export async function setupPico(): Promise<PicoSetupResponse> {
-  return request<PicoSetupResponse>("/api/pico/setup", { method: "POST" })
+export async function setuphiro(): Promise<hiroSetupResponse> {
+  return request<hiroSetupResponse>("/api/hiro/setup", { method: "POST" })
 }
 
-export type { PicoInfoResponse, PicoSetupResponse }
+export type { hiroInfoResponse, hiroSetupResponse }

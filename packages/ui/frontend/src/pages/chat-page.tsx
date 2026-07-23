@@ -41,7 +41,7 @@ import {
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { usePicoChat } from "@/hooks/use-pico-chat"
+import { useHiroChat } from "@/hooks/use-hiro-chat"
 import { useSessionHistory } from "@/hooks/use-session-history"
 import type { AssistantDetailVisibility } from "@/store/chat"
 import type { ConnectionState } from "@/store/chat"
@@ -452,7 +452,7 @@ export function ChatPage() {
     retryMessage,
     switchSession,
     newChat,
-  } = usePicoChat()
+  } = useHiroChat()
   const retryableMessageIds = useMemo(
     () => getRetryableMessageIds(messages),
     [messages],
@@ -681,8 +681,7 @@ export function ChatPage() {
         message.attachments
           ?.filter(
             (attachment) => attachment.type === "image" && attachment.url,
-          )
-          .slice(0, 1) ?? [],
+          ) ?? [],
       )
       focusComposer()
     },
@@ -691,7 +690,16 @@ export function ChatPage() {
 
   const handleRetryMessage = useCallback(
     (messageId: string) => {
-      if (retryMessage(messageId)) {
+      try {
+        if (retryMessage(messageId)) {
+          return
+        }
+      } catch (error) {
+        toast.error(
+          t("chat.actions.retryError", {
+            defaultValue: error instanceof Error ? error.message : "Connect chat before retrying",
+          }),
+        )
         return
       }
 

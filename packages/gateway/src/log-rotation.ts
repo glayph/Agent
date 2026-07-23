@@ -75,7 +75,9 @@ export class RotatingWriteStream {
     try {
       // Close current stream first
       await new Promise<void>((resolve, reject) => {
-        this.stream.end((err?: Error | null) => (err ? reject(err) : resolve()));
+        this.stream.end((err?: Error | null) =>
+          err ? reject(err) : resolve(),
+        );
       });
 
       // Shift existing rotations: .6.gz → .7.gz, .5.gz → .6.gz, etc.
@@ -93,7 +95,9 @@ export class RotatingWriteStream {
       const oldest = `${this.filePath}.${this.maxFiles + 1}.gz`;
       try {
         if (fs.existsSync(oldest)) fs.unlinkSync(oldest);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       // Compress current log → .1.gz
       await this._compressFile(this.filePath, `${this.filePath}.1.gz`);

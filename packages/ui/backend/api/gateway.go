@@ -43,39 +43,39 @@ var gateway = struct {
 	startupDeadline     time.Time
 	logs                *LogBuffer
 	pidData             *ppid.PidFileData // pid file data read from Hiro.pid.json
-	picoToken           string            // cached raw pico token for upstream gateway proxy injection
+	hiroToken           string            // cached raw hiro token for upstream gateway proxy injection
 }{
 	runtimeStatus: "stopped",
 	logs:          NewLogBuffer(200),
 }
 
-// refreshPicoTokensLocked reads the pico token from config and caches it.
+// refreshhiroTokensLocked reads the hiro token from config and caches it.
 // Caller must hold gateway.mu (or be sole writer).
-func refreshPicoTokensLocked(configPath string) {
+func refreshhiroTokensLocked(configPath string) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return
 	}
-	var picoCfg config.PicoSettings
-	if bc := cfg.Channels.GetByType(config.ChannelPico); bc != nil {
+	var hiroCfg config.hiroSettings
+	if bc := cfg.Channels.GetByType(config.Channelhiro); bc != nil {
 		decoded, err := bc.GetDecoded()
 		if err == nil && decoded != nil {
-			if p, ok := decoded.(*config.PicoSettings); ok {
-				picoCfg = *p
+			if p, ok := decoded.(*config.hiroSettings); ok {
+				hiroCfg = *p
 			}
 		}
 	}
-	gateway.picoToken = picoCfg.Token.String()
+	gateway.hiroToken = hiroCfg.Token.String()
 }
 
-// ensurePicoTokenCachedLocked lazily fills the in-memory pico token cache when
+// ensurehiroTokenCachedLocked lazily fills the in-memory hiro token cache when
 // the launcher has already discovered a running gateway via pidData, but has
 // not yet refreshed the token into memory.
-func ensurePicoTokenCachedLocked(configPath string) {
-	if gateway.picoToken != "" {
+func ensurehiroTokenCachedLocked(configPath string) {
+	if gateway.hiroToken != "" {
 		return
 	}
-	refreshPicoTokensLocked(configPath)
+	refreshhiroTokensLocked(configPath)
 }
 
 func (h *Handler) gatewayCommandArgs() []string {
@@ -91,15 +91,15 @@ const (
 	tokenPrefix = "token."
 )
 
-// picoGatewayProtocol returns the gateway-facing pico subprotocol that the
+// hiroGatewayProtocol returns the gateway-facing hiro subprotocol that the
 // launcher should inject when proxying browser traffic upstream.
-func picoGatewayProtocol() string {
+func hiroGatewayProtocol() string {
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
-	if gateway.picoToken == "" {
+	if gateway.hiroToken == "" {
 		return ""
 	}
-	return tokenPrefix + gateway.picoToken
+	return tokenPrefix + gateway.hiroToken
 }
 
 var (
@@ -342,7 +342,7 @@ func (h *Handler) TryAutoStartGateway() {
 			logger.ErrorC("gateway", fmt.Sprintf("Failed to attach to running gateway (PID: %d): %v", pid, err))
 		} else {
 			gateway.pidData = pidData
-			refreshPicoTokensLocked(h.configPath)
+			refreshhiroTokensLocked(h.configPath)
 			logger.InfoC("gateway", fmt.Sprintf("Attached to running gateway via PID file (PID: %d)", pid))
 		}
 		gateway.mu.Unlock()
@@ -1066,19 +1066,19 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	// Clear old logs for this new run
 	gateway.logs.Reset()
 
-	// Ensure Pico Channel is configured before starting gateway
-	changed, err := h.EnsurePicoChannel()
+	// Ensure hiro Channel is configured before starting gateway
+	changed, err := h.EnsurehiroChannel()
 	if err != nil {
-		logger.ErrorC("gateway", fmt.Sprintf("Warning: failed to ensure pico channel: %v", err))
-		// Non-fatal: gateway can still start without pico channel
+		logger.ErrorC("gateway", fmt.Sprintf("Warning: failed to ensure hiro channel: %v", err))
+		// Non-fatal: gateway can still start without hiro channel
 	}
-	// Refresh cached pico token in case EnsurePicoChannel generated a new one.
+	// Refresh cached hiro token in case EnsurehiroChannel generated a new one.
 	// Already holding gateway.mu from caller.
 	if changed {
-		refreshPicoTokensLocked(h.configPath)
+		refreshhiroTokensLocked(h.configPath)
 		cfg, err = config.LoadConfig(h.configPath)
 		if err != nil {
-			return 0, fmt.Errorf("failed to reload config after ensuring pico channel: %w", err)
+			return 0, fmt.Errorf("failed to reload config after ensuring hiro channel: %w", err)
 		}
 		defaultModelName = strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
 	}
@@ -1136,16 +1136,16 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 				gateway.mu.Lock()
 				if gateway.cmd == cmd {
 					gateway.pidData = pd
-					var picoCfg config.PicoSettings
-					if bc := cfg.Channels.GetByType(config.ChannelPico); bc != nil {
+					var hiroCfg config.hiroSettings
+					if bc := cfg.Channels.GetByType(config.Channelhiro); bc != nil {
 						decoded, err := bc.GetDecoded()
 						if err == nil && decoded != nil {
-							if p, ok := decoded.(*config.PicoSettings); ok {
-								picoCfg = *p
+							if p, ok := decoded.(*config.hiroSettings); ok {
+								hiroCfg = *p
 							}
 						}
 					}
-					gateway.picoToken = picoCfg.Token.String()
+					gateway.hiroToken = hiroCfg.Token.String()
 					setGatewayRuntimeStatusLocked("running")
 				}
 				gateway.mu.Unlock()

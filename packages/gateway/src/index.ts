@@ -22,7 +22,6 @@ import {
   waitForLiteLLM,
   liteLLMStatusPayload,
   restartLiteLLM,
-  resolveLiteLLMConfigPath,
   liteLLMLogFile,
   liteLLMBaseUrl,
   stopLiteLLMSupervisor,
@@ -34,7 +33,6 @@ import {
   createRelayWebSocketServer,
   rejectWsUpgrade,
   hasWsAuthMaterial,
-  firstHeaderValue,
   relayWs,
   closeWebSocketServer,
 } from "./websocket-relay.js";
@@ -106,7 +104,10 @@ function runtimeLoaderArgs(): string[] {
     'import { pathToFileURL } from "node:url";',
     `register(${JSON.stringify(pathToFileURL(loaderPath).href)}, pathToFileURL("./"));`,
   ].join(" ");
-  return ["--import", `data:text/javascript,${encodeURIComponent(registerSource)}`];
+  return [
+    "--import",
+    `data:text/javascript,${encodeURIComponent(registerSource)}`,
+  ];
 }
 
 function isLoopbackIp(ip: string): boolean {
@@ -176,13 +177,7 @@ function startCore(): child_process.ChildProcess {
     `\n--- Gateway spawning core at ${new Date().toISOString()} ---\n`,
   );
 
-  const coreEntry = runtimePath(
-    "packages",
-    "core",
-    "dist",
-    "api",
-    "index.js",
-  );
+  const coreEntry = runtimePath("packages", "core", "dist", "api", "index.js");
   const proc = child_process.spawn(
     "node",
     [...runtimeLoaderArgs(), coreEntry],
@@ -190,7 +185,9 @@ function startCore(): child_process.ChildProcess {
       cwd: config.workspaceDir,
       env: {
         ...process.env,
-        LITELLM_MASTER_KEY: resolveLiteLLMMasterKey({ workspaceDir: config.workspaceDir }),
+        LITELLM_MASTER_KEY: resolveLiteLLMMasterKey({
+          workspaceDir: config.workspaceDir,
+        }),
         Hiro_RUNTIME_ROOT: config.runtimeRoot,
         Hiro_WORKSPACE_DIR: config.workspaceDir,
       },
@@ -235,13 +232,21 @@ function attemptCoreRestart(): void {
     return;
   }
   // config.maxCoreRestarts === 0 means unbounded
-  if (config.maxCoreRestarts > 0 && coreRestartAttempts >= config.maxCoreRestarts) {
-    log.error(`Max core restarts (${config.maxCoreRestarts}) reached. Giving up. Set CORE_MAX_RESTARTS=0 for unbounded.`);
+  if (
+    config.maxCoreRestarts > 0 &&
+    coreRestartAttempts >= config.maxCoreRestarts
+  ) {
+    log.error(
+      `Max core restarts (${config.maxCoreRestarts}) reached. Giving up. Set CORE_MAX_RESTARTS=0 for unbounded.`,
+    );
     return;
   }
   coreRestartAttempts++;
   // Backoff: 2s, 4s, 8s … capped at 5 minutes
-  const backoff = Math.min(Math.pow(2, coreRestartAttempts) * 1000, 5 * 60 * 1000);
+  const backoff = Math.min(
+    Math.pow(2, coreRestartAttempts) * 1000,
+    5 * 60 * 1000,
+  );
   log.info(`Restarting core in ${backoff}ms (attempt ${coreRestartAttempts})`);
   coreRestartTimer = setTimeout(async () => {
     coreRestartTimer = null;
@@ -576,15 +581,12 @@ app.get("/gateway/litellm/logs", (_req, res) => {
 app.get("/gateway/litellm/models", async (_req, res) => {
   try {
     const baseUrl = liteLLMBaseUrl(litellmConfig.litellmPort);
-    const response = await fetch(
-      `${baseUrl.replace(/\/+$/, "")}/models`,
-      {
-        signal: AbortSignal.timeout(5000),
-        headers: {
-          Authorization: `Bearer ${resolveLiteLLMMasterKey({ workspaceDir: config.workspaceDir })}`,
-        },
+    const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+      signal: AbortSignal.timeout(5000),
+      headers: {
+        Authorization: `Bearer ${resolveLiteLLMMasterKey({ workspaceDir: config.workspaceDir })}`,
       },
-    );
+    });
     const body = await response.text();
     res.status(response.status).type("application/json").send(body);
   } catch (err) {
@@ -596,8 +598,13 @@ app.get("/gateway/litellm/models", async (_req, res) => {
 
 app.post("/gateway/litellm/restart", async (_req, res) => {
   try {
-    dotenv.config({ path: path.join(config.workspaceDir, ".env"), override: true });
-    await restartLiteLLM(litellmState, litellmConfig, (msg: unknown) => log.info(msg));
+    dotenv.config({
+      path: path.join(config.workspaceDir, ".env"),
+      override: true,
+    });
+    await restartLiteLLM(litellmState, litellmConfig, (msg: unknown) =>
+      log.info(msg),
+    );
     res.json(await liteLLMStatusPayload(litellmState, litellmConfig));
   } catch (err) {
     litellmState.status = "error";
@@ -607,7 +614,10 @@ app.post("/gateway/litellm/restart", async (_req, res) => {
 });
 
 app.post("/gateway/shutdown", (_req, res) => {
-  res.json({ ok: true, message: "Gateway and backend services shutting down..." });
+  res.json({
+    ok: true,
+    message: "Gateway and backend services shutting down...",
+  });
   setTimeout(() => {
     shutdown("API_SHUTDOWN", 0);
   }, 500);
@@ -647,9 +657,12 @@ setInterval(() => {
 app.use(
   "/webhooks",
   (req, res, next) => {
-    const clientKey = (req.ip || req.socket.remoteAddress || "unknown") + ":" + req.path;
+    const clientKey =
+      (req.ip || req.socket.remoteAddress || "unknown") + ":" + req.path;
     if (!channelRateLimiter.isAllowed(clientKey)) {
-      res.status(429).json({ error: "Too many requests. Rate limit exceeded." });
+      res
+        .status(429)
+        .json({ error: "Too many requests. Rate limit exceeded." });
       return;
     }
     next();
@@ -657,7 +670,8 @@ app.use(
   createProxyMiddleware({
     target: coreProxyTarget,
     changeOrigin: false,
-    pathRewrite: (proxyPath) => `/webhooks${proxyPath === "/" ? "" : proxyPath}`,
+    pathRewrite: (proxyPath) =>
+      `/webhooks${proxyPath === "/" ? "" : proxyPath}`,
     proxyTimeout: 120000,
     timeout: 120000,
     on: {
@@ -698,7 +712,7 @@ const server = http.createServer(app);
 
 // ── WebSocket relay ──────────────────────────────────────────────────────────
 
-const WS_PATHS = ["/pico/ws", "/ws/chat", "/ws", "/chat/ws"];
+const WS_PATHS = ["/hiro/ws", "/ws/chat", "/ws", "/chat/ws"];
 const wss = createRelayWebSocketServer();
 const activeWsConnections = new Set<WSWebSocket>();
 
@@ -731,7 +745,12 @@ server.on("upgrade", (request, socket, head) => {
       return;
     }
     wss.handleUpgrade(request, socket, head, (clientWs) => {
-      relayWs(clientWs, `ws://127.0.0.1:${config.corePort}${url}`, request, activeWsConnections);
+      relayWs(
+        clientWs,
+        `ws://127.0.0.1:${config.corePort}${url}`,
+        request,
+        activeWsConnections,
+      );
     });
     return;
   }
@@ -815,8 +834,14 @@ async function main(): Promise<void> {
   }
   if (config.enableLiteLLM) {
     try {
-      litellmState.process = startLiteLLM(litellmState, litellmConfig, (msg: unknown) => log.info(msg));
-      waitForLiteLLM(litellmConfig.litellmPort, (msg: unknown) => log.info(msg)).catch((err) =>
+      litellmState.process = startLiteLLM(
+        litellmState,
+        litellmConfig,
+        (msg: unknown) => log.info(msg),
+      );
+      waitForLiteLLM(litellmConfig.litellmPort, (msg: unknown) =>
+        log.info(msg),
+      ).catch((err) =>
         log.warn(
           "LiteLLM startup monitor exited:",
           err instanceof Error ? err.message : String(err),
@@ -855,7 +880,10 @@ async function main(): Promise<void> {
 
   server.listen(config.gatewayPort, config.gatewayHost, () => {
     try {
-      fs.writeFileSync(path.join(workspaceDir, "data", "gateway.pid"), process.pid.toString());
+      fs.writeFileSync(
+        path.join(workspaceDir, "data", "gateway.pid"),
+        process.pid.toString(),
+      );
     } catch (err) {
       log.warn("Failed to write PID file:", err);
     }

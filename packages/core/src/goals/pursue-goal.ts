@@ -32,7 +32,11 @@ export interface Plan {
 }
 
 export type PursueGoalStatus =
-  "pending" | "active" | "completed" | "blocked" | "cancelled";
+  | "pending"
+  | "active"
+  | "completed"
+  | "blocked"
+  | "cancelled";
 
 export interface PursueGoalCreateInput {
   objective: string;

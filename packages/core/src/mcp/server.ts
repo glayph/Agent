@@ -130,7 +130,7 @@ export async function createMcpServer(
   const discoveryUnlocks = new DiscoveryUnlocks(runtimeConfig.discovery.ttl);
 
   const server = new McpServer(
-    { name: "Hiro-nexus-agent", version: "2.0.0" },
+    { name: "Hiro-miki-agent", version: "2.0.0" },
     {
       instructions:
         "Hiro autonomous AI agent v2 MCP server. Tools execute through the core ToolRegistry; resources expose agent memory, config, health, heartbeat, self-improvement, metrics, and tasks; prompts help analyze, plan, and debug.",

@@ -4,7 +4,12 @@ import * as path from "path";
 import { normalizeAgentError, type NormalizedAgentError } from "./errors.js";
 
 export type JobStatus =
-  "queued" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "dead_letter";
 
 export interface PersistentJob {
   id: string;

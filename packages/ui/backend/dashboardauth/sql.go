@@ -3,7 +3,7 @@
 package dashboardauth
 
 const (
-	// DBFilename is the SQLite database file stored under the owlclaw home directory.
+	// DBFilename is the SQLite database file stored under the miki home directory.
 	DBFilename = "launcher-auth.db"
 
 	sqliteDriver = "sqlite"

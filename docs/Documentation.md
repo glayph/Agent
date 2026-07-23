@@ -149,7 +149,7 @@ From the dashboard, browser requests normally go through the gateway:
 
 ```text
 Dashboard -> /api/*      -> Core compatibility API
-Dashboard -> /pico/ws    -> Gateway WebSocket relay -> Core chat runtime
+Dashboard -> /hiro/ws    -> Gateway WebSocket relay -> Core chat runtime
 Webhook   -> /webhooks/* -> Core channel handlers
 MCP       -> /mcp        -> Core MCP session manager
 ```
@@ -158,7 +158,7 @@ MCP       -> /mcp        -> Core MCP session manager
 
 | Route             | Use                                                      |
 | ----------------- | -------------------------------------------------------- |
-| `/`               | Pico/Web chat                                            |
+| `/`               | hiro/Web chat                                            |
 | `/drive`          | Workspace file browsing                                  |
 | `/models`         | Provider and model management                            |
 | `/credentials`    | Provider credential flows                                |
@@ -178,7 +178,7 @@ MCP       -> /mcp        -> Core MCP session manager
 
 - health and status: `/health`, `/status`, `/system/health`, `/system/stats`,
   `/metrics`
-- chat and sessions: `/chat`, `/pico/ws`, `/ws/chat`, `/sessions`
+- chat and sessions: `/chat`, `/hiro/ws`, `/ws/chat`, `/sessions`
 - tasks and goals: `/tasks`, `/tasks/scheduled`, `/goals`, `/goals/next`
 - models and providers: `/models`, `/models/active`, `/models/by-provider`,
   `/providers`

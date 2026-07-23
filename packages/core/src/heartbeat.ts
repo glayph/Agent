@@ -18,7 +18,10 @@ export interface IOrchestrator {
    * Must expose a `prepare(sql).run()` / `exec(sql)` interface (better-sqlite3).
    */
   db?: {
-    prepare: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => unknown };
+    prepare: (sql: string) => {
+      run: (...args: unknown[]) => unknown;
+      get: (...args: unknown[]) => unknown;
+    };
     exec?: (sql: string) => void;
   };
   tools?: {
@@ -92,7 +95,8 @@ export class HeartbeatEngine {
     this.config = config;
     this._lastUserInteraction = Date.now() / 1000;
     const resourceLimits = config.resource_limits as
-      { max_tokens_per_cycle?: number } | undefined;
+      | { max_tokens_per_cycle?: number }
+      | undefined;
     this._nominalBudget = resourceLimits?.max_tokens_per_cycle ?? 1000;
     this._nominalBudget = Math.max(this._nominalBudget, 1);
     this._tokenBudget = this._nominalBudget; // will be recalibrated each pulse
@@ -239,8 +243,8 @@ export class HeartbeatEngine {
     const db = this.orchestrator.db;
     if (!db) return;
 
-    const CHECKPOINT_INTERVAL = 120;   // cycles
-    const DAILY_INTERVAL      = 2880;  // cycles
+    const CHECKPOINT_INTERVAL = 120; // cycles
+    const DAILY_INTERVAL = 2880; // cycles
 
     // WAL checkpoint (~1h)
     if (this._cycle - this._lastCheckpointCycle >= CHECKPOINT_INTERVAL) {
@@ -257,7 +261,9 @@ export class HeartbeatEngine {
     if (this._cycle - this._lastIntegrityCycle >= DAILY_INTERVAL) {
       this._lastIntegrityCycle = this._cycle;
       try {
-        const result = db.prepare("PRAGMA integrity_check").get() as { integrity_check: string } | undefined;
+        const result = db.prepare("PRAGMA integrity_check").get() as
+          | { integrity_check: string }
+          | undefined;
         const status = result?.integrity_check ?? "unknown";
         if (status === "ok") {
           console.log("[Heartbeat] SQLite integrity check: ok");

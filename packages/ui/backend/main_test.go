@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/netbind"
-	"github.com/sipeed/owlclaw/web/backend/middleware"
+	"github.com/sipeed/miki/pkg/netbind"
+	"github.com/sipeed/miki/web/backend/middleware"
 )
 
 func TestShouldEnableLauncherFileLogging(t *testing.T) {

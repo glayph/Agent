@@ -28,7 +28,7 @@ function resolveCorepackPath() {
     }
     // Second try: check if corepack is on PATH (shim or global install)
     try {
-      const result = spawnSync("where", ["corepack"], {
+      const result = spawnSync("where corepack", {
         cwd: root,
         stdio: "pipe",
         shell: true,

@@ -1,21 +1,21 @@
 //go:build legacy_backend
 
 // IMPORTANT: The legacy Go backend requires external dependencies
-// (github.com/sipeed/owlclaw/pkg/*, etc.) that are NOT vendored in this
+// (github.com/sipeed/miki/pkg/*, etc.) that are NOT vendored in this
 // repository. To build this binary, you must set up the full Go module
 // workspace with all required dependencies. The stub_main.go file provides
 // a minimal alternative that compiles without external dependencies.
 //
-// owlclaw Web Console - Web-based chat and management interface
+// miki Web Console - Web-based chat and management interface
 //
-// Provides a web UI for chatting with owlclaw via the Pico Channel WebSocket,
+// Provides a web UI for chatting with miki via the hiro Channel WebSocket,
 // with configuration management and gateway process control.
 //
 // Usage:
 //
-//	go build -o owlclaw-web ./web/backend/
-//	./owlclaw-web [config.json]
-//	./owlclaw-web -public config.json
+//	go build -o miki-web ./web/backend/
+//	./miki-web [config.json]
+//	./miki-web -public config.json
 
 package main
 
@@ -34,18 +34,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
-	"github.com/sipeed/owlclaw/pkg/netbind"
-	"github.com/sipeed/owlclaw/web/backend/api"
-	"github.com/sipeed/owlclaw/web/backend/dashboardauth"
-	"github.com/sipeed/owlclaw/web/backend/launcherconfig"
-	"github.com/sipeed/owlclaw/web/backend/middleware"
-	"github.com/sipeed/owlclaw/web/backend/utils"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
+	"github.com/sipeed/miki/pkg/netbind"
+	"github.com/sipeed/miki/web/backend/api"
+	"github.com/sipeed/miki/web/backend/dashboardauth"
+	"github.com/sipeed/miki/web/backend/launcherconfig"
+	"github.com/sipeed/miki/web/backend/middleware"
+	"github.com/sipeed/miki/web/backend/utils"
 )
 
 const (
-	appName = "owlclaw"
+	appName = "miki"
 
 	logPath   = "logs"
 	panicFile = "launcher_panic.log"
@@ -363,7 +363,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s Launcher - Web console and gateway manager\n\n", appName)
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] [config.json]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Arguments:\n")
-		fmt.Fprintf(os.Stderr, "  config.json    Path to the configuration file (default: ~/.owlclaw/config.json)\n\n")
+		fmt.Fprintf(os.Stderr, "  config.json    Path to the configuration file (default: ~/.miki/config.json)\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
@@ -385,9 +385,9 @@ func main() {
 	flag.Parse()
 
 	// Initialize logger
-	picoHome := utils.GetowlclawHome()
+	hiroHome := utils.GetmikiHome()
 
-	f := filepath.Join(picoHome, logPath, panicFile)
+	f := filepath.Join(hiroHome, logPath, panicFile)
 	panicFunc, err := logger.InitPanic(f)
 	if err != nil {
 		panic(fmt.Sprintf("error initializing panic log: %v", err))
@@ -402,7 +402,7 @@ func main() {
 			logger.DisableConsole()
 		}
 
-		f := filepath.Join(picoHome, logPath, logFile)
+		f := filepath.Join(hiroHome, logPath, logFile)
 		if err = logger.EnableFileLogging(f); err != nil {
 			panic(fmt.Sprintf("error enabling file logging: %v", err))
 		}
@@ -436,7 +436,7 @@ func main() {
 	}
 
 	logger.InfoC("web", fmt.Sprintf("%s launcher starting (version %s)...", appName, appVersion))
-	logger.InfoC("web", fmt.Sprintf("%s Home: %s", appName, picoHome))
+	logger.InfoC("web", fmt.Sprintf("%s Home: %s", appName, hiroHome))
 	if debug {
 		logger.InfoC("web", "Debug mode enabled")
 		logger.DebugC(
@@ -492,7 +492,7 @@ func main() {
 	}
 
 	if !explicitHost && hostOverrideActive {
-		logger.InfoC("web", "Using launcher host from environment owlclaw_LAUNCHER_HOST")
+		logger.InfoC("web", "Using launcher host from environment miki_LAUNCHER_HOST")
 	}
 
 	if hostOverrideActive && explicitPublic {
@@ -519,7 +519,7 @@ func main() {
 	}
 
 	// Open the bcrypt password store (creates the DB file on first run).
-	authStore, authStoreErr := dashboardauth.New(picoHome)
+	authStore, authStoreErr := dashboardauth.New(hiroHome)
 	var passwordStore api.PasswordStore
 	if authStoreErr == nil {
 		passwordStore = authStore
@@ -589,8 +589,8 @@ func main() {
 	// API Routes (e.g. /api/status)
 	apiHandler = api.NewHandler(absPath)
 	apiHandler.SetDebug(debug)
-	if _, err = apiHandler.EnsurePicoChannel(); err != nil {
-		logger.ErrorC("web", fmt.Sprintf("Warning: failed to ensure pico channel on startup: %v", err))
+	if _, err = apiHandler.EnsurehiroChannel(); err != nil {
+		logger.ErrorC("web", fmt.Sprintf("Warning: failed to ensure hiro channel on startup: %v", err))
 	}
 	apiHandler.SetServerOptions(portNum, effectivePublic, explicitPublic, launcherCfg.AllowedCIDRs)
 	apiHandler.SetServerBindHost(hostInput, hostOverrideActive)

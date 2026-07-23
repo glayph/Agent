@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
 )
 
 const (
 	wecomFlowTTL             = 5 * time.Minute
 	wecomFlowGCAge           = 30 * time.Minute
-	wecomQRSourceID          = "owlclaw"
+	wecomQRSourceID          = "miki"
 	wecomQRGenerateEndpoint  = "https://work.weixin.qq.com/ai/qc/generate"
 	wecomQRQueryEndpoint     = "https://work.weixin.qq.com/ai/qc/query_result"
 	wecomQRHTTPTimeout       = 15 * time.Second

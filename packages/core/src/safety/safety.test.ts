@@ -40,8 +40,8 @@ describe("safety and recovery modules", () => {
   it("creates config/db backups and rolls them back with a pre-rollback backup", () => {
     const workspace = tempWorkspace("Hiro-backup-");
     const configPath = path.join(workspace, "config", "agent.yaml");
-    const dbPath = path.join(workspace, "data", "nexus_memory.db");
-    const walPath = path.join(workspace, "data", "nexus_memory.db-wal");
+    const dbPath = path.join(workspace, "data", "miki_memory.db");
+    const walPath = path.join(workspace, "data", "miki_memory.db-wal");
     fs.writeFileSync(dbPath, "db-v1", "utf-8");
     fs.writeFileSync(walPath, "wal-v1", "utf-8");
 
@@ -56,7 +56,7 @@ describe("safety and recovery modules", () => {
     expect(fs.readFileSync(dbPath, "utf-8")).toBe("db-v1");
     expect(
       backup.entries.some(
-        (entry) => entry.source === path.join("data", "nexus_memory.db-wal"),
+        (entry) => entry.source === path.join("data", "miki_memory.db-wal"),
       ),
     ).toBe(true);
     expect(rollback.preRollbackBackupId).not.toBe(backup.id);
@@ -66,8 +66,8 @@ describe("safety and recovery modules", () => {
   it("can skip high-volume operational stores for startup backups", () => {
     const workspace = tempWorkspace("Hiro-backup-startup-fast-");
     const auditPath = path.join(workspace, "data", "audit.db");
-    const memoryPath = path.join(workspace, "data", "nexus_memory.db");
-    const memoryWalPath = path.join(workspace, "data", "nexus_memory.db-wal");
+    const memoryPath = path.join(workspace, "data", "miki_memory.db");
+    const memoryWalPath = path.join(workspace, "data", "miki_memory.db-wal");
     const systemIndexPath = path.join(workspace, "data", "system-index.db");
     fs.writeFileSync(auditPath, "audit", "utf-8");
     fs.writeFileSync(memoryPath, "memory", "utf-8");
@@ -80,8 +80,8 @@ describe("safety and recovery modules", () => {
     const sources = backup.entries.map((entry) => entry.source);
 
     expect(sources).toContain(path.join("data", "audit.db"));
-    expect(sources).not.toContain(path.join("data", "nexus_memory.db"));
-    expect(sources).not.toContain(path.join("data", "nexus_memory.db-wal"));
+    expect(sources).not.toContain(path.join("data", "miki_memory.db"));
+    expect(sources).not.toContain(path.join("data", "miki_memory.db-wal"));
     expect(sources).not.toContain(path.join("data", "system-index.db"));
   });
 
@@ -367,7 +367,7 @@ describe("safety and recovery modules", () => {
   it("exposes Hiro doctor as JSON from the launcher", () => {
     const result = child_process.spawnSync(
       process.execPath,
-      ["bin/owlclaw-doctor.mjs", "--json", "--skip-external"],
+      ["bin/miki-doctor.mjs", "--json", "--skip-external"],
       {
         cwd: process.cwd(),
         encoding: "utf-8",

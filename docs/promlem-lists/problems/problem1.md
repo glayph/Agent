@@ -22,7 +22,7 @@
 - Evidence:
   - `packages/ui/frontend/vite.config.ts:14-16` says `.env` `GATEWAY_PORT` may be a pending restart value and only explicit frontend overrides should be used.
   - `packages/ui/frontend/vite.config.ts:17-21` still includes `process.env.GATEWAY_PORT`.
-  - `packages/ui/frontend/vite.config.ts:96-114` uses that origin for `/api`, `/gateway`, `/pico/media`, and `/pico/ws` proxying.
+  - `packages/ui/frontend/vite.config.ts:96-114` uses that origin for `/api`, `/gateway`, `/hiro/media`, and `/hiro/ws` proxying.
 - Impact: local frontend development can proxy to a port that the live gateway is not using yet, making frontend API calls appear broken after a pending port change.
 - Recommended fix: remove `process.env.GATEWAY_PORT` from the dev proxy fallback or treat it only as an explicit dev override with a separate variable.
 

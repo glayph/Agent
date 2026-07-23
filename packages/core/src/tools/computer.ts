@@ -1210,14 +1210,22 @@ export class ComputerAgent {
         height: number;
         format: string;
       }>("screenshot", {});
-      const showGrid = Boolean(args["grid"] ?? args["draw_grid"] ?? args["drawGrid"]);
+      const showGrid = Boolean(
+        args["grid"] ?? args["draw_grid"] ?? args["drawGrid"],
+      );
       if (showGrid && result.ok && result.data?.screenshot) {
         try {
           const { drawGridOverlay } = await import("./computer-grid.js");
           const rawPng = Buffer.from(result.data.screenshot, "base64");
           // Superimpose grid overlay
-          const gridStep = typeof args["grid_step"] === "number" ? args["grid_step"] : 100;
-          const gridPng = drawGridOverlay(rawPng, result.data.width, result.data.height, gridStep);
+          const gridStep =
+            typeof args["grid_step"] === "number" ? args["grid_step"] : 100;
+          const gridPng = drawGridOverlay(
+            rawPng,
+            result.data.width,
+            result.data.height,
+            gridStep,
+          );
           result.data.screenshot = gridPng.toString("base64");
         } catch {
           // If grid drawing fails, return clean screenshot
@@ -1233,7 +1241,8 @@ export class ComputerAgent {
     try {
       const x = asNumber(args["x"]);
       const y = asNumber(args["y"]);
-      if (x == null || y == null) throw new Error("x and y coordinates are required.");
+      if (x == null || y == null)
+        throw new Error("x and y coordinates are required.");
       const button = asString(args["button"]) || "left";
       const doubleClick = Boolean(args["double_click"] ?? args["doubleClick"]);
       const result = await this.runPowerShell("click_at", {
@@ -1286,7 +1295,9 @@ export class ComputerAgent {
   async terminateApp(args: Record<string, unknown>): Promise<string> {
     try {
       const pid = asNumber(args["pid"]);
-      const processName = asString(args["process_name"] ?? args["processName"] ?? args["app"]);
+      const processName = asString(
+        args["process_name"] ?? args["processName"] ?? args["app"],
+      );
       if (pid == null && !processName) {
         throw new Error("pid or process_name is required.");
       }
@@ -1330,37 +1341,67 @@ export class ComputerAgent {
   /**
    * Lists all visible windows with their titles, process names, handles, and bounds.
    */
-  public async listWindows(
-    _args: Record<string, unknown>,
-  ): Promise<string> {
+  public async listWindows(_args: Record<string, unknown>): Promise<string> {
     if (process.platform === "win32") {
-      return this.formatResult(
-        await this.runPowerShell("list_windows", {}),
-      );
+      return this.formatResult(await this.runPowerShell("list_windows", {}));
     }
     if (process.platform === "linux") {
       try {
-        const { stdout } = await execFileText("wmctrl", ["-l", "-p"], { timeout: 15000, maxBuffer: 1024 * 1024 });
-        return JSON.stringify({ ok: true, action: "list_windows", data: stdout.trim() });
+        const { stdout } = await execFileText("wmctrl", ["-l", "-p"], {
+          timeout: 15000,
+          maxBuffer: 1024 * 1024,
+        });
+        return JSON.stringify({
+          ok: true,
+          action: "list_windows",
+          data: stdout.trim(),
+        });
       } catch {
         try {
-          const { stdout } = await execFileText("xdotool", ["search", "--onlyvisible", "--name", ""], { timeout: 15000, maxBuffer: 1024 * 1024 });
-          return JSON.stringify({ ok: true, action: "list_windows", data: stdout.trim() });
+          const { stdout } = await execFileText(
+            "xdotool",
+            ["search", "--onlyvisible", "--name", ""],
+            { timeout: 15000, maxBuffer: 1024 * 1024 },
+          );
+          return JSON.stringify({
+            ok: true,
+            action: "list_windows",
+            data: stdout.trim(),
+          });
         } catch {
-          return JSON.stringify({ ok: false, action: "list_windows", error: "wmctrl and xdotool not available" });
+          return JSON.stringify({
+            ok: false,
+            action: "list_windows",
+            error: "wmctrl and xdotool not available",
+          });
         }
       }
     }
     if (process.platform === "darwin") {
       try {
         const script = `tell application "System Events" to get {name, title} of every process whose visible is true`;
-        const { stdout } = await execFileText("osascript", ["-e", script], { timeout: 15000, maxBuffer: 1024 * 1024 });
-        return JSON.stringify({ ok: true, action: "list_windows", data: stdout.trim() });
+        const { stdout } = await execFileText("osascript", ["-e", script], {
+          timeout: 15000,
+          maxBuffer: 1024 * 1024,
+        });
+        return JSON.stringify({
+          ok: true,
+          action: "list_windows",
+          data: stdout.trim(),
+        });
       } catch (e) {
-        return JSON.stringify({ ok: false, action: "list_windows", error: String(e) });
+        return JSON.stringify({
+          ok: false,
+          action: "list_windows",
+          error: String(e),
+        });
       }
     }
-    return JSON.stringify({ ok: false, action: "list_windows", error: "Unsupported platform" });
+    return JSON.stringify({
+      ok: false,
+      action: "list_windows",
+      error: "Unsupported platform",
+    });
   }
 
   async verify(args: Record<string, unknown>): Promise<string> {

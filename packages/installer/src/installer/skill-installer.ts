@@ -8,7 +8,6 @@ import {
   InstallOptions,
   InstallResult,
   InstalledSkill,
-  PluginManifest,
 } from "../types.js";
 import { fetchSkill } from "../source-dispatch.js";
 import { validatePluginManifest } from "../utils/validator.js";
@@ -72,7 +71,9 @@ export class SkillInstaller {
 
       try {
         const downloadResult = await fetchSkill(
-          parsed.protocol, parsed, tmpDir,
+          parsed.protocol,
+          parsed,
+          tmpDir,
           { clawhubRegistryUrl: this.clawhubRegistryUrl || undefined },
         );
 
@@ -112,7 +113,11 @@ export class SkillInstaller {
           };
         }
 
-        await fs.promises.writeFile(skillTsPath, `// Plugin: ${manifest.name} v${manifest.version}\nexport const DESCRIPTION = \`${manifest.description}\`;\n`, "utf-8");
+        await fs.promises.writeFile(
+          skillTsPath,
+          `// Plugin: ${manifest.name} v${manifest.version}\nexport const DESCRIPTION = \`${manifest.description}\`;\n`,
+          "utf-8",
+        );
 
         if (fs.existsSync(assetsDir)) {
           await fs.promises.rm(assetsDir, { recursive: true, force: true });

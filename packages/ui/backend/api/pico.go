@@ -11,23 +11,23 @@ import (
 	"net/http/httputil"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
-	ppid "github.com/sipeed/owlclaw/pkg/pid"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
+	ppid "github.com/sipeed/miki/pkg/pid"
 )
 
-// registerPicoRoutes binds Pico Channel management endpoints to the ServeMux.
-func (h *Handler) registerPicoRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/pico/info", h.handleGetPicoInfo)
-	mux.HandleFunc("POST /api/pico/token", h.handleRegenPicoToken)
-	mux.HandleFunc("POST /api/pico/setup", h.handlePicoSetup)
+// registerhiroRoutes binds hiro Channel management endpoints to the ServeMux.
+func (h *Handler) registerhiroRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/hiro/info", h.handleGethiroInfo)
+	mux.HandleFunc("POST /api/hiro/token", h.handleRegenhiroToken)
+	mux.HandleFunc("POST /api/hiro/setup", h.handlehiroSetup)
 
-	// WebSocket proxy: forward /pico/ws to gateway
+	// WebSocket proxy: forward /hiro/ws to gateway
 	// This allows the frontend to connect via the same port as the web UI,
 	// avoiding the need to expose extra ports for WebSocket communication.
-	mux.HandleFunc("GET /pico/ws", h.handleWebSocketProxy())
-	mux.HandleFunc("GET /pico/media/{id}", h.handlePicoMediaProxy())
-	mux.HandleFunc("HEAD /pico/media/{id}", h.handlePicoMediaProxy())
+	mux.HandleFunc("GET /hiro/ws", h.handleWebSocketProxy())
+	mux.HandleFunc("GET /hiro/media/{id}", h.handlehiroMediaProxy())
+	mux.HandleFunc("HEAD /hiro/media/{id}", h.handlehiroMediaProxy())
 }
 
 // createWsProxy creates a reverse proxy to the current gateway WebSocket endpoint.
@@ -59,7 +59,7 @@ func (h *Handler) createWsProxy(origProtocol string, upstreamProtocol string) *h
 	return wsProxy
 }
 
-func (h *Handler) createPicoHTTPProxy(token string) *httputil.ReverseProxy {
+func (h *Handler) createhiroHTTPProxy(token string) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			target := h.gatewayProxyURL()
@@ -67,7 +67,7 @@ func (h *Handler) createPicoHTTPProxy(token string) *httputil.ReverseProxy {
 			r.Out.Header.Set("Authorization", "Bearer "+token)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			logger.Errorf("Failed to proxy Pico HTTP request: %v", err)
+			logger.Errorf("Failed to proxy hiro HTTP request: %v", err)
 			http.Error(w, "Gateway unavailable: "+err.Error(), http.StatusBadGateway)
 		},
 	}
@@ -75,7 +75,7 @@ func (h *Handler) createPicoHTTPProxy(token string) *httputil.ReverseProxy {
 
 func (h *Handler) gatewayAvailableForProxy() bool {
 	gateway.mu.Lock()
-	ensurePicoTokenCachedLocked(h.configPath)
+	ensurehiroTokenCachedLocked(h.configPath)
 	cachedPID := gateway.pidData
 	trackedCmd := gateway.cmd
 	gateway.mu.Unlock()
@@ -106,31 +106,31 @@ func (h *Handler) gatewayAvailableForProxy() bool {
 	return available
 }
 
-func decodePicoSettings(cfg *config.Config) (config.PicoSettings, bool) {
+func decodehiroSettings(cfg *config.Config) (config.hiroSettings, bool) {
 	if cfg == nil {
-		return config.PicoSettings{}, false
+		return config.hiroSettings{}, false
 	}
 
-	bc := cfg.Channels.GetByType(config.ChannelPico)
+	bc := cfg.Channels.GetByType(config.Channelhiro)
 	if bc == nil {
-		return config.PicoSettings{}, false
+		return config.hiroSettings{}, false
 	}
 
-	var picoCfg config.PicoSettings
-	if err := bc.Decode(&picoCfg); err != nil {
-		return config.PicoSettings{}, false
+	var hiroCfg config.hiroSettings
+	if err := bc.Decode(&hiroCfg); err != nil {
+		return config.hiroSettings{}, false
 	}
 
-	return picoCfg, bc.Enabled
+	return hiroCfg, bc.Enabled
 }
 
-func (h *Handler) writePicoInfoResponse(
+func (h *Handler) writehiroInfoResponse(
 	w http.ResponseWriter,
 	r *http.Request,
 	cfg *config.Config,
 	changed *bool,
 ) {
-	picoCfg, enabled := decodePicoSettings(cfg)
+	hiroCfg, enabled := decodehiroSettings(cfg)
 
 	resp := map[string]any{
 		"ws_url":  h.buildWsURL(r),
@@ -139,7 +139,7 @@ func (h *Handler) writePicoInfoResponse(
 	if changed != nil {
 		resp["changed"] = *changed
 	}
-	if picoCfg.Token.String() != "" {
+	if hiroCfg.Token.String() != "" {
 		resp["configured"] = true
 	}
 
@@ -148,7 +148,7 @@ func (h *Handler) writePicoInfoResponse(
 }
 
 // handleWebSocketProxy wraps a reverse proxy to handle WebSocket connections.
-// It relies on launcher dashboard auth, then injects the raw pico token only
+// It relies on launcher dashboard auth, then injects the raw hiro token only
 // on the upstream gateway request.
 func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -158,10 +158,10 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 			return
 		}
 
-		upstreamProtocol := picoGatewayProtocol()
+		upstreamProtocol := hiroGatewayProtocol()
 		if upstreamProtocol == "" {
-			logger.Warn("Pico token unavailable for WebSocket proxy")
-			http.Error(w, "Pico channel not configured", http.StatusServiceUnavailable)
+			logger.Warn("hiro token unavailable for WebSocket proxy")
+			http.Error(w, "hiro channel not configured", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -174,46 +174,46 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	}
 }
 
-func (h *Handler) handlePicoMediaProxy() http.HandlerFunc {
+func (h *Handler) handlehiroMediaProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !h.gatewayAvailableForProxy() {
-			logger.Warnf("Gateway not available for Pico media proxy")
+			logger.Warnf("Gateway not available for hiro media proxy")
 			http.Error(w, "Gateway not available", http.StatusServiceUnavailable)
 			return
 		}
 
 		gateway.mu.Lock()
-		picoToken := gateway.picoToken
+		hiroToken := gateway.hiroToken
 		gateway.mu.Unlock()
 
-		if picoToken == "" {
-			logger.Warnf("Missing Pico token for media proxy")
-			http.Error(w, "Invalid Pico token", http.StatusForbidden)
+		if hiroToken == "" {
+			logger.Warnf("Missing hiro token for media proxy")
+			http.Error(w, "Invalid hiro token", http.StatusForbidden)
 			return
 		}
 
-		h.createPicoHTTPProxy(picoToken).ServeHTTP(w, r)
+		h.createhiroHTTPProxy(hiroToken).ServeHTTP(w, r)
 	}
 }
 
-// handleGetPicoInfo returns non-secret Pico connection info for the launcher UI.
+// handleGethiroInfo returns non-secret hiro connection info for the launcher UI.
 //
-//	GET /api/pico/info
-func (h *Handler) handleGetPicoInfo(w http.ResponseWriter, r *http.Request) {
+//	GET /api/hiro/info
+func (h *Handler) handleGethiroInfo(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	h.writePicoInfoResponse(w, r, cfg, nil)
+	h.writehiroInfoResponse(w, r, cfg, nil)
 }
 
-// handleRegenPicoToken rotates the raw Pico WebSocket token and returns
+// handleRegenhiroToken rotates the raw hiro WebSocket token and returns
 // non-secret connection info for the launcher UI.
 //
-//	POST /api/pico/token
-func (h *Handler) handleRegenPicoToken(w http.ResponseWriter, r *http.Request) {
+//	POST /api/hiro/token
+func (h *Handler) handleRegenhiroToken(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
@@ -221,10 +221,10 @@ func (h *Handler) handleRegenPicoToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := generateSecureToken()
-	if bc := cfg.Channels.GetByType(config.ChannelPico); bc != nil {
+	if bc := cfg.Channels.GetByType(config.Channelhiro); bc != nil {
 		decoded, err := bc.GetDecoded()
 		if err == nil && decoded != nil {
-			if settings, ok := decoded.(*config.PicoSettings); ok {
+			if settings, ok := decoded.(*config.hiroSettings); ok {
 				settings.Token = *config.NewSecureString(token)
 			}
 		}
@@ -236,15 +236,15 @@ func (h *Handler) handleRegenPicoToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	gateway.mu.Lock()
-	gateway.picoToken = token
+	gateway.hiroToken = token
 	gateway.mu.Unlock()
 
-	h.writePicoInfoResponse(w, r, cfg, nil)
+	h.writehiroInfoResponse(w, r, cfg, nil)
 }
 
-// EnsurePicoChannel enables the Pico channel with sane defaults if it isn't
+// EnsurehiroChannel enables the hiro channel with sane defaults if it isn't
 // already configured. Returns true when the config was modified.
-func (h *Handler) EnsurePicoChannel() (bool, error) {
+func (h *Handler) EnsurehiroChannel() (bool, error) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to load config: %w", err)
@@ -252,10 +252,10 @@ func (h *Handler) EnsurePicoChannel() (bool, error) {
 
 	changed := false
 
-	bc := cfg.Channels.GetByType(config.ChannelPico)
+	bc := cfg.Channels.GetByType(config.Channelhiro)
 	if bc == nil {
-		bc = &config.Channel{Type: config.ChannelPico}
-		cfg.Channels["pico"] = bc
+		bc = &config.Channel{Type: config.Channelhiro}
+		cfg.Channels["hiro"] = bc
 	}
 
 	if !bc.Enabled {
@@ -264,9 +264,9 @@ func (h *Handler) EnsurePicoChannel() (bool, error) {
 	}
 
 	if decoded, err := bc.GetDecoded(); err == nil && decoded != nil {
-		if picoCfg, ok := decoded.(*config.PicoSettings); ok {
-			if picoCfg.Token.String() == "" {
-				picoCfg.Token = *config.NewSecureString(generateSecureToken())
+		if hiroCfg, ok := decoded.(*config.hiroSettings); ok {
+			if hiroCfg.Token.String() == "" {
+				hiroCfg.Token = *config.NewSecureString(generateSecureToken())
 				changed = true
 			}
 		}
@@ -281,24 +281,24 @@ func (h *Handler) EnsurePicoChannel() (bool, error) {
 	return changed, nil
 }
 
-// handlePicoSetup automatically configures everything needed for the Pico Channel to work.
+// handlehiroSetup automatically configures everything needed for the hiro Channel to work.
 //
-//	POST /api/pico/setup
-func (h *Handler) handlePicoSetup(w http.ResponseWriter, r *http.Request) {
-	changed, err := h.EnsurePicoChannel()
+//	POST /api/hiro/setup
+func (h *Handler) handlehiroSetup(w http.ResponseWriter, r *http.Request) {
+	changed, err := h.EnsurehiroChannel()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Reload config (EnsurePicoChannel may have modified it).
+	// Reload config (EnsurehiroChannel may have modified it).
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	h.writePicoInfoResponse(w, r, cfg, &changed)
+	h.writehiroInfoResponse(w, r, cfg, &changed)
 }
 
 // generateSecureToken creates a random 32-character hex string.

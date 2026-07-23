@@ -767,7 +767,7 @@ export class AgentOrchestrator {
             { signal: AbortSignal.timeout(3000) },
           );
           if (memRes.ok) {
-            tkgContext = await memRes.json() as { context: string };
+            tkgContext = (await memRes.json()) as { context: string };
             contextStr = tkgContext.context;
           }
         } catch {
@@ -825,7 +825,8 @@ export class AgentOrchestrator {
         const assistantMsg = response.choices?.[0]?.message?.content;
         if (assistantMsg) {
           const lastUserMsg = messages.filter((m) => m.role === "user").pop();
-          const userContent = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
+          const userContent =
+            typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
 
           // Write to TKG v2 event stream
           await fetch("http://localhost:3777/api/v2/event", {
@@ -835,7 +836,7 @@ export class AgentOrchestrator {
               content: userContent,
               source: "user",
               event_type: "message",
-              metadata: { role: "user" }
+              metadata: { role: "user" },
             }),
             signal: AbortSignal.timeout(3000),
           }).catch(() => {});
@@ -847,7 +848,7 @@ export class AgentOrchestrator {
               content: assistantMsg,
               source: "agent",
               event_type: "message",
-              metadata: { role: "assistant" }
+              metadata: { role: "assistant" },
             }),
             signal: AbortSignal.timeout(3000),
           }).catch(() => {});

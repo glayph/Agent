@@ -15,9 +15,9 @@ import (
 
 	"rsc.io/qr"
 
-	"github.com/sipeed/owlclaw/pkg/channels/weixin"
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
+	"github.com/sipeed/miki/pkg/channels/weixin"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
 )
 
 const (

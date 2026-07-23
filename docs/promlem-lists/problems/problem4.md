@@ -88,7 +88,7 @@
 - Evidence:
   - `packages/ui/frontend/src/components/chat/chat-page.tsx:53-75` accepts image files up to 7 MB and reads them as data URLs.
   - `packages/ui/frontend/src/components/chat/chat-page.tsx:747` stores image attachments for the outgoing user message.
-  - `packages/ui/frontend/src/features/chat/controller.ts:343-363` sends image attachments as `media: attachments.map(url)` over the Pico websocket.
+  - `packages/ui/frontend/src/features/chat/controller.ts:343-363` sends image attachments as `media: attachments.map(url)` over the hiro websocket.
   - `packages/core/src/api/index.ts:819-855` receives `payload.media` and converts it into plain text with `Attached media:\n${media.join("\n")}`.
   - `packages/config/src/types.ts:7-13` defines `ChatMessage.content` as string-only.
   - `packages/core/src/agent.ts:840-888` casts string-only chat messages into OpenAI chat completion params.

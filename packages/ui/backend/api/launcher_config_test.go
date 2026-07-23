@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/owlclaw/web/backend/launcherconfig"
+	"github.com/sipeed/miki/web/backend/launcherconfig"
 )
 
 func TestGetLauncherConfigUsesRuntimeFallback(t *testing.T) {

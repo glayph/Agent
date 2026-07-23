@@ -156,7 +156,7 @@ describe("chat controller WebSocket dependency injection", () => {
     await connectChat()
 
     expect(createdSockets).toHaveLength(1)
-    expect(createdSockets[0].url).toContain("/pico/ws?session_id=")
+    expect(createdSockets[0].url).toContain("/hiro/ws?session_id=")
     expect(getChatState().connectionState).toBe("connecting")
 
     createdSockets[0].simulateOpen()

@@ -67,7 +67,7 @@ func newCompatibilityStubHandler(distDir string) http.Handler {
 	mux.HandleFunc("/api/version", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(versionResponse{
-			Name:    "owlclaw-web",
+			Name:    "miki-web",
 			Version: "1.0.0",
 			Mode:    "compatibility-stub",
 		})
@@ -81,7 +81,7 @@ func newCompatibilityStubHandler(distDir string) http.Handler {
 		mux.Handle("/", http.FileServer(http.Dir(distDir)))
 	} else {
 		mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "OwlClaw WebUI assets are not built. Run npm run build.", http.StatusServiceUnavailable)
+			http.Error(w, "miki WebUI assets are not built. Run npm run build.", http.StatusServiceUnavailable)
 		})
 	}
 	return mux
@@ -100,6 +100,6 @@ func main() {
 	mux := newCompatibilityStubHandler(distDir)
 
 	addr := fmt.Sprintf("%s:%s", *host, *port)
-	log.Printf("OwlClaw Go compatibility backend listening on http://%s", addr)
+	log.Printf("miki Go compatibility backend listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

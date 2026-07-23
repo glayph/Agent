@@ -184,7 +184,7 @@ const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
   onebot: ["access_token"],
   whatsapp: ["webhook_token"],
   wecom: ["secret", "corp_secret", "webhook_url"],
-  pico: ["token"],
+  hiro: ["token"],
   matrix: ["access_token"],
   irc: ["password", "nickserv_password", "sasl_password"],
   mqtt: ["username", "password"],
@@ -266,8 +266,8 @@ interface LauncherCompatOptions {
 
 export interface LauncherRuntimeAuthBridge {
   isDashboardAuthenticated(headers: IncomingHttpHeaders): boolean;
-  getPicoToken(): string | undefined;
-  ensurePicoToken(): string;
+  gethiroToken(): string | undefined;
+  ensurehiroToken(): string;
 }
 
 export type RuntimeApplyStatus = "applied" | "pending_restart" | "failed";
@@ -378,7 +378,7 @@ interface CompatState {
   tool_state?: Record<string, boolean>;
   web_search?: JsonRecord;
   oauth?: Record<string, JsonRecord>;
-  pico_token?: string;
+  hiro_token?: string;
   gateway_restart_required?: boolean;
   runtime_apply_status?: RuntimeApplyStatus;
   runtime_apply_error?: string;
@@ -412,7 +412,7 @@ const activeSessions = new Map<string, number>();
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 
 const CHANNEL_RUNTIME_NOTES = {
-  pico: "Verified WebUI chat path through the gateway WebSocket proxy.",
+  hiro: "Verified WebUI chat path through the gateway WebSocket proxy.",
   telegram: "Node Telegram adapter exists; requires a valid bot token.",
   discord:
     "Node Discord Gateway adapter supports inbound messages, outbound replies, filtering, reconnect, and API error surfacing.",
@@ -517,11 +517,11 @@ export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] = [
     runtime_note: CHANNEL_RUNTIME_NOTES.whatsapp,
   },
   {
-    name: "pico",
-    display_name: "Pico",
-    config_key: "pico",
+    name: "hiro",
+    display_name: "hiro",
+    config_key: "hiro",
     runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.pico,
+    runtime_note: CHANNEL_RUNTIME_NOTES.hiro,
   },
   {
     name: "matrix",
@@ -1993,17 +1993,7 @@ function noteLoginFailure(req: Request): void {
   existing.count += 1;
 }
 
-function sanitizeEnvValue(value: string): string {
-  // Reject CR/LF to prevent .env newline injection attacks
-  if (/[
-]/.test(value)) {
-    throw new Error(`Invalid .env value: contains newline characters`);
-  }
-  return value.trim();
-}
-
 function updateEnvVar(paths: RuntimePaths, key: string, value: string): void {
-  value = sanitizeEnvValue(value);
   const envPath = path.join(paths.configDir, ".env");
   let content = "";
   try {
@@ -3079,25 +3069,26 @@ async function fetchModelsFromProvider(
       ? body.models
       : [];
   const models = rawModels
-    .map((item: unknown): ProviderModelResult =>
-      typeof item === "string"
-        ? { id: item }
-        : item && typeof item === "object"
-          ? {
-              id: String(
-                (item as { id?: unknown; name?: unknown }).id ||
-                  (item as { id?: unknown; name?: unknown }).name ||
-                  "",
-              ),
-              owned_by:
-                typeof (item as { owned_by?: unknown }).owned_by === "string"
-                  ? (item as { owned_by: string }).owned_by
-                  : undefined,
-              extra: item as JsonRecord,
-            }
-          : {
-              id: "",
-            },
+    .map(
+      (item: unknown): ProviderModelResult =>
+        typeof item === "string"
+          ? { id: item }
+          : item && typeof item === "object"
+            ? {
+                id: String(
+                  (item as { id?: unknown; name?: unknown }).id ||
+                    (item as { id?: unknown; name?: unknown }).name ||
+                    "",
+                ),
+                owned_by:
+                  typeof (item as { owned_by?: unknown }).owned_by === "string"
+                    ? (item as { owned_by: string }).owned_by
+                    : undefined,
+                extra: item as JsonRecord,
+              }
+            : {
+                id: "",
+              },
     )
     .filter((item: { id: string }) => item.id);
   return models.length > 0
@@ -3236,19 +3227,19 @@ export function createLauncherCompatRouter({
     writeJsonFile(statePath, state);
   };
 
-  const ensurePicoToken = (): string => {
-    if (!state.pico_token) {
-      state.pico_token = crypto.randomBytes(24).toString("base64url");
+  const ensurehiroToken = (): string => {
+    if (!state.hiro_token) {
+      state.hiro_token = crypto.randomBytes(24).toString("base64url");
       saveState();
     }
-    return state.pico_token;
+    return state.hiro_token;
   };
 
   registerRuntimeAuth?.({
     isDashboardAuthenticated: (headers: IncomingHttpHeaders) =>
       isAuthenticatedCookieHeader(headers.cookie),
-    getPicoToken: () => state.pico_token,
-    ensurePicoToken,
+    gethiroToken: () => state.hiro_token,
+    ensurehiroToken,
   });
 
   const normalizedModels = state.models.map(normalizeStoredModel);
@@ -3617,7 +3608,7 @@ export function createLauncherCompatRouter({
         status: "ready",
         summary:
           "Dashboard, REST, websocket, and channel entrypoints are mounted.",
-        evidence: ["/chat", "/pico/ws", "/api", "/webhooks/*"],
+        evidence: ["/chat", "/hiro/ws", "/api", "/webhooks/*"],
       },
       {
         id: "gateway",
@@ -3674,7 +3665,7 @@ export function createLauncherCompatRouter({
         status: (() => {
           if (!orchestrator) return "error" as FlowComponentStatus;
           try {
-            const memoryDbPath = path.join(paths.dataDir, "nexus_memory.db");
+            const memoryDbPath = path.join(paths.dataDir, "miki_memory.db");
             const memoryExists = fs.existsSync(memoryDbPath);
             const agentRunsDbPath = path.join(paths.dataDir, "agent-runs.db");
             const agentRunsExists = fs.existsSync(agentRunsDbPath);
@@ -3688,12 +3679,12 @@ export function createLauncherCompatRouter({
         summary: (() => {
           if (!orchestrator) return "Memory subsystem not available.";
           try {
-            const memoryDbPath = path.join(paths.dataDir, "nexus_memory.db");
+            const memoryDbPath = path.join(paths.dataDir, "miki_memory.db");
             const memoryExists = fs.existsSync(memoryDbPath);
             const agentRunsDbPath = path.join(paths.dataDir, "agent-runs.db");
             const agentRunsExists = fs.existsSync(agentRunsDbPath);
             const missing = [];
-            if (!memoryExists) missing.push("nexus_memory.db");
+            if (!memoryExists) missing.push("miki_memory.db");
             if (!agentRunsExists) missing.push("agent-runs.db");
             if (missing.length > 0)
               return `Memory DB files missing: ${missing.join(", ")}. Schema may not be initialized yet.`;
@@ -3702,13 +3693,13 @@ export function createLauncherCompatRouter({
             return "Memory probe failed.";
           }
         })(),
-        evidence: ["/memory/search", "/sessions", "nexus_memory.db"],
+        evidence: ["/memory/search", "/sessions", "miki_memory.db"],
         metrics: {
           active_sessions: sessions.length,
           memory_ready: !!orchestrator,
           memory_db_exists: (() => {
             try {
-              return fs.existsSync(path.join(paths.dataDir, "nexus_memory.db"));
+              return fs.existsSync(path.join(paths.dataDir, "miki_memory.db"));
             } catch {
               return false;
             }
@@ -4448,8 +4439,7 @@ export function createLauncherCompatRouter({
     res.json({
       gateway_status: "running",
       gateway_start_allowed: true,
-      gateway_start_reason:
-        "Gateway is managed by the running Hiro process.",
+      gateway_start_reason: "Gateway is managed by the running Hiro process.",
       gateway_restart_required: state.gateway_restart_required === true,
       runtime_apply_status: state.runtime_apply_status || "applied",
       runtime_apply_error: state.runtime_apply_error,
@@ -5277,7 +5267,7 @@ export function createLauncherCompatRouter({
   router.post("/config/test-command-patterns", (req, res) => {
     if (!isRecord(req.body))
       return res.status(400).json({ error: "JSON object expected" });
-    
+
     const { allow_patterns, deny_patterns, command } = req.body as {
       allow_patterns?: string[];
       deny_patterns?: string[];
@@ -5484,7 +5474,7 @@ export function createLauncherCompatRouter({
           channel,
           config: flattened,
           configuredSecrets,
-          hasPicoToken: Boolean(state.pico_token),
+          hashiroToken: Boolean(state.hiro_token),
           mode,
           extraChecks,
         }),
@@ -5543,40 +5533,40 @@ export function createLauncherCompatRouter({
     }
   });
 
-  const picoInfo = (req: Request) => {
-    ensurePicoToken();
+  const hiroInfo = (req: Request) => {
+    ensurehiroToken();
     const protocol =
       req.headers["x-forwarded-proto"] === "https" ? "wss" : "ws";
     const host = req.headers.host || `127.0.0.1:${settings.corePort}`;
     return {
-      ws_url: `${protocol}://${host}/pico/ws`,
+      ws_url: `${protocol}://${host}/hiro/ws`,
       enabled: true,
       configured: true,
     };
   };
 
-  router.get("/pico/info", (req, res) => {
-    res.json(picoInfo(req));
+  router.get("/hiro/info", (req, res) => {
+    res.json(hiroInfo(req));
   });
 
-  router.post("/pico/token", (req, res) => {
-    state.pico_token = crypto.randomBytes(24).toString("base64url");
+  router.post("/hiro/token", (req, res) => {
+    state.hiro_token = crypto.randomBytes(24).toString("base64url");
     saveState();
-    res.json(picoInfo(req));
+    res.json(hiroInfo(req));
   });
 
-  router.post("/pico/setup", async (req, res) => {
-    const info = picoInfo(req);
+  router.post("/hiro/setup", async (req, res) => {
+    const info = hiroInfo(req);
     const channels = {
       ...(isRecord(state.config?.channels)
         ? (state.config!.channels as JsonRecord)
         : {}),
     };
-    channels.pico = {
+    channels.hiro = {
       enabled: true,
-      type: "pico",
+      type: "hiro",
       settings: {
-        token: state.pico_token,
+        token: state.hiro_token,
         ws_url: info.ws_url,
         streaming: { enabled: true },
       },
@@ -5585,7 +5575,7 @@ export function createLauncherCompatRouter({
       const committed = commitConfig({ ...(state.config || {}), channels });
       const apply = await applyRuntimeChanges({
         channelsChanged: committed.channelsChanged,
-        reason: "pico.setup",
+        reason: "hiro.setup",
       });
       res.json({
         ...info,

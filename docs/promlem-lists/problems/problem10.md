@@ -40,13 +40,13 @@
 - Evidence:
   - `scripts/build-go-backend.mjs:15-24` builds the default Go backend as a "compatibility stub" and does not include the `legacy_backend` tag in the default build.
   - `packages/ui/backend/stub_main.go:29-40` registers only `/api/version` and `/api/health` as API handlers.
-  - `packages/ui/backend/stub_main.go:45-62` then serves embedded frontend assets or a missing-assets error; it does not register dashboard API routes for auth, models, config, channels, Pico, sessions, skills, logs, or gateway control.
+  - `packages/ui/backend/stub_main.go:45-62` then serves embedded frontend assets or a missing-assets error; it does not register dashboard API routes for auth, models, config, channels, hiro, sessions, skills, logs, or gateway control.
   - `packages/ui/README.md:3-14` describes the launcher as a service that bundles the React dashboard, exposes a backend API, manages authentication, and starts or attaches to the runtime process.
-  - `packages/ui/README.md:20-33` says the Go backend serves REST APIs, authentication endpoints, channel helper flows, the Pico WebSocket proxy, and the frontend talks only to the launcher backend.
-  - `packages/ui/frontend/src/api/launcher-auth.ts:12-60`, `packages/ui/frontend/src/api/gateway.ts:57-100`, `packages/ui/frontend/src/api/models.ts:86-212`, `packages/ui/frontend/src/api/channels.ts:114-170`, `packages/ui/frontend/src/api/pico.ts:29-37`, and `packages/ui/frontend/src/api/sessions.ts:63-93` call many `/api/...` routes that the stub binary does not implement.
+  - `packages/ui/README.md:20-33` says the Go backend serves REST APIs, authentication endpoints, channel helper flows, the hiro WebSocket proxy, and the frontend talks only to the launcher backend.
+  - `packages/ui/frontend/src/api/launcher-auth.ts:12-60`, `packages/ui/frontend/src/api/gateway.ts:57-100`, `packages/ui/frontend/src/api/models.ts:86-212`, `packages/ui/frontend/src/api/channels.ts:114-170`, `packages/ui/frontend/src/api/hiro.ts:29-37`, and `packages/ui/frontend/src/api/sessions.ts:63-93` call many `/api/...` routes that the stub binary does not implement.
   - `scripts/assert-pack-contents.mjs:54-55` still requires both the built frontend and the Go backend binary in the packaged runtime.
 - Impact: even after the dashboard HTML/assets load, the packaged/default Go web server can only answer health/version. Most dashboard actions will 404 or fail because the frontend is wired to a full launcher API that the default binary does not provide.
-- Recommended fix: either stop packaging/advertising the stub as the dashboard backend and route packaged dashboards to the Node launcher-compat API, or build a real API-proxy/full launcher backend by default. Add a packaged smoke test that starts the bundled backend and checks representative routes such as `/api/auth/status`, `/api/config`, `/api/models`, `/api/channels/catalog`, and `/api/pico/info`.
+- Recommended fix: either stop packaging/advertising the stub as the dashboard backend and route packaged dashboards to the Node launcher-compat API, or build a real API-proxy/full launcher backend by default. Add a packaged smoke test that starts the bundled backend and checks representative routes such as `/api/auth/status`, `/api/config`, `/api/models`, `/api/channels/catalog`, and `/api/hiro/info`.
 
 ### 92. Cron execution enable switch saves to tools.yaml but scheduler reads agent.yaml
 
@@ -86,7 +86,7 @@
   - `packages/core/src/tools/executor/shell.ts:136-196` has no caller, session, origin, or remote/local context parameter and reads only `permissions.shell_execute`.
   - `packages/core/src/tools/registry/executor.ts:396-413` executes structured tools without applying a caller-origin policy.
 - Impact: the dashboard suggests command execution can be limited to local safe contexts, but `allow_remote: false` is never checked before tool execution. Any client path that can reach the tool-call API or MCP bridge and passes the normal auth/session gates follows the standard shell permission state instead of the remote-execution toggle.
-- Recommended fix: carry caller origin and session type into `ToolRegistry` and `ShellExecutor`, define trusted local contexts, block remote callers when `runtime.exec.allow_remote === false`, and add tests for API, MCP, dashboard, Pico, and channel-origin tool calls.
+- Recommended fix: carry caller origin and session type into `ToolRegistry` and `ShellExecutor`, define trusted local contexts, block remote callers when `runtime.exec.allow_remote === false`, and add tests for API, MCP, dashboard, hiro, and channel-origin tool calls.
 
 ### 95. Legacy full Go backend cannot compile from the checked-in module
 

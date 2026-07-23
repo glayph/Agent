@@ -26,10 +26,18 @@ export function useSessionHistory({
     async (reset = true) => {
       try {
         const currentOffset = reset ? 0 : offset
-        if (reset) {
-          setLoadError(false)
-          setHasMore(true)
-          setOffset(0)
+        const shouldFetch = (reset || currentOffset === offset)
+        if (shouldFetch) {
+          if (reset) {
+            setLoadError(false)
+            setHasMore(true)
+            setOffset(0)
+          }
+        }
+
+        if (!shouldFetch) {
+          setIsLoadingMore(false)
+          return
         }
 
         const data = await getSessions(currentOffset, LIMIT)
@@ -41,7 +49,7 @@ export function useSessionHistory({
 
         if (reset) {
           setSessions(data)
-        } else {
+        } else if (data.length > 0) {
           setSessions((prev) => {
             const existingIds = new Set(prev.map((s) => s.id))
             const newItems = data.filter((s) => !existingIds.has(s.id))

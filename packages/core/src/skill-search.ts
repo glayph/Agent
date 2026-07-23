@@ -39,12 +39,7 @@ export class SkillSearchEngine {
   constructor(paths: RuntimePaths | string, additionalDirs: string[] = []) {
     const runtimePaths = normalizeRuntimePaths(paths);
     const bundledSkillsDir = runtimePaths.sourceDir
-      ? path.resolve(
-          runtimePaths.sourceDir,
-          "packages",
-          "skills",
-          "src",
-        )
+      ? path.resolve(runtimePaths.sourceDir, "packages", "skills", "src")
       : path.resolve(runtimePaths.skillsDir, "..", "skills");
     const userSkillsDir = path.resolve(runtimePaths.skillsDir);
     this.skillsDirs = Array.from(
@@ -69,7 +64,8 @@ export class SkillSearchEngine {
 
       const scored: Array<{ skill: SkillMetadata; score: number }> = [];
       for (const skill of results) {
-        const searchText = `${skill.name} ${skill.description} ${skill.tags.join(" ")}`.toLowerCase();
+        const searchText =
+          `${skill.name} ${skill.description} ${skill.tags.join(" ")}`.toLowerCase();
         let score = 0;
         for (const kw of rawKeywords) {
           if (searchText.includes(kw)) score += 1;
@@ -78,7 +74,9 @@ export class SkillSearchEngine {
         }
         if (score > 0) scored.push({ skill, score });
       }
-      scored.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name));
+      scored.sort(
+        (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+      );
       results = scored.map((s) => s.skill);
     }
 
@@ -146,7 +144,10 @@ export class SkillSearchEngine {
 
   private async loadSkills(): Promise<void> {
     const now = Date.now();
-    if (this.skillCache.size > 0 && now - this.lastCacheTime < this.cacheDurationMs) {
+    if (
+      this.skillCache.size > 0 &&
+      now - this.lastCacheTime < this.cacheDurationMs
+    ) {
       return;
     }
     this.skillCache.clear();
@@ -172,7 +173,9 @@ export class SkillSearchEngine {
     }
     if (fs.existsSync(categoriesPath)) {
       try {
-        const categoriesData = JSON.parse(fs.readFileSync(categoriesPath, "utf-8"));
+        const categoriesData = JSON.parse(
+          fs.readFileSync(categoriesPath, "utf-8"),
+        );
         categories = categoriesData.categories || [];
       } catch (err) {
         console.error("Failed to load categories.json:", err);
@@ -190,7 +193,10 @@ export class SkillSearchEngine {
         const skillsData = JSON.parse(fs.readFileSync(skillsPath, "utf-8"));
         skillIds = skillsData.skills || [];
       } catch (err) {
-        console.error(`Failed to load skills.json for category ${categoryName}:`, err);
+        console.error(
+          `Failed to load skills.json for category ${categoryName}:`,
+          err,
+        );
       }
 
       for (const skillName of skillIds) {
@@ -213,7 +219,10 @@ export class SkillSearchEngine {
             ) as Partial<SkillMetadata>;
             parsedMeta = { ...parsedMeta, ...metadata };
           } catch (err) {
-            console.error(`Failed to load skill metadata from ${skillMetadataPath}:`, err);
+            console.error(
+              `Failed to load skill metadata from ${skillMetadataPath}:`,
+              err,
+            );
           }
         }
 
@@ -246,7 +255,9 @@ export class SkillSearchEngine {
     }
   }
 
-  private parseSkillMdFrontmatter(skillMdPath: string): Partial<SkillMetadata> | null {
+  private parseSkillMdFrontmatter(
+    skillMdPath: string,
+  ): Partial<SkillMetadata> | null {
     try {
       const content = fs.readFileSync(skillMdPath, "utf-8");
       const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
@@ -259,14 +270,25 @@ export class SkillSearchEngine {
         const key = kvMatch[1];
         const value = kvMatch[2].trim();
         switch (key) {
-          case "name": meta.name = value.replace(/^["']|["']$/g, ""); break;
-          case "description": meta.description = value.replace(/^["']|["']$/g, ""); break;
-          case "version": meta.version = value.replace(/^["']|["']$/g, ""); break;
-          case "author": meta.author = value.replace(/^["']|["']$/g, ""); break;
+          case "name":
+            meta.name = value.replace(/^["']|["']$/g, "");
+            break;
+          case "description":
+            meta.description = value.replace(/^["']|["']$/g, "");
+            break;
+          case "version":
+            meta.version = value.replace(/^["']|["']$/g, "");
+            break;
+          case "author":
+            meta.author = value.replace(/^["']|["']$/g, "");
+            break;
           case "tags": {
             const tagMatch = value.match(/\[([^\]]*)\]/);
             if (tagMatch) {
-              meta.tags = tagMatch[1].split(",").map((t) => t.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+              meta.tags = tagMatch[1]
+                .split(",")
+                .map((t) => t.trim().replace(/^["']|["']$/g, ""))
+                .filter(Boolean);
             }
             break;
           }
@@ -283,7 +305,13 @@ export class SkillSearchEngine {
   }
 
   private findMetadataFile(skillPath: string): string | null {
-    for (const name of [".marketplace.json", "skill.json", "skill.metadata.json", "metadata.json", "package.json"]) {
+    for (const name of [
+      ".marketplace.json",
+      "skill.json",
+      "skill.metadata.json",
+      "metadata.json",
+      "package.json",
+    ]) {
       const fp = path.join(skillPath, name);
       if (fs.existsSync(fp)) return fp;
     }
@@ -296,7 +324,9 @@ export class SkillSearchEngine {
   }
 
   getCacheStats() {
-    const categories = new Set(Array.from(this.skillCache.values()).map((s) => s.category));
+    const categories = new Set(
+      Array.from(this.skillCache.values()).map((s) => s.category),
+    );
     return {
       skillsLoaded: this.skillCache.size,
       categories: Array.from(categories),

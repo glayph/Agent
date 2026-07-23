@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sipeed/owlclaw/web/backend/middleware"
+	"github.com/sipeed/miki/web/backend/middleware"
 )
 
 // PasswordStore is the interface for dashboard password persistence.

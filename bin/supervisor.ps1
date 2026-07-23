@@ -9,7 +9,7 @@
 
     Usage:
         .\bin\supervisor.ps1
-        .\bin\supervisor.ps1 -WorkspaceDir "D:\Data\My Agent\Agent\Nexus"
+        .\bin\supervisor.ps1 -WorkspaceDir "D:\Data\My Agent\Agent\miki"
         .\bin\supervisor.ps1 -MaxRestarts 10   # limit restarts (0 = unbounded)
 
     Control files (all in WorkspaceDir\data\):
@@ -42,7 +42,7 @@ $ErrorActionPreference = "Stop"
 # ── Resolve paths ─────────────────────────────────────────────────────────────
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot  = Split-Path -Parent $ScriptDir  # Nexus/
+$RepoRoot  = Split-Path -Parent $ScriptDir  # miki/
 
 if (-not $WorkspaceDir) {
     $WorkspaceDir = $RepoRoot

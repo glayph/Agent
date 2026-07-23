@@ -37,12 +37,18 @@ export function hasExited(proc: child_process.ChildProcess): boolean {
   return proc.exitCode !== null || proc.signalCode !== null;
 }
 
-export function waitForProcessExit(proc: child_process.ChildProcess, timeoutMs: number): Promise<void> {
+export function waitForProcessExit(
+  proc: child_process.ChildProcess,
+  timeoutMs: number,
+): Promise<void> {
   if (hasExited(proc)) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, timeoutMs);
     timer.unref?.();
-    proc.once("exit", () => { clearTimeout(timer); resolve(); });
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
 }
 
@@ -53,10 +59,17 @@ export async function terminateProcessTree(
   if (hasExited(proc)) return;
 
   if (process.platform === "win32" && proc.pid) {
-    child_process.spawnSync("taskkill", ["/T", "/PID", String(proc.pid)], { stdio: "ignore", shell: false });
+    child_process.spawnSync("taskkill", ["/T", "/PID", String(proc.pid)], {
+      stdio: "ignore",
+      shell: false,
+    });
     await waitForProcessExit(proc, timeoutMs);
     if (!hasExited(proc)) {
-      child_process.spawnSync("taskkill", ["/F", "/T", "/PID", String(proc.pid)], { stdio: "ignore", shell: false });
+      child_process.spawnSync(
+        "taskkill",
+        ["/F", "/T", "/PID", String(proc.pid)],
+        { stdio: "ignore", shell: false },
+      );
       await waitForProcessExit(proc, 2000);
     }
     return;

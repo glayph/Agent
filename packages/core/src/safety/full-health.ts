@@ -60,10 +60,7 @@ export function buildHealthComponents(
     },
     {
       name: "Runtime files",
-      status: fileExists(
-        paths.sourceDir,
-        "packages/core/dist/api/index.js",
-      )
+      status: fileExists(paths.sourceDir, "packages/core/dist/api/index.js")
         ? "healthy"
         : "degraded",
       message: "Core runtime artifact check.",

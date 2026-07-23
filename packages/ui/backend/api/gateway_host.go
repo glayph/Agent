@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/netbind"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/netbind"
 )
 
 func (h *Handler) effectiveLauncherPublic() bool {
@@ -196,7 +196,7 @@ func forwardedPortFirst(r *http.Request) string {
 }
 
 // clientVisiblePort picks the TCP port the browser uses to reach this app (after proxies).
-// Used by picoWebUIAddr → buildWsURL / buildPicoEventsURL / buildPicoSendURL so WebSocket and
+// Used by hiroWebUIAddr → buildWsURL / buildhiroEventsURL / buildhiroSendURL so WebSocket and
 // HTTP URLs match the dashboard page origin (cookies / token flow behind tunnels and reverse proxies).
 func clientVisiblePort(r *http.Request, serverListenPort int) string {
 	if p := forwardedPortFirst(r); p != "" {
@@ -227,10 +227,10 @@ func joinClientVisibleHostPort(r *http.Request, host string, serverListenPort in
 	return net.JoinHostPort(host, clientVisiblePort(r, serverListenPort))
 }
 
-// picoWebUIAddr is host:port for URLs returned to the browser (/pico/ws, /pico/events, /pico/send).
+// hiroWebUIAddr is host:port for URLs returned to the browser (/hiro/ws, /hiro/events, /hiro/send).
 // It must match the HTTP Host the client used (or X-Forwarded-*), not cfg.Gateway.Host — otherwise
 // e.g. page on localhost with ws_url 127.0.0.1 omits cookies and the dashboard auth handshake fails.
-func (h *Handler) picoWebUIAddr(r *http.Request) string {
+func (h *Handler) hiroWebUIAddr(r *http.Request) string {
 	wsPort := h.serverPort
 	if wsPort == 0 {
 		wsPort = 18800
@@ -242,13 +242,13 @@ func (h *Handler) picoWebUIAddr(r *http.Request) string {
 }
 
 func (h *Handler) buildWsURL(r *http.Request) string {
-	return requestWSScheme(r) + "://" + h.picoWebUIAddr(r) + "/pico/ws"
+	return requestWSScheme(r) + "://" + h.hiroWebUIAddr(r) + "/hiro/ws"
 }
 
-func (h *Handler) buildPicoEventsURL(r *http.Request) string {
-	return requestHTTPScheme(r) + "://" + h.picoWebUIAddr(r) + "/pico/events"
+func (h *Handler) buildhiroEventsURL(r *http.Request) string {
+	return requestHTTPScheme(r) + "://" + h.hiroWebUIAddr(r) + "/hiro/events"
 }
 
-func (h *Handler) buildPicoSendURL(r *http.Request) string {
-	return requestHTTPScheme(r) + "://" + h.picoWebUIAddr(r) + "/pico/send"
+func (h *Handler) buildhiroSendURL(r *http.Request) string {
+	return requestHTTPScheme(r) + "://" + h.hiroWebUIAddr(r) + "/hiro/send"
 }

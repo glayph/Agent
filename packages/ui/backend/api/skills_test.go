@@ -19,7 +19,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/sipeed/owlclaw/pkg/config"
+	"github.com/sipeed/miki/pkg/config"
 )
 
 func setClawHubBaseURL(cfg *config.Config, baseURL string) {
@@ -77,15 +77,15 @@ func TestHandleListSkills(t *testing.T) {
 	}
 
 	builtinRoot := filepath.Join(t.TempDir(), "builtin-skills")
-	oldBuiltin := os.Getenv("owlclaw_BUILTIN_SKILLS")
-	if err := os.Setenv("owlclaw_BUILTIN_SKILLS", builtinRoot); err != nil {
-		t.Fatalf("Setenv(owlclaw_BUILTIN_SKILLS) error = %v", err)
+	oldBuiltin := os.Getenv("miki_BUILTIN_SKILLS")
+	if err := os.Setenv("miki_BUILTIN_SKILLS", builtinRoot); err != nil {
+		t.Fatalf("Setenv(miki_BUILTIN_SKILLS) error = %v", err)
 	}
 	defer func() {
 		if oldBuiltin == "" {
-			_ = os.Unsetenv("owlclaw_BUILTIN_SKILLS")
+			_ = os.Unsetenv("miki_BUILTIN_SKILLS")
 		} else {
-			_ = os.Setenv("owlclaw_BUILTIN_SKILLS", oldBuiltin)
+			_ = os.Setenv("miki_BUILTIN_SKILLS", oldBuiltin)
 		}
 	}()
 

@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sipeed/owlclaw/pkg/config"
+	"github.com/sipeed/miki/pkg/config"
 )
 
 var execCommand = exec.Command
@@ -22,7 +22,7 @@ func EnsureOnboarded(configPath string) error {
 		return fmt.Errorf("stat config: %w", err)
 	}
 
-	cmd := execCommand(FindowlclawBinary(), "onboard")
+	cmd := execCommand(FindmikiBinary(), "onboard")
 	cmd.Env = append(os.Environ(), config.EnvConfig+"="+configPath)
 	cmd.Stdin = strings.NewReader("n\n")
 

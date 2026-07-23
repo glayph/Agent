@@ -17,7 +17,11 @@ import {
 } from "./plugin-contract-runtime.js";
 
 export type PluginMarketplaceReadinessStatus =
-  "ready" | "metadata_only" | "needs_policy" | "incomplete" | "blocked";
+  | "ready"
+  | "metadata_only"
+  | "needs_policy"
+  | "incomplete"
+  | "blocked";
 
 export type PluginMarketplaceIssueSeverity = "error" | "warning" | "info";
 

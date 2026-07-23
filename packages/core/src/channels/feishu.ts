@@ -337,7 +337,8 @@ async function getTenantAccessToken(
     },
   );
   const body = (await response.json().catch(() => ({}))) as
-    FeishuTenantTokenResponse | JsonRecord;
+    | FeishuTenantTokenResponse
+    | JsonRecord;
   const token = stringOrEmpty(
     "tenant_access_token" in body ? body.tenant_access_token : undefined,
   );

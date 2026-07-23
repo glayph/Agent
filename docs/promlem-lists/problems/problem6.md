@@ -10,7 +10,7 @@
   - `packages/core/src/agent.ts:1724-1824` executes tools and emits only `tool_result`; it never builds feedback text, max-arg previews, separate messages, or `tool_feedback_explanation`.
   - `packages/ui/frontend/src/features/chat/tool-calls.ts:83-84` can display `tool_feedback_explanation` if it arrives, but `rg -n "tool_feedback|tool_feedback_explanation|separate_messages|max_args_length" packages/core/src` finds no runtime use beyond the default config.
 - Impact: the dashboard promises a short execution note before each tool runs, but enabling/disabling Tool Feedback and changing preview/separate-message settings has no effect on backend output.
-- Recommended fix: implement feedback generation in the Pico/WebSocket bridge or agent tool loop, honoring `enabled`, `separate_messages`, and `max_args_length`; include `tool_feedback_explanation` metadata when appropriate. Otherwise remove the setting.
+- Recommended fix: implement feedback generation in the hiro/WebSocket bridge or agent tool loop, honoring `enabled`, `separate_messages`, and `max_args_length`; include `tool_feedback_explanation` metadata when appropriate. Otherwise remove the setting.
 
 ### 47. Context window, max tool iterations, and summarization controls are inert
 
@@ -35,7 +35,7 @@
   - `packages/core/src/api/launcher-compat.ts:1750-1751` includes `split_on_marker: false` in defaults.
   - `rg -n "split_on_marker|splitOnMarker" packages/core/src packages/gateway/src packages/config/src` finds no runtime parser, streamer, or message-splitting use outside defaults/config sync.
 - Impact: toggling Chatty Mode changes saved config but does not affect assistant message streaming or message splitting.
-- Recommended fix: implement response splitting in the chat/Pico bridge or agent stream based on `split_on_marker`, or remove the toggle until the behavior exists.
+- Recommended fix: implement response splitting in the chat/hiro bridge or agent stream based on `split_on_marker`, or remove the toggle until the behavior exists.
 
 ### 49. Workspace Directory setting does not change the runtime workspace
 
@@ -58,7 +58,7 @@
   - `packages/ui/frontend/src/features/chat/assistant-message-state.ts:79-90` replaces the message state with the explicit one-item tool-call payload.
   - `packages/ui/frontend/src/features/chat/assistant-message-state.ts:102-108` clears existing `tool_calls` when a later update has no explicit kind/tool-call payload.
 - Impact: multiple tool calls collapse to the latest one, and final assistant text updates remove tool-call details from the same message. The UI can briefly show tool activity, then lose it once normal content streams in, making tool feedback and history unreliable.
-- Recommended fix: accumulate tool calls in the Pico bridge or frontend store, preserve existing tool-call metadata on normal content updates unless explicitly cleared, and include tool results/status in durable message metadata.
+- Recommended fix: accumulate tool calls in the hiro bridge or frontend store, preserve existing tool-call metadata on normal content updates unless explicitly cleared, and include tool results/status in durable message metadata.
 
 ### 51. Exec allow/deny pattern settings are saved but not enforced
 

@@ -10,7 +10,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/logger"
+	"github.com/sipeed/miki/pkg/logger"
 )
 
 // JSONContentType sets the Content-Type header to application/json for

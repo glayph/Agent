@@ -29,7 +29,9 @@ export function canRunDashboardSetup(
 }
 
 export type DashboardAccessDecision =
-  "allow" | "uninitialized" | "unauthorized";
+  | "allow"
+  | "uninitialized"
+  | "unauthorized";
 
 export function dashboardAccessDecision(
   auth: StoredAuth | undefined,

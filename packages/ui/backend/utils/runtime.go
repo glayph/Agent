@@ -11,33 +11,33 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
 )
 
-// GetowlclawHome returns the owlclaw home directory.
-// Priority: $owlclaw_HOME > ~/.owlclaw
-func GetowlclawHome() string {
+// GetmikiHome returns the miki home directory.
+// Priority: $miki_HOME > ~/.miki
+func GetmikiHome() string {
 	return config.GetHome()
 }
 
-// GetDefaultConfigPath returns the default path to the owlclaw config file.
+// GetDefaultConfigPath returns the default path to the miki config file.
 func GetDefaultConfigPath() string {
 	if configPath := os.Getenv(config.EnvConfig); configPath != "" {
 		return configPath
 	}
-	return filepath.Join(GetowlclawHome(), "config.json")
+	return filepath.Join(GetmikiHome(), "config.json")
 }
 
-// FindowlclawBinary locates the owlclaw executable.
+// FindmikiBinary locates the miki executable.
 // Search order:
-//  1. owlclaw_BINARY environment variable (explicit override)
+//  1. miki_BINARY environment variable (explicit override)
 //  2. Same directory as the current executable
-//  3. Falls back to "owlclaw" and relies on $PATH
-func FindowlclawBinary() string {
-	binaryName := "owlclaw"
+//  3. Falls back to "miki" and relies on $PATH
+func FindmikiBinary() string {
+	binaryName := "miki"
 	if runtime.GOOS == "windows" {
-		binaryName = "owlclaw.exe"
+		binaryName = "miki.exe"
 	}
 
 	if p := os.Getenv(config.EnvBinary); p != "" {
@@ -47,14 +47,14 @@ func FindowlclawBinary() string {
 	}
 
 	if exe, err := os.Executable(); err == nil {
-		logger.Debugf("Trying to find owlclaw binary in %s", exe)
+		logger.Debugf("Trying to find miki binary in %s", exe)
 		candidate := filepath.Join(filepath.Dir(exe), binaryName)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate
 		}
 	}
 
-	return "owlclaw"
+	return "miki"
 }
 
 func appendUniqueIP(addrs []string, seen map[string]struct{}, value string) []string {

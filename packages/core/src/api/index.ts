@@ -387,8 +387,8 @@ function rejectUpgrade(
   socket.destroy();
 }
 
-function isPicoBearerAuthenticated(request: http.IncomingMessage): boolean {
-  const configuredToken = launcherRuntimeAuth?.getPicoToken();
+function ishiroBearerAuthenticated(request: http.IncomingMessage): boolean {
+  const configuredToken = launcherRuntimeAuth?.gethiroToken();
   if (!configuredToken) return false;
   const authorization = firstHeaderValue(request.headers.authorization);
   const incomingToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
@@ -406,7 +406,7 @@ function isWebSocketUpgradeAuthorized(
   if (launcherRuntimeAuth?.isDashboardAuthenticated(request.headers)) {
     return true;
   }
-  return pathname === "/pico/ws" && isPicoBearerAuthenticated(request);
+  return pathname === "/hiro/ws" && ishiroBearerAuthenticated(request);
 }
 
 validateApiKeyConfiguration();
@@ -520,7 +520,7 @@ const wss = new WebSocketServer({
   noServer: true,
   maxPayload: 5 * 1024 * 1024, // 5MB
 });
-const picoWss = new WebSocketServer({
+const hiroWss = new WebSocketServer({
   noServer: true,
   maxPayload: 5 * 1024 * 1024,
 });
@@ -542,13 +542,13 @@ server.on("upgrade", (request, socket, head) => {
     });
     return;
   }
-  if (pathname === "/pico/ws") {
+  if (pathname === "/hiro/ws") {
     if (!isWebSocketUpgradeAuthorized(request, pathname)) {
       rejectUpgrade(socket, 401, "Unauthorized");
       return;
     }
-    picoWss.handleUpgrade(request, socket, head, (ws) => {
-      picoWss.emit("connection", ws, request);
+    hiroWss.handleUpgrade(request, socket, head, (ws) => {
+      hiroWss.emit("connection", ws, request);
     });
     return;
   }
@@ -561,7 +561,7 @@ let wsPingTimer: NodeJS.Timeout | null = null;
 
 function _setupWSPing(): void {
   wsPingTimer = setInterval(() => {
-    for (const server of [wss, picoWss]) {
+    for (const server of [wss, hiroWss]) {
       server.clients.forEach((ws) => {
         const aliveWs = ws as AliveWebSocket;
         if (aliveWs.__alive === false) {
@@ -576,7 +576,7 @@ function _setupWSPing(): void {
   wsPingTimer.unref?.();
 }
 
-function _sendPico(ws: WebSocket, message: Record<string, unknown>): void {
+function _sendhiro(ws: WebSocket, message: Record<string, unknown>): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(message));
   }
@@ -599,14 +599,14 @@ function _asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-interface PicoContextUsage {
+interface hiroContextUsage {
   used_tokens: number;
   total_tokens: number;
   compress_at_tokens: number;
   used_percent: number;
 }
 
-function _normalizePicoContextUsage(value: unknown): PicoContextUsage | null {
+function _normalizehiroContextUsage(value: unknown): hiroContextUsage | null {
   const raw = _asRecord(value);
   const used = Number(raw.used_tokens);
   const total = Number(raw.total_tokens);
@@ -629,11 +629,11 @@ function _normalizePicoContextUsage(value: unknown): PicoContextUsage | null {
   };
 }
 
-function _picoContextUsage(
+function _hiroContextUsage(
   content: string,
   explicitUsage?: unknown,
-): PicoContextUsage {
-  const normalized = _normalizePicoContextUsage(explicitUsage);
+): hiroContextUsage {
+  const normalized = _normalizehiroContextUsage(explicitUsage);
   if (normalized) return normalized;
 
   const used = Math.max(1, Math.ceil(content.length / 4));
@@ -646,14 +646,14 @@ function _picoContextUsage(
   };
 }
 
-picoWss.on("connection", (ws, req) => {
+hiroWss.on("connection", (ws, req) => {
   const aliveWs = ws as AliveWebSocket;
   aliveWs.__alive = true;
   ws.on("pong", () => {
     aliveWs.__alive = true;
   });
 
-  const url = new URL(req.url || "/pico/ws", "http://127.0.0.1");
+  const url = new URL(req.url || "/hiro/ws", "http://127.0.0.1");
   const sessionId = url.searchParams.get("session_id") || crypto.randomUUID();
 
   ws.on("message", async (raw) => {
@@ -661,7 +661,7 @@ picoWss.on("connection", (ws, req) => {
       Buffer.isBuffer(raw) ? raw : Buffer.from(raw.toString()),
     );
     if (!data) {
-      _sendPico(ws, {
+      _sendhiro(ws, {
         type: "error",
         session_id: sessionId,
         payload: { message: "Invalid JSON payload" },
@@ -670,16 +670,16 @@ picoWss.on("connection", (ws, req) => {
     }
 
     if (data.type === "ping") {
-      _sendPico(ws, { type: "pong", session_id: sessionId });
+      _sendhiro(ws, { type: "pong", session_id: sessionId });
       return;
     }
 
     if (data.type !== "message.send") {
-      _sendPico(ws, {
+      _sendhiro(ws, {
         type: "error",
         session_id: sessionId,
         payload: {
-          message: `Unsupported pico message type: ${String(data.type)}`,
+          message: `Unsupported hiro message type: ${String(data.type)}`,
         },
       });
       return;
@@ -697,7 +697,7 @@ picoWss.on("connection", (ws, req) => {
       : [];
 
     if (!content && media.length === 0) {
-      _sendPico(ws, {
+      _sendhiro(ws, {
         type: "error",
         session_id: sessionId,
         payload: {
@@ -710,10 +710,10 @@ picoWss.on("connection", (ws, req) => {
 
     const assistantMessageId = `assistant-${requestId}`;
     let fullResponse = "";
-    let lastContextUsage: PicoContextUsage | null = null;
+    let lastContextUsage: hiroContextUsage | null = null;
 
-    _sendPico(ws, { type: "typing.start", session_id: sessionId });
-    _sendPico(ws, {
+    _sendhiro(ws, { type: "typing.start", session_id: sessionId });
+    _sendhiro(ws, {
       type: "message.create",
       id: crypto.randomUUID(),
       session_id: sessionId,
@@ -743,7 +743,7 @@ picoWss.on("connection", (ws, req) => {
           event = { type: "stream_chunk", content: chunk };
         }
 
-        const eventContextUsage = _normalizePicoContextUsage(
+        const eventContextUsage = _normalizehiroContextUsage(
           event.context_usage,
         );
         if (eventContextUsage) {
@@ -753,7 +753,7 @@ picoWss.on("connection", (ws, req) => {
         if (event.type === "stream_chunk") {
           fullResponse +=
             typeof event.content === "string" ? event.content : "";
-          _sendPico(ws, {
+          _sendhiro(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
             session_id: sessionId,
@@ -762,14 +762,14 @@ picoWss.on("connection", (ws, req) => {
               message_id: assistantMessageId,
               content: fullResponse,
               model_name: orchestrator.modelName,
-              context_usage: _picoContextUsage(fullResponse, lastContextUsage),
+              context_usage: _hiroContextUsage(fullResponse, lastContextUsage),
             },
           });
           continue;
         }
 
         if (event.type === "tool_call") {
-          _sendPico(ws, {
+          _sendhiro(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
             session_id: sessionId,
@@ -800,7 +800,7 @@ picoWss.on("connection", (ws, req) => {
         }
       }
 
-      _sendPico(ws, {
+      _sendhiro(ws, {
         type: "message.update",
         id: crypto.randomUUID(),
         session_id: sessionId,
@@ -809,13 +809,13 @@ picoWss.on("connection", (ws, req) => {
           message_id: assistantMessageId,
           content: fullResponse,
           model_name: orchestrator.modelName,
-          context_usage: _picoContextUsage(fullResponse, lastContextUsage),
+          context_usage: _hiroContextUsage(fullResponse, lastContextUsage),
         },
       });
-      _sendPico(ws, { type: "typing.stop", session_id: sessionId });
+      _sendhiro(ws, { type: "typing.stop", session_id: sessionId });
     } catch (err: unknown) {
-      _sendPico(ws, { type: "typing.stop", session_id: sessionId });
-      _sendPico(ws, {
+      _sendhiro(ws, { type: "typing.stop", session_id: sessionId });
+      _sendhiro(ws, {
         type: "error",
         session_id: sessionId,
         payload: {
@@ -1907,7 +1907,7 @@ async function shutdown() {
   shutdownInProgress = true;
   console.log("Shutting down...");
   _clearWSPing();
-  await Promise.all([closeWebSocketServer(wss), closeWebSocketServer(picoWss)]);
+  await Promise.all([closeWebSocketServer(wss), closeWebSocketServer(hiroWss)]);
   await closeHttpServer(server, {
     timeoutMs: 5000,
     onForceClose: () =>

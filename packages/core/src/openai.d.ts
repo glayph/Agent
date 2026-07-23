@@ -1,6 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare module "openai" {
   class OpenAI {
-    constructor(options: { apiKey?: string; baseURL?: string; timeout?: number; maxRetries?: number });
+    constructor(options: {
+      apiKey?: string;
+      baseURL?: string;
+      timeout?: number;
+      maxRetries?: number;
+    });
     chat: OpenAI.Chat;
     models: { list(): Promise<{ data: Array<{ id: string }> }> };
   }
@@ -13,7 +19,14 @@ declare module "openai" {
       export namespace Completions {
         export interface ChatCompletionMessageParam {
           role: string;
-          content: string | null | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+          content:
+            | string
+            | null
+            | Array<{
+                type: string;
+                text?: string;
+                image_url?: { url: string };
+              }>;
           name?: string;
           tool_calls?: any[];
           tool_call_id?: string;

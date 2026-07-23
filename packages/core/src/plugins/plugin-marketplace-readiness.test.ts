@@ -1,10 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import {
-  SkillRegistry,
-  type PluginContracts,
-} from "@hiro/installer";
+import { SkillRegistry, type PluginContracts } from "@hiro/installer";
 import { SqliteAuditLog } from "../audit-log";
 import { buildPluginMarketplaceReadinessReport } from "./plugin-marketplace-readiness";
 

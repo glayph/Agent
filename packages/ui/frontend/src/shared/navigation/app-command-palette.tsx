@@ -30,7 +30,7 @@ import {
   CommandShortcut,
 } from "@/shared/ui/command"
 import { useGateway } from "@/hooks/use-gateway"
-import { usePicoChat } from "@/hooks/use-pico-chat"
+import { useHiroChat } from "@/hooks/use-hiro-chat"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
 import { type ThemePreference, useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
@@ -197,7 +197,7 @@ export function AppCommandPalette({
   const [search, setSearch] = React.useState("")
   const navigate = useNavigate()
   const { i18n, t } = useTranslation()
-  const { newChat } = usePicoChat()
+  const { newChat } = useHiroChat()
   const { preference, setTheme } = useTheme()
   const {
     state: gatewayState,

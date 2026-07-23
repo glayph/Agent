@@ -2,16 +2,8 @@ import { Router, Request, Response } from "express";
 import * as path from "path";
 import { SkillLoader } from "./skill-loader.js";
 import { type RuntimePaths } from "./paths.js";
-import {
-  SkillInstaller,
-  type PluginContractKind,
-} from "@hiro/installer";
-import { getErrorMessage } from "./errors.js";
-import {
-  createSuccessResponse,
-  createErrorResponse,
-  type ApiResponse,
-} from "./skill-utils.js";
+import { SkillInstaller, type PluginContractKind } from "@hiro/installer";
+import { createSuccessResponse, createErrorResponse } from "./skill-utils.js";
 import {
   executeRuntimePluginTool,
   loadRuntimePluginContracts,
@@ -33,17 +25,17 @@ import type { ChannelProbeMode } from "./api/channel-runtime-probe.js";
 import type { ToolRegistry } from "./tools/registry/executor.js";
 
 const PLUGIN_CONTRACT_KINDS = new Set<PluginContractKind>([
-  "tools", "channels", "skills", "providers", "hooks",
+  "tools",
+  "channels",
+  "skills",
+  "providers",
+  "hooks",
 ]);
 const CHANNEL_PROBE_MODES = new Set<ChannelProbeMode>([
-  "mock", "sandbox", "live",
+  "mock",
+  "sandbox",
+  "live",
 ]);
-
-interface AutoSkillInstallRequest {
-  source: string;
-  skillName?: string;
-  requireInstalled?: boolean;
-}
 
 interface AutoSkillInstallResult {
   installed: number;
@@ -73,7 +65,9 @@ interface CreateSkillsRouterOptions {
   toolRegistry?: ToolRegistry;
 }
 
-async function discoverInstalledSkillIds(skillLoader: SkillLoader): Promise<string[]> {
+async function discoverInstalledSkillIds(
+  skillLoader: SkillLoader,
+): Promise<string[]> {
   try {
     const skills = await skillLoader.getAllSkillsMetadata();
     return skills.map((s) => s.id || s.name || "").filter(Boolean);
@@ -82,11 +76,17 @@ async function discoverInstalledSkillIds(skillLoader: SkillLoader): Promise<stri
   }
 }
 
-async function installSkillDirect(skillSpec: string, workspaceDir: string, skillLoader: SkillLoader): Promise<{ result: SkillInstallResult }> {
+async function installSkillDirect(
+  skillSpec: string,
+  workspaceDir: string,
+  skillLoader: SkillLoader,
+): Promise<{ result: SkillInstallResult }> {
   const skillsDir = path.join(workspaceDir, "src", "skills");
   const skillInstaller = new SkillInstaller(skillsDir);
   await skillInstaller.init();
-  const result = (await skillInstaller.install(skillSpec)) as SkillInstallResult;
+  const result = (await skillInstaller.install(
+    skillSpec,
+  )) as SkillInstallResult;
   skillLoader.refreshCache();
   return { result };
 }
@@ -129,12 +129,20 @@ export function createSkillsRouter(
       const action = req.query.action as string | undefined;
       if (!action || action === "list") {
         const skills = await skillLoader.getAllSkillsMetadata();
-        return res.json(createSuccessResponse({ skills, total: skills.length }));
+        return res.json(
+          createSuccessResponse({ skills, total: skills.length }),
+        );
       }
       if (action === "search") {
         const { q, category, tags, limit } = req.query;
         const keywords = q ? (typeof q === "string" ? q.split(",") : [q]) : [];
-        const tagArray = tags ? (typeof tags === "string" ? tags.split(",") : Array.isArray(tags) ? tags : []) : [];
+        const tagArray = tags
+          ? typeof tags === "string"
+            ? tags.split(",")
+            : Array.isArray(tags)
+              ? tags
+              : []
+          : [];
         const searchEngine = skillLoader.getSearchEngine();
         const result = await searchEngine.search({
           keywords: keywords.map((k) => (k as string).trim()),
@@ -143,12 +151,20 @@ export function createSkillsRouter(
           enabled: true,
           limit: limit ? parseInt(limit as string, 10) : 20,
         });
-        return res.json(createSuccessResponse({ results: result.results, total: result.total, executionTimeMs: result.executionTimeMs }));
+        return res.json(
+          createSuccessResponse({
+            results: result.results,
+            total: result.total,
+            executionTimeMs: result.executionTimeMs,
+          }),
+        );
       }
       if (action === "categories") {
         const searchEngine = skillLoader.getSearchEngine();
         const categories = await searchEngine.getCategories();
-        return res.json(createSuccessResponse({ categories, total: categories.length }));
+        return res.json(
+          createSuccessResponse({ categories, total: categories.length }),
+        );
       }
       if (action === "tags") {
         const searchEngine = skillLoader.getSearchEngine();
@@ -161,7 +177,9 @@ export function createSkillsRouter(
       }
       if (action === "loaded") {
         const loaded = skillLoader.getLoadedSkills();
-        return res.json(createSuccessResponse({ loaded, total: loaded.length }));
+        return res.json(
+          createSuccessResponse({ loaded, total: loaded.length }),
+        );
       }
       if (action === "discover") {
         const ids = await discoverInstalledSkillIds(skillLoader);
@@ -173,17 +191,28 @@ export function createSkillsRouter(
         const searchEngine = skillLoader.getSearchEngine();
         if (action === "get" && skillId) {
           const skill = await searchEngine.getSkill(skillId);
-          if (!skill) return res.status(404).json(createErrorResponse("Skill not found"));
+          if (!skill)
+            return res.status(404).json(createErrorResponse("Skill not found"));
           return res.json(createSuccessResponse(skill));
         }
         if (action === "category" && category) {
           const skills = await searchEngine.getCategory(category);
-          return res.json(createSuccessResponse({ skills, total: skills.length }));
+          return res.json(
+            createSuccessResponse({ skills, total: skills.length }),
+          );
         }
       }
-      return res.status(400).json(createErrorResponse(`Unknown action: ${action || "missing action parameter"}`));
+      return res
+        .status(400)
+        .json(
+          createErrorResponse(
+            `Unknown action: ${action || "missing action parameter"}`,
+          ),
+        );
     } catch (err: unknown) {
-      res.status(500).json(createErrorResponse("Failed to process skill request", err));
+      res
+        .status(500)
+        .json(createErrorResponse("Failed to process skill request", err));
     }
   });
 
@@ -191,44 +220,86 @@ export function createSkillsRouter(
     try {
       const action = req.query.action as string | undefined;
       if (action === "contracts" || !action) {
-        const rawKind = typeof req.query.kind === "string" ? req.query.kind : "";
+        const rawKind =
+          typeof req.query.kind === "string" ? req.query.kind : "";
         const kind = rawKind || undefined;
         if (kind && !PLUGIN_CONTRACT_KINDS.has(kind as PluginContractKind)) {
-          return res.status(400).json(createErrorResponse("Invalid contract kind"));
+          return res
+            .status(400)
+            .json(createErrorResponse("Invalid contract kind"));
         }
-        const skillInstaller = new SkillInstaller(path.join(wd, "src", "skills"));
+        const skillInstaller = new SkillInstaller(
+          path.join(wd, "src", "skills"),
+        );
         await skillInstaller.init();
-        const contracts = await skillInstaller.getRegistry().listPluginContracts(kind as PluginContractKind | undefined);
-        return res.json(createSuccessResponse({ contracts, total: contracts.length }));
+        const contracts = await skillInstaller
+          .getRegistry()
+          .listPluginContracts(kind as PluginContractKind | undefined);
+        return res.json(
+          createSuccessResponse({ contracts, total: contracts.length }),
+        );
       }
       if (action === "runtime-contracts") {
-        const rawKind = typeof req.query.kind === "string" ? req.query.kind : "";
+        const rawKind =
+          typeof req.query.kind === "string" ? req.query.kind : "";
         const kind = rawKind || undefined;
         if (kind && !PLUGIN_CONTRACT_KINDS.has(kind as PluginContractKind)) {
-          return res.status(400).json(createErrorResponse("Invalid contract kind"));
+          return res
+            .status(400)
+            .json(createErrorResponse("Invalid contract kind"));
         }
-        const contracts = await loadRuntimePluginContracts(wd, { kind: kind as PluginContractKind | undefined });
-        return res.json(createSuccessResponse({ contracts, total: contracts.length }));
+        const contracts = await loadRuntimePluginContracts(wd, {
+          kind: kind as PluginContractKind | undefined,
+        });
+        return res.json(
+          createSuccessResponse({ contracts, total: contracts.length }),
+        );
       }
       if (action === "channels") {
         const channels = await listRuntimePluginChannelMetadata(wd);
-        return res.json(createSuccessResponse({ channels, total: channels.length }));
+        return res.json(
+          createSuccessResponse({ channels, total: channels.length }),
+        );
       }
       if (action === "providers") {
         const providers = await listRuntimePluginProviderMetadata(wd);
-        return res.json(createSuccessResponse({ providers, total: providers.length }));
+        return res.json(
+          createSuccessResponse({ providers, total: providers.length }),
+        );
       }
       if (action === "marketplace") {
-        const pluginName = typeof req.query.plugin === "string" && req.query.plugin.trim()
-          ? req.query.plugin.trim() : undefined;
-        const includeNonPluginSkills = typeof req.query.includeNonPluginSkills === "string" &&
+        const pluginName =
+          typeof req.query.plugin === "string" && req.query.plugin.trim()
+            ? req.query.plugin.trim()
+            : undefined;
+        const includeNonPluginSkills =
+          typeof req.query.includeNonPluginSkills === "string" &&
           req.query.includeNonPluginSkills.toLowerCase() === "true";
-        const report = await buildPluginMarketplaceReadinessReport(wd, { pluginName, includeNonPluginSkills });
-        return res.json({ success: true, data: report.data, total: report.total, summary: report.summary, generatedAt: report.generatedAt, skillsDir: report.skillsDir, configPath: report.configPath });
+        const report = await buildPluginMarketplaceReadinessReport(wd, {
+          pluginName,
+          includeNonPluginSkills,
+        });
+        return res.json({
+          success: true,
+          data: report.data,
+          total: report.total,
+          summary: report.summary,
+          generatedAt: report.generatedAt,
+          skillsDir: report.skillsDir,
+          configPath: report.configPath,
+        });
       }
-      return res.status(400).json(createErrorResponse(`Unknown action: ${action || "missing action parameter"}`));
+      return res
+        .status(400)
+        .json(
+          createErrorResponse(
+            `Unknown action: ${action || "missing action parameter"}`,
+          ),
+        );
     } catch (err: unknown) {
-      res.status(500).json(createErrorResponse("Failed to process plugin request", err));
+      res
+        .status(500)
+        .json(createErrorResponse("Failed to process plugin request", err));
     }
   });
 
@@ -237,66 +308,165 @@ export function createSkillsRouter(
       const action = req.body.action as string | undefined;
 
       if (action === "call-tool") {
-        const args = req.body.args && typeof req.body.args === "object" ? (req.body.args as Record<string, unknown>) : {};
-        const result = await executeRuntimePluginTool(wd, req.body.toolName || "", args, {
-          actor: "api.skills",
-          requestId: (req as Request & { requestId?: string }).requestId,
-        });
-        return res.status(result.success ? 200 : 400).json(result.success ? createSuccessResponse(result) : createErrorResponse(result.error || "Tool execution failed"));
+        const args =
+          req.body.args && typeof req.body.args === "object"
+            ? (req.body.args as Record<string, unknown>)
+            : {};
+        const result = await executeRuntimePluginTool(
+          wd,
+          req.body.toolName || "",
+          args,
+          {
+            actor: "api.skills",
+            requestId: (req as Request & { requestId?: string }).requestId,
+          },
+        );
+        return res
+          .status(result.success ? 200 : 400)
+          .json(
+            result.success
+              ? createSuccessResponse(result)
+              : createErrorResponse(result.error || "Tool execution failed"),
+          );
       }
 
       if (action === "probe-channel") {
         const body = recordOrEmpty(req.body);
-        const rawConfiguredSecrets = Array.isArray(body.configuredSecrets) ? body.configuredSecrets : Array.isArray(body.configured_secrets) ? body.configured_secrets : [];
-        const configuredSecrets = rawConfiguredSecrets.filter((item): item is string => typeof item === "string");
-        const probe = await probeRuntimePluginChannel(wd, req.body.channelName || "", recordOrEmpty(body.config), {
-          configuredSecrets,
-          mode: parseChannelProbeMode(req.query.mode),
-        });
-        if (!probe) return res.status(404).json(createErrorResponse("Plugin channel not found"));
+        const rawConfiguredSecrets = Array.isArray(body.configuredSecrets)
+          ? body.configuredSecrets
+          : Array.isArray(body.configured_secrets)
+            ? body.configured_secrets
+            : [];
+        const configuredSecrets = rawConfiguredSecrets.filter(
+          (item): item is string => typeof item === "string",
+        );
+        const probe = await probeRuntimePluginChannel(
+          wd,
+          req.body.channelName || "",
+          recordOrEmpty(body.config),
+          {
+            configuredSecrets,
+            mode: parseChannelProbeMode(req.query.mode),
+          },
+        );
+        if (!probe)
+          return res
+            .status(404)
+            .json(createErrorResponse("Plugin channel not found"));
         return res.json(createSuccessResponse(probe));
       }
 
       if (action === "probe-provider") {
-        const result = await probeRuntimePluginProvider(wd, req.body.providerId || "", recordOrEmpty(req.body));
-        if (!result) return res.status(404).json(createErrorResponse("Plugin provider not found"));
-        return res.status(result.success ? 200 : 400).json(result.success ? createSuccessResponse(result) : createErrorResponse(result.error || "Provider probe failed"));
+        const result = await probeRuntimePluginProvider(
+          wd,
+          req.body.providerId || "",
+          recordOrEmpty(req.body),
+        );
+        if (!result)
+          return res
+            .status(404)
+            .json(createErrorResponse("Plugin provider not found"));
+        return res
+          .status(result.success ? 200 : 400)
+          .json(
+            result.success
+              ? createSuccessResponse(result)
+              : createErrorResponse(result.error || "Provider probe failed"),
+          );
       }
 
       if (action === "load") {
         const skillDef = await skillLoader.loadSkill(req.body.skillId || "");
-        if (!skillDef) return res.status(404).json(createErrorResponse("Failed to load skill"));
-        return res.json(createSuccessResponse({ id: skillDef.metadata.id, name: skillDef.metadata.name, loaded: true, indexPath: skillDef.index, tools: skillDef.tools?.length || 0 }));
+        if (!skillDef)
+          return res
+            .status(404)
+            .json(createErrorResponse("Failed to load skill"));
+        return res.json(
+          createSuccessResponse({
+            id: skillDef.metadata.id,
+            name: skillDef.metadata.name,
+            loaded: true,
+            indexPath: skillDef.index,
+            tools: skillDef.tools?.length || 0,
+          }),
+        );
       }
 
-      if (action === "install" || action === "auto-install" || action === "install-direct") {
+      if (
+        action === "install" ||
+        action === "auto-install" ||
+        action === "install-direct"
+      ) {
         const source = req.body.source;
-        if (!source) return res.status(400).json(createErrorResponse("Missing required field: source"));
+        if (!source)
+          return res
+            .status(400)
+            .json(createErrorResponse("Missing required field: source"));
         const installResult = await installSkillDirect(source, wd, skillLoader);
-        const pluginTools = shouldRefreshPluginTools(installResult.result) ? await refreshRuntimePluginTools() : undefined;
+        const pluginTools = shouldRefreshPluginTools(installResult.result)
+          ? await refreshRuntimePluginTools()
+          : undefined;
 
         if (action === "auto-install") {
           const requireInstalled = req.body.requireInstalled ?? false;
-          if (requireInstalled && !installResult.result.success) return res.status(404).json(createErrorResponse("No skills were installed from the given source"));
-          const autoResult: AutoSkillInstallResult = { installed: installResult.result.success ? 1 : 0, source, skillFilter: req.body.skillName, refreshed: true, installedSkills: [], pluginTools };
+          if (requireInstalled && !installResult.result.success)
+            return res
+              .status(404)
+              .json(
+                createErrorResponse(
+                  "No skills were installed from the given source",
+                ),
+              );
+          const autoResult: AutoSkillInstallResult = {
+            installed: installResult.result.success ? 1 : 0,
+            source,
+            skillFilter: req.body.skillName,
+            refreshed: true,
+            installedSkills: [],
+            pluginTools,
+          };
           return res.json(createSuccessResponse(autoResult));
         }
 
-        if (action === "install-direct" && !installResult.result.success && installResult.result.action === "skipped") {
-          return res.json(createSuccessResponse({ ...installResult.result, pluginTools, message: `Skill already installed: ${installResult.result.name}@${installResult.result.version}` }));
+        if (
+          action === "install-direct" &&
+          !installResult.result.success &&
+          installResult.result.action === "skipped"
+        ) {
+          return res.json(
+            createSuccessResponse({
+              ...installResult.result,
+              pluginTools,
+              message: `Skill already installed: ${installResult.result.name}@${installResult.result.version}`,
+            }),
+          );
         }
 
-        return res.json(createSuccessResponse({ ...installResult.result, pluginTools }));
+        return res.json(
+          createSuccessResponse({ ...installResult.result, pluginTools }),
+        );
       }
 
       if (action === "search-registry") {
         const query = req.body.query;
-        if (!query) return res.status(400).json(createErrorResponse("Missing required field: query"));
-        const apiRes = await fetch(`https://www.skills.sh/api/skills?q=${encodeURIComponent(query)}&limit=20`);
-        if (!apiRes.ok) return res.status(502).json(createErrorResponse(`skills.sh API returned ${apiRes.status}`));
+        if (!query)
+          return res
+            .status(400)
+            .json(createErrorResponse("Missing required field: query"));
+        const apiRes = await fetch(
+          `https://www.skills.sh/api/skills?q=${encodeURIComponent(query)}&limit=20`,
+        );
+        if (!apiRes.ok)
+          return res
+            .status(502)
+            .json(
+              createErrorResponse(`skills.sh API returned ${apiRes.status}`),
+            );
         const data = (await apiRes.json()) as RegistrySearchResponse;
         const skills = data.skills || data.data || [];
-        return res.json(createSuccessResponse({ skills, total: skills.length }));
+        return res.json(
+          createSuccessResponse({ skills, total: skills.length }),
+        );
       }
 
       if (action === "reload-cache") {
@@ -306,9 +476,17 @@ export function createSkillsRouter(
         return res.json(createSuccessResponse({ ...stats, pluginTools }));
       }
 
-      return res.status(400).json(createErrorResponse(`Unknown action: ${action || "missing action parameter"}`));
+      return res
+        .status(400)
+        .json(
+          createErrorResponse(
+            `Unknown action: ${action || "missing action parameter"}`,
+          ),
+        );
     } catch (err: unknown) {
-      res.status(500).json(createErrorResponse("Failed to process manage request", err));
+      res
+        .status(500)
+        .json(createErrorResponse("Failed to process manage request", err));
     }
   });
 

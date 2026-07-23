@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/sipeed/owlclaw/pkg/config"
+	"github.com/sipeed/miki/pkg/config"
 )
 
 type channelCatalogItem struct {
@@ -29,7 +29,7 @@ var channelCatalog = []channelCatalogItem{
 	{Name: "wecom", ConfigKey: "wecom"},
 	{Name: "whatsapp", ConfigKey: "whatsapp", Variant: "bridge"},
 	{Name: "whatsapp_native", ConfigKey: "whatsapp", Variant: "native"},
-	{Name: "pico", ConfigKey: "pico"},
+	{Name: "hiro", ConfigKey: "hiro"},
 	{Name: "maixcam", ConfigKey: "maixcam"},
 	{Name: "matrix", ConfigKey: "matrix"},
 	{Name: "irc", ConfigKey: "irc"},
@@ -104,7 +104,7 @@ var channelSecretFieldMap = map[string][]string{
 	"qq":              {"app_secret"},
 	"onebot":          {"access_token"},
 	"wecom":           {"secret"},
-	"pico":            {"token"},
+	"hiro":            {"token"},
 	"matrix":          {"access_token"},
 	"irc":             {"password", "nickserv_password", "sasl_password"},
 	"whatsapp":        {},

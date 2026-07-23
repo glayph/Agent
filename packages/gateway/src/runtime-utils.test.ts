@@ -26,7 +26,7 @@ describe("gateway runtime utilities", () => {
   });
 
   test("rewrites API, webhook, and MCP proxy paths to core routes", () => {
-    expect(rewriteApiProxyPath("/pico/info")).toBe("/api/pico/info");
+    expect(rewriteApiProxyPath("/hiro/info")).toBe("/api/hiro/info");
     expect(rewriteWebhookProxyPath("/whatsapp")).toBe("/webhooks/whatsapp");
     expect(rewriteWebhookProxyPath("/")).toBe("/webhooks");
     expect(rewriteMcpProxyPath("/")).toBe("/mcp");
@@ -34,7 +34,8 @@ describe("gateway runtime utilities", () => {
   });
 
   test("resolves litellm via Hiro_PYTHON_DIR env var (Windows)", () => {
-    const pythonDir = "C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Python314";
+    const pythonDir =
+      "C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Python314";
     const expected = path.win32.join(pythonDir, "Scripts", "litellm.exe");
 
     expect(
@@ -47,7 +48,8 @@ describe("gateway runtime utilities", () => {
   });
 
   test("resolves litellm via Hiro_PYTHON_DIR .cmd script (Windows, uses shell)", () => {
-    const pythonDir = "C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Python314";
+    const pythonDir =
+      "C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Python314";
     const expected = path.win32.join(pythonDir, "Scripts", "litellm.cmd");
 
     expect(

@@ -310,9 +310,9 @@ channels:
   whatsapp:
     enabled: true
     type: whatsapp
-  pico:
+  hiro:
     enabled: true
-    type: pico
+    type: hiro
   matrix:
     enabled: true
     type: matrix
@@ -356,9 +356,9 @@ channel_list:
   whatsapp:
     enabled: true
     type: whatsapp
-  pico:
+  hiro:
     enabled: true
-    type: pico
+    type: hiro
   matrix:
     enabled: true
     type: matrix

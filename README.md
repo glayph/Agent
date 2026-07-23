@@ -43,7 +43,7 @@ It is a **Monorepo** with 8 packages, each responsible for a distinct layer of t
 ## Monorepo Structure
 
 ```
-Nexus/
+miki/
 ├── packages/
 │   ├── core/          ← Agent engine (TypeScript) — the brain
 │   ├── gateway/       ← Process orchestrator + LiteLLM manager (TypeScript)
@@ -54,7 +54,7 @@ Nexus/
 │   ├── ui/
 │   │   ├── frontend/  ← React + Vite Web UI (TypeScript/TSX)
 │   │   └── backend/   ← Go HTTP server (legacy + stub)
-│   └── cli/           ← Go TUI terminal launcher (nexusagent-cli)
+│   └── cli/           ← Go TUI terminal launcher (mikiagent-cli)
 ├── config/
 │   ├── agent.yaml     ← Agent personality, specialists, channels config
 │   ├── litellm.yaml   ← LiteLLM proxy config
@@ -486,7 +486,7 @@ installer/src/
 ```
 ui/backend/
 ├── main.go (708 lines)    → Legacy Go HTTP server (build tag: legacy_backend)
-│   └── owlclaw Web Console — WebSocket chat + config management
+│   └── miki Web Console — WebSocket chat + config management
 ├── stub_main.go           → Minimal stub (no external deps)
 ├── systray.go             → System tray icon support
 ├── i18n.go                → Internationalization
@@ -498,11 +498,11 @@ ui/backend/
 └── model/                 → Data models
 ```
 
-> Legacy Go backend requires external `owlclaw` pkg deps. Normally, `stub_main.go` compiles without them.
+> Legacy Go backend requires external `miki` pkg deps. Normally, `stub_main.go` compiles without them.
 
 ### `packages/cli` — Go TUI Launcher
 
-Terminal-based launcher written in Go (`nexusagent-cli`, 20MB compiled):
+Terminal-based launcher written in Go (`mikiagent-cli`, 20MB compiled):
 
 ```
 cli/
@@ -555,7 +555,7 @@ cli/
 bin/Hiro.js (Entry Point)
        │
        ▼
-[CLI Go Launcher] ──→ nexusagent-cli
+[CLI Go Launcher] ──→ mikiagent-cli
        │
        ▼
 packages/gateway/dist/index.js  (Gateway Server — port 18800)
@@ -647,7 +647,7 @@ The runtime includes functional Node adapters for the following channels:
 - Feishu/Lark webhook flows
 - DingTalk webhook flows
 - QQ webhook callbacks
-- Pico (built-in web chat)
+- hiro (built-in web chat)
 
 The repository also contains forms and config surfaces for WeChat/WeCom, but the
 live runtime adapters for those services are currently partial and require more

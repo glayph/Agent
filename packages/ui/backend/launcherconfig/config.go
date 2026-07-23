@@ -17,7 +17,7 @@ const (
 	// DefaultPort is the default port for the web launcher.
 	DefaultPort = 18800
 	// EnvLauncherHost overrides launcher listen host.
-	EnvLauncherHost = "owlclaw_LAUNCHER_HOST"
+	EnvLauncherHost = "miki_LAUNCHER_HOST"
 )
 
 // Config stores launch parameters for the web backend service.

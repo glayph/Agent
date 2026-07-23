@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/fileutil"
-	"github.com/sipeed/owlclaw/pkg/providers"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/fileutil"
+	"github.com/sipeed/miki/pkg/providers"
 )
 
 // CatalogModel represents a single model entry in a saved catalog.

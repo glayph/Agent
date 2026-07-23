@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/memory"
-	"github.com/sipeed/owlclaw/pkg/providers"
-	"github.com/sipeed/owlclaw/pkg/providers/messageutil"
-	"github.com/sipeed/owlclaw/pkg/session"
-	"github.com/sipeed/owlclaw/pkg/utils"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/memory"
+	"github.com/sipeed/miki/pkg/providers"
+	"github.com/sipeed/miki/pkg/providers/messageutil"
+	"github.com/sipeed/miki/pkg/session"
+	"github.com/sipeed/miki/pkg/utils"
 )
 
 // registerSessionRoutes binds session list and detail endpoints to the ServeMux.
@@ -66,11 +66,11 @@ type sessionChatAttachment struct {
 	ContentType string `json:"content_type,omitempty"`
 }
 
-// legacyPicoSessionPrefix is the legacy key prefix used by older Pico JSON/JSONL
+// legacyhiroSessionPrefix is the legacy key prefix used by older hiro JSON/JSONL
 // sessions before structured scope metadata existed.
 const (
-	legacyPicoSessionPrefix = "agent:main:pico:direct:pico:"
-	picoSessionPrefix       = legacyPicoSessionPrefix
+	legacyhiroSessionPrefix = "agent:main:hiro:direct:hiro:"
+	hiroSessionPrefix       = legacyhiroSessionPrefix
 
 	// Keep the session API aligned with the shared JSONL store reader limit in
 	// pkg/memory/jsonl.go so oversized lines fail consistently everywhere.
@@ -85,11 +85,11 @@ func defaultToolFeedbackMaxArgsLength() int {
 	return defaults.GetToolFeedbackMaxArgsLength()
 }
 
-// extractLegacyPicoSessionID extracts the session UUID from an old Pico key.
-// Returns the UUID and true if the key matches the Pico session pattern.
-func extractLegacyPicoSessionID(key string) (string, bool) {
-	if strings.HasPrefix(key, legacyPicoSessionPrefix) {
-		return strings.TrimPrefix(key, legacyPicoSessionPrefix), true
+// extractLegacyhiroSessionID extracts the session UUID from an old hiro key.
+// Returns the UUID and true if the key matches the hiro session pattern.
+func extractLegacyhiroSessionID(key string) (string, bool) {
+	if strings.HasPrefix(key, legacyhiroSessionPrefix) {
+		return strings.TrimPrefix(key, legacyhiroSessionPrefix), true
 	}
 	return "", false
 }
@@ -208,18 +208,18 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 	}, nil
 }
 
-type picoJSONLSessionRef struct {
+type hiroJSONLSessionRef struct {
 	ID  string
 	Key string
 }
 
-type picoLegacySessionRef struct {
+type hiroLegacySessionRef struct {
 	ID   string
 	Path string
 }
 
-func extractPicoSessionIDFromScope(scope session.SessionScope) (string, bool) {
-	if !strings.EqualFold(strings.TrimSpace(scope.Channel), "pico") {
+func extracthiroSessionIDFromScope(scope session.SessionScope) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(scope.Channel), "hiro") {
 		return "", false
 	}
 
@@ -231,8 +231,8 @@ func extractPicoSessionIDFromScope(scope session.SessionScope) (string, bool) {
 		if candidate == "" {
 			continue
 		}
-		if idx := strings.Index(candidate, "pico:"); idx >= 0 {
-			sessionID := strings.TrimSpace(candidate[idx+len("pico:"):])
+		if idx := strings.Index(candidate, "hiro:"); idx >= 0 {
+			sessionID := strings.TrimSpace(candidate[idx+len("hiro:"):])
 			if sessionID != "" {
 				return sessionID, true
 			}
@@ -241,44 +241,44 @@ func extractPicoSessionIDFromScope(scope session.SessionScope) (string, bool) {
 	return "", false
 }
 
-func sessionRefFromMeta(meta memory.SessionMeta) (picoJSONLSessionRef, bool) {
+func sessionRefFromMeta(meta memory.SessionMeta) (hiroJSONLSessionRef, bool) {
 	if len(meta.Scope) == 0 {
-		if sessionID, ok := extractLegacyPicoSessionID(meta.Key); ok {
-			return picoJSONLSessionRef{ID: sessionID, Key: meta.Key}, true
+		if sessionID, ok := extractLegacyhiroSessionID(meta.Key); ok {
+			return hiroJSONLSessionRef{ID: sessionID, Key: meta.Key}, true
 		}
 		for _, alias := range meta.Aliases {
-			if sessionID, ok := extractLegacyPicoSessionID(alias); ok {
-				return picoJSONLSessionRef{ID: sessionID, Key: meta.Key}, true
+			if sessionID, ok := extractLegacyhiroSessionID(alias); ok {
+				return hiroJSONLSessionRef{ID: sessionID, Key: meta.Key}, true
 			}
 		}
-		return picoJSONLSessionRef{}, false
+		return hiroJSONLSessionRef{}, false
 	}
 	var scope session.SessionScope
 	if err := json.Unmarshal(meta.Scope, &scope); err != nil {
-		return picoJSONLSessionRef{}, false
+		return hiroJSONLSessionRef{}, false
 	}
-	sessionID, ok := extractPicoSessionIDFromScope(scope)
+	sessionID, ok := extracthiroSessionIDFromScope(scope)
 	if !ok {
-		if legacySessionID, ok := extractLegacyPicoSessionID(meta.Key); ok {
-			return picoJSONLSessionRef{ID: legacySessionID, Key: meta.Key}, true
+		if legacySessionID, ok := extractLegacyhiroSessionID(meta.Key); ok {
+			return hiroJSONLSessionRef{ID: legacySessionID, Key: meta.Key}, true
 		}
 		for _, alias := range meta.Aliases {
-			if legacySessionID, ok := extractLegacyPicoSessionID(alias); ok {
-				return picoJSONLSessionRef{ID: legacySessionID, Key: meta.Key}, true
+			if legacySessionID, ok := extractLegacyhiroSessionID(alias); ok {
+				return hiroJSONLSessionRef{ID: legacySessionID, Key: meta.Key}, true
 			}
 		}
-		return picoJSONLSessionRef{}, false
+		return hiroJSONLSessionRef{}, false
 	}
-	return picoJSONLSessionRef{ID: sessionID, Key: meta.Key}, true
+	return hiroJSONLSessionRef{ID: sessionID, Key: meta.Key}, true
 }
 
-func (h *Handler) findPicoJSONLSessions(dir string) ([]picoJSONLSessionRef, error) {
+func (h *Handler) findhiroJSONLSessions(dir string) ([]hiroJSONLSessionRef, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	refs := make([]picoJSONLSessionRef, 0)
+	refs := make([]hiroJSONLSessionRef, 0)
 	seen := make(map[string]struct{})
 	metaBackedBases := make(map[string]struct{})
 	for _, entry := range entries {
@@ -325,26 +325,26 @@ func (h *Handler) findPicoJSONLSessions(dir string) ([]picoJSONLSessionRef, erro
 	return refs, nil
 }
 
-func (h *Handler) findPicoJSONLSession(dir, sessionID string) (picoJSONLSessionRef, error) {
-	refs, err := h.findPicoJSONLSessions(dir)
+func (h *Handler) findhiroJSONLSession(dir, sessionID string) (hiroJSONLSessionRef, error) {
+	refs, err := h.findhiroJSONLSessions(dir)
 	if err != nil {
-		return picoJSONLSessionRef{}, err
+		return hiroJSONLSessionRef{}, err
 	}
 	for _, ref := range refs {
 		if ref.ID == sessionID {
 			return ref, nil
 		}
 	}
-	return picoJSONLSessionRef{}, os.ErrNotExist
+	return hiroJSONLSessionRef{}, os.ErrNotExist
 }
 
-func (h *Handler) findLegacyPicoSessions(dir string) ([]picoLegacySessionRef, error) {
+func (h *Handler) findLegacyhiroSessions(dir string) ([]hiroLegacySessionRef, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	refs := make([]picoLegacySessionRef, 0)
+	refs := make([]hiroLegacySessionRef, 0)
 	seen := make(map[string]struct{})
 	for _, entry := range entries {
 		name := entry.Name()
@@ -358,7 +358,7 @@ func (h *Handler) findLegacyPicoSessions(dir string) ([]picoLegacySessionRef, er
 			continue
 		}
 
-		sessionID, ok := extractLegacyPicoSessionID(sess.Key)
+		sessionID, ok := extractLegacyhiroSessionID(sess.Key)
 		if !ok || sessionID == "" {
 			continue
 		}
@@ -366,53 +366,53 @@ func (h *Handler) findLegacyPicoSessions(dir string) ([]picoLegacySessionRef, er
 			continue
 		}
 		seen[sessionID] = struct{}{}
-		refs = append(refs, picoLegacySessionRef{ID: sessionID, Path: path})
+		refs = append(refs, hiroLegacySessionRef{ID: sessionID, Path: path})
 	}
 	return refs, nil
 }
 
-func jsonlSessionRefFromFilename(name string) (picoJSONLSessionRef, bool) {
+func jsonlSessionRefFromFilename(name string) (hiroJSONLSessionRef, bool) {
 	if !strings.HasSuffix(name, ".jsonl") {
-		return picoJSONLSessionRef{}, false
+		return hiroJSONLSessionRef{}, false
 	}
 	base := strings.TrimSuffix(name, ".jsonl")
 	if base == "" {
-		return picoJSONLSessionRef{}, false
+		return hiroJSONLSessionRef{}, false
 	}
 
-	legacyPrefix := sanitizeSessionKey(legacyPicoSessionPrefix)
+	legacyPrefix := sanitizeSessionKey(legacyhiroSessionPrefix)
 	if strings.HasPrefix(base, legacyPrefix) {
 		sessionID := strings.TrimPrefix(base, legacyPrefix)
 		if sessionID == "" {
-			return picoJSONLSessionRef{}, false
+			return hiroJSONLSessionRef{}, false
 		}
-		return picoJSONLSessionRef{
+		return hiroJSONLSessionRef{
 			ID:  sessionID,
-			Key: legacyPicoSessionPrefix + sessionID,
+			Key: legacyhiroSessionPrefix + sessionID,
 		}, true
 	}
 
 	if session.IsOpaqueSessionKey(base) {
-		return picoJSONLSessionRef{
+		return hiroJSONLSessionRef{
 			ID:  base,
 			Key: base,
 		}, true
 	}
 
-	return picoJSONLSessionRef{}, false
+	return hiroJSONLSessionRef{}, false
 }
 
-func (h *Handler) findLegacyPicoSession(dir, sessionID string) (picoLegacySessionRef, error) {
-	refs, err := h.findLegacyPicoSessions(dir)
+func (h *Handler) findLegacyhiroSession(dir, sessionID string) (hiroLegacySessionRef, error) {
+	refs, err := h.findLegacyhiroSessions(dir)
 	if err != nil {
-		return picoLegacySessionRef{}, err
+		return hiroLegacySessionRef{}, err
 	}
 	for _, ref := range refs {
 		if ref.ID == sessionID {
 			return ref, nil
 		}
 	}
-	return picoLegacySessionRef{}, os.ErrNotExist
+	return hiroLegacySessionRef{}, os.ErrNotExist
 }
 
 func buildSessionListItem(sessionID string, sess sessionFile, toolFeedbackMaxArgsLength int) sessionListItem {
@@ -541,7 +541,7 @@ func sessionTranscriptMessages(
 			)
 			visibleToolMessages := visibleAssistantToolMessages(msg.ToolCalls, msg.ModelName, msg.CreatedAt)
 
-			// Pico web chat can persist both visible `message` tool output and a
+			// hiro web chat can persist both visible `message` tool output and a
 			// later plain assistant reply in the same turn. Hide only the fixed
 			// internal summary that marks handled tool delivery.
 			content := msg.Content
@@ -778,7 +778,7 @@ func parseMessageToolContent(argsJSON string) (string, bool) {
 }
 
 // sessionsDir resolves the path to the gateway's session storage directory.
-// It reads the workspace from config, falling back to ~/.owlclaw/workspace.
+// It reads the workspace from config, falling back to ~/.miki/workspace.
 func (h *Handler) sessionsDir() (string, error) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
@@ -800,7 +800,7 @@ func (h *Handler) sessionRuntimeSettings() (string, int, error) {
 func resolveSessionsDir(workspace string) string {
 	if workspace == "" {
 		home, _ := os.UserHomeDir()
-		workspace = filepath.Join(home, ".owlclaw", "workspace")
+		workspace = filepath.Join(home, ".miki", "workspace")
 	}
 
 	// Expand ~ prefix
@@ -816,7 +816,7 @@ func resolveSessionsDir(workspace string) string {
 	return filepath.Join(workspace, "sessions")
 }
 
-// handleListSessions returns a list of Pico session summaries.
+// handleListSessions returns a list of hiro session summaries.
 //
 //	GET /api/sessions
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -836,7 +836,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	items := []sessionListItem{}
 	seen := make(map[string]struct{})
 
-	if refs, findErr := h.findPicoJSONLSessions(dir); findErr == nil {
+	if refs, findErr := h.findhiroJSONLSessions(dir); findErr == nil {
 		for _, ref := range refs {
 			sess, loadErr := h.readJSONLSession(dir, ref.Key)
 			if loadErr != nil || isEmptySession(sess) {
@@ -847,7 +847,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if legacyRefs, findErr := h.findLegacyPicoSessions(dir); findErr == nil {
+	if legacyRefs, findErr := h.findLegacyhiroSessions(dir); findErr == nil {
 		for _, ref := range legacyRefs {
 			if _, exists := seen[ref.ID]; exists {
 				continue
@@ -912,7 +912,7 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ref, refErr := h.findPicoJSONLSession(dir, sessionID)
+	ref, refErr := h.findhiroJSONLSession(dir, sessionID)
 	var sess sessionFile
 	err = refErr
 	if refErr == nil {
@@ -923,7 +923,7 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if legacyRef, legacyErr := h.findLegacyPicoSession(dir, sessionID); legacyErr == nil {
+			if legacyRef, legacyErr := h.findLegacyhiroSession(dir, sessionID); legacyErr == nil {
 				sess, err = h.readLegacySession(legacyRef.Path)
 			}
 			if err == nil && isEmptySession(sess) {
@@ -977,7 +977,7 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	removed := false
-	if ref, err := h.findPicoJSONLSession(dir, sessionID); err == nil {
+	if ref, err := h.findhiroJSONLSession(dir, sessionID); err == nil {
 		base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
 		for _, path := range []string{base + ".jsonl", base + ".meta.json"} {
 			if err := os.Remove(path); err != nil {
@@ -991,7 +991,7 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if legacyRef, err := h.findLegacyPicoSession(dir, sessionID); err == nil {
+	if legacyRef, err := h.findLegacyhiroSession(dir, sessionID); err == nil {
 		if err := os.Remove(legacyRef.Path); err != nil {
 			if !os.IsNotExist(err) {
 				http.Error(w, "failed to delete session", http.StatusInternalServerError)

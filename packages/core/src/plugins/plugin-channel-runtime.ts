@@ -507,9 +507,7 @@ export class PluginChannelRuntimeManager {
         return;
       }
       stdoutBuffer += chunk.toString("utf-8");
-      const lines = stdoutBuffer.split(/
-?
-/);
+      const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || "";
       for (const line of lines) {
         this.handlePluginLine(processState, line).catch((error) => {
@@ -523,21 +521,8 @@ export class PluginChannelRuntimeManager {
     });
 
     processState.child.stderr.on("data", (chunk: Buffer) => {
-      // Count stderr toward the shared output budget to prevent unbounded growth
-      processState.outputBytes += chunk.byteLength;
-      if (processState.outputBytes > maxOutputBytes) {
-        console.warn(
-          `Plugin channel ${processState.key}: stderr exceeded max_output_bytes (${maxOutputBytes}), terminating`
-        );
-        processState.child.kill("SIGTERM");
-        return;
-      }
       stderrBuffer += chunk.toString("utf-8");
-      // Cap partial stderrBuffer to prevent unbounded memory on lines without newline
-      if (stderrBuffer.length > 8192) {
-        stderrBuffer = stderrBuffer.slice(-4096);
-      }
-      const lines = stderrBuffer.split(/\n?\n/);
+      const lines = stderrBuffer.split(/\r?\n/);
       stderrBuffer = lines.pop() || "";
       for (const line of lines) {
         if (line.trim()) {
@@ -706,8 +691,7 @@ export class PluginChannelRuntimeManager {
     ) {
       return;
     }
-    processState.child.stdin.write(`${JSON.stringify(payload)}
-`);
+    processState.child.stdin.write(`${JSON.stringify(payload)}\n`);
   }
 
   private stopProcess(key: string, reason: string): void {

@@ -46,7 +46,7 @@ function npmCommand() {
 // ── Step 1: TypeScript compilation ─────────────────────────────────────────────
 function buildTypeScript() {
   log("Building TypeScript packages (tsc -b)...");
-  run("npx", ["tsc", "-b", "--force"], { cwd: root, shell: true });
+  run("npx", ["tsc", "-b", "--force"], { cwd: root });
   log("TypeScript build complete");
 }
 

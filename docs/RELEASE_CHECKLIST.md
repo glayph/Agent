@@ -46,7 +46,7 @@ it.
 - `GET /gateway/health` reports healthy gateway state.
 - `GET /api/health` and `GET /api/status` are reachable through the gateway.
 - `GET /api/enhancements/health/full` returns a full health report.
-- Pico/Web chat works through `/pico/ws`.
+- hiro/Web chat works through `/hiro/ws`.
 - MCP is reachable only when `ENABLE_MCP=true` and a strong `API_KEY_SECRET`
   is configured.
 - Shutdown drains HTTP/WebSocket connections and terminates child processes.

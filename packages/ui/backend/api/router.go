@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sipeed/owlclaw/web/backend/launcherconfig"
+	"github.com/sipeed/miki/web/backend/launcherconfig"
 )
 
 // Handler serves HTTP API requests.
@@ -52,7 +52,7 @@ func (h *Handler) SetServerOptions(port int, public bool, publicExplicit bool, a
 }
 
 // SetServerBindHost stores the launcher's effective bind host.
-// When explicit is true, hostInput is the normalized -host / owlclaw_LAUNCHER_HOST value.
+// When explicit is true, hostInput is the normalized -host / miki_LAUNCHER_HOST value.
 func (h *Handler) SetServerBindHost(hostInput string, explicit bool) {
 	h.serverHostInput = strings.TrimSpace(hostInput)
 	if !explicit {
@@ -70,8 +70,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Config CRUD
 	h.registerConfigRoutes(mux)
 
-	// Pico Channel (WebSocket chat)
-	h.registerPicoRoutes(mux)
+	// hiro Channel (WebSocket chat)
+	h.registerhiroRoutes(mux)
 
 	// Gateway process lifecycle
 	h.registerGatewayRoutes(mux)

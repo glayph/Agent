@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/auth"
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/providers"
+	"github.com/sipeed/miki/pkg/auth"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/providers"
 )
 
 func resetModelProbeHooks(t *testing.T) {
@@ -1075,7 +1075,7 @@ func TestHandleAddModel_PersistsCustomHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/models", bytes.NewBufferString(`{
 		"model_name":"new-model-headers",
 		"model":"openai/gpt-4o-mini",
-		"custom_headers":{"X-Source":"coding-plan","X-Agent":"owlclaw"}
+		"custom_headers":{"X-Source":"coding-plan","X-Agent":"miki"}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	mux.ServeHTTP(rec, req)
@@ -1099,8 +1099,8 @@ func TestHandleAddModel_PersistsCustomHeaders(t *testing.T) {
 	if got := added.CustomHeaders["X-Source"]; got != "coding-plan" {
 		t.Fatalf("custom_headers[X-Source] = %q, want %q", got, "coding-plan")
 	}
-	if got := added.CustomHeaders["X-Agent"]; got != "owlclaw" {
-		t.Fatalf("custom_headers[X-Agent] = %q, want %q", got, "owlclaw")
+	if got := added.CustomHeaders["X-Agent"]; got != "miki" {
+		t.Fatalf("custom_headers[X-Agent] = %q, want %q", got, "miki")
 	}
 }
 
@@ -2604,13 +2604,13 @@ func TestHandleFetchModels_ModelIndexUsesStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	tmp := t.TempDir()
-	oldHome := os.Getenv("owlclaw_HOME")
-	t.Setenv("owlclaw_HOME", filepath.Join(tmp, ".owlclaw"))
+	oldHome := os.Getenv("miki_HOME")
+	t.Setenv("miki_HOME", filepath.Join(tmp, ".miki"))
 	defer func() {
 		if oldHome != "" {
-			os.Setenv("owlclaw_HOME", oldHome)
+			os.Setenv("miki_HOME", oldHome)
 		} else {
-			os.Unsetenv("owlclaw_HOME")
+			os.Unsetenv("miki_HOME")
 		}
 	}()
 
@@ -2669,7 +2669,7 @@ func TestHandleFetchModels_ModelIndexProviderMismatchRejectsKey(t *testing.T) {
 	defer srv.Close()
 
 	tmp := t.TempDir()
-	t.Setenv("owlclaw_HOME", filepath.Join(tmp, ".owlclaw"))
+	t.Setenv("miki_HOME", filepath.Join(tmp, ".miki"))
 
 	cfg := config.DefaultConfig()
 	cfg.ModelList = []*config.ModelConfig{

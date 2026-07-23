@@ -15,7 +15,7 @@ const MarkdownRenderer = lazy(() => import("./markdown-renderer"))
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { MessageCodeBlock } from "@/features/chat/components/message-code-block"
 import { Button } from "@/shared/ui/button"
-import { formatMessageTime } from "@/hooks/use-pico-chat"
+import { formatMessageTime } from "@/hooks/use-hiro-chat"
 import { cn } from "@/lib/utils"
 import {
   type AssistantMessageKind,

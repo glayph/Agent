@@ -11,7 +11,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/sipeed/owlclaw/pkg/logger"
+	"github.com/sipeed/miki/pkg/logger"
 )
 
 //go:embed all:dist

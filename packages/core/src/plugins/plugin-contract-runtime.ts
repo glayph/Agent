@@ -652,12 +652,15 @@ function runtimeCommand(runtime: RuntimePluginEntrypointRuntime): {
   return { command: "python", args: [] };
 }
 
-function buildPluginEnvironment(paths: RuntimePaths, sandbox: {
-  filesystem: "none" | "read" | "write";
-  network: boolean;
-  secrets: boolean;
-  shell: boolean;
-}): NodeJS.ProcessEnv {
+function buildPluginEnvironment(
+  paths: RuntimePaths,
+  sandbox: {
+    filesystem: "none" | "read" | "write";
+    network: boolean;
+    secrets: boolean;
+    shell: boolean;
+  },
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     Hiro_PLUGIN_SANDBOX: "1",
     Hiro_WORKSPACE_DIR: paths.sourceDir || paths.configDir,
@@ -667,7 +670,7 @@ function buildPluginEnvironment(paths: RuntimePaths, sandbox: {
     Hiro_SANDBOX_SHELL: sandbox.shell.toString(),
     NODE_ENV: "production",
   };
-  
+
   // Limit environment variables for better isolation
   const allowedEnvVars = [
     "PATH",
@@ -680,11 +683,11 @@ function buildPluginEnvironment(paths: RuntimePaths, sandbox: {
     "HOME",
     "USERPROFILE",
   ];
-  
+
   for (const key of allowedEnvVars) {
     if (process.env[key]) env[key] = process.env[key];
   }
-  
+
   return env;
 }
 
@@ -955,8 +958,14 @@ export async function executeRuntimePluginContract(
           shell: contract.readiness.sandbox.shell,
         },
       },
-      timeoutMs: options.timeoutMs || policy.execution_timeout_ms || DEFAULT_EXECUTION_TIMEOUT_MS,
-      maxOutputBytes: options.maxOutputBytes || policy.max_output_bytes || DEFAULT_MAX_OUTPUT_BYTES,
+      timeoutMs:
+        options.timeoutMs ||
+        policy.execution_timeout_ms ||
+        DEFAULT_EXECUTION_TIMEOUT_MS,
+      maxOutputBytes:
+        options.maxOutputBytes ||
+        policy.max_output_bytes ||
+        DEFAULT_MAX_OUTPUT_BYTES,
       sandbox: contract.readiness.sandbox,
     });
     recordPluginExecutionAudit(audit, options, {

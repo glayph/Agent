@@ -12,7 +12,7 @@ const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
   onebot: ["access_token"],
   whatsapp: ["webhook_token"],
   wecom: ["secret", "corp_secret", "webhook_url"],
-  pico: ["token"],
+  hiro: ["token"],
   matrix: ["access_token"],
   irc: ["password", "nickserv_password", "sasl_password"],
   mqtt: ["username", "password"],
@@ -31,7 +31,7 @@ const CHANNEL_REQUIRED_FIELDS: Record<string, string[]> = {
   wecom: ["bot_id"],
   whatsapp: ["bridge_url"],
   whatsapp_native: ["config"],
-  pico: ["token"],
+  hiro: ["token"],
   maixcam: ["host"],
   matrix: ["homeserver_url", "user_id", "access_token"],
   irc: ["server", "nick"],
@@ -98,7 +98,7 @@ interface BuildChannelRuntimeProbeOptions {
   config: JsonRecord;
   configuredSecrets?: string[];
   env?: NodeJS.ProcessEnv;
-  hasPicoToken?: boolean;
+  hashiroToken?: boolean;
   mode?: ChannelProbeMode;
   extraChecks?: ChannelRuntimeProbeCheck[];
 }
@@ -236,7 +236,7 @@ function configuredFieldSetForEnv(
   for (const [field, envKey] of Object.entries(envMap)) {
     if (env[envKey]) fields.add(field);
   }
-  if (channelName === "pico") fields.add("token");
+  if (channelName === "hiro") fields.add("token");
   for (const field of Object.keys(config)) {
     if (fieldConfigured(config, field)) fields.add(field);
   }
@@ -330,7 +330,7 @@ export function buildChannelRuntimeProbe({
         : `Missing required saved fields: ${missingFields.join(", ")}.`,
   });
 
-  const enabledIsRequired = channel.name !== "pico";
+  const enabledIsRequired = channel.name !== "hiro";
   const disableEnvKey = CHANNEL_ENV_DISABLE_FLAGS[channel.name];
   const disabledByEnv = Boolean(
     disableEnvKey && env[disableEnvKey] === "false",
@@ -526,7 +526,7 @@ export function buildChannelRuntimeProbe({
     runtime_status: runtimeStatus,
     probe_status: probeStatus,
     agent_connected: probeStatus === "ready",
-    enabled: enabled || channel.name === "pico",
+    enabled: enabled || channel.name === "hiro",
     configured,
     missing_fields: missingFields,
     checks,

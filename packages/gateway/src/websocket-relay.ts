@@ -21,14 +21,19 @@ export function firstHeaderValue(value: string | string[] | undefined): string {
   return value || "";
 }
 
-export function rejectWsUpgrade(socket: Duplex, statusCode: 401 | 403, reason: string): void {
+export function rejectWsUpgrade(
+  socket: Duplex,
+  statusCode: 401 | 403,
+  reason: string,
+): void {
   const body = JSON.stringify({ error: reason });
   socket.write(
     `HTTP/1.1 ${statusCode} ${reason}\r\n` +
-    "Connection: close\r\n" +
-    "Content-Type: application/json\r\n" +
-    `Content-Length: ${Buffer.byteLength(body)}\r\n` +
-    "\r\n" + body,
+      "Connection: close\r\n" +
+      "Content-Type: application/json\r\n" +
+      `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+      "\r\n" +
+      body,
   );
   socket.destroy();
 }
@@ -41,7 +46,9 @@ export function hasWsAuthMaterial(request: http.IncomingMessage): boolean {
   );
 }
 
-function forwardedWsHeaders(request: http.IncomingMessage): Record<string, string> {
+function forwardedWsHeaders(
+  request: http.IncomingMessage,
+): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const key of ["cookie", "authorization", "x-api-key", "origin"]) {
     const value = firstHeaderValue(request.headers[key]);
@@ -56,7 +63,9 @@ export function relayWs(
   request: http.IncomingMessage,
   activeConnections: Set<WSWebSocket>,
 ): void {
-  const coreWs = new WSWebSocket(coreUrl, { headers: forwardedWsHeaders(request) });
+  const coreWs = new WSWebSocket(coreUrl, {
+    headers: forwardedWsHeaders(request),
+  });
   const earlyMessages: Buffer[] = [];
   activeConnections.add(clientWs);
 
@@ -64,7 +73,11 @@ export function relayWs(
 
   const cleanup = () => {
     activeConnections.delete(clientWs);
-    try { coreWs.close(); } catch { /* ignore */ }
+    try {
+      coreWs.close();
+    } catch {
+      /* ignore */
+    }
     clearInterval(idleTimer);
   };
 
@@ -73,12 +86,16 @@ export function relayWs(
     if (Date.now() - lastActivity > WS_IDLE_TIMEOUT_MS) {
       try {
         clientWs.close(1001, "Idle timeout");
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       cleanup();
     }
   }, WS_IDLE_CHECK_INTERVAL_MS);
   // Don't keep Node alive solely for idle timers
-  (idleTimer as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.();
+  (
+    idleTimer as ReturnType<typeof setInterval> & { unref?: () => void }
+  ).unref?.();
 
   clientWs.on("message", (data) => {
     lastActivity = Date.now();
@@ -86,7 +103,8 @@ export function relayWs(
       coreWs.send(data);
     } else if (earlyMessages.length < MAX_EARLY_MESSAGES) {
       if (Buffer.isBuffer(data)) earlyMessages.push(data);
-      else if (data instanceof ArrayBuffer) earlyMessages.push(Buffer.from(data));
+      else if (data instanceof ArrayBuffer)
+        earlyMessages.push(Buffer.from(data));
       else earlyMessages.push(Buffer.from(data.toString()));
     }
   });
@@ -104,16 +122,25 @@ export function relayWs(
 
   clientWs.on("close", cleanup);
   clientWs.on("error", cleanup);
-  coreWs.on("close", () => { activeConnections.delete(clientWs); clearInterval(idleTimer); });
-  coreWs.on("error", () => { activeConnections.delete(clientWs); clearInterval(idleTimer); });
+  coreWs.on("close", () => {
+    activeConnections.delete(clientWs);
+    clearInterval(idleTimer);
+  });
+  coreWs.on("error", () => {
+    activeConnections.delete(clientWs);
+    clearInterval(idleTimer);
+  });
 }
 
 export function closeWebSocketServer(wss: WebSocketServer): Promise<void> {
   return new Promise((resolve) => {
     for (const ws of wss.clients) {
-      try { ws.close(1001, "Server shutdown"); } catch { /* ignore */ }
+      try {
+        ws.close(1001, "Server shutdown");
+      } catch {
+        /* ignore */
+      }
     }
     wss.close(() => resolve());
   });
 }
-

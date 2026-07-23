@@ -126,36 +126,36 @@
 - Impact: the dashboard can show Mention Only disabled while the Discord bot still requires mentions or configured prefixes. Users will think the bot should answer normal messages, but backend filtering rejects them.
 - Recommended fix: make the Discord form default match the runtime (`groupTriggerConfig.mention_only !== false`) or change the runtime default to false and migrate existing configs intentionally.
 
-### 64. Pico channel token field is disconnected from WebSocket authentication
+### 64. hiro channel token field is disconnected from WebSocket authentication
 
 - Evidence:
-  - `packages/ui/frontend/src/components/channels/channel-config-model.ts:135-136` treats Pico `token` as a required channel field.
-  - `packages/ui/frontend/src/components/channels/channel-config-fields.ts:37` marks Pico `token` as a channel secret, so the generic channel form can save it.
-  - `packages/core/src/api/index.ts:406-415` authenticates Pico Bearer tokens only against `launcherRuntimeAuth.getPicoToken()`.
-  - `packages/core/src/api/launcher-compat.ts:3197-3209` backs that runtime auth token with `state.pico_token`, not `channels.pico.settings.token`.
-  - `packages/core/src/api/launcher-compat.ts:5439-5442` rotates only `state.pico_token` in `/pico/token`.
-  - `packages/core/src/api/launcher-compat.ts:5452-5459` writes `channels.pico.settings.token` only during `/pico/setup`, and the exported frontend helpers in `packages/ui/frontend/src/api/pico.ts:28-37` are not called anywhere else in the UI.
-  - `packages/core/src/api/channel-runtime-probe.ts:239` marks Pico `token` configured unconditionally, so the probe can report token readiness without validating the saved channel token.
-- Impact: changing the Pico token in the channel config page does not change Bearer authentication for `/pico/ws`. Rotating the Pico token through the backend endpoint can also leave saved channel config stale, while readiness still looks configured.
-- Recommended fix: use one source of truth for Pico auth. Either drive WebSocket auth from the saved channel secret or make `/pico/token` update the saved channel config/vault and expose the setup/rotation UI clearly.
+  - `packages/ui/frontend/src/components/channels/channel-config-model.ts:135-136` treats hiro `token` as a required channel field.
+  - `packages/ui/frontend/src/components/channels/channel-config-fields.ts:37` marks hiro `token` as a channel secret, so the generic channel form can save it.
+  - `packages/core/src/api/index.ts:406-415` authenticates hiro Bearer tokens only against `launcherRuntimeAuth.gethiroToken()`.
+  - `packages/core/src/api/launcher-compat.ts:3197-3209` backs that runtime auth token with `state.hiro_token`, not `channels.hiro.settings.token`.
+  - `packages/core/src/api/launcher-compat.ts:5439-5442` rotates only `state.hiro_token` in `/hiro/token`.
+  - `packages/core/src/api/launcher-compat.ts:5452-5459` writes `channels.hiro.settings.token` only during `/hiro/setup`, and the exported frontend helpers in `packages/ui/frontend/src/api/hiro.ts:28-37` are not called anywhere else in the UI.
+  - `packages/core/src/api/channel-runtime-probe.ts:239` marks hiro `token` configured unconditionally, so the probe can report token readiness without validating the saved channel token.
+- Impact: changing the hiro token in the channel config page does not change Bearer authentication for `/hiro/ws`. Rotating the hiro token through the backend endpoint can also leave saved channel config stale, while readiness still looks configured.
+- Recommended fix: use one source of truth for hiro auth. Either drive WebSocket auth from the saved channel secret or make `/hiro/token` update the saved channel config/vault and expose the setup/rotation UI clearly.
 
-### 65. Pico Streaming controls are saved but ignored by the WebSocket handler
+### 65. hiro Streaming controls are saved but ignored by the WebSocket handler
 
 - Evidence:
-  - `packages/ui/frontend/src/components/channels/channel-config-page.tsx:641-650` passes `supportsStreaming={channel?.name === "pico"}` into the generic form.
+  - `packages/ui/frontend/src/components/channels/channel-config-page.tsx:641-650` passes `supportsStreaming={channel?.name === "hiro"}` into the generic form.
   - `packages/ui/frontend/src/components/channels/channel-forms/generic-form.tsx:97-99` shows the Streaming config when `supportsStreaming` is true.
-  - `packages/ui/frontend/src/components/channels/channel-forms/generic-form.tsx:387-391` saves Pico streaming settings through `onChange("streaming", value)`.
+  - `packages/ui/frontend/src/components/channels/channel-forms/generic-form.tsx:387-391` saves hiro streaming settings through `onChange("streaming", value)`.
   - `packages/core/src/api/index.ts:839-891` always sends `typing.start`, a placeholder `message.create`, and incremental `message.update` events while streaming agent chunks.
-  - `rg -n "channels\\.pico|pico.*streaming|settings\\.streaming|raw\\.streaming|streaming" packages/core/src/api/index.ts packages/core/src/api/launcher-compat.ts packages/core/src/api/channel-runtime-probe.ts` finds no Pico runtime read of the saved streaming config; only setup/model-related references appear.
-- Impact: turning Pico Streaming off, changing throttle seconds, or changing minimum growth chars in the dashboard does not alter WebSocket chat behavior. The handler streams and placeholders exactly the same way.
-- Recommended fix: read `channels.pico.settings.streaming` in the Pico WebSocket handler and apply enabled/throttle/min-growth behavior, or remove the controls from Pico config until implemented.
+  - `rg -n "channels\\.hiro|hiro.*streaming|settings\\.streaming|raw\\.streaming|streaming" packages/core/src/api/index.ts packages/core/src/api/launcher-compat.ts packages/core/src/api/channel-runtime-probe.ts` finds no hiro runtime read of the saved streaming config; only setup/model-related references appear.
+- Impact: turning hiro Streaming off, changing throttle seconds, or changing minimum growth chars in the dashboard does not alter WebSocket chat behavior. The handler streams and placeholders exactly the same way.
+- Recommended fix: read `channels.hiro.settings.streaming` in the hiro WebSocket handler and apply enabled/throttle/min-growth behavior, or remove the controls from hiro config until implemented.
 
 ### 66. Chat message Edit/Delete actions only mutate local UI state
 
 - Evidence:
   - `packages/ui/frontend/src/components/chat/chat-page.tsx:628-639` submits message edits through `editMessage(...)`.
   - `packages/ui/frontend/src/components/chat/chat-page.tsx:1000-1002` wires visible message Edit/Delete actions to `handleEditMessage` and `deleteMessage`.
-  - `packages/ui/frontend/src/hooks/use-pico-chat.ts:71-73` exposes `sendMessage`, `deleteMessage`, and `editMessage` from the Pico chat controller.
+  - `packages/ui/frontend/src/hooks/use-hiro-chat.ts:71-73` exposes `sendMessage`, `deleteMessage`, and `editMessage` from the hiro chat controller.
   - `packages/ui/frontend/src/features/chat/controller.ts:444-448` deletes a message only by filtering the in-memory chat store.
   - `packages/ui/frontend/src/features/chat/controller.ts:450-482` edits a message only by mapping the in-memory chat store.
   - `packages/ui/frontend/src/features/chat/history.ts:42-61` reloads messages from persisted session history through `getSessionHistory(sessionId)`.
@@ -169,7 +169,7 @@
   - `packages/ui/frontend/src/components/chat/chat-page.tsx:869-873` wires the visible Fork action to `forkFromMessage(messageId)`.
   - `packages/ui/frontend/src/components/chat/chat-page.tsx:1000-1003` passes that fork action into the chat message list.
   - `packages/ui/frontend/src/features/chat/controller.ts:485-511` clones messages up to the selected point, generates a new local session id, updates the local chat store, and reconnects.
-  - `packages/ui/frontend/src/features/chat/controller.ts:351-365` sends future Pico messages with only `type`, request id, `payload.content`, and media URLs; it does not send the cloned fork history.
+  - `packages/ui/frontend/src/features/chat/controller.ts:351-365` sends future hiro messages with only `type`, request id, `payload.content`, and media URLs; it does not send the cloned fork history.
   - `packages/core/src/api/index.ts:853-862` runs the backend agent loop with only `sessionId` and the latest `messageForAgent`.
   - `rg -n "forkChatSessionFromMessage|copy.*session|clone.*session|create.*session" packages/ui/frontend/src/features/chat packages/core/src` finds no backend session-copy operation.
 - Impact: after users click Fork From Here, the UI shows earlier messages in a new session, but the backend memory for that new session is empty. The next assistant reply does not actually have the forked context, and a history reload can drop the locally cloned pre-fork messages.
@@ -179,7 +179,7 @@
 
 - Evidence:
   - `packages/ui/frontend/src/components/chat/workspace/chat-message-list.tsx:96-100` exposes Retry when connected and not currently typing.
-  - `packages/ui/frontend/src/features/chat/controller.ts:516-576` finds the nearest user message, slices local messages back to the retry point, sets `isTyping`, and sends a new Pico message.
+  - `packages/ui/frontend/src/features/chat/controller.ts:516-576` finds the nearest user message, slices local messages back to the retry point, sets `isTyping`, and sends a new hiro message.
   - `packages/ui/frontend/src/features/chat/controller.ts:351-365` sends only the retried content and media URLs, with no rollback marker or target message id.
   - `packages/core/src/api/index.ts:853-862` passes only `sessionId` and the latest message into `orchestrator.runAgentLoop(...)`.
   - `packages/core/src/agent.ts:915-929` immediately appends the retried user message and then reloads existing persisted messages for that same session.

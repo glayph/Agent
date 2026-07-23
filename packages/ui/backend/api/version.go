@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/web/backend/utils"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/web/backend/utils"
 )
 
 type systemVersionResponse struct {
@@ -48,14 +48,14 @@ var (
 	// staying independent from cross-file init ordering.
 	versionCmdTimeout           = 15 * time.Second
 	maxVersionResolveAttempts   = 3
-	findowlclawBinaryForInfo   = resolveGatewayBinaryForVersionInfo
-	runowlclawVersionOutput    = executeowlclawVersion
+	findmikiBinaryForInfo   = resolveGatewayBinaryForVersionInfo
+	runmikiVersionOutput    = executemikiVersion
 	currentGatewayVersionState  = gatewayVersionState
 	launcherBuildInfoForVersion = fallbackSystemVersionInfoFromConfig
 	versionInfoCache            = newSystemVersionCache()
 	ansiEscapePattern           = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	versionLinePattern          = regexp.MustCompile(
-		`^(?:[^A-Za-z0-9]*\s*)?owlclaw(?:\.exe)?\s+([^\s(]+)` +
+		`^(?:[^A-Za-z0-9]*\s*)?miki(?:\.exe)?\s+([^\s(]+)` +
 			`(?:\s+\(git:\s*([^)]+)\))?\s*$`,
 	)
 )
@@ -75,7 +75,7 @@ func (h *Handler) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// resolveSystemVersionInfo prefers the actual owlclaw binary version output,
+// resolveSystemVersionInfo prefers the actual miki binary version output,
 // and falls back to launcher build metadata when command execution fails.
 func (h *Handler) resolveSystemVersionInfo(ctx context.Context) systemVersionResponse {
 	for range maxVersionResolveAttempts {
@@ -108,7 +108,7 @@ func (h *Handler) resolveSystemVersionInfoUncached(ctx context.Context) systemVe
 
 	fallback := fallbackSystemVersionInfo()
 
-	execPath := strings.TrimSpace(findowlclawBinaryForInfo())
+	execPath := strings.TrimSpace(findmikiBinaryForInfo())
 	if execPath == "" {
 		return fallback
 	}
@@ -116,12 +116,12 @@ func (h *Handler) resolveSystemVersionInfoUncached(ctx context.Context) systemVe
 	cmdCtx, cancel := context.WithTimeout(ctx, versionCmdTimeout)
 	defer cancel()
 
-	output, err := runowlclawVersionOutput(cmdCtx, execPath)
+	output, err := runmikiVersionOutput(cmdCtx, execPath)
 	if err != nil {
 		return fallback
 	}
 
-	parsed, ok := parseowlclawVersionOutput(output)
+	parsed, ok := parsemikiVersionOutput(output)
 	if !ok {
 		return fallback
 	}
@@ -165,7 +165,7 @@ func resolveGatewayBinaryForVersionInfo() string {
 		}
 	}
 
-	return utils.FindowlclawBinary()
+	return utils.FindmikiBinary()
 }
 
 func gatewayVersionState() (int, bool) {
@@ -258,9 +258,9 @@ func (c *systemVersionCache) resetForTest() {
 	}
 }
 
-// executeowlclawVersion runs the version subcommand against the
-// discovered owlclaw executable.
-func executeowlclawVersion(ctx context.Context, execPath string) (string, error) {
+// executemikiVersion runs the version subcommand against the
+// discovered miki executable.
+func executemikiVersion(ctx context.Context, execPath string) (string, error) {
 	out, err := exec.CommandContext(ctx, execPath, "version").CombinedOutput()
 	if err == nil {
 		return string(out), nil
@@ -269,9 +269,9 @@ func executeowlclawVersion(ctx context.Context, execPath string) (string, error)
 	return string(out), fmt.Errorf("failed to execute version command: %w", err)
 }
 
-// parseowlclawVersionOutput extracts version/build/go fields from CLI output.
+// parsemikiVersionOutput extracts version/build/go fields from CLI output.
 // It accepts banner/ANSI-decorated output and only requires the version line.
-func parseowlclawVersionOutput(raw string) (systemVersionResponse, bool) {
+func parsemikiVersionOutput(raw string) (systemVersionResponse, bool) {
 	var result systemVersionResponse
 
 	scanner := bufio.NewScanner(strings.NewReader(raw))

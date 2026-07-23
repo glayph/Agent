@@ -27,9 +27,7 @@ describe("tool executor security", () => {
 
   it("allows shell execution outside any workspace in trusted full-access mode", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-shell-"));
-    const outsideDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-outside-"),
-    );
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
     const configPath = writeConfig(
       dir,
       [
@@ -72,9 +70,7 @@ describe("tool executor security", () => {
 
   it("allows absolute file paths anywhere on the filesystem", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-file-"));
-    const outsideDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-outside-"),
-    );
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
     const outsidePath = path.join(outsideDir, "outside.txt");
     fs.writeFileSync(outsidePath, "outside-content", "utf-8");
     const configPath = writeConfig(
@@ -93,12 +89,8 @@ describe("tool executor security", () => {
   });
 
   it("allows file access via symlinks (no workspace restriction)", () => {
-    const workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-file-"),
-    );
-    const outsideDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-outside-"),
-    );
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-file-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
     fs.writeFileSync(path.join(outsideDir, "outside.txt"), "outside", "utf-8");
     const linkPath = path.join(workspaceDir, "outside-link");
     try {

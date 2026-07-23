@@ -18,8 +18,8 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/providers"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/providers"
 )
 
 const (

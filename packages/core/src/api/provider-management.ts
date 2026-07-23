@@ -1,8 +1,4 @@
-import {
-  resolveEnvSecret,
-  setEnvSecret,
-  settings,
-} from "@hiro/config";
+import { resolveEnvSecret, setEnvSecret, settings } from "@hiro/config";
 
 export interface ProviderConfig {
   id: string;

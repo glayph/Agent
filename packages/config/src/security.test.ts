@@ -47,9 +47,7 @@ describe("security helpers", () => {
   });
 
   it("allows all valid browser origins when restrictions are bypassed in workspace config", () => {
-    const workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-cors-"),
-    );
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-cors-"));
     fs.mkdirSync(path.join(workspaceDir, "config"), { recursive: true });
     fs.writeFileSync(
       path.join(workspaceDir, "config", "agent.yaml"),

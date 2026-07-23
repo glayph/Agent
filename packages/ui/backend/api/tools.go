@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	picotools "github.com/sipeed/owlclaw/pkg/tools"
+	"github.com/sipeed/miki/pkg/config"
+	hirotools "github.com/sipeed/miki/pkg/tools"
 )
 
 type toolCatalogEntry struct {
@@ -540,7 +540,7 @@ func normalizeWebSearchAPIKeys(apiKeys []string, apiKey string) ([]string, bool)
 }
 
 func buildWebSearchConfigResponse(cfg *config.Config) webSearchConfigResponse {
-	opts := picotools.WebSearchToolOptionsFromConfig(cfg)
+	opts := hirotools.WebSearchToolOptionsFromConfig(cfg)
 	current := resolveCurrentWebSearchProvider(cfg)
 	settings := map[string]webSearchProviderConfig{
 		"sogou": {
@@ -603,60 +603,60 @@ func buildWebSearchConfigResponse(cfg *config.Config) webSearchConfigResponse {
 		{
 			ID:         "sogou",
 			Label:      "Sogou",
-			Configured: picotools.WebSearchProviderReady(opts, "sogou"),
+			Configured: hirotools.WebSearchProviderReady(opts, "sogou"),
 			Current:    current == "sogou",
 		},
 		{
 			ID:         "duckduckgo",
 			Label:      "DuckDuckGo",
-			Configured: picotools.WebSearchProviderReady(opts, "duckduckgo"),
+			Configured: hirotools.WebSearchProviderReady(opts, "duckduckgo"),
 			Current:    current == "duckduckgo",
 		},
 		{
 			ID:           "gemini",
 			Label:        "Gemini (Google Search)",
-			Configured:   picotools.WebSearchProviderReady(opts, "gemini"),
+			Configured:   hirotools.WebSearchProviderReady(opts, "gemini"),
 			Current:      current == "gemini",
 			RequiresAuth: true,
 		},
 		{
 			ID:           "brave",
 			Label:        "Brave Search",
-			Configured:   picotools.WebSearchProviderReady(opts, "brave"),
+			Configured:   hirotools.WebSearchProviderReady(opts, "brave"),
 			Current:      current == "brave",
 			RequiresAuth: true,
 		},
 		{
 			ID:           "tavily",
 			Label:        "Tavily",
-			Configured:   picotools.WebSearchProviderReady(opts, "tavily"),
+			Configured:   hirotools.WebSearchProviderReady(opts, "tavily"),
 			Current:      current == "tavily",
 			RequiresAuth: true,
 		},
 		{
 			ID:           "perplexity",
 			Label:        "Perplexity",
-			Configured:   picotools.WebSearchProviderReady(opts, "perplexity"),
+			Configured:   hirotools.WebSearchProviderReady(opts, "perplexity"),
 			Current:      current == "perplexity",
 			RequiresAuth: true,
 		},
 		{
 			ID:         "searxng",
 			Label:      "SearXNG",
-			Configured: picotools.WebSearchProviderReady(opts, "searxng"),
+			Configured: hirotools.WebSearchProviderReady(opts, "searxng"),
 			Current:    current == "searxng",
 		},
 		{
 			ID:           "glm_search",
 			Label:        "GLM Search",
-			Configured:   picotools.WebSearchProviderReady(opts, "glm_search"),
+			Configured:   hirotools.WebSearchProviderReady(opts, "glm_search"),
 			Current:      current == "glm_search",
 			RequiresAuth: true,
 		},
 		{
 			ID:           "baidu_search",
 			Label:        "Baidu Search",
-			Configured:   picotools.WebSearchProviderReady(opts, "baidu_search"),
+			Configured:   hirotools.WebSearchProviderReady(opts, "baidu_search"),
 			Current:      current == "baidu_search",
 			RequiresAuth: true,
 		},
@@ -681,7 +681,7 @@ func resolveCurrentWebSearchProvider(cfg *config.Config) string {
 	if cfg == nil || !cfg.Tools.IsToolEnabled("web") {
 		return ""
 	}
-	selected, err := picotools.ResolveWebSearchProviderName(picotools.WebSearchToolOptionsFromConfig(cfg), "")
+	selected, err := hirotools.ResolveWebSearchProviderName(hirotools.WebSearchToolOptionsFromConfig(cfg), "")
 	if err != nil {
 		return ""
 	}

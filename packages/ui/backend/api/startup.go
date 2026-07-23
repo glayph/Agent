@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	autoStartEntryName = "owlclawLauncher"
-	launchAgentLabel   = "io.owlclaw.launcher"
+	autoStartEntryName = "mikiLauncher"
+	launchAgentLabel   = "io.miki.launcher"
 )
 
 type autoStartRequest struct {
@@ -220,7 +220,7 @@ func buildDarwinPlist(exePath string, args []string) string {
 
 func linuxAutoStartPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "autostart", "owlclaw-web.desktop")
+	return filepath.Join(home, ".config", "autostart", "miki-web.desktop")
 }
 
 func shellQuote(s string) string {
@@ -252,8 +252,8 @@ func setLinuxAutoStart(enabled bool, exePath string, args []string) error {
 			"[Desktop Entry]",
 			"Type=Application",
 			"Version=1.0",
-			"Name=owlclaw Web",
-			"Comment=Start owlclaw Web on login",
+			"Name=miki Web",
+			"Comment=Start miki Web on login",
 			"Exec=" + buildLinuxExecLine(exePath, args),
 			"Terminal=false",
 			"X-GNOME-Autostart-enabled=true",

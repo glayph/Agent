@@ -23,7 +23,7 @@ const SUPPORTED_CHANNEL_NAMES = new Set([
   "onebot",
   "mqtt",
   "whatsapp",
-  "pico",
+  "hiro",
   "weixin",
   "wecom",
 ]);

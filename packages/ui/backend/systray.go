@@ -7,8 +7,8 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/sipeed/owlclaw/pkg/logger"
-	"github.com/sipeed/owlclaw/web/backend/utils"
+	"github.com/sipeed/miki/pkg/logger"
+	"github.com/sipeed/miki/web/backend/utils"
 )
 
 func runTray() {
@@ -54,7 +54,7 @@ func onReady() {
 				// Version info - do nothing, just shows current version
 
 			case <-mRepo.ClickedCh:
-				if err := utils.OpenBrowser("https://github.com/sipeed/owlclaw"); err != nil {
+				if err := utils.OpenBrowser("https://github.com/sipeed/miki"); err != nil {
 					logger.Errorf("Failed to open GitHub: %v", err)
 				}
 

@@ -446,7 +446,8 @@ export async function validatePluginManifest(
       entrypoint: stringField(pluginBlock, "entrypoint"),
       hooks: pluginBlock.hooks as PluginBlock["hooks"] | undefined,
       dependencies: pluginBlock.dependencies as
-        PluginBlock["dependencies"] | undefined,
+        | PluginBlock["dependencies"]
+        | undefined,
       permissions: validatePermissionList(
         pluginBlock.permissions,
         errors,

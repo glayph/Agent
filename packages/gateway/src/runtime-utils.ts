@@ -24,7 +24,10 @@ export function runtimeLoaderArgsFor(
     'import { pathToFileURL } from "node:url";',
     `register(${JSON.stringify(pathToFileURL(loaderPath).href)}, pathToFileURL("./"));`,
   ].join(" ");
-  return ["--import", `data:text/javascript,${encodeURIComponent(registerSource)}`];
+  return [
+    "--import",
+    `data:text/javascript,${encodeURIComponent(registerSource)}`,
+  ];
 }
 
 export interface ResolveLiteLLMCommandOptions {
@@ -42,7 +45,10 @@ export interface LiteLLMCommand {
  * Scan a directory for Python3XX subdirectories and return them sorted
  * by version descending (newest first), so Python 3.14 is tried before 3.13.
  */
-function findPythonVersionDirs(baseDir: string, fexists: (p: string) => boolean): string[] {
+function findPythonVersionDirs(
+  baseDir: string,
+  fexists: (p: string) => boolean,
+): string[] {
   if (!fexists(baseDir)) return [];
   try {
     const entries = fs.readdirSync(baseDir, { withFileTypes: true });
@@ -56,16 +62,20 @@ function findPythonVersionDirs(baseDir: string, fexists: (p: string) => boolean)
   }
 }
 
-export function resolveLiteLLMCommand(options: ResolveLiteLLMCommandOptions = {}): LiteLLMCommand {
+export function resolveLiteLLMCommand(
+  options: ResolveLiteLLMCommandOptions = {},
+): LiteLLMCommand {
   const plat = options.platform ?? process.platform;
   const env = options.env ?? process.env;
-  const fexists = options.fileExists ?? ((p: string) => {
-    try {
-      return fs.existsSync(p);
-    } catch {
-      return false;
-    }
-  });
+  const fexists =
+    options.fileExists ??
+    ((p: string) => {
+      try {
+        return fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    });
 
   if (plat !== "win32") {
     const pathDirs = (env.PATH ?? "").split(":");
@@ -79,8 +89,13 @@ export function resolveLiteLLMCommand(options: ResolveLiteLLMCommandOptions = {}
   // Windows: try Hiro_PYTHON_DIR env var first (user override)
   if (env.Hiro_PYTHON_DIR) {
     for (const ext of [".exe", ".cmd", ".bat"]) {
-      const candidate = path.join(env.Hiro_PYTHON_DIR, "Scripts", `litellm${ext}`);
-      if (fexists(candidate)) return { command: candidate, shell: ext !== ".exe" };
+      const candidate = path.join(
+        env.Hiro_PYTHON_DIR,
+        "Scripts",
+        `litellm${ext}`,
+      );
+      if (fexists(candidate))
+        return { command: candidate, shell: ext !== ".exe" };
     }
   }
 
@@ -91,13 +106,15 @@ export function resolveLiteLLMCommand(options: ResolveLiteLLMCommandOptions = {}
     for (const versionDir of findPythonVersionDirs(pythonBase, fexists)) {
       for (const ext of [".exe", ".cmd", ".bat"]) {
         const candidate = path.join(versionDir, "Scripts", `litellm${ext}`);
-        if (fexists(candidate)) return { command: candidate, shell: ext !== ".exe" };
+        if (fexists(candidate))
+          return { command: candidate, shell: ext !== ".exe" };
       }
     }
     // Also try APPDATA\Python\Scripts (flat layout some versions use)
     for (const ext of [".exe", ".cmd", ".bat"]) {
       const candidate = path.join(pythonBase, "Scripts", `litellm${ext}`);
-      if (fexists(candidate)) return { command: candidate, shell: ext !== ".exe" };
+      if (fexists(candidate))
+        return { command: candidate, shell: ext !== ".exe" };
     }
   }
 
@@ -108,7 +125,8 @@ export function resolveLiteLLMCommand(options: ResolveLiteLLMCommandOptions = {}
     for (const versionDir of findPythonVersionDirs(pythonBase, fexists)) {
       for (const ext of [".exe", ".cmd", ".bat"]) {
         const candidate = path.join(versionDir, "Scripts", `litellm${ext}`);
-        if (fexists(candidate)) return { command: candidate, shell: ext !== ".exe" };
+        if (fexists(candidate))
+          return { command: candidate, shell: ext !== ".exe" };
       }
     }
   }
@@ -126,4 +144,3 @@ export function resolveLiteLLMCommand(options: ResolveLiteLLMCommandOptions = {}
 
   return { command: "litellm", shell: true };
 }
-

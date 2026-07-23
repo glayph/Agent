@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm"
 import { MarkdownCodeBlock } from "@/features/chat/components/message-code-block"
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
-const MARKDOWN_REHYPE_PLUGINS = [rehypeSanitize, rehypeHighlight]
+const MARKDOWN_REHYPE_PLUGINS = [rehypeHighlight, rehypeSanitize]
 
 interface MarkdownRendererProps {
   content: string

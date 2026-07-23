@@ -23,7 +23,8 @@ coverage/
 **/coverage/
 *.tsbuildinfo
 *.buildinfo
-.turbo
+*turbo
+*.LandingPageForPublising/
 
 # Runtime state
 data/

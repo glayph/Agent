@@ -1,12 +1,12 @@
 # Agent CLI package for public npm distribution
 
-This directory contains the CLI agent entry point that serves as the main interface when the Nexus project is distributed via npm. Unlike the system-level packages that are grouped under `packages/` in the monorepo structure, this package is intended to be published and installed as a standalone npm package.
+This directory contains the CLI agent entry point that serves as the main interface when the miki project is distributed via npm. Unlike the system-level packages that are grouped under `packages/` in the monorepo structure, this package is intended to be published and installed as a standalone npm package.
 
 ## Overview
 
 The `@hiro/cli` package provides:
 
-1. **Entry Point**: `agent.js` - Main CLI script that launches the Nexus dashboard
+1. **Entry Point**: `agent.js` - Main CLI script that launches the miki dashboard
 2. **CLI Commands**: start, doctor, install, uninstall, version, help
 3. **Runtime Support**: Express gateway launching, system tray integration
 4. **Platform Detection**: Works on Windows, macOS, and Linux
@@ -60,10 +60,10 @@ agent help
 
 | Command | Description |
 |---------|-------------|
-| `agent start` | Start the Nexus dashboard and agent runtime |
+| `agent start` | Start the miki dashboard and agent runtime |
 | `agent doctor` | Run system diagnostics and health checks |
-| `agent install` | Install Nexus (npm package mode) |
-| `agent uninstall` | Uninstall Nexus from system |
+| `agent install` | Install miki (npm package mode) |
+| `agent uninstall` | Uninstall miki from system |
 | `agent version` | Show version and build information |
 | `agent help` | Show comprehensive help information |
 
@@ -94,9 +94,9 @@ When installed via npm, this package:
 3. Provides proper CLI entry points
 4. Supports both normal and tray-based operation modes
 
-## Integration with Nexus Runtime
+## Integration with miki Runtime
 
-This package integrates with the full Nexus runtime stack:
+This package integrates with the full miki runtime stack:
 
 - **Gateway**: Express gateway server
 - **Core**: Agent runtime API
@@ -134,4 +134,4 @@ The `agent.js` script is a standalone Node.js application that:
 - Provides comprehensive error handling
 - Offers system tray integration for minimalism
 
-This package enables users to easily install and run the Nexus AI agent platform via npm, making it accessible to both developers and end users without complex installation procedures.
+This package enables users to easily install and run the miki AI agent platform via npm, making it accessible to both developers and end users without complex installation procedures.

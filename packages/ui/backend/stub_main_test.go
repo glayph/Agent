@@ -35,7 +35,7 @@ func TestResolveDistDirUsesFrontendAssetsNextToExecutable(t *testing.T) {
 		t.Fatalf("write index.html: %v", err)
 	}
 
-	got := resolveDistDir(filepath.Join(exeDir, "owlclaw-web"), filepath.Join(tempRoot, "missing"))
+	got := resolveDistDir(filepath.Join(exeDir, "miki-web"), filepath.Join(tempRoot, "missing"))
 	if got != frontendDistDir {
 		t.Fatalf("resolveDistDir() = %q, want %q", got, frontendDistDir)
 	}

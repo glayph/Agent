@@ -5,10 +5,7 @@ import type { AddressInfo } from "net";
 import * as os from "os";
 import * as path from "path";
 import express from "express";
-import {
-  SkillRegistry,
-  type PluginContracts,
-} from "@hiro/installer";
+import { SkillRegistry, type PluginContracts } from "@hiro/installer";
 import {
   canRunDashboardSetup,
   dashboardAccessDecision,
@@ -1377,9 +1374,7 @@ describe("channel runtime probe", () => {
 
     expect(probe.check_mode).toBe("live");
     expect(probe.send_check?.status).toBe("skipped");
-    expect(probe.send_check?.message).toContain(
-      "Hiro_CHANNEL_ALLOW_LIVE_SEND",
-    );
+    expect(probe.send_check?.message).toContain("Hiro_CHANNEL_ALLOW_LIVE_SEND");
   });
 
   it("reports Telegram disabled when startup is explicitly disabled", () => {
@@ -1402,12 +1397,12 @@ describe("channel runtime probe", () => {
     expect(probe.agent_connected).toBe(false);
   });
 
-  it("reports Pico ready without depending on a prior token-generation endpoint", () => {
+  it("reports hiro ready without depending on a prior token-generation endpoint", () => {
     const probe = buildChannelRuntimeProbe({
       channel: {
-        name: "pico",
-        display_name: "Pico",
-        config_key: "pico",
+        name: "hiro",
+        display_name: "hiro",
+        config_key: "hiro",
         runtime_status: "functional",
       },
       config: {},

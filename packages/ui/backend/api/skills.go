@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/fileutil"
-	"github.com/sipeed/owlclaw/pkg/skills"
-	"github.com/sipeed/owlclaw/pkg/utils"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/fileutil"
+	"github.com/sipeed/miki/pkg/skills"
+	"github.com/sipeed/miki/pkg/utils"
 )
 
 const defaultInstallSkillRegistry = "github"
@@ -959,7 +959,7 @@ func importUploadedMarkdownSkill(cfg *config.Config, filename string, content []
 }
 
 func importUploadedSkillArchive(cfg *config.Config, filename string, content []byte) (*skillSupportItem, int, error) {
-	tmpDir, tempDirErr := os.MkdirTemp("", "owlclaw-skill-import-*")
+	tmpDir, tempDirErr := os.MkdirTemp("", "miki-skill-import-*")
 	if tempDirErr != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("Failed to create temp directory: %v", tempDirErr)
 	}

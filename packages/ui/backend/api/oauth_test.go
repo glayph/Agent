@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/auth"
-	"github.com/sipeed/owlclaw/pkg/config"
+	"github.com/sipeed/miki/pkg/auth"
+	"github.com/sipeed/miki/pkg/config"
 )
 
 func TestOAuthLoginRejectsUnsupportedMethod(t *testing.T) {
@@ -269,13 +269,13 @@ func setupOAuthTestEnv(t *testing.T) (string, func()) {
 
 	tmp := t.TempDir()
 	oldHome := os.Getenv("HOME")
-	oldPicoHome := os.Getenv("owlclaw_HOME")
+	oldhiroHome := os.Getenv("miki_HOME")
 
 	if err := os.Setenv("HOME", tmp); err != nil {
 		t.Fatalf("set HOME: %v", err)
 	}
-	if err := os.Setenv("owlclaw_HOME", filepath.Join(tmp, ".owlclaw")); err != nil {
-		t.Fatalf("set owlclaw_HOME: %v", err)
+	if err := os.Setenv("miki_HOME", filepath.Join(tmp, ".miki")); err != nil {
+		t.Fatalf("set miki_HOME: %v", err)
 	}
 
 	cfg := config.DefaultConfig()
@@ -293,10 +293,10 @@ func setupOAuthTestEnv(t *testing.T) (string, func()) {
 
 	cleanup := func() {
 		_ = os.Setenv("HOME", oldHome)
-		if oldPicoHome == "" {
-			_ = os.Unsetenv("owlclaw_HOME")
+		if oldhiroHome == "" {
+			_ = os.Unsetenv("miki_HOME")
 		} else {
-			_ = os.Setenv("owlclaw_HOME", oldPicoHome)
+			_ = os.Setenv("miki_HOME", oldhiroHome)
 		}
 	}
 	return configPath, cleanup

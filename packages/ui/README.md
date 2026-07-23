@@ -7,7 +7,7 @@ It is not just a frontend: it is a small launcher service that bundles a React d
 
 ## What This Directory Provides
 
-- A browser-based chat UI backed by the Pico channel WebSocket proxy.
+- A browser-based chat UI backed by the hiro channel WebSocket proxy.
 - A dashboard for models, credentials, channels, agent tools, skills, logs, and runtime settings.
 - A launcher process that can auto-open the browser, show a system tray menu, and persist launcher-specific settings.
 - A controlled way to start, stop, restart, and inspect the `Hiro` subprocess.
@@ -19,7 +19,7 @@ This directory is a small monorepo:
 
 - `backend/`
   - Go HTTP server and launcher runtime.
-  - Serves REST APIs, authentication endpoints, channel helper flows, and the Pico WebSocket reverse proxy.
+  - Serves REST APIs, authentication endpoints, channel helper flows, and the hiro WebSocket reverse proxy.
   - Embeds compiled frontend assets from `backend/dist`.
 - `frontend/`
   - Vite + React 19 + TanStack Router SPA.
@@ -31,14 +31,14 @@ At runtime the launcher and the main Hiro engine are separate processes:
 2. The launcher serves the dashboard and handles dashboard authentication.
 3. When allowed, it starts or attaches to `Hiro`.
 4. The frontend talks only to the launcher backend.
-5. The launcher proxies chat traffic to the gateway through `/pico/ws`.
+5. The launcher proxies chat traffic to the gateway through `/hiro/ws`.
 
 ## Dashboard Capabilities
 
 The current frontend exposes these major pages and flows:
 
 - `/`
-  - Chat UI with session history, default model selection, and Pico channel messaging.
+  - Chat UI with session history, default model selection, and hiro channel messaging.
 - `/models`
   - Add, edit, delete, and set the default model.
   - Supports API-key models, OAuth-backed models, and local/CLI-backed models.
@@ -47,7 +47,7 @@ The current frontend exposes these major pages and flows:
   - Current built-in flows: OpenAI, Anthropic, and Google Antigravity.
 - `/channels/*`
   - Configure supported channels from a shared catalog.
-  - Current catalog: `weixin`, `telegram`, `discord`, `slack`, `line`, `onebot`, `wecom`, `whatsapp`, `pico`, `matrix`, `irc`, `mqtt`.
+  - Current catalog: `weixin`, `telegram`, `discord`, `slack`, `line`, `onebot`, `wecom`, `whatsapp`, `hiro`, `matrix`, `irc`, `mqtt`.
   - Legacy config-only forms remain in source but are no longer surfaced in the default catalog.
   - Includes QR-based binding helpers for WeChat and WeCom.
 - `/agent/skills`
@@ -118,7 +118,7 @@ When a gateway process is started by the launcher, the launcher:
 - captures stdout and stderr into an in-memory ring buffer
 - tracks transient states such as `starting`, `restarting`, and `stopping`
 - marks restart-required when the default model or enabled tool set changed since boot
-- ensures the Pico channel is configured before startup
+- ensures the hiro channel is configured before startup
 
 ### Launcher Authentication
 

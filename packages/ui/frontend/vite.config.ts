@@ -114,11 +114,11 @@ export default defineConfig(({ mode }) => {
           target: apiOrigin,
           changeOrigin: true,
         },
-        "/pico/media": {
+        "/hiro/media": {
           target: apiOrigin,
           changeOrigin: true,
         },
-        "/pico/ws": {
+        "/hiro/ws": {
           target: wsOrigin,
           ws: true,
         },

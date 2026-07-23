@@ -143,7 +143,6 @@
   --chat-user-border:       #27272a;
   --chat-user-text:         #fafafa;
   --chat-user-shadow:       0 2px 12px rgba(0,0,0,0.08);
-  --chat-composer-bg:       transparent;
   --chat-composer-bg:       rgba(249,250,251,0.6);
   --chat-composer-border:   rgba(15,23,42,0.06);
   --chat-composer-focus-border: rgba(59,130,246,0.9);

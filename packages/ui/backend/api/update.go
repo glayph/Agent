@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/sipeed/owlclaw/pkg/updater"
+	"github.com/sipeed/miki/pkg/updater"
 )
 
 // registerUpdateRoutes registers the self-update endpoint.
@@ -41,7 +41,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	binary := req.Binary
 	if binary == "" {
-		binary = "owlclaw-launcher"
+		binary = "miki-launcher"
 	}
 
 	if err := updater.UpdateSelfFromRelease(req.URL, "", "", binary); err != nil {

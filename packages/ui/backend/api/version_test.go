@@ -18,13 +18,13 @@ func setupVersionTestIsolation(t *testing.T) {
 	t.Helper()
 
 	originalGatewayState := currentGatewayVersionState
-	originalFinder := findowlclawBinaryForInfo
-	originalRunner := runowlclawVersionOutput
+	originalFinder := findmikiBinaryForInfo
+	originalRunner := runmikiVersionOutput
 	originalFallback := launcherBuildInfoForVersion
 	t.Cleanup(func() {
 		currentGatewayVersionState = originalGatewayState
-		findowlclawBinaryForInfo = originalFinder
-		runowlclawVersionOutput = originalRunner
+		findmikiBinaryForInfo = originalFinder
+		runmikiVersionOutput = originalRunner
 		launcherBuildInfoForVersion = originalFallback
 		versionInfoCache.resetForTest()
 	})
@@ -33,16 +33,16 @@ func setupVersionTestIsolation(t *testing.T) {
 	versionInfoCache.resetForTest()
 }
 
-func TestGetSystemVersionUsesowlclawBinaryInfo(t *testing.T) {
+func TestGetSystemVersionUsesmikiBinaryInfo(t *testing.T) {
 	setupVersionTestIsolation(t)
 
 	launcherBuildInfoForVersion = func() systemVersionResponse {
 		return systemVersionResponse{Version: "fallback", GoVersion: "go-fallback"}
 	}
 
-	findowlclawBinaryForInfo = func() string { return "owlclaw" }
-	runowlclawVersionOutput = func(_ context.Context, _ string) (string, error) {
-		return "🦞 owlclaw v1.2.3 (git: deadbeef)\n  Build: 2026-03-27T12:34:56Z\n  Go: go1.25.8\n", nil
+	findmikiBinaryForInfo = func() string { return "miki" }
+	runmikiVersionOutput = func(_ context.Context, _ string) (string, error) {
+		return "🦞 miki v1.2.3 (git: deadbeef)\n  Build: 2026-03-27T12:34:56Z\n  Go: go1.25.8\n", nil
 	}
 
 	h := NewHandler("")
@@ -87,8 +87,8 @@ func TestGetSystemVersionFallsBackToLauncherInfoWhenCommandFails(t *testing.T) {
 	}
 	launcherBuildInfoForVersion = func() systemVersionResponse { return expected }
 
-	findowlclawBinaryForInfo = func() string { return "owlclaw" }
-	runowlclawVersionOutput = func(_ context.Context, _ string) (string, error) {
+	findmikiBinaryForInfo = func() string { return "miki" }
+	runmikiVersionOutput = func(_ context.Context, _ string) (string, error) {
 		return "", errors.New("binary unavailable")
 	}
 
@@ -123,13 +123,13 @@ func TestGetSystemVersionFallsBackToLauncherInfoWhenCommandFails(t *testing.T) {
 	}
 }
 
-func TestParseowlclawVersionOutput(t *testing.T) {
+func TestParsemikiVersionOutput(t *testing.T) {
 	setupVersionTestIsolation(t)
 
-	raw := "\u001b[1;31m████\u001b[0m\n🦞 owlclaw 18ec263 (git: 18ec2631)\n  Build: 2026-03-27T10:43:34+0000\n  Go: go1.25.8\n"
-	got, ok := parseowlclawVersionOutput(raw)
+	raw := "\u001b[1;31m████\u001b[0m\n🦞 miki 18ec263 (git: 18ec2631)\n  Build: 2026-03-27T10:43:34+0000\n  Go: go1.25.8\n"
+	got, ok := parsemikiVersionOutput(raw)
 	if !ok {
-		t.Fatal("parseowlclawVersionOutput() should parse valid output")
+		t.Fatal("parsemikiVersionOutput() should parse valid output")
 	}
 	if got.Version != "18ec263" {
 		t.Fatalf("version = %q, want %q", got.Version, "18ec263")
@@ -145,23 +145,23 @@ func TestParseowlclawVersionOutput(t *testing.T) {
 	}
 }
 
-func TestParseowlclawVersionOutputIgnoresUsageLine(t *testing.T) {
+func TestParsemikiVersionOutputIgnoresUsageLine(t *testing.T) {
 	setupVersionTestIsolation(t)
 
-	raw := "Usage: owlclaw version [flags]\n"
-	got, ok := parseowlclawVersionOutput(raw)
+	raw := "Usage: miki version [flags]\n"
+	got, ok := parsemikiVersionOutput(raw)
 	if ok {
-		t.Fatalf("parseowlclawVersionOutput() parsed usage line unexpectedly: %#v", got)
+		t.Fatalf("parsemikiVersionOutput() parsed usage line unexpectedly: %#v", got)
 	}
 }
 
-func TestParseowlclawVersionOutputAcceptsLetterOnlyHashVersion(t *testing.T) {
+func TestParsemikiVersionOutputAcceptsLetterOnlyHashVersion(t *testing.T) {
 	setupVersionTestIsolation(t)
 
-	raw := "owlclaw abcdefa (git: abcdefabcdefabcdefabcdefabcdefabcdefabcd)\n"
-	got, ok := parseowlclawVersionOutput(raw)
+	raw := "miki abcdefa (git: abcdefabcdefabcdefabcdefabcdefabcdefabcd)\n"
+	got, ok := parsemikiVersionOutput(raw)
 	if !ok {
-		t.Fatal("parseowlclawVersionOutput() should parse letter-only hash version")
+		t.Fatal("parsemikiVersionOutput() should parse letter-only hash version")
 	}
 	if got.Version != "abcdefa" {
 		t.Fatalf("version = %q, want %q", got.Version, "abcdefa")
@@ -178,9 +178,9 @@ func TestResolveSystemVersionInfoFallsBackRuntimeGoVersion(t *testing.T) {
 		return systemVersionResponse{Version: "dev", GoVersion: ""}
 	}
 
-	findowlclawBinaryForInfo = func() string { return "owlclaw" }
-	runowlclawVersionOutput = func(_ context.Context, _ string) (string, error) {
-		return "owlclaw v1.0.0\n", nil
+	findmikiBinaryForInfo = func() string { return "miki" }
+	runmikiVersionOutput = func(_ context.Context, _ string) (string, error) {
+		return "miki v1.0.0\n", nil
 	}
 
 	h := NewHandler("")
@@ -196,15 +196,15 @@ func TestResolveSystemVersionInfoCachesWhileGatewayAlive(t *testing.T) {
 	launcherBuildInfoForVersion = func() systemVersionResponse {
 		return systemVersionResponse{Version: "dev", GoVersion: "go-fallback"}
 	}
-	findowlclawBinaryForInfo = func() string { return "owlclaw" }
+	findmikiBinaryForInfo = func() string { return "miki" }
 
 	pid := 4321
 	currentGatewayVersionState = func() (int, bool) { return pid, true }
 
 	runCount := 0
-	runowlclawVersionOutput = func(_ context.Context, _ string) (string, error) {
+	runmikiVersionOutput = func(_ context.Context, _ string) (string, error) {
 		runCount++
-		return fmt.Sprintf("owlclaw v1.2.%d\n", runCount), nil
+		return fmt.Sprintf("miki v1.2.%d\n", runCount), nil
 	}
 
 	h := NewHandler("")
@@ -228,7 +228,7 @@ func TestResolveSystemVersionInfoInvalidatesCacheWhenGatewayStops(t *testing.T) 
 	launcherBuildInfoForVersion = func() systemVersionResponse {
 		return systemVersionResponse{Version: "dev", GoVersion: "go-fallback"}
 	}
-	findowlclawBinaryForInfo = func() string { return "owlclaw" }
+	findmikiBinaryForInfo = func() string { return "miki" }
 
 	alive := true
 	pid := 9876
@@ -240,9 +240,9 @@ func TestResolveSystemVersionInfoInvalidatesCacheWhenGatewayStops(t *testing.T) 
 	}
 
 	runCount := 0
-	runowlclawVersionOutput = func(_ context.Context, _ string) (string, error) {
+	runmikiVersionOutput = func(_ context.Context, _ string) (string, error) {
 		runCount++
-		return fmt.Sprintf("owlclaw v2.0.%d\n", runCount), nil
+		return fmt.Sprintf("miki v2.0.%d\n", runCount), nil
 	}
 
 	h := NewHandler("")
@@ -272,12 +272,12 @@ func TestResolveSystemVersionInfoSkipsCommandWhenContextCanceled(t *testing.T) {
 	launcherBuildInfoForVersion = func() systemVersionResponse {
 		return systemVersionResponse{Version: "v3.0.0", GoVersion: "go-fallback"}
 	}
-	findowlclawBinaryForInfo = func() string { return "owlclaw" }
+	findmikiBinaryForInfo = func() string { return "miki" }
 
 	runCount := 0
-	runowlclawVersionOutput = func(_ context.Context, _ string) (string, error) {
+	runmikiVersionOutput = func(_ context.Context, _ string) (string, error) {
 		runCount++
-		return "owlclaw v9.9.9\n", nil
+		return "miki v9.9.9\n", nil
 	}
 
 	canceledCtx, cancel := context.WithCancel(context.Background())
@@ -297,14 +297,14 @@ func TestResolveSystemVersionInfoSkipsCommandWhenContextCanceled(t *testing.T) {
 func TestResolveGatewayBinaryForVersionInfoPrefersGatewayCommandPath(t *testing.T) {
 	setupVersionTestIsolation(t)
 
-	originalFinder := findowlclawBinaryForInfo
+	originalFinder := findmikiBinaryForInfo
 	t.Cleanup(func() {
-		findowlclawBinaryForInfo = originalFinder
+		findmikiBinaryForInfo = originalFinder
 	})
 
 	gateway.mu.Lock()
 	originalCmd := gateway.cmd
-	gateway.cmd = &exec.Cmd{Path: "/tmp/owlclaw-from-gateway"}
+	gateway.cmd = &exec.Cmd{Path: "/tmp/miki-from-gateway"}
 	gateway.mu.Unlock()
 	t.Cleanup(func() {
 		gateway.mu.Lock()
@@ -313,7 +313,7 @@ func TestResolveGatewayBinaryForVersionInfoPrefersGatewayCommandPath(t *testing.
 	})
 
 	got := resolveGatewayBinaryForVersionInfo()
-	if got != "/tmp/owlclaw-from-gateway" {
-		t.Fatalf("exec path = %q, want %q", got, "/tmp/owlclaw-from-gateway")
+	if got != "/tmp/miki-from-gateway" {
+		t.Fatalf("exec path = %q, want %q", got, "/tmp/miki-from-gateway")
 	}
 }

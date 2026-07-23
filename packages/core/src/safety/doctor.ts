@@ -5,10 +5,7 @@ import { createRequire } from "module";
 import Database from "better-sqlite3";
 import * as yaml from "js-yaml";
 import { type RuntimePaths } from "../paths.js";
-import {
-  inspectEnvSecretStatus,
-  validateRuntimeConfig,
-} from "@hiro/config";
+import { inspectEnvSecretStatus, validateRuntimeConfig } from "@hiro/config";
 import { createMigrationManager } from "./migrations.js";
 import { scanSecrets } from "./secret-scan.js";
 

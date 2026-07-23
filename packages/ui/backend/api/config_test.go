@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
 )
 
 func TestHandlePatchConfig_PreservesTurnProfile(t *testing.T) {
@@ -151,7 +151,7 @@ func TestHandleUpdateConfig_PreservesExecAllowRemoteDefaultWhenOmitted(t *testin
 "version": 3,
 		"agents": {
 			"defaults": {
-				"workspace": "~/.owlclaw/workspace"
+				"workspace": "~/.miki/workspace"
 			}
 		},
 		"model_list": [
@@ -190,7 +190,7 @@ func TestHandleUpdateConfig_DoesNotInheritDefaultModelFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{
 		"agents": {
 			"defaults": {
-				"workspace": "~/.owlclaw/workspace"
+				"workspace": "~/.miki/workspace"
 			}
 		},
 		"model_list": [
@@ -350,8 +350,8 @@ func TestHandlePatchConfig_NormalizesStringChannelArrayFields(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
 		"channel_list": {
-			"pico": {
-				"type": "pico",
+			"hiro": {
+				"type": "hiro",
 				"allow_from": " ou_a\u200b，\u2060ou_b\tou_c\u202e，ou_a ",
 				"group_trigger": {
 					"prefixes": "/，!;\n?，/"
@@ -387,37 +387,37 @@ func TestHandlePatchConfig_NormalizesStringChannelArrayFields(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	picoChannel := cfg.Channels[config.ChannelPico]
-	if len(picoChannel.AllowFrom) != 3 ||
-		picoChannel.AllowFrom[0] != "ou_a" ||
-		picoChannel.AllowFrom[1] != "ou_b" ||
-		picoChannel.AllowFrom[2] != "ou_c" {
+	hiroChannel := cfg.Channels[config.Channelhiro]
+	if len(hiroChannel.AllowFrom) != 3 ||
+		hiroChannel.AllowFrom[0] != "ou_a" ||
+		hiroChannel.AllowFrom[1] != "ou_b" ||
+		hiroChannel.AllowFrom[2] != "ou_c" {
 		t.Fatalf(
-			"pico allow_from = %#v, want [\"ou_a\", \"ou_b\", \"ou_c\"]",
-			picoChannel.AllowFrom,
+			"hiro allow_from = %#v, want [\"ou_a\", \"ou_b\", \"ou_c\"]",
+			hiroChannel.AllowFrom,
 		)
 	}
-	if len(picoChannel.GroupTrigger.Prefixes) != 3 ||
-		picoChannel.GroupTrigger.Prefixes[0] != "/" ||
-		picoChannel.GroupTrigger.Prefixes[1] != "!;" ||
-		picoChannel.GroupTrigger.Prefixes[2] != "?" {
+	if len(hiroChannel.GroupTrigger.Prefixes) != 3 ||
+		hiroChannel.GroupTrigger.Prefixes[0] != "/" ||
+		hiroChannel.GroupTrigger.Prefixes[1] != "!;" ||
+		hiroChannel.GroupTrigger.Prefixes[2] != "?" {
 		t.Fatalf(
-			"pico group_trigger.prefixes = %#v, want [\"/\", \"!;\", \"?\"]",
-			picoChannel.GroupTrigger.Prefixes,
+			"hiro group_trigger.prefixes = %#v, want [\"/\", \"!;\", \"?\"]",
+			hiroChannel.GroupTrigger.Prefixes,
 		)
 	}
 
-	decoded, err := picoChannel.GetDecoded()
+	decoded, err := hiroChannel.GetDecoded()
 	if err != nil {
-		t.Fatalf("GetDecoded() pico error = %v", err)
+		t.Fatalf("GetDecoded() hiro error = %v", err)
 	}
-	picoCfg := decoded.(*config.PicoSettings)
-	if len(picoCfg.AllowOrigins) != 2 ||
-		picoCfg.AllowOrigins[0] != "https://a.example.com" ||
-		picoCfg.AllowOrigins[1] != "http://localhost:5173" {
+	hiroCfg := decoded.(*config.hiroSettings)
+	if len(hiroCfg.AllowOrigins) != 2 ||
+		hiroCfg.AllowOrigins[0] != "https://a.example.com" ||
+		hiroCfg.AllowOrigins[1] != "http://localhost:5173" {
 		t.Fatalf(
-			"pico allow_origins = %#v, want [\"https://a.example.com\", \"http://localhost:5173\"]",
-			picoCfg.AllowOrigins,
+			"hiro allow_origins = %#v, want [\"https://a.example.com\", \"http://localhost:5173\"]",
+			hiroCfg.AllowOrigins,
 		)
 	}
 
@@ -587,7 +587,7 @@ func TestHandlePatchConfig_RejectsNegativeStreamingDeliveryValues(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
 		"channel_list": {
-			"pico": {
+			"hiro": {
 				"settings": {
 					"streaming": {
 						"enabled": true,
@@ -761,20 +761,20 @@ func TestHandlePatchConfig_CreatesMissingChannelWithTypeAndSecret(t *testing.T) 
 	}
 }
 
-// setupPicoEnabledEnv creates a test environment with Pico channel enabled and
+// setuphiroEnabledEnv creates a test environment with hiro channel enabled and
 // its token stored only in .security.yml (not in the JSON payload).
-func setupPicoEnabledEnv(t *testing.T) (string, func()) {
+func setuphiroEnabledEnv(t *testing.T) (string, func()) {
 	t.Helper()
 
 	tmp := t.TempDir()
 	oldHome := os.Getenv("HOME")
-	oldPicoHome := os.Getenv("owlclaw_HOME")
+	oldhiroHome := os.Getenv("miki_HOME")
 
 	if err := os.Setenv("HOME", tmp); err != nil {
 		t.Fatalf("set HOME: %v", err)
 	}
-	if err := os.Setenv("owlclaw_HOME", filepath.Join(tmp, ".owlclaw")); err != nil {
-		t.Fatalf("set owlclaw_HOME: %v", err)
+	if err := os.Setenv("miki_HOME", filepath.Join(tmp, ".miki")); err != nil {
+		t.Fatalf("set miki_HOME: %v", err)
 	}
 
 	cfg := config.DefaultConfig()
@@ -784,14 +784,14 @@ func setupPicoEnabledEnv(t *testing.T) (string, func()) {
 		APIKeys:   config.SimpleSecureStrings("sk-default"),
 	}}
 	cfg.Agents.Defaults.ModelName = "custom-default"
-	bc := cfg.Channels["pico"]
+	bc := cfg.Channels["hiro"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	picoCfg := decoded.(*config.PicoSettings)
+	hiroCfg := decoded.(*config.hiroSettings)
 	bc.Enabled = true
-	picoCfg.Token = *config.NewSecureString("test-pico-token")
+	hiroCfg.Token = *config.NewSecureString("test-hiro-token")
 
 	configPath := filepath.Join(tmp, "config.json")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
@@ -800,34 +800,34 @@ func setupPicoEnabledEnv(t *testing.T) (string, func()) {
 
 	cleanup := func() {
 		_ = os.Setenv("HOME", oldHome)
-		if oldPicoHome == "" {
-			_ = os.Unsetenv("owlclaw_HOME")
+		if oldhiroHome == "" {
+			_ = os.Unsetenv("miki_HOME")
 		} else {
-			_ = os.Setenv("owlclaw_HOME", oldPicoHome)
+			_ = os.Setenv("miki_HOME", oldhiroHome)
 		}
 	}
 	return configPath, cleanup
 }
 
-func TestHandleUpdateConfig_SucceedsWhenPicoTokenInSecurityOnly(t *testing.T) {
-	configPath, cleanup := setupPicoEnabledEnv(t)
+func TestHandleUpdateConfig_SucceedsWhenhiroTokenInSecurityOnly(t *testing.T) {
+	configPath, cleanup := setuphiroEnabledEnv(t)
 	defer cleanup()
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// PUT request with pico enabled but no token in JSON — token is in .security.yml
+	// PUT request with hiro enabled but no token in JSON — token is in .security.yml
 	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{
 		"version": 1,
 		"agents": {
 			"defaults": {
-				"workspace": "~/.owlclaw/workspace",
+				"workspace": "~/.miki/workspace",
 				"model_name": "custom-default"
 			}
 		},
 		"channels": {
-			"pico": {
+			"hiro": {
 				"enabled": true,
 				"ping_interval": 30,
 				"read_timeout": 60,
@@ -857,15 +857,15 @@ func TestHandleUpdateConfig_SucceedsWhenPicoTokenInSecurityOnly(t *testing.T) {
 	}
 }
 
-func TestHandlePatchConfig_SucceedsWhenPicoTokenInSecurityOnly(t *testing.T) {
-	configPath, cleanup := setupPicoEnabledEnv(t)
+func TestHandlePatchConfig_SucceedsWhenhiroTokenInSecurityOnly(t *testing.T) {
+	configPath, cleanup := setuphiroEnabledEnv(t)
 	defer cleanup()
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// PATCH request changing an unrelated field — pico token still in .security.yml
+	// PATCH request changing an unrelated field — hiro token still in .security.yml
 	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
 		"gateway": {
 			"log_level": "info"
@@ -890,7 +890,7 @@ func TestHandleUpdateConfig_AppliesGatewayLogLevel(t *testing.T) {
 		"version": 1,
 		"agents": {
 			"defaults": {
-				"workspace": "~/.owlclaw/workspace",
+				"workspace": "~/.miki/workspace",
 				"model_name": "custom-default"
 			}
 		},

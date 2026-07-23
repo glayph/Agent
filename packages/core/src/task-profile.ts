@@ -1,7 +1,10 @@
 export type AgentTaskComplexity = "simple" | "standard" | "complex";
 export type AgentTaskSpeedClass = "instant" | "fastest" | "medium" | "heavy";
 export type AgentVerificationDepth =
-  "none" | "focused" | "integration" | "release";
+  | "none"
+  | "focused"
+  | "integration"
+  | "release";
 
 export interface AgentTaskProfile {
   complexity: AgentTaskComplexity;

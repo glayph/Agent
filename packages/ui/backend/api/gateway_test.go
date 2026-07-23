@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/auth"
-	"github.com/sipeed/owlclaw/pkg/config"
-	ppid "github.com/sipeed/owlclaw/pkg/pid"
-	"github.com/sipeed/owlclaw/web/backend/utils"
+	"github.com/sipeed/miki/pkg/auth"
+	"github.com/sipeed/miki/pkg/config"
+	ppid "github.com/sipeed/miki/pkg/pid"
+	"github.com/sipeed/miki/web/backend/utils"
 )
 
 func startLongRunningProcess(t *testing.T) *exec.Cmd {
@@ -47,7 +47,7 @@ func startGatewayLikeProcess(t *testing.T) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		t.Skip("gateway-like process commandline check is not deterministic on Windows tests")
 	}
-	cmd = exec.Command("sh", "-c", "sleep 30 # owlclaw")
+	cmd = exec.Command("sh", "-c", "sleep 30 # miki")
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -59,7 +59,7 @@ func startGatewayLikeProcess(t *testing.T) *exec.Cmd {
 func writeTestPidFile(t *testing.T, data ppid.PidFileData) string {
 	t.Helper()
 
-	path := filepath.Join(globalConfigDir(), ".owlclaw.pid")
+	path := filepath.Join(globalConfigDir(), ".miki.pid")
 	raw, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal pid file: %v", err)
@@ -103,7 +103,7 @@ func resetGatewayTestState(t *testing.T) {
 	originalRestartGracePeriod := gatewayRestartGracePeriod
 	originalRestartForceKillWindow := gatewayRestartForceKillWindow
 	originalRestartPollInterval := gatewayRestartPollInterval
-	t.Setenv("owlclaw_HOME", t.TempDir())
+	t.Setenv("miki_HOME", t.TempDir())
 	t.Cleanup(func() {
 		gatewayHealthGet = originalHealthGet
 		gatewayProcessMatcher = originalProcessMatcher
@@ -123,15 +123,15 @@ func resetGatewayTestState(t *testing.T) {
 	})
 }
 
-func TestPicoGatewayProtocol(t *testing.T) {
+func TesthiroGatewayProtocol(t *testing.T) {
 	resetGatewayTestState(t)
 
 	gateway.mu.Lock()
-	gateway.picoToken = "ui-token"
+	gateway.hiroToken = "ui-token"
 	gateway.mu.Unlock()
 
-	if got := picoGatewayProtocol(); got != tokenPrefix+"ui-token" {
-		t.Fatalf("picoGatewayProtocol() = %q, want %q", got, tokenPrefix+"ui-token")
+	if got := hiroGatewayProtocol(); got != tokenPrefix+"ui-token" {
+		t.Fatalf("hiroGatewayProtocol() = %q, want %q", got, tokenPrefix+"ui-token")
 	}
 }
 
@@ -297,7 +297,7 @@ func TestStartGatewayLocked_UsesReloadedConfigForBootSignature(t *testing.T) {
 
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	cfg := config.DefaultConfig()
-	delete(cfg.Channels, "pico")
+	delete(cfg.Channels, "hiro")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -336,7 +336,7 @@ func TestStartGatewayLocked_UsesReloadedConfigForBootSignature(t *testing.T) {
 	}
 	expectedSignature := computeConfigSignature(updatedCfg)
 	if expectedSignature == originalSignature {
-		t.Fatal("expected EnsurePicoChannel() to change the config signature during gateway start")
+		t.Fatal("expected EnsurehiroChannel() to change the config signature during gateway start")
 	}
 	if bootSignature != expectedSignature {
 		t.Fatalf("bootConfigSignature = %q, want %q", bootSignature, expectedSignature)
@@ -404,13 +404,13 @@ func TestLooksLikeGatewayCommandLine(t *testing.T) {
 		want    bool
 	}{
 		{
-			name:    "default owlclaw cli",
-			cmdline: "/usr/local/bin/owlclaw",
+			name:    "default miki cli",
+			cmdline: "/usr/local/bin/miki",
 			want:    true,
 		},
 		{
 			name:    "node cli entrypoint",
-			cmdline: "node /opt/owlclaw/bin/owlclaw.js --debug",
+			cmdline: "node /opt/miki/bin/miki.js --debug",
 			want:    true,
 		},
 		{
@@ -2182,11 +2182,11 @@ func TestGatewayRestartReturnsErrorStatusWhenReplacementFailsToStart(t *testing.
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
-	invalidBinaryPath := filepath.Join(t.TempDir(), "fake-owlclaw")
+	invalidBinaryPath := filepath.Join(t.TempDir(), "fake-miki")
 	if err := os.WriteFile(invalidBinaryPath, []byte("#!/bin/sh\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	t.Setenv("owlclaw_BINARY", invalidBinaryPath)
+	t.Setenv("miki_BINARY", invalidBinaryPath)
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
@@ -2359,29 +2359,29 @@ func TestGatewayClearLogsResetsBufferedHistory(t *testing.T) {
 	}
 }
 
-func TestFindowlclawBinary_EnvOverride(t *testing.T) {
+func TestFindmikiBinary_EnvOverride(t *testing.T) {
 	// Create a temporary file to act as the mock binary
 	tmpDir := t.TempDir()
-	mockBinary := filepath.Join(tmpDir, "owlclaw-mock")
+	mockBinary := filepath.Join(tmpDir, "miki-mock")
 	if err := os.WriteFile(mockBinary, []byte("mock"), 0o755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	t.Setenv("owlclaw_BINARY", mockBinary)
+	t.Setenv("miki_BINARY", mockBinary)
 
-	got := utils.FindowlclawBinary()
+	got := utils.FindmikiBinary()
 	if got != mockBinary {
-		t.Errorf("FindowlclawBinary() = %q, want %q", got, mockBinary)
+		t.Errorf("FindmikiBinary() = %q, want %q", got, mockBinary)
 	}
 }
 
-func TestFindowlclawBinary_EnvOverride_InvalidPath(t *testing.T) {
-	// When owlclaw_BINARY points to a non-existent path, fall through to next strategy
-	t.Setenv("owlclaw_BINARY", "/nonexistent/owlclaw-binary")
+func TestFindmikiBinary_EnvOverride_InvalidPath(t *testing.T) {
+	// When miki_BINARY points to a non-existent path, fall through to next strategy
+	t.Setenv("miki_BINARY", "/nonexistent/miki-binary")
 
-	got := utils.FindowlclawBinary()
-	// Should not return the invalid path; falls back to "owlclaw" or another found path
-	if got == "/nonexistent/owlclaw-binary" {
-		t.Errorf("FindowlclawBinary() returned invalid env path %q, expected fallback", got)
+	got := utils.FindmikiBinary()
+	// Should not return the invalid path; falls back to "miki" or another found path
+	if got == "/nonexistent/miki-binary" {
+		t.Errorf("FindmikiBinary() returned invalid env path %q, expected fallback", got)
 	}
 }

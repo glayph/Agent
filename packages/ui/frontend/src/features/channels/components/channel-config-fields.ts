@@ -34,7 +34,7 @@ const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
   onebot: ["access_token"],
   whatsapp: ["webhook_token"],
   wecom: ["secret", "corp_secret", "webhook_url"],
-  pico: ["token"],
+  hiro: ["token"],
   matrix: ["access_token"],
   irc: ["password", "nickserv_password", "sasl_password"],
   mqtt: ["username", "password"],

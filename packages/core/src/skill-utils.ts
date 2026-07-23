@@ -42,7 +42,10 @@ export function createErrorResponse(
 /**
  * Validate skill name format
  */
-export function validateSkillName(name: string): { valid: boolean; error?: string } {
+export function validateSkillName(name: string): {
+  valid: boolean;
+  error?: string;
+} {
   if (!name || name.trim() === "") {
     return { valid: false, error: "Skill name is required" };
   }
@@ -54,7 +57,10 @@ export function validateSkillName(name: string): { valid: boolean; error?: strin
 
   const nameRegex = /^[a-z0-9]+(-[a-z0-9]+)*$/;
   if (!nameRegex.test(trimmed)) {
-    return { valid: false, error: "Skill name must be alphanumeric with hyphens" };
+    return {
+      valid: false,
+      error: "Skill name must be alphanumeric with hyphens",
+    };
   }
 
   return { valid: true };
@@ -85,9 +91,10 @@ export interface SkillMetadata {
   author?: string;
 }
 
-export function validateSkillMetadata(
-  metadata: SkillMetadata,
-): { valid: boolean; error?: string } {
+export function validateSkillMetadata(metadata: SkillMetadata): {
+  valid: boolean;
+  error?: string;
+} {
   // Validate name
   const nameValidation = validateSkillName(metadata.name);
   if (!nameValidation.valid) {
@@ -106,7 +113,10 @@ export function validateSkillMetadata(
     }
     const categoryRegex = /^[a-zA-Z0-9 _-]+$/;
     if (!categoryRegex.test(metadata.category)) {
-      return { valid: false, error: "Skill category contains invalid characters" };
+      return {
+        valid: false,
+        error: "Skill category contains invalid characters",
+      };
     }
   }
 
@@ -116,11 +126,17 @@ export function validateSkillMetadata(
     for (const tag of tagList) {
       if (tag) {
         if (tag.length > 32) {
-          return { valid: false, error: `Skill tag exceeds 32 characters: ${tag}` };
+          return {
+            valid: false,
+            error: `Skill tag exceeds 32 characters: ${tag}`,
+          };
         }
         const tagRegex = /^[a-zA-Z0-9_-]+$/;
         if (!tagRegex.test(tag)) {
-          return { valid: false, error: `Skill tag contains invalid characters: ${tag}` };
+          return {
+            valid: false,
+            error: `Skill tag contains invalid characters: ${tag}`,
+          };
         }
       }
     }
@@ -133,7 +149,10 @@ export function validateSkillMetadata(
     }
     const versionRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$/;
     if (!versionRegex.test(metadata.version)) {
-      return { valid: false, error: "Skill version must follow semantic versioning (e.g., 1.0.0)" };
+      return {
+        valid: false,
+        error: "Skill version must follow semantic versioning (e.g., 1.0.0)",
+      };
     }
   }
 

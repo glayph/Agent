@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/logger"
-	"github.com/sipeed/owlclaw/web/backend/utils"
+	"github.com/sipeed/miki/pkg/logger"
+	"github.com/sipeed/miki/web/backend/utils"
 )
 
 const (

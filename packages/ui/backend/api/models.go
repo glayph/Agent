@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/audio/asr"
-	"github.com/sipeed/owlclaw/pkg/config"
-	"github.com/sipeed/owlclaw/pkg/logger"
-	"github.com/sipeed/owlclaw/pkg/providers"
+	"github.com/sipeed/miki/pkg/audio/asr"
+	"github.com/sipeed/miki/pkg/config"
+	"github.com/sipeed/miki/pkg/logger"
+	"github.com/sipeed/miki/pkg/providers"
 )
 
 // registerModelRoutes binds model list management endpoints to the ServeMux.

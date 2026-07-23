@@ -45,9 +45,7 @@ function writeSkill(
 
 describe("SkillSearchEngine", () => {
   it("deduplicates query terms and ranks relevant skills first", async () => {
-    const workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-skill-"),
-    );
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-skill-"));
     const skillsRoot = path.join(workspaceDir, "custom-skills");
     fs.mkdirSync(skillsRoot, { recursive: true });
     fs.writeFileSync(

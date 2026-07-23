@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // packages/cli/agent.js - CLI entry point for public npm package
-// This file serves as the main CLI entry point when the Nexus package is installed via npm.
+// This file serves as the main CLI entry point when the miki package is installed via npm.
 // It handles both normal dashboard launching and tray mode operation.
 
 // Usage:
@@ -118,7 +118,7 @@ async function startDashboard() {
   }
 
   // Normal dashboard launch (npm package or advanced usage)
-  console.log("Starting Nexus dashboard...");
+  console.log("Starting miki dashboard...");
   
   if (isTrayMode) {
     console.log("System tray mode enabled.");
@@ -145,7 +145,7 @@ async function startDashboard() {
 }
 
 async function runDoctor() {
-  console.log("=== Nexus System Diagnostic ===\\n");
+  console.log("=== miki System Diagnostic ===\\n");
 
   console.log("1. Checking Node.js environment...");
   try {
@@ -190,7 +190,7 @@ async function runDoctor() {
 }
 
 async function installPackage() {
-  console.log("=== Nexus Package Installation ===\\n");
+  console.log("=== miki Package Installation ===\\n");
 
   if (isWindowsInstaller) {
     console.log("This appears to be running from the Windows installer.");
@@ -198,7 +198,7 @@ async function installPackage() {
     return;
   }
 
-  console.log("Installing Nexus from npm package...");
+  console.log("Installing miki from npm package...");
 
   const dirs = ["data", "logs", "config"];
 
@@ -221,15 +221,15 @@ async function installPackage() {
 }
 
 async function uninstallPackage() {
-  console.log("=== Nexus Package Uninstallation ===\\n");
+  console.log("=== miki Package Uninstallation ===\\n");
 
   if (!isWindowsInstaller) {
-    console.log("Warning: This will remove Nexus from the system.");
+    console.log("Warning: This will remove miki from the system.");
     console.log("Do you want to continue? (y/N)");
     console.log("(Auto-confirming for non-Windows installer...)");
   }
 
-  console.log("Uninstalling Nexus...");
+  console.log("Uninstalling miki...");
 
   const sensitivePaths = ["data", "logs"];
   for (const p of sensitivePaths) {
@@ -243,7 +243,7 @@ async function uninstallPackage() {
 }
 
 async function showVersion() {
-  console.log("=== Nexus Version Information ===\\n");
+  console.log("=== miki Version Information ===\\n");
 
   try {
     const pkgPath = join(getCurrentDir(), "..", "..", "package.json");
@@ -283,12 +283,12 @@ async function showVersion() {
 }
 
 function showHelp() {
-  console.log("=== Nexus CLI Command Reference ===\\n");
+  console.log("=== miki CLI Command Reference ===\\n");
   console.log("Commands:");
-  console.log("  agent start       Start the Nexus dashboard and agent runtime");
+  console.log("  agent start       Start the miki dashboard and agent runtime");
   console.log("  agent doctor      Run system diagnostics and health checks");
-  console.log("  agent install     Install Nexus (npm package mode)");
-  console.log("  agent uninstall   Uninstall Nexus from the system");
+  console.log("  agent install     Install miki (npm package mode)");
+  console.log("  agent uninstall   Uninstall miki from the system");
   console.log("  agent version     Show version and build information");
   console.log("  agent help        Show comprehensive help information");
   console.log("\\nFlags:");

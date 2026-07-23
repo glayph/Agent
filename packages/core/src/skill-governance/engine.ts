@@ -38,29 +38,43 @@ export class RuleEngine {
 
   toggleRule(ruleId: string): boolean {
     for (const r of this._builtinRules) {
-      if (r.id === ruleId) { r.enabled = !r.enabled; return true; }
+      if (r.id === ruleId) {
+        r.enabled = !r.enabled;
+        return true;
+      }
     }
     return false;
   }
 
   refineRule(ruleId: string, updates: Partial<GovernanceRule>): boolean {
     for (const r of this._builtinRules) {
-      if (r.id === ruleId) { Object.assign(r, updates); return true; }
+      if (r.id === ruleId) {
+        Object.assign(r, updates);
+        return true;
+      }
     }
     return false;
   }
 
-  checkToolCall(toolName: string, _toolArgs: Record<string, unknown>): Violation[] {
+  checkToolCall(
+    toolName: string,
+    _toolArgs: Record<string, unknown>,
+  ): Violation[] {
     const violations: Violation[] = [];
-    const sorted = [...this._builtinRules].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    const sorted = [...this._builtinRules].sort(
+      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+    );
     for (const rule of sorted) {
       if (!rule.enabled) continue;
       if (toolName.includes(rule.pattern.replace(/\*/g, ""))) {
         rule.hitCount = (rule.hitCount || 0) + 1;
         rule.lastHitAt = new Date().toISOString();
         violations.push({
-          rule_id: rule.id, description: rule.description, action: rule.action,
-          pattern: rule.pattern, priority: rule.priority ?? 0,
+          rule_id: rule.id,
+          description: rule.description,
+          action: rule.action,
+          pattern: rule.pattern,
+          priority: rule.priority ?? 0,
         });
         if (rule.action === "block") break;
       }
@@ -74,8 +88,11 @@ export class RuleEngine {
       if (!rule.enabled) continue;
       if (description.toLowerCase().includes(rule.pattern.toLowerCase())) {
         violations.push({
-          rule_id: rule.id, description: rule.description, action: rule.action,
-          pattern: rule.pattern, priority: rule.priority ?? 0,
+          rule_id: rule.id,
+          description: rule.description,
+          action: rule.action,
+          pattern: rule.pattern,
+          priority: rule.priority ?? 0,
         });
       }
     }
@@ -130,14 +147,20 @@ export class SelfPlanner {
           anyInProgress = true;
           const deps = step.depends_on || [];
           const allDone = deps.every(
-            (d) => d >= 0 && d < plan.steps.length && plan.steps[d].status === "completed",
+            (d) =>
+              d >= 0 &&
+              d < plan.steps.length &&
+              plan.steps[d].status === "completed",
           );
           if (!allDone) {
             step.status = "pending";
           }
         }
       }
-      if (anyInProgress && !plan.steps.some((s) => s.status === "in_progress")) {
+      if (
+        anyInProgress &&
+        !plan.steps.some((s) => s.status === "in_progress")
+      ) {
         this._advancePlan(plan);
       }
     }
@@ -166,7 +189,12 @@ export class SelfPlanner {
       steps[i].depends_on = steps[i].depends_on || [];
     }
     this._plans.set(planId, {
-      id: planId, title, steps, status: "active", created_at: now, updated_at: now,
+      id: planId,
+      title,
+      steps,
+      status: "active",
+      created_at: now,
+      updated_at: now,
     });
     return planId;
   }
@@ -197,7 +225,10 @@ export class SelfPlanner {
       if (step.status !== "pending") continue;
       const deps = step.depends_on || [];
       const allDone = deps.every(
-        (d) => d >= 0 && d < plan.steps.length && plan.steps[d].status === "completed",
+        (d) =>
+          d >= 0 &&
+          d < plan.steps.length &&
+          plan.steps[d].status === "completed",
       );
       if (allDone) step.status = "in_progress";
     }
@@ -205,12 +236,18 @@ export class SelfPlanner {
 
   private _checkPlanCompletion(plan: Plan): void {
     if (plan.status !== "active") return;
-    if (plan.steps.every((s) => s.status === "completed" || s.status === "failed")) {
+    if (
+      plan.steps.every((s) => s.status === "completed" || s.status === "failed")
+    ) {
       plan.status = "completed";
     }
   }
 
-  revisePlan(planId: string, newSteps: PlanStep[], afterStep: number = -1): boolean {
+  revisePlan(
+    planId: string,
+    newSteps: PlanStep[],
+    afterStep: number = -1,
+  ): boolean {
     const plan = this.getPlan(planId);
     if (!plan) return false;
     const baseIndex = afterStep >= 0 ? afterStep + 1 : plan.steps.length;
@@ -218,7 +255,9 @@ export class SelfPlanner {
       newSteps[i].id = baseIndex + i;
       newSteps[i].status = newSteps[i].status || "pending";
       const deps = newSteps[i].depends_on || [];
-      newSteps[i].depends_on = deps.map((d) => (d < baseIndex ? d : d + newSteps.length));
+      newSteps[i].depends_on = deps.map((d) =>
+        d < baseIndex ? d : d + newSteps.length,
+      );
     }
     plan.steps.splice(baseIndex, 0, ...newSteps);
     plan.updated_at = new Date().toISOString();
@@ -237,14 +276,26 @@ export class SelfPlanner {
   getActivePlan(): Plan | undefined {
     for (const plan of this._plans.values()) {
       if (plan.status !== "active") continue;
-      if (plan.steps.some((s) => s.status === "pending" || s.status === "in_progress")) {
+      if (
+        plan.steps.some(
+          (s) => s.status === "pending" || s.status === "in_progress",
+        )
+      ) {
         return plan;
       }
     }
     return undefined;
   }
 
-  planSummary(): { title: string; total_steps: number; completed: number; failed: number; currentStep?: string } | undefined {
+  planSummary():
+    | {
+        title: string;
+        total_steps: number;
+        completed: number;
+        failed: number;
+        currentStep?: string;
+      }
+    | undefined {
     const plan = this.getActivePlan();
     if (!plan) return undefined;
     return {
@@ -252,19 +303,33 @@ export class SelfPlanner {
       total_steps: plan.steps.length,
       completed: plan.steps.filter((s) => s.status === "completed").length,
       failed: plan.steps.filter((s) => s.status === "failed").length,
-      currentStep: plan.steps.find((s) => s.status === "in_progress")?.description,
+      currentStep: plan.steps.find((s) => s.status === "in_progress")
+        ?.description,
     };
   }
 
-  addStep(planId: string, description: string, dependsOn: number[] = []): boolean {
+  addStep(
+    planId: string,
+    description: string,
+    dependsOn: number[] = [],
+  ): boolean {
     const plan = this.getPlan(planId);
     if (!plan) return false;
-    plan.steps.push({ id: plan.steps.length, description, status: "pending", depends_on: dependsOn });
+    plan.steps.push({
+      id: plan.steps.length,
+      description,
+      status: "pending",
+      depends_on: dependsOn,
+    });
     plan.updated_at = new Date().toISOString();
     return true;
   }
 
-  getIncompleteGoals(): Array<{ id: number; title: string; description: string | null }> {
+  getIncompleteGoals(): Array<{
+    id: number;
+    title: string;
+    description: string | null;
+  }> {
     return [];
   }
 }
@@ -304,7 +369,10 @@ export class SkillGovernanceEngine {
     this.config.enabled = val;
   }
 
-  getRuleViolations(toolName: string, toolArgs: Record<string, unknown>): Violation[] {
+  getRuleViolations(
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+  ): Violation[] {
     return this.ruleEngine.checkToolCall(toolName, toolArgs);
   }
 

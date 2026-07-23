@@ -70,12 +70,12 @@
 - Evidence:
   - `packages/core/src/api/index.ts:969-1017` supports a legacy websocket message of `type: "resume"` with `checkpoint_id` and `last_sequence`.
   - `packages/core/src/api/index.ts:1090-1128` saves stream chunks under generated checkpoint IDs.
-  - `packages/ui/frontend/src/features/chat/controller.ts:144-145` opens only `/pico/ws?session_id=...`.
+  - `packages/ui/frontend/src/features/chat/controller.ts:144-145` opens only `/hiro/ws?session_id=...`.
   - `packages/ui/frontend/src/features/chat/controller.ts:153-169` handles `onopen` by marking the socket connected; it never sends `resume` and does not track checkpoint/sequence.
   - `rg -n "checkpoint|last_sequence|resume" packages/ui/frontend/src` finds no dashboard chat resume usage.
-  - `packages/core/src/api/index.ts:781-944` implements the Pico websocket path without checkpoint storage or resume handling.
-- Impact: if the dashboard socket drops during a response, reconnect opens a fresh Pico socket and the in-flight assistant response cannot replay or resume, even though resume code exists elsewhere.
-- Recommended fix: implement checkpoint IDs and resume handling on the Pico/dashboard path, or remove the unused resume path and provide explicit retry/recover UX.
+  - `packages/core/src/api/index.ts:781-944` implements the hiro websocket path without checkpoint storage or resume handling.
+- Impact: if the dashboard socket drops during a response, reconnect opens a fresh hiro socket and the in-flight assistant response cannot replay or resume, even though resume code exists elsewhere.
+- Recommended fix: implement checkpoint IDs and resume handling on the hiro/dashboard path, or remove the unused resume path and provide explicit retry/recover UX.
 
 ### 44. Session delete failure is hidden and local history metadata is removed early
 

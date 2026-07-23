@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sipeed/owlclaw/pkg/config"
+	"github.com/sipeed/miki/pkg/config"
 )
 
 func TestFindSkillsAndInstallSkillStayEnabledWhenSpecificToolsAreEnabled(t *testing.T) {

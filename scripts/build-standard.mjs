@@ -70,7 +70,6 @@ function tryTurboBuild() {
   try {
     const tscResult = spawnSync("npx", ["turbo", "run", "build"], {
       stdio: "ignore",
-      shell: true,
     });
     if (tscResult.status === 0) {
       log("Used turbo for build");
@@ -107,7 +106,7 @@ function main() {
   } else {
     // Fallback: compile TypeScript
     log("Using TypeScript compilation fallback...");
-    run("npx", ["tsc", "-b", "--force"], { cwd: root, shell: true });
+    run("npx", ["tsc", "-b", "--force"], { cwd: root });
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

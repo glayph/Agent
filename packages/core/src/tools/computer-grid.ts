@@ -58,7 +58,11 @@ export function drawGridOverlay(
 /**
  * Creates a raw uncompressed PNG buffer from RGBA data.
  */
-function encodeUncompressedPng(rgba: Buffer, width: number, height: number): Buffer {
+function encodeUncompressedPng(
+  rgba: Buffer,
+  width: number,
+  height: number,
+): Buffer {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
   // IHDR chunk

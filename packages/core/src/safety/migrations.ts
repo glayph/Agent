@@ -2,10 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { type RuntimePaths } from "../paths.js";
-import {
-  migrateRuntimeConfig,
-  validateRuntimeConfig,
-} from "@hiro/config";
+import { migrateRuntimeConfig, validateRuntimeConfig } from "@hiro/config";
 
 export interface MigrationDefinition {
   id: string;

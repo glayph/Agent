@@ -191,7 +191,7 @@ function checkStatusClass(
 }
 
 const CHANNELS_WITHOUT_DOCS = new Set([
-  "pico",
+  "hiro",
   "wecom",
   "matrix",
   "irc",
@@ -646,7 +646,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
             configuredSecrets={configuredSecrets}
             hiddenKeys={hiddenKeys}
             requiredKeys={requiredKeys}
-            supportsStreaming={channel?.name === "pico"}
+            supportsStreaming={channel?.name === "hiro"}
             fieldErrors={fieldErrors}
             registerArrayFieldFlusher={registerArrayFieldFlusher}
             arrayFieldResetVersion={arrayFieldResetVersion}

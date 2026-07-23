@@ -6,7 +6,7 @@ import {
   loadSessionMessages,
   mergeHistoryMessages,
 } from "@/features/chat/history"
-import { type PicoMessage, handlePicoMessage } from "@/features/chat/protocol"
+import { type hiroMessage, handlehiroMessage } from "@/features/chat/protocol"
 import {
   clearStoredSessionId,
   generateSessionId,
@@ -148,7 +148,7 @@ export async function connectChat() {
     const isHttps = typeof window !== "undefined" && window.location?.protocol === "https:"
     const host = typeof window !== "undefined" && window.location?.host ? window.location.host : "localhost:18800"
     const wsScheme = isHttps ? "wss:" : "ws:"
-    const wsUrl = `${wsScheme}//${host}/pico/ws`
+    const wsUrl = `${wsScheme}//${host}/hiro/ws`
     const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}`
     const socket = customWsFactory ? customWsFactory(url) : new WebSocket(url)
 
@@ -197,10 +197,10 @@ export async function connectChat() {
             : event.data instanceof ArrayBuffer
               ? new TextDecoder().decode(event.data)
               : String(event.data)
-        const message = JSON.parse(raw) as PicoMessage
-        handlePicoMessage(message, sessionId)
+        const message = JSON.parse(raw) as hiroMessage
+        handlehiroMessage(message, sessionId)
       } catch {
-        console.warn("Non-JSON message from pico:", event.data)
+        console.warn("Non-JSON message from hiro:", event.data)
       }
     }
 
@@ -250,7 +250,7 @@ export async function connectChat() {
       isConnecting = false
       return
     }
-    console.error("Failed to connect to pico:", error)
+    console.error("Failed to connect to hiro:", error)
     updateChatStore({ connectionState: "error" })
     isConnecting = false
     scheduleReconnect(generation, activeSessionIdRef)
@@ -356,7 +356,7 @@ function normalizeOutgoingAttachments(
     .map((attachment) => ({ ...attachment }))
 }
 
-function sendPicoMessage(
+function sendhiroMessage(
   socket: WebSocket,
   requestId: string,
   content: string,
@@ -437,10 +437,10 @@ export function sendChatMessage({
   }))
 
   try {
-    sendPicoMessage(socket, id, normalizedContent, normalizedAttachments)
+    sendhiroMessage(socket, id, normalizedContent, normalizedAttachments)
     return true
   } catch (error) {
-    console.error("Failed to send pico message:", error)
+    console.error("Failed to send hiro message:", error)
     updateChatStore((prev) => ({
       messages: prev.messages.filter((message) => message.id !== id),
       isTyping: false,
@@ -537,7 +537,7 @@ export function retryChatMessage(messageId: string) {
 
   const retrySource = findNearestUserMessage(state.messages, messageIndex)
   if (!retrySource) {
-    return false
+    throw new Error("No preceding user message found")
   }
 
   const normalizedContent = retrySource.message.content.trim()
@@ -545,10 +545,9 @@ export function retryChatMessage(messageId: string) {
     retrySource.message.attachments,
   )
   if (!normalizedContent && normalizedAttachments.length === 0) {
-    return false
+    throw new Error("No content or attachments to retry")
   }
 
-  const socket = wsRef
   const requestId = `retry-${++msgIdCounter}-${Date.now()}`
 
   updateChatStore((prev) => {
@@ -575,10 +574,10 @@ export function retryChatMessage(messageId: string) {
   })
 
   try {
-    sendPicoMessage(socket, requestId, normalizedContent, normalizedAttachments)
+    sendhiroMessage(wsRef, requestId, normalizedContent, normalizedAttachments)
     return true
   } catch (error) {
-    console.error("Failed to retry pico message:", error)
+    console.error("Failed to retry hiro message:", error)
     updateChatStore({ isTyping: false })
     return false
   }

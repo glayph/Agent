@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/owlclaw/pkg/config"
+	"github.com/sipeed/miki/pkg/config"
 )
 
 func TestSaveWeixinBindingReturnsSuccessWhenRestartFails(t *testing.T) {

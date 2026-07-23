@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/owlclaw/web/backend/middleware"
+	"github.com/sipeed/miki/web/backend/middleware"
 )
 
 type fakePasswordStore struct {

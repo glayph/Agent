@@ -274,9 +274,7 @@ describe("project workflow generation", () => {
 
   test("allows output directories outside the workspace for computer-based agent", () => {
     const workspace = tempWorkspace();
-    const outsideDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-outside-"),
-    );
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
 
     const workflow = createProjectWorkflow(workspace, {
       brief: "Build outside",

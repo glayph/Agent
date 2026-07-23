@@ -40,7 +40,7 @@ interface CreateBackupOptions {
 const DATA_FILE_PATTERN = /\.(db|sqlite|json|ya?ml)(?:-(?:wal|shm))?$/i;
 const DEFAULT_MAX_BACKUPS = 50;
 const OPERATIONAL_DATA_FILE_PATTERNS = [
-  /^nexus_memory\.db(?:-(?:wal|shm))?$/i,
+  /^miki_memory\.db(?:-(?:wal|shm))?$/i,
   /^system-index\.db(?:-(?:wal|shm))?$/i,
   /^agent-runs\.db(?:-(?:wal|shm))?$/i,
 ];

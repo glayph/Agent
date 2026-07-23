@@ -55,7 +55,7 @@ func TestLauncherDashboardAuth_AllowsPublicPaths(t *testing.T) {
 		{http.MethodPost, "/api/auth/logout", http.StatusTeapot},
 		{http.MethodGet, "/api/auth/logout", http.StatusUnauthorized},
 		{http.MethodGet, "/api/config", http.StatusUnauthorized},
-		{http.MethodGet, "/pico/ws", http.StatusUnauthorized},
+		{http.MethodGet, "/hiro/ws", http.StatusUnauthorized},
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(tc.method, tc.path, nil)
@@ -255,7 +255,7 @@ func TestLauncherDashboardAuth_WebSocketUnauthorizedDoesNotRedirect(t *testing.T
 	h := LauncherDashboardAuth(cfg, next)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/pico/ws", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hiro/ws", nil)
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {

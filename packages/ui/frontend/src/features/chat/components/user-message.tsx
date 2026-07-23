@@ -2,7 +2,7 @@ import { type FocusEvent, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
-import { formatMessageTime } from "@/hooks/use-pico-chat"
+import { formatMessageTime } from "@/hooks/use-hiro-chat"
 import { cn } from "@/lib/utils"
 import type { ChatAttachment } from "@/store/chat"
 

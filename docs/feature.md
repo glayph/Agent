@@ -47,7 +47,7 @@ and session permissions.
 
 ## Channels
 
-Hiro includes local surfaces for Pico/Web chat plus channel configuration for
+Hiro includes local surfaces for hiro/Web chat plus channel configuration for
 Telegram, Discord, Slack, Matrix, IRC, OneBot, MQTT, LINE, WhatsApp, WeChat,
 WeCom, Feishu, DingTalk, QQ, and generic form-backed integrations. The default
 Node runtime includes functional adapters for Telegram, Discord, Slack, Matrix,
