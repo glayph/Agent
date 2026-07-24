@@ -556,7 +556,7 @@ export class AgentOrchestrator {
     try {
       const skills = await this.skillLoader.loadAll();
       for (const skill of skills) {
-        if (!skill.index) {
+        if (!skill.index || skill.index.endsWith(".md")) {
           continue;
         }
         // Dynamically import the skill module and register its tools

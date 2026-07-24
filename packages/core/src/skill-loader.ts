@@ -175,7 +175,8 @@ export class SkillLoader {
   /**
    * Find the main index or entry file of a skill.
    * Checks index.ts, index.js, index.mjs, index.cjs, main.ts, main.js,
-   * package.json main entry, or SKILL.md.
+   * or package.json main entry. Note: SKILL.md is documentation only and
+   * is never treated as an importable module.
    */
   private findSkillIndex(skillPath: string): string {
     const candidates = [
@@ -185,7 +186,6 @@ export class SkillLoader {
       path.join(skillPath, "index.cjs"),
       path.join(skillPath, "main.ts"),
       path.join(skillPath, "main.js"),
-      path.join(skillPath, "SKILL.md"),
     ];
 
     for (const candidate of candidates) {
@@ -206,7 +206,10 @@ export class SkillLoader {
       }
     }
 
-    return skillPath;
+    // No importable module found (e.g. documentation-only skill with just
+    // SKILL.md). Returning the directory path would cause a directory-import
+    // error downstream, so signal "no module" with an empty string.
+    return "";
   }
 
   /**
