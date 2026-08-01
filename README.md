@@ -96,7 +96,7 @@ aliased as `hiro`, `Hiro`, `mikiagent`, `MikiAgent`, `agent`, and `Agent`.
                                       │  HTTP + WebSocket
                               ┌───────▼────────┐        ┌──────────────────┐
                               │  Gateway       │        │  Memory server   │
-                              │ (@hiro/gateway)│       │ (graphrag-memory)│
+                              │ (@hiro/gateway)│        │ (graphrag-memory)│
                               │  port 18800    │        │  port 3777       │
                               └───────┬────────┘        └───────┬──────────┘
                                       │ proxy                  │
