@@ -1,0 +1,21 @@
+{
+  "id": "research/arxiv",
+  "name": "arXiv Research Paper Search",
+  "description": "Search and analyze research papers from arXiv with filtering by category, date, and keywords",
+  "category": "research",
+  "tags": ["research", "papers", "arxiv", "academic"],
+  "author": "Hiro",
+  "version": "1.0.0",
+  "enabled": true,
+  "dependencies": [],
+  "tools": [
+    {
+      "name": "arxiv_search",
+      "description": "Search arXiv for research papers"
+    },
+    {
+      "name": "arxiv_fetch_paper",
+      "description": "Fetch and analyze a specific arXiv paper"
+    }
+  ]
+}

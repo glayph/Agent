@@ -1,0 +1,18 @@
+# Hiro agent — Python runtime dependencies
+# Install:  python -m pip install -r requirements.txt
+# Requires: Python >=3.10 (verified on Python 3.14)
+
+# --- Runtime (required) ---
+# (no required Python packages — LLM calls go directly to Gemini / OpenRouter / OpenAI)
+
+# --- Optional: bundled-skill Python packages ---
+debugpy            # python-debugpy skill (debugger attach)
+remote-pdb         # python-debugpy skill (remote pdb)
+SciencePlots       # research-paper-writing (matplotlib styles)
+matplotlib         # research-paper-writing
+numpy              # research-paper-writing
+arxiv              # research-paper-writing + arxiv skill (API client)
+semanticscholar    # research-paper-writing
+habanero           # research-paper-writing (CrossRef client)
+krippendorff       # research-paper-writing (inter-rater reliability)
+pygount            # github codebase-inspection (code metrics)
