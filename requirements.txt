@@ -6,12 +6,14 @@
 # (no required Python packages — LLM calls go directly to Gemini / OpenRouter / OpenAI)
 
 # --- Optional: bundled-skill Python packages ---
+# Note: the arxiv and polymarket research skills were ported to Node.js (.mjs) and
+# no longer need any Python packages — see packages/skills/src/research/{arxiv,polymarket}/scripts/
 debugpy            # python-debugpy skill (debugger attach)
 remote-pdb         # python-debugpy skill (remote pdb)
 SciencePlots       # research-paper-writing (matplotlib styles)
 matplotlib         # research-paper-writing
 numpy              # research-paper-writing
-arxiv              # research-paper-writing + arxiv skill (API client)
+arxiv              # research-paper-writing (API client used in generated experiment code)
 semanticscholar    # research-paper-writing
 habanero           # research-paper-writing (CrossRef client)
 krippendorff       # research-paper-writing (inter-rater reliability)

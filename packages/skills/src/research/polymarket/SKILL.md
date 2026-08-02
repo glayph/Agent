@@ -59,8 +59,26 @@ Example: `"Will X happen?" — 65.2% Yes ($1.2M volume)`
 ## Parsing Double-Encoded Fields
 
 The Gamma API returns `outcomePrices`, `outcomes`, and `clobTokenIds` as JSON strings
-inside JSON responses (double-encoded). When processing with Python, parse them with
-`json.loads(market['outcomePrices'])` to get the actual array.
+inside JSON responses (double-encoded). Parse them with `JSON.parse(market.outcomePrices)`
+to get the actual array — the bundled `scripts/polymarket.mjs` helper (see below) does this
+automatically.
+
+## Helper Script
+
+The `scripts/polymarket.mjs` script wraps all three APIs with clean, formatted output:
+
+```bash
+node scripts/polymarket.mjs search "bitcoin"
+node scripts/polymarket.mjs trending --limit 10
+node scripts/polymarket.mjs market <slug>
+node scripts/polymarket.mjs event <slug>
+node scripts/polymarket.mjs price <token_id>
+node scripts/polymarket.mjs book <token_id>
+node scripts/polymarket.mjs history <condition_id> --interval all --fidelity 50
+node scripts/polymarket.mjs trades --limit 10
+```
+
+No dependencies — uses only Node.js built-ins (requires Node 18+ for global `fetch`).
 
 ## Rate Limits
 

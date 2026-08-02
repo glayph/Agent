@@ -26,7 +26,8 @@ Search and retrieve academic papers from arXiv via their free REST API. No API k
 
 ## Searching Papers
 
-The API returns Atom XML. Parse with `grep`/`sed` or pipe through `python3` for clean output.
+The API returns Atom XML. Use `curl` for the raw response, or the bundled `scripts/search-arxiv.mjs`
+helper (see below) for clean, readable output.
 
 ### Basic search
 
@@ -37,24 +38,7 @@ curl -s "https://export.arxiv.org/api/query?search_query=all:GRPO+reinforcement+
 ### Clean output (parse XML to readable format)
 
 ```bash
-curl -s "https://export.arxiv.org/api/query?search_query=all:GRPO+reinforcement+learning&max_results=5&sortBy=submittedDate&sortOrder=descending" | python3 -c "
-import sys, xml.etree.ElementTree as ET
-ns = {'a': 'http://www.w3.org/2005/Atom'}
-root = ET.parse(sys.stdin).getroot()
-for i, entry in enumerate(root.findall('a:entry', ns)):
-    title = entry.find('a:title', ns).text.strip().replace('\n', ' ')
-    arxiv_id = entry.find('a:id', ns).text.strip().split('/abs/')[-1]
-    published = entry.find('a:published', ns).text[:10]
-    authors = ', '.join(a.find('a:name', ns).text for a in entry.findall('a:author', ns))
-    summary = entry.find('a:summary', ns).text.strip()[:200]
-    cats = ', '.join(c.get('term') for c in entry.findall('a:category', ns))
-    print(f'{i+1}. [{arxiv_id}] {title}')
-    print(f'   Authors: {authors}')
-    print(f'   Published: {published} | Categories: {cats}')
-    print(f'   Abstract: {summary}...')
-    print(f'   PDF: https://arxiv.org/pdf/{arxiv_id}')
-    print()
-"
+node scripts/search-arxiv.mjs "GRPO reinforcement learning" --max 5 --sort date
 ```
 
 ## Search Query Syntax
@@ -117,29 +101,7 @@ After fetching metadata for a paper, generate a BibTeX entry:
 
 {% raw %}
 ```bash
-curl -s "https://export.arxiv.org/api/query?id_list=1706.03762" | python3 -c "
-import sys, xml.etree.ElementTree as ET
-ns = {'a': 'http://www.w3.org/2005/Atom', 'arxiv': 'http://arxiv.org/schemas/atom'}
-root = ET.parse(sys.stdin).getroot()
-entry = root.find('a:entry', ns)
-if entry is None: sys.exit('Paper not found')
-title = entry.find('a:title', ns).text.strip().replace('\n', ' ')
-authors = ' and '.join(a.find('a:name', ns).text for a in entry.findall('a:author', ns))
-year = entry.find('a:published', ns).text[:4]
-raw_id = entry.find('a:id', ns).text.strip().split('/abs/')[-1]
-cat = entry.find('arxiv:primary_category', ns)
-primary = cat.get('term') if cat is not None else 'cs.LG'
-last_name = entry.find('a:author', ns).find('a:name', ns).text.split()[-1]
-print(f'@article{{{last_name}{year}_{raw_id.replace(\".\", \"\")},')
-print(f'  title     = {{{title}}},')
-print(f'  author    = {{{authors}}},')
-print(f'  year      = {{{year}}},')
-print(f'  eprint    = {{{raw_id}}},')
-print(f'  archivePrefix = {{arXiv}},')
-print(f'  primaryClass  = {{{primary}}},')
-print(f'  url       = {{https://arxiv.org/abs/{raw_id}}}')
-print('}')
-"
+node scripts/search-arxiv.mjs --bibtex 1706.03762
 ```
 {% endraw %}
 
@@ -174,18 +136,18 @@ Full list: https://arxiv.org/category_taxonomy
 
 ## Helper Script
 
-The `scripts/search_arxiv.py` script handles XML parsing and provides clean output:
+The `scripts/search-arxiv.mjs` script handles XML parsing and provides clean output:
 
 ```bash
-python scripts/search_arxiv.py "GRPO reinforcement learning"
-python scripts/search_arxiv.py "transformer attention" --max 10 --sort date
-python scripts/search_arxiv.py --author "Yann LeCun" --max 5
-python scripts/search_arxiv.py --category cs.AI --sort date
-python scripts/search_arxiv.py --id 2402.03300
-python scripts/search_arxiv.py --id 2402.03300,2401.12345
+node scripts/search-arxiv.mjs "GRPO reinforcement learning"
+node scripts/search-arxiv.mjs "transformer attention" --max 10 --sort date
+node scripts/search-arxiv.mjs --author "Yann LeCun" --max 5
+node scripts/search-arxiv.mjs --category cs.AI --sort date
+node scripts/search-arxiv.mjs --id 2402.03300
+node scripts/search-arxiv.mjs --id 2402.03300,2401.12345
 ```
 
-No dependencies — uses only Python stdlib.
+No dependencies — uses only Node.js built-ins (requires Node 18+ for global `fetch`).
 
 ---
 
@@ -243,7 +205,7 @@ curl -s "https://api.semanticscholar.org/graph/v1/author/search?query=Yann+LeCun
 
 ## Complete Research Workflow
 
-1. **Discover**: `python scripts/search_arxiv.py "your topic" --sort date --max 10`
+1. **Discover**: `node scripts/search-arxiv.mjs "your topic" --sort date --max 10`
 2. **Assess impact**: `curl -s "https://api.semanticscholar.org/graph/v1/paper/arXiv:ID?fields=citationCount,influentialCitationCount"`
 3. **Read abstract**: `web_extract(urls=["https://arxiv.org/abs/ID"])`
 4. **Read full paper**: `web_extract(urls=["https://arxiv.org/pdf/ID"])`
