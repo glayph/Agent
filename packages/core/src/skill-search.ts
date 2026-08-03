@@ -1,6 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as yaml from "js-yaml";
 import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
+import type { RuntimeRequirement } from "./runtime-fetch/types.js";
 
 export interface SkillMetadata {
   id: string;
@@ -10,7 +12,11 @@ export interface SkillMetadata {
   tags: string[];
   author?: string;
   version?: string;
+  /** Legacy flat dependency list. Historically assumed Python/pip; kept for
+   * backward compatibility. New skills should use `runtime` instead. */
   dependencies?: string[];
+  /** External language runtimes this skill needs (Python, Ruby, Rust, ...). */
+  runtime?: RuntimeRequirement[];
   enabled: boolean;
   path: string;
 }
@@ -236,6 +242,7 @@ export class SkillSearchEngine {
             author: parsedMeta.author,
             version: parsedMeta.version || "1.0.0",
             dependencies: parsedMeta.dependencies || [],
+            runtime: parsedMeta.runtime,
             enabled: parsedMeta.enabled !== false,
             path: skillPath,
           });
@@ -263,6 +270,15 @@ export class SkillSearchEngine {
       const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
       if (!match) return null;
       const frontmatter = match[1];
+
+      // Prefer a real YAML parse: it handles every field the legacy
+      // line-by-line parser understood (name, description, version, author,
+      // single-line tags/dependencies arrays) *and* new nested structures
+      // like `runtime: [...]` the legacy parser can't express. Fall back to
+      // the legacy parser only if the frontmatter isn't valid YAML.
+      const viaYaml = this.parseFrontmatterYaml(frontmatter);
+      if (viaYaml) return viaYaml;
+
       const meta: Partial<SkillMetadata> = { tags: [] };
       for (const line of frontmatter.split("\n")) {
         const kvMatch = line.match(/^\s*(\w+)\s*:\s*(.*?)\s*$/);
@@ -302,6 +318,77 @@ export class SkillSearchEngine {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Parse frontmatter as real YAML. Returns null (never throws) on malformed
+   * YAML or missing `name`, so callers fall back to the legacy line parser.
+   */
+  private parseFrontmatterYaml(
+    frontmatter: string,
+  ): Partial<SkillMetadata> | null {
+    let doc: unknown;
+    try {
+      doc = yaml.load(frontmatter);
+    } catch {
+      return null;
+    }
+    if (!doc || typeof doc !== "object") return null;
+    const raw = doc as Record<string, unknown>;
+
+    const meta: Partial<SkillMetadata> = { tags: [] };
+    if (typeof raw.name === "string") meta.name = raw.name;
+    if (typeof raw.description === "string")
+      meta.description = raw.description;
+    if (typeof raw.version === "string") meta.version = String(raw.version);
+    if (typeof raw.author === "string") meta.author = raw.author;
+    if (typeof raw.category === "string") {
+      meta.category = raw.category;
+      meta.id = `${meta.category}/${meta.name || "unknown"}`;
+    }
+    if (Array.isArray(raw.tags)) {
+      meta.tags = raw.tags.filter((t): t is string => typeof t === "string");
+    }
+    if (Array.isArray(raw.dependencies)) {
+      meta.dependencies = raw.dependencies.filter(
+        (d): d is string => typeof d === "string",
+      );
+    }
+    if (Array.isArray(raw.runtime)) {
+      meta.runtime = this.normalizeRuntimeList(raw.runtime, meta.dependencies);
+    } else if (meta.dependencies && meta.dependencies.length > 0) {
+      // Legacy skills declared a flat `dependencies` list with no language
+      // tag. Every such skill in this codebase historically meant Python/pip
+      // (e.g. research-paper-writing), so treat that as the compatibility
+      // default rather than silently dropping the requirement.
+      meta.runtime = [{ language: "python", packages: meta.dependencies }];
+    }
+
+    // Require at least `name`; otherwise treat as "not real frontmatter" and
+    // let the caller fall back to the legacy parser.
+    if (!meta.name) return null;
+    return meta;
+  }
+
+  private normalizeRuntimeList(
+    raw: unknown[],
+    legacyDependencies?: string[],
+  ): RuntimeRequirement[] {
+    const out: RuntimeRequirement[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const r = entry as Record<string, unknown>;
+      if (typeof r.language !== "string" || !r.language.trim()) continue;
+      const packages = Array.isArray(r.packages)
+        ? r.packages.filter((p): p is string => typeof p === "string")
+        : legacyDependencies || [];
+      out.push({
+        language: r.language.trim().toLowerCase(),
+        version: typeof r.version === "string" ? r.version : undefined,
+        packages,
+      });
+    }
+    return out;
   }
 
   private findMetadataFile(skillPath: string): string | null {

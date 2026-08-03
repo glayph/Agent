@@ -27,6 +27,15 @@ permissions:
     allow_keyboard: true
     allow_clipboard: true
     max_observe_elements: 300
+  runtime_installer:
+    # REQUIRE_APPROVAL: ask the user before installing any new external
+    # language runtime/package for a skill (first time per skill+language+
+    # package set only; approved combos are cached). Set to
+    # TRUSTED_FULL_ACCESS to skip prompts, or DISABLED to block entirely.
+    level: REQUIRE_APPROVAL
+    allowed_languages: [python, ruby, rust, node, go, php, perl, lua]
+    allow_sudo: false
+    max_timeout_seconds: 300
 tool_state:
   tool_search_tool_regex: true
   shell_execute: true

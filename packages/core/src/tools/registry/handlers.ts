@@ -9,6 +9,7 @@ import type { ComputerAgent } from "../computer.js";
 import type { CrawlerAgent } from "../crawler.js";
 import type { ShellExecutor } from "../executor/shell.js";
 import type { FileSecurityExecutor } from "../executor/file-security.js";
+import type { RuntimeFetcher } from "../../runtime-fetch/index.js";
 
 export type ToolHandler = (
   args: Record<string, unknown>,
@@ -22,6 +23,7 @@ interface ToolHandlerContext {
   computer: ComputerAgent;
   crawler: CrawlerAgent;
   orchestrator?: AgentOrchestrator | null;
+  runtimeFetcher?: RuntimeFetcher | null;
 }
 
 // Shell Handlers
@@ -512,4 +514,63 @@ export async function handleModelSelect(
     this.orchestrator.provider = settings.provider;
   }
   return JSON.stringify({ success: true, active_model: modelName });
+}
+
+// Runtime Fetcher Handlers
+export async function handleRuntimeEnsure(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  if (!this.runtimeFetcher) {
+    return JSON.stringify({
+      outcome: "failed",
+      error:
+        "Runtime fetcher is not initialized on this agent instance.",
+    });
+  }
+  const skillId = args["skill_id"] as string;
+  const language = args["language"] as string;
+  const packages = Array.isArray(args["packages"])
+    ? (args["packages"] as unknown[]).filter(
+        (p): p is string => typeof p === "string",
+      )
+    : [];
+  const version = args["version"] as string | undefined;
+
+  if (!skillId || !language) {
+    return JSON.stringify({
+      outcome: "failed",
+      error: "skill_id and language are required.",
+    });
+  }
+
+  const result = await this.runtimeFetcher.ensureRuntimeReady(skillId, {
+    language,
+    packages,
+    version,
+  });
+  return JSON.stringify(result);
+}
+
+export async function handleRuntimeEnsureStatus(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  if (!this.runtimeFetcher) {
+    return JSON.stringify({
+      error: "Runtime fetcher is not initialized on this agent instance.",
+    });
+  }
+  const requestId = args["request_id"] as string | undefined;
+  const store = this.runtimeFetcher.getConsentStore();
+
+  if (requestId) {
+    const request = store.getById(requestId);
+    if (!request) {
+      return JSON.stringify({ error: `No such request: ${requestId}` });
+    }
+    return JSON.stringify(request);
+  }
+
+  return JSON.stringify({ pending: store.listPending() });
 }

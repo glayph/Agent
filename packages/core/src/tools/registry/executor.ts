@@ -47,6 +47,8 @@ import {
   handleModelSelect,
   handleDirectDownloadSearch,
   handleProjectWorkflowCreate,
+  handleRuntimeEnsure,
+  handleRuntimeEnsureStatus,
 } from "./handlers.js";
 import { ShellExecutor } from "../executor/shell.js";
 import { FileSecurityExecutor } from "../executor/file-security.js";
@@ -57,6 +59,7 @@ import { CrawlerAgent } from "../crawler.js";
 import type { AgentOrchestrator } from "../../agent.js";
 import { getErrorMessage } from "../../errors.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "../../paths.js";
+import { RuntimeFetcher } from "../../runtime-fetch/index.js";
 
 export interface ToolResult {
   success: boolean;
@@ -77,7 +80,15 @@ const TOOL_TIMEOUTS: Record<string, number> = {
 };
 
 interface RuntimeToolsConfig {
-  permissions?: Record<string, { level?: string; allow_app_launch?: boolean }>;
+  permissions?: Record<
+    string,
+    {
+      level?: string;
+      allow_app_launch?: boolean;
+      allowed_languages?: string[];
+      allow_sudo?: boolean;
+    }
+  >;
   tool_state?: Record<string, boolean>;
   disabled_tools?: string[];
 }
@@ -133,6 +144,7 @@ export class ToolRegistry {
   public crawler: CrawlerAgent;
   public profileManager: ProfileManager | null = null;
   public orchestrator: AgentOrchestrator | null = null;
+  public runtimeFetcher: RuntimeFetcher | null = null;
   private handlers: Map<string, ToolHandler> = new Map();
   private skillToolDefs: Map<string, ToolDefinition> = new Map();
   private pluginToolDefs: Map<string, ToolDefinition> = new Map();
@@ -163,7 +175,34 @@ export class ToolRegistry {
     );
     this.computer = new ComputerAgent();
     this.crawler = new CrawlerAgent(this.browser);
+    this.initRuntimeFetcher();
     this.registerBuiltins();
+  }
+
+  private initRuntimeFetcher(): void {
+    try {
+      const config = this.loadRuntimeToolsConfig();
+      const runtimeInstallerConfig = config.permissions?.runtime_installer;
+      const level = String(
+        runtimeInstallerConfig?.level || "REQUIRE_APPROVAL",
+      ).toUpperCase();
+      const approvalLevel: "REQUIRE_APPROVAL" | "TRUSTED_FULL_ACCESS" | "DISABLED" =
+        this.isDisabledLevel(level)
+          ? "DISABLED"
+          : level === "TRUSTED_FULL_ACCESS"
+            ? "TRUSTED_FULL_ACCESS"
+            : "REQUIRE_APPROVAL";
+
+      this.runtimeFetcher = new RuntimeFetcher({
+        dataDir: this.runtimePaths.dataDir,
+        shell: this.executor,
+        allowedLanguages: runtimeInstallerConfig?.allowed_languages,
+        approvalLevel,
+      });
+    } catch (err) {
+      console.warn("Failed to initialize runtime fetcher:", err);
+      this.runtimeFetcher = null;
+    }
   }
 
   setOrchestrator(orchestrator: AgentOrchestrator): void {
@@ -240,6 +279,9 @@ export class ToolRegistry {
       return name;
     }
     if (name.startsWith("computer_")) return "computer_use";
+    if (name === "runtime_ensure" || name === "runtime_ensure_status") {
+      return "runtime_installer";
+    }
     return undefined;
   }
 
@@ -356,6 +398,11 @@ export class ToolRegistry {
       "project_workflow_create",
       handleProjectWorkflowCreate.bind(this),
     );
+    this.registerHandler("runtime_ensure", handleRuntimeEnsure.bind(this));
+    this.registerHandler(
+      "runtime_ensure_status",
+      handleRuntimeEnsureStatus.bind(this),
+    );
   }
 
   getToolDefinitions(): ToolDefinition[] {
@@ -368,6 +415,7 @@ export class ToolRegistry {
       ...ToolRegistrySchemas.modelSchemas(),
       ...ToolRegistrySchemas.directDownloadSchema(),
       ...ToolRegistrySchemas.projectWorkflowSchemas(),
+      ...ToolRegistrySchemas.runtimeSchema(),
     ];
     const skillTools = Array.from(this.skillToolDefs.values());
     const pluginTools = Array.from(this.pluginToolDefs.values());

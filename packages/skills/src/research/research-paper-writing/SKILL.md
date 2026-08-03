@@ -5,7 +5,9 @@ description: "Write ML papers for NeurIPS/ICML/ICLR: design→submit."
 version: 1.1.0
 author: Orchestra Research
 license: MIT
-dependencies: [semanticscholar, arxiv, habanero, requests, scipy, numpy, matplotlib, SciencePlots]
+runtime:
+  - language: python
+    packages: [semanticscholar, arxiv, habanero, requests, scipy, numpy, matplotlib, SciencePlots]
 platforms: [linux, macos]
 metadata:
   Hiro:
@@ -17,6 +19,16 @@ metadata:
 ---
 
 # Research Paper Writing Pipeline
+
+> **Before running any experiment script or literature-search step below**,
+> call the `runtime_ensure` tool with `skill_id: "research/research-paper-writing"`,
+> `language: "python"`, `packages: ["semanticscholar", "arxiv", "habanero",
+> "requests", "scipy", "numpy", "matplotlib", "SciencePlots"]`. If it returns
+> `awaiting-consent`, stop and tell the user this skill needs approval to
+> install these Python packages into an isolated sandbox — do not `pip
+> install` them yourself. Once it returns `already-satisfied` or `installed`,
+> use the sandboxed interpreter path it reports for all Python commands in
+> this pipeline.
 
 End-to-end pipeline for producing publication-ready ML/AI research papers targeting **NeurIPS, ICML, ICLR, ACL, AAAI, and COLM**. This skill covers the full research lifecycle: experiment design, execution, monitoring, analysis, paper writing, review, revision, and submission.
 

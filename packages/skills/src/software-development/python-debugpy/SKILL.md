@@ -5,6 +5,9 @@ version: 1.0.0
 author: Hiro
 license: MIT
 platforms: [linux, macos]
+runtime:
+  - language: python
+    packages: [debugpy, remote-pdb]
 metadata:
   Hiro:
     tags: [debugging, python, pdb, debugpy, breakpoints, dap, post-mortem]
@@ -12,6 +15,15 @@ metadata:
 ---
 
 # Python Debugger (pdb + debugpy)
+
+> **Before using `debugpy` or `remote-pdb`** (plain `breakpoint()`/`pdb` need
+> nothing extra — skip this for those): call the `runtime_ensure` tool with
+> `skill_id: "software-development/python-debugpy"`, `language: "python"`,
+> `packages: ["debugpy", "remote-pdb"]`. If it returns `awaiting-consent`,
+> stop and tell the user a new Python package needs their approval — do not
+> attempt to `pip install` it yourself. If it returns `already-satisfied` or
+> `installed`, proceed with the shell commands below using the sandboxed
+> interpreter path it reports.
 
 ## Overview
 

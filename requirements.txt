@@ -1,5 +1,17 @@
-# Hiro agent — Python runtime dependencies
-# Install:  python -m pip install -r requirements.txt
+# Hiro agent — Python runtime dependencies (INFORMATIONAL / MANUAL FALLBACK)
+#
+# The agent no longer relies on this file to make these packages available.
+# Skills that need Python (or Ruby/Rust/Node) packages now declare them in
+# their own SKILL.md frontmatter (`runtime:` block) and the agent fetches
+# them on-demand into an isolated per-skill sandbox after explicit user
+# consent — see packages/core/src/runtime-fetch/. Nothing here is installed
+# automatically or globally.
+#
+# This file is kept only as:
+#   1. documentation of which packages each bundled skill uses, and
+#   2. a manual fallback if you'd rather install everything yourself
+#      up front instead of letting the agent prompt you per skill:
+#        python -m pip install -r requirements.txt
 # Requires: Python >=3.10 (verified on Python 3.14)
 
 # --- Runtime (required) ---
@@ -16,5 +28,6 @@ numpy              # research-paper-writing
 arxiv              # research-paper-writing (API client used in generated experiment code)
 semanticscholar    # research-paper-writing
 habanero           # research-paper-writing (CrossRef client)
-krippendorff       # research-paper-writing (inter-rater reliability)
+krippendorff       # research-paper-writing (inter-rater reliability) — NOTE: not yet listed in this skill's SKILL.md runtime: block, add it there if actually used
 pygount            # github codebase-inspection (code metrics)
+

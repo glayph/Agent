@@ -40,6 +40,7 @@ import {
   buildWorkflowDecisionPattern,
 } from "../workflow-accelerator.js";
 import { createSessionRouter } from "./session-router.js";
+import { createRuntimeApprovalRouter } from "./runtime-approval-router.js";
 import { getSystemStats } from "./system-monitoring.js";
 import { createEnhancementRouter } from "./enhancement-router.js";
 import { closeHttpServer, closeWebSocketServer } from "./shutdown-utils.js";
@@ -496,6 +497,17 @@ app.use(
   "/sessions",
   validateRequiredApiKey,
   createSessionRouter({ audit: permissionAuditLog }),
+);
+
+// Mount runtime-installer approval router — lets the CLI TUI / web dashboard
+// list and approve/deny pending external-runtime install requests created by
+// the runtime_ensure tool (see packages/core/src/runtime-fetch/).
+app.use(
+  "/runtime-installer",
+  validateRequiredApiKey,
+  createRuntimeApprovalRouter({
+    getRuntimeFetcher: () => orchestrator.tools.runtimeFetcher,
+  }),
 );
 
 const server = http.createServer(app);

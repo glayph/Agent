@@ -51,6 +51,79 @@ export class ToolRegistrySchemas {
     ];
   }
 
+  /**
+   * Multi-language external runtime fetcher. Skills that are pure
+   * documentation (SKILL.md prose, no bundled tool handler) — such as
+   * python-debugpy or research-paper-writing — instruct the agent to call
+   * this before running shell commands that need an external interpreter
+   * (Python, Ruby, Rust, ...) the agent's own Go/TypeScript core does not
+   * bundle. It never installs silently: first call for a new
+   * skill+language+package combination creates a pending approval request
+   * and returns "awaiting-consent" instead of installing.
+   */
+  static runtimeSchema(): ToolDefinition[] {
+    return [
+      {
+        type: "function",
+        function: {
+          name: "runtime_ensure",
+          description:
+            "Ensure an external language runtime + packages (Python, Ruby, Rust, Node) are available in an isolated, per-skill sandbox before running shell commands that need them. Returns 'already-satisfied' or 'installed' when ready to proceed, 'awaiting-consent' if this is a new combination needing user approval (do not proceed with the dependent shell command until approved), or 'failed'/'runtime-unavailable' with manual fallback instructions.",
+          parameters: {
+            type: "object",
+            properties: {
+              skill_id: {
+                type: "string",
+                description:
+                  "The skill requesting this runtime, e.g. 'software-development/python-debugpy'.",
+              },
+              language: {
+                type: "string",
+                description:
+                  "Lowercased language/runtime identifier: python, ruby, rust, or node.",
+              },
+              packages: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  "Package names to install inside the sandbox (e.g. ['debugpy', 'remote-pdb']). Empty array if only the base interpreter is needed.",
+              },
+              version: {
+                type: "string",
+                description:
+                  "Optional version constraint for the base runtime, e.g. '>=3.9'.",
+              },
+            },
+            required: ["skill_id", "language", "packages"],
+          },
+        },
+        risk: {
+          level: "medium",
+          label: "Medium risk",
+          reason:
+            "May install packages from an external package registry (PyPI, npm, RubyGems, crates.io) into an isolated sandbox after user consent.",
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "runtime_ensure_status",
+          description:
+            "Check the status of a pending or past runtime_ensure request by its request_id, or list all pending requests awaiting user approval if no request_id is given.",
+          parameters: {
+            type: "object",
+            properties: {
+              request_id: {
+                type: "string",
+                description: "The request ID returned by runtime_ensure.",
+              },
+            },
+          },
+        },
+      },
+    ];
+  }
+
   static fileSchemas(): ToolDefinition[] {
     return [
       {
