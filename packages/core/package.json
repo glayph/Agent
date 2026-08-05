@@ -27,20 +27,21 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\""
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@hiro/config": "file:../config",
     "@hiro/installer": "file:../installer",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",
     "express": "^4.19.0",
+    "graphrag-memory": "file:../memory",
     "js-yaml": "^4.2.1",
     "openai": "^4.52.0",
     "playwright": "^1.44.0",
     "qrcode": "^1.5.4",
     "telegraf": "^4.16.0",
     "turndown": "^7.2.4",
-    "ws": "^8.17.0",
-    "graphrag-memory": "file:../memory"
+    "ws": "^8.17.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.9",
