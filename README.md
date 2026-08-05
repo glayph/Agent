@@ -30,6 +30,7 @@ aliased as `hiro`, `Hiro`, `mikiagent`, `MikiAgent`, `agent`, and `Agent`.
 > ⚠️ **Warning:** this project is designed to run with **full system access**. Review the
 > configuration and tool permissions (`config/agent.yaml`, `config/tools.yaml`) before running
 > it on a machine you care about.
+> This is not a serious project. I'm just making it to learn for myself.
 
 ---
 
