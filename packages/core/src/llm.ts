@@ -9,6 +9,19 @@ import {
   directProviderClient,
   type DirectProviderConfig,
 } from "./providers/provider-controller.js";
+import { claudeNativeCompletion } from "./providers/claude-native.js";
+
+/**
+ * When true, the "claude" provider routes through the native @anthropic-ai/sdk
+ * path instead of the OpenAI-compatible endpoint. Controlled by the env var
+ * CLAUDE_NATIVE (set to "0" or "false" to disable and fall back to the
+ * OpenAI-compat path). Default: enabled.
+ */
+function isClaudeNativeEnabled(): boolean {
+  const val = process.env["CLAUDE_NATIVE"];
+  if (val === undefined || val === null) return true; // on by default
+  return val !== "0" && val.toLowerCase() !== "false";
+}
 
 export class LLMProviderError extends Error {
   constructor(message: string) {
@@ -140,6 +153,18 @@ export async function achatCompletion(
     );
   }
   const mappedModel = normalizeDirectModelName(provider.id, modelName);
+
+  // Route claude provider through native @anthropic-ai/sdk when enabled.
+  // The native path handles its own retry loop, so we call it once and
+  // return directly — no need for the OpenAI-compat retry loop below.
+  if (provider.id === "claude" && isClaudeNativeEnabled()) {
+    return claudeNativeCompletion(
+      messages as Parameters<typeof claudeNativeCompletion>[0],
+      mappedModel,
+      apiKey ?? "",
+      extra,
+    );
+  }
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
