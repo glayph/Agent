@@ -6,6 +6,10 @@ import {
   type PluginContractKind,
 } from "@hiro/installer";
 import {
+  normalizeRuntimePaths,
+  resolveDownloadedSkillsDir,
+} from "../paths.js";
+import {
   SqliteAuditLog,
   type AuditEvent,
   type AuditEventType,
@@ -690,8 +694,9 @@ export async function buildPluginMarketplaceReadinessReport(
   workspaceDir: string,
   options: BuildPluginMarketplaceReadinessOptions = {},
 ): Promise<PluginMarketplaceReadinessResult> {
+  const runtimePaths = normalizeRuntimePaths(workspaceDir);
   const skillsDir =
-    options.skillsDir || path.join(workspaceDir, "src", "skills");
+    options.skillsDir || resolveDownloadedSkillsDir(runtimePaths, workspaceDir);
   const configPath =
     options.configPath || path.join(workspaceDir, "config", "tools.yaml");
   const auditPath =

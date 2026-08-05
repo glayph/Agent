@@ -30,8 +30,11 @@ export const BUILTIN_MODELS = [
   "openai/gpt-4o-mini",
   "openai/gpt-4o-2024-08-06",
   "anthropic/claude-3.5-sonnet",
+  "anthropic/claude-opus-4-8",
+  "anthropic/claude-sonnet-5",
   "google/gemini-2.0-flash-001",
   "meta-llama/llama-3.3-70b-instruct",
+  "ollama/llama3.3",
 ];
 
 export function shouldWarnMissingApiKeys(
@@ -69,6 +72,13 @@ export class Settings {
   get googleApiKey(): string {
     return resolveConfiguredSecret(
       "GOOGLE_API_KEY",
+      process.env["Hiro_WORKSPACE_DIR"],
+    );
+  }
+
+  get anthropicApiKey(): string {
+    return resolveConfiguredSecret(
+      "ANTHROPIC_API_KEY",
       process.env["Hiro_WORKSPACE_DIR"],
     );
   }

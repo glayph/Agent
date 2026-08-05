@@ -3,17 +3,25 @@ import * as path from "path";
 import * as os from "os";
 import { SkillRegistry } from "@hiro/installer";
 import { SqliteAuditLog } from "../audit-log";
+import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";
 import {
   executeRuntimePluginTool,
   loadRuntimePluginContracts,
 } from "./plugin-contract-runtime";
+
+function skillsDirFor(workspaceDir: string): string {
+  return resolveDownloadedSkillsDir(
+    normalizeRuntimePaths(workspaceDir),
+    workspaceDir,
+  );
+}
 
 function createWorkspace() {
   const workspaceDir = path.join(
     os.tmpdir(),
     `plugin-runtime-test-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
-  fs.mkdirSync(path.join(workspaceDir, "src", "skills"), { recursive: true });
+  fs.mkdirSync(skillsDirFor(workspaceDir), { recursive: true });
   fs.mkdirSync(path.join(workspaceDir, "config"), { recursive: true });
   return workspaceDir;
 }
@@ -29,7 +37,7 @@ async function registerPlugin(
     toolEntrypointContent?: string;
   },
 ) {
-  const skillsDir = path.join(workspaceDir, "src", "skills");
+  const skillsDir = skillsDirFor(workspaceDir);
   const assetsPath = path.join(skillsDir, `${options.name || "plugin"}_assets`);
   fs.mkdirSync(path.join(assetsPath, "tools"), { recursive: true });
   if (options.createToolEntrypoint) {

@@ -8,7 +8,11 @@ import {
   type PluginContractCatalogEntry,
   type PluginContractKind,
 } from "@hiro/installer";
-import { normalizeRuntimePaths, type RuntimePaths } from "../paths.js";
+import {
+  normalizeRuntimePaths,
+  resolveDownloadedSkillsDir,
+  type RuntimePaths,
+} from "../paths.js";
 
 export type RuntimePluginContractStatus =
   | "ready"
@@ -625,7 +629,8 @@ export async function loadRuntimePluginContracts(
   options: LoadRuntimePluginContractsOptions = {},
 ): Promise<RuntimePluginContract[]> {
   const runtimePaths = normalizeRuntimePaths(paths);
-  const skillsDir = options.skillsDir || runtimePaths.skillsDir;
+  const skillsDir =
+    options.skillsDir || resolveDownloadedSkillsDir(runtimePaths);
   const configPath =
     options.configPath || path.join(runtimePaths.configDir, "tools.yaml");
   const policy = readPluginContractsPolicy(configPath);

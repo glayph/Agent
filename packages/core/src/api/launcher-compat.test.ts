@@ -20,7 +20,7 @@ import {
 import { routeAgentTask } from "../agent-router.js";
 import type { AgentOrchestrator } from "../agent.js";
 import type { SkillLoader } from "../skill-loader.js";
-import { normalizeRuntimePaths } from "../paths.js";
+import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths.js";
 import { buildChannelRuntimeProbe } from "./channel-runtime-probe.js";
 import {
   normalizeDiscordPrompt,
@@ -224,7 +224,10 @@ async function registerLauncherPluginContracts(
   workspaceDir: string,
   contracts: PluginContracts,
 ): Promise<void> {
-  const skillsDir = path.join(workspaceDir, "src", "skills");
+  const skillsDir = resolveDownloadedSkillsDir(
+    normalizeRuntimePaths(workspaceDir),
+    workspaceDir,
+  );
   const assetsPath = path.join(skillsDir, "launcher_channel_plugin_assets");
   fs.mkdirSync(skillsDir, { recursive: true });
   fs.mkdirSync(assetsPath, { recursive: true });

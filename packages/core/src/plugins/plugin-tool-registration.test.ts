@@ -4,7 +4,7 @@ import * as os from "os";
 import { SkillRegistry } from "@hiro/installer";
 import { ToolRegistry } from "../tools/registry/executor";
 import { registerRuntimePluginTools } from "./plugin-tool-registration";
-import { type RuntimePaths } from "../paths.js";
+import { resolveDownloadedSkillsDir, type RuntimePaths } from "../paths.js";
 
 function makeRuntimePaths(workspaceDir: string): RuntimePaths {
   return {
@@ -19,6 +19,14 @@ function makeRuntimePaths(workspaceDir: string): RuntimePaths {
   };
 }
 
+// registerRuntimePluginTools resolves the actual skills directory via
+// resolveDownloadedSkillsDir (isolated under dataDir when sandbox_mode is
+// on, which is the default), not runtimePaths.skillsDir directly — the
+// fixture below must write plugins to the same place production code reads.
+function skillsDirFor(workspaceDir: string): string {
+  return resolveDownloadedSkillsDir(makeRuntimePaths(workspaceDir), workspaceDir);
+}
+
 function createWorkspace() {
   const workspaceDir = path.join(
     os.tmpdir(),
@@ -26,13 +34,13 @@ function createWorkspace() {
       .toString(16)
       .slice(2)}`,
   );
-  fs.mkdirSync(path.join(workspaceDir, "src", "skills"), { recursive: true });
+  fs.mkdirSync(skillsDirFor(workspaceDir), { recursive: true });
   fs.mkdirSync(path.join(workspaceDir, "config"), { recursive: true });
   return workspaceDir;
 }
 
 async function registerEchoPlugin(workspaceDir: string) {
-  const skillsDir = path.join(workspaceDir, "src", "skills");
+  const skillsDir = skillsDirFor(workspaceDir);
   const assetsPath = path.join(skillsDir, "echo_plugin_assets");
   fs.mkdirSync(path.join(assetsPath, "tools"), { recursive: true });
   fs.writeFileSync(

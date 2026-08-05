@@ -2,10 +2,18 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { SkillRegistry, type PluginContracts } from "@hiro/installer";
+import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";
 import {
   listRuntimePluginProviderMetadata,
   probeRuntimePluginProvider,
 } from "./plugin-provider-adapter";
+
+function skillsDirFor(workspaceDir: string): string {
+  return resolveDownloadedSkillsDir(
+    normalizeRuntimePaths(workspaceDir),
+    workspaceDir,
+  );
+}
 
 function createWorkspace() {
   const workspaceDir = path.join(
@@ -14,7 +22,7 @@ function createWorkspace() {
       .toString(16)
       .slice(2)}`,
   );
-  fs.mkdirSync(path.join(workspaceDir, "src", "skills"), { recursive: true });
+  fs.mkdirSync(skillsDirFor(workspaceDir), { recursive: true });
   fs.mkdirSync(path.join(workspaceDir, "config"), { recursive: true });
   return workspaceDir;
 }
@@ -24,7 +32,7 @@ async function registerPlugin(
   contracts: PluginContracts,
   files: Record<string, string> = {},
 ) {
-  const skillsDir = path.join(workspaceDir, "src", "skills");
+  const skillsDir = skillsDirFor(workspaceDir);
   const assetsPath = path.join(skillsDir, "provider_plugin_assets");
   fs.mkdirSync(assetsPath, { recursive: true });
   for (const [relativePath, contents] of Object.entries(files)) {

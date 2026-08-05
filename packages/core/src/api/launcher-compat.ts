@@ -74,7 +74,10 @@ import {
   buildWorkflowAccelerationPlan,
   buildWorkflowDecisionPattern,
 } from "../workflow-accelerator.js";
-import { type RuntimePaths } from "../paths.js";
+import {
+  resolveDownloadedSkillsDir,
+  type RuntimePaths,
+} from "../paths.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -5318,22 +5321,21 @@ export function createLauncherCompatRouter({
         titleMatch?.[1] ||
           path.basename(file.filename, path.extname(file.filename)),
       );
-      const skillDir = path.join(workspaceDir, "src", "skills", "manual", name);
+      // Manually imported skills came from outside the agent (a file the
+      // user uploaded, likely sourced from the internet), so they're
+      // isolated the same way as installer-fetched skills: under the
+      // sandbox-isolated downloaded-skills directory when sandbox_mode is
+      // on (the default), rather than inside the workspace's own src/
+      // tree, so a workspace cleanup can never delete them by accident.
+      const manualSkillsBase = path.join(
+        resolveDownloadedSkillsDir(paths, workspaceDir),
+        "manual",
+      );
+      const skillDir = path.join(manualSkillsBase, name);
       ensureDir(skillDir);
       fs.writeFileSync(path.join(skillDir, "SKILL.md"), content, "utf-8");
-      const categoriesPath = path.join(
-        workspaceDir,
-        "src",
-        "skills",
-        "categories.json",
-      );
-      const manualSkillsPath = path.join(
-        workspaceDir,
-        "src",
-        "skills",
-        "manual",
-        "skills.json",
-      );
+      const categoriesPath = path.join(manualSkillsBase, "categories.json");
+      const manualSkillsPath = path.join(manualSkillsBase, "skills.json");
       ensureDir(path.dirname(categoriesPath));
       ensureDir(path.dirname(manualSkillsPath));
       const categories = readJsonFile<{ categories: string[] }>(

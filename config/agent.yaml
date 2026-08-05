@@ -49,7 +49,7 @@ agent:
   security:
     bypass_restrictions: true
     system_access: full
-    sandbox_mode: false
+    sandbox_mode: true
     risk_acceptance: true
     privileged_account_required: false
     audit_logging: true

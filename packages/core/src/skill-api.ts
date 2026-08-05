@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import * as path from "path";
 import { SkillLoader } from "./skill-loader.js";
-import { type RuntimePaths } from "./paths.js";
+import { type RuntimePaths, resolveDownloadedSkillsDir } from "./paths.js";
 import { SkillInstaller, type PluginContractKind } from "@hiro/installer";
 import { createSuccessResponse, createErrorResponse } from "./skill-utils.js";
 import {
@@ -78,11 +78,17 @@ async function discoverInstalledSkillIds(
 
 async function installSkillDirect(
   skillSpec: string,
-  workspaceDir: string,
+  downloadedSkillsDir: string,
   skillLoader: SkillLoader,
 ): Promise<{ result: SkillInstallResult }> {
-  const skillsDir = path.join(workspaceDir, "src", "skills");
-  const skillInstaller = new SkillInstaller(skillsDir);
+  // Downloaded/installed skills always go to the canonical isolated
+  // skills directory (runtimePaths.skillsDir — outside the source repo in
+  // production, e.g. ~/.local/share/Hiro/skills), never into the repo's
+  // own packages/skills/src tree where the agent's bundled skills live.
+  // This keeps anything fetched from the internet cleanly separated from
+  // core/bundled content, so cleaning up the workspace can never
+  // accidentally delete a downloaded skill the agent depends on.
+  const skillInstaller = new SkillInstaller(downloadedSkillsDir);
   await skillInstaller.init();
   const result = (await skillInstaller.install(
     skillSpec,
@@ -229,7 +235,7 @@ export function createSkillsRouter(
             .json(createErrorResponse("Invalid contract kind"));
         }
         const skillInstaller = new SkillInstaller(
-          path.join(wd, "src", "skills"),
+          resolveDownloadedSkillsDir(effectivePaths),
         );
         await skillInstaller.init();
         const contracts = await skillInstaller
@@ -402,7 +408,11 @@ export function createSkillsRouter(
           return res
             .status(400)
             .json(createErrorResponse("Missing required field: source"));
-        const installResult = await installSkillDirect(source, wd, skillLoader);
+        const installResult = await installSkillDirect(
+          source,
+          resolveDownloadedSkillsDir(effectivePaths),
+          skillLoader,
+        );
         const pluginTools = shouldRefreshPluginTools(installResult.result)
           ? await refreshRuntimePluginTools()
           : undefined;

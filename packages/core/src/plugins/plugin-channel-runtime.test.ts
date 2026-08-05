@@ -5,8 +5,15 @@ import { createWorkspaceSecretVault } from "@hiro/config";
 import { SkillRegistry, type PluginContracts } from "@hiro/installer";
 import type { AgentOrchestrator } from "../agent";
 import { SqliteAuditLog } from "../audit-log";
-import { normalizeRuntimePaths } from "../paths";
+import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";
 import { PluginChannelRuntimeManager } from "./plugin-channel-runtime";
+
+function skillsDirFor(workspaceDir: string): string {
+  return resolveDownloadedSkillsDir(
+    normalizeRuntimePaths(workspaceDir),
+    workspaceDir,
+  );
+}
 
 function createWorkspace() {
   const workspaceDir = path.join(
@@ -15,7 +22,7 @@ function createWorkspace() {
       .toString(16)
       .slice(2)}`,
   );
-  fs.mkdirSync(path.join(workspaceDir, "src", "skills"), { recursive: true });
+  fs.mkdirSync(skillsDirFor(workspaceDir), { recursive: true });
   fs.mkdirSync(path.join(workspaceDir, "config"), { recursive: true });
   return workspaceDir;
 }
@@ -25,7 +32,7 @@ async function registerPlugin(
   contracts: PluginContracts,
   files: Record<string, string>,
 ) {
-  const skillsDir = path.join(workspaceDir, "src", "skills");
+  const skillsDir = skillsDirFor(workspaceDir);
   const assetsPath = path.join(skillsDir, "runtime_channel_plugin_assets");
   fs.mkdirSync(assetsPath, { recursive: true });
   for (const [relativePath, contents] of Object.entries(files)) {

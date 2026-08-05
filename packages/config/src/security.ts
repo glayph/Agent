@@ -49,6 +49,36 @@ function bypassRestrictionsFromConfig(
   }
 }
 
+/**
+ * Whether agent.yaml has security.sandbox_mode: true. This is unrelated to
+ * bypass_restrictions/system_access (which govern CORS/network access, not
+ * the filesystem) — sandbox_mode governs whether anything the agent fetches
+ * from the internet at runtime (installed skills, per-skill language
+ * runtime packages) is written into an isolated directory outside the
+ * agent's own source/workspace tree, so that cleaning up the workspace can
+ * never accidentally delete a downloaded dependency the agent needs.
+ * Defaults to true (isolate by default) if agent.yaml can't be read or
+ * doesn't set the key, matching the schema default in schema.ts.
+ */
+export function isSandboxModeEnabled(workspaceDir: string | undefined): boolean {
+  if (!workspaceDir) return true;
+  const configPath = path.join(workspaceDir, "config", "agent.yaml");
+  try {
+    const parsed = yaml.load(fs.readFileSync(configPath, "utf-8"));
+    if (!isRecord(parsed)) return true;
+    const agent = parsed.agent;
+    if (!isRecord(agent)) return true;
+    const security = agent.security;
+    if (!isRecord(security)) return true;
+    if (typeof security["sandbox_mode"] === "boolean") {
+      return security["sandbox_mode"];
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 function isAllowedCorsOriginsOptions(
   value: AllowedCorsOriginsOptions | NodeJS.ProcessEnv,
 ): value is AllowedCorsOriginsOptions {

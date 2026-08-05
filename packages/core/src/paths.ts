@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { isSandboxModeEnabled } from "@hiro/config";
 
 export interface RuntimePaths {
   configDir: string;
@@ -102,6 +103,35 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
     outputDir,
     sourceDir: paths.sourceDir ? path.resolve(paths.sourceDir) : sourceDir,
   };
+}
+
+/**
+ * Where downloaded/installed skills should actually be written.
+ *
+ * With security.sandbox_mode: true in agent.yaml (the default), this is
+ * always <dataDir>/downloaded-skills — a location fully isolated from the
+ * agent's own source/workspace tree and from the bundled skill catalog
+ * (packages/skills/src), even when RuntimePaths was constructed from a raw
+ * workspace path (dev mode), where skillsDir would otherwise resolve
+ * *inside* the source tree at <sourceDir>/src/skills.
+ *
+ * This exists specifically so that cleaning up or resetting the workspace
+ * can never accidentally delete a skill fetched from the internet that the
+ * agent still needs — full system access elsewhere is unaffected; this
+ * only isolates internet-sourced content.
+ *
+ * With sandbox_mode: false, falls back to the legacy runtimePaths.skillsDir
+ * for backward compatibility with existing setups that rely on that path.
+ */
+export function resolveDownloadedSkillsDir(
+  runtimePaths: RuntimePaths,
+  workspaceDir?: string,
+): string {
+  const wd = workspaceDir ?? runtimePaths.sourceDir;
+  if (isSandboxModeEnabled(wd)) {
+    return path.join(runtimePaths.dataDir, "downloaded-skills");
+  }
+  return runtimePaths.skillsDir;
 }
 
 export function resolveRuntimePaths(): RuntimePaths {
