@@ -604,6 +604,47 @@ function _asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+interface ToolFeedbackConfig {
+  enabled: boolean;
+  maxArgsLength: number;
+  separateMessages: boolean;
+}
+
+/**
+ * Reads agents.defaults.tool_feedback from live config (see the
+ * tool_feedback block in launcher-compat.ts defaultAppConfig for the
+ * matching default shape). Falls back to those same defaults when a field
+ * is absent so behavior stays identical to a fresh install.
+ */
+function _getToolFeedbackConfig(): ToolFeedbackConfig {
+  const agents = _asRecord(orchestrator.config.agents);
+  const defaults = _asRecord(agents.defaults);
+  const toolFeedback = _asRecord(defaults.tool_feedback);
+
+  const enabled =
+    typeof toolFeedback.enabled === "boolean" ? toolFeedback.enabled : true;
+  const maxArgsLength = Number(toolFeedback.max_args_length);
+  const separateMessages =
+    typeof toolFeedback.separate_messages === "boolean"
+      ? toolFeedback.separate_messages
+      : false;
+
+  return {
+    enabled,
+    maxArgsLength: Number.isFinite(maxArgsLength) && maxArgsLength > 0
+      ? Math.floor(maxArgsLength)
+      : 300,
+    separateMessages,
+  };
+}
+
+/** Truncates a JSON-stringified tool-argument preview to maxArgsLength. */
+function _previewToolArgs(input: unknown, maxArgsLength: number): string {
+  const full = JSON.stringify(input || {});
+  if (full.length <= maxArgsLength) return full;
+  return full.slice(0, maxArgsLength) + "…";
+}
+
 interface mikiContextUsage {
   used_tokens: number;
   total_tokens: number;
@@ -716,6 +757,8 @@ mikiWss.on("connection", (ws, req) => {
     const assistantMessageId = `assistant-${requestId}`;
     let fullResponse = "";
     let lastContextUsage: mikiContextUsage | null = null;
+    const toolFeedback = _getToolFeedbackConfig();
+    let toolFeedbackCounter = 0;
 
     _sendmiki(ws, { type: "typing.start", session_id: sessionId });
     _sendmiki(ws, {
@@ -774,27 +817,57 @@ mikiWss.on("connection", (ws, req) => {
         }
 
         if (event.type === "tool_call") {
-          _sendmiki(ws, {
-            type: "message.update",
+          if (!toolFeedback.enabled) {
+            // Tool Feedback is disabled: skip emitting an execution note,
+            // per the tool_feedback.enabled setting from the config UI.
+            continue;
+          }
+
+          const argsPreview = _previewToolArgs(
+            event.input,
+            toolFeedback.maxArgsLength,
+          );
+          const toolCallPayload = {
             id: crypto.randomUUID(),
-            session_id: sessionId,
-            timestamp: Date.now(),
-            payload: {
-              message_id: assistantMessageId,
-              content: fullResponse,
-              kind: "tool_calls",
-              tool_calls: [
-                {
-                  id: crypto.randomUUID(),
-                  type: "function",
-                  function: {
-                    name: event.tool,
-                    arguments: JSON.stringify(event.input || {}),
-                  },
-                },
-              ],
+            type: "function",
+            function: {
+              name: event.tool,
+              arguments: argsPreview,
             },
-          });
+          };
+
+          if (toolFeedback.separateMessages) {
+            // Each tool feedback update gets its own chat message instead
+            // of reusing the streaming placeholder/progress message.
+            toolFeedbackCounter += 1;
+            const toolMessageId = `${assistantMessageId}-tool-${toolFeedbackCounter}`;
+            _sendmiki(ws, {
+              type: "message.create",
+              id: crypto.randomUUID(),
+              session_id: sessionId,
+              timestamp: Date.now(),
+              payload: {
+                message_id: toolMessageId,
+                content: "",
+                kind: "tool_calls",
+                tool_calls: [toolCallPayload],
+                model_name: orchestrator.modelName,
+              },
+            });
+          } else {
+            _sendmiki(ws, {
+              type: "message.update",
+              id: crypto.randomUUID(),
+              session_id: sessionId,
+              timestamp: Date.now(),
+              payload: {
+                message_id: assistantMessageId,
+                content: fullResponse,
+                kind: "tool_calls",
+                tool_calls: [toolCallPayload],
+              },
+            });
+          }
           continue;
         }
 
