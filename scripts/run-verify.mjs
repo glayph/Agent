@@ -75,7 +75,7 @@ function main() {
 
   // Step 3: Doctor
   log("Step 3/3: Running doctor checks...");
-  run("node", [path.join(root, "bin", "Hiro.js"), "doctor"], { cwd: root });
+  run("node", [path.join(root, "bin", "miki.js"), "doctor"], { cwd: root });
 
   log("");
   log("=========================================");

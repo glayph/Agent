@@ -114,4 +114,4 @@ Invoke-WebRequest http://127.0.0.1:18800/api/models
 
 - **Chat fails with a missing-credential error** — no Gemini / OpenRouter / OpenAI API key is configured. Add one via the Models page, `mikiagent config set GEMINI_API_KEY <your-key>`, or `.env`.
 - **Provider rejects the API key (401/403)** — the stored key is invalid. Update it in the dashboard Credentials or Models page.
-- **`npm run doctor` hangs / starts the gateway** — the current `bin/Hiro.js` has no doctor branch; use the manual checks above instead.
+- **`npm run doctor` hangs / starts the gateway** — the current `bin/miki.js` has no doctor branch; use the manual checks above instead.

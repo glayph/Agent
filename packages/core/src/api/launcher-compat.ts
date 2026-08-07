@@ -30,6 +30,7 @@ import {
   redactSecrets,
   resolveConfiguredSecret,
   setConfiguredSecret,
+  setEnvSecret,
   settings,
   validateRuntimeConfig,
   type ConfigValidationResult,
@@ -838,8 +839,11 @@ function pluginChannelSecretFieldsFromRegistry(
   }
 }
 
-function pluginChannelConfigKeysFromRegistry(paths: RuntimePaths): string[] {
-  const registryPath = path.join(paths.skillsDir, ".plugin-registry.json");
+function pluginChannelConfigKeysFromRegistry(paths: RuntimePaths, workspaceDir?: string): string[] {
+  // Use resolveDownloadedSkillsDir so sandbox_mode is respected (registry is
+  // written to downloaded-skills only when sandboxed; otherwise skillsDir)
+  const _skillsDir = resolveDownloadedSkillsDir(paths, workspaceDir);
+  const registryPath = path.join(_skillsDir, ".plugin-registry.json");
   if (!fs.existsSync(registryPath)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as {
@@ -1827,7 +1831,11 @@ function updateEnvVar(paths: RuntimePaths, key: string, value: string): void {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`^${escaped}=.*$`, "m");
   if (isSecretEnvKey(key)) {
-    setConfiguredSecret(key, value);
+    // Store in the workspace-scoped vault (paths.configDir), not the global
+    // user config directory. Using the global dir here caused secrets from
+    // one workspace to leak into every other workspace (and polluted the
+    // real machine's config dir during test runs).
+    setEnvSecret(key, value, paths.configDir);
     if (regex.test(content)) {
       const next = content.replace(regex, "").replace(/\n{3,}/g, "\n\n");
       fs.writeFileSync(envPath, next.trimStart(), "utf-8");
@@ -2848,7 +2856,7 @@ export function createLauncherCompatRouter({
     extractRuntimeSecretsToVault(config, secretVault, paths);
   const validateWorkspaceConfig = (config: JsonRecord) =>
     validateAndNormalizeConfig(config, {
-      allowedChannelNames: pluginChannelConfigKeysFromRegistry(paths),
+      allowedChannelNames: pluginChannelConfigKeysFromRegistry(paths, workspaceDir),
     });
 
   let state = readJsonFile<CompatState>(statePath, {});
@@ -4874,7 +4882,7 @@ export function createLauncherCompatRouter({
     if (!isRecord(req.body))
       return res.status(400).json({ error: "JSON object expected" });
     const validation = validateRuntimeConfig(stripChannelAliases(req.body), {
-      allowedChannelNames: pluginChannelConfigKeysFromRegistry(paths),
+      allowedChannelNames: pluginChannelConfigKeysFromRegistry(paths, workspaceDir),
     });
     res.json(configValidationSummary(validation));
   });

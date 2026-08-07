@@ -44,8 +44,8 @@ async function runConfigCommand() {
       process.exit(1);
     }
     setConfiguredSecret("GEMINI_API_KEY", key);
-    console.log(`Gemini API key saved to your MikiAgent user config at ${userConfigDir()}.`);
-    console.log("Start MikiAgent again and send a chat message to test it.");
+    console.log(`Gemini API key saved to your Miki user config at ${userConfigDir()}.`);
+    console.log("Start Miki again and send a chat message to test it.");
     return true;
   }
 
@@ -54,7 +54,7 @@ async function runConfigCommand() {
     const value = String(valueArg || "").trim() ||
       (await readSecretFromPrompt(`Paste value for ${name || "the key"}`));
     if (!name || !/^[A-Z0-9_]+$/.test(name)) {
-      console.error("Usage: mikiagent config set GEMINI_API_KEY <value>");
+      console.error("Usage: miki config set GEMINI_API_KEY <value>");
       process.exit(1);
     }
     if (!value) {
@@ -62,7 +62,7 @@ async function runConfigCommand() {
       process.exit(1);
     }
     setConfiguredSecret(name, value);
-    console.log(`${name} saved to your MikiAgent user config at ${userConfigDir()}.`);
+    console.log(`${name} saved to your Miki user config at ${userConfigDir()}.`);
     return true;
   }
 
@@ -74,7 +74,7 @@ async function runConfigCommand() {
   if (command === "config" && subcommand === "get") {
     const name = String(keyArg || "").trim().toUpperCase();
     if (!name) {
-      console.error("Usage: mikiagent config get GEMINI_API_KEY");
+      console.error("Usage: miki config get GEMINI_API_KEY");
       process.exit(1);
     }
     const value = resolveConfiguredSecret(name, PROJECT_ROOT);

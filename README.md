@@ -134,7 +134,7 @@ long-term memory.
 | `packages/installer/` | `@hiro/installer` | Skill installer (Clawhub, npm, git, local sources) |
 | `packages/ui/` | — | React frontend + Go launcher backend |
 | `packages/cli/` | `@hiro/cli` | Go terminal UI + npm CLI entry point |
-| `bin/` | — | Runtime entry points (`Hiro.js`, `Agent.js`, doctor, PowerShell supervisor) |
+| `bin/` | — | Runtime entry points (`miki.js`, `miki-config.js`, `miki-doctor.mjs`, PowerShell supervisor) |
 | `config/` | — | `agent.yaml`, `tools.yaml` |
 | `scripts/` | — | Build, release, and verification automation |
 | `docs/` | — | Structure breakdown and troubleshooting matrix |
@@ -271,7 +271,7 @@ agent version     # show version and build information
 agent help        # show help
 ```
 
-`bin/owlclaw-doctor.mjs` performs deeper runtime checks (Node/npm/Go versions, runtime files,
+`bin/miki-doctor.mjs` performs deeper runtime checks (Node/npm/Go versions, runtime files,
 writable directories, config validation, SQLite writability, secret-vault status, provider API
 key presence, npm audit).
 
@@ -371,7 +371,7 @@ npm run typecheck      # turbo typecheck across packages
 | `npm run build:webui` | Build the React web UI |
 | `npm run build:go-backend` | Build the Go launcher backend |
 | `npm run build:cli` | Build the Go CLI |
-| `npm run dev` | Build runtime if stale, then launch `bin/Hiro.js` |
+| `npm run dev` | Build runtime if stale, then launch `bin/miki.js` |
 | `npm start` | Run the gateway directly from `packages/gateway/dist` |
 | `npm run doctor` | Run diagnostics via the CLI |
 | `npm run verify` / `npm run verify:release` | CI-style verification |
@@ -396,7 +396,7 @@ npm run typecheck      # turbo typecheck across packages
 | Provider rejects the API key (401/403) | The stored key is invalid. Update it in the dashboard Credentials or Models page |
 | Chat fails with quota / rate-limit error | Provider quota exhausted; wait for reset or configure another provider/model as fallback |
 | Gateway health times out | Check `data/logs/**` and free the configured `CORE_PORT`/`GATEWAY_PORT` |
-| `npm run doctor` hangs | `bin/Hiro.js` has no doctor branch; use `agent doctor` or `bin/owlclaw-doctor.mjs` instead |
+| `npm run doctor` hangs | `bin/miki.js` has no doctor branch; use `agent doctor` or `bin/miki-doctor.mjs` instead |
 
 See `docs/TROUBLESHOOTING_MATRIX.md` and `setup.md` (a Windows setup guide) for more.
 

@@ -366,7 +366,7 @@ async function runDoctor() {
 }
 
 function printHuman(report) {
-  console.log(`Hiro doctor: ${report.status.toUpperCase()}`);
+  console.log(`Miki doctor: ${report.status.toUpperCase()}`);
   for (const item of report.checks) {
     const symbol = item.status === "pass" ? "OK" : item.status === "warn" ? "WARN" : "FAIL";
     console.log(`[${symbol}] ${item.label}: ${item.message}`);

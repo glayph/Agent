@@ -105,7 +105,7 @@ function main() {
 
   // Step 7: Doctor
   log("Step 7/7: Running doctor checks...");
-  run("node", [path.join(root, "bin", "Hiro.js"), "doctor"], { cwd: root });
+  run("node", [path.join(root, "bin", "miki.js"), "doctor"], { cwd: root });
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   log("");

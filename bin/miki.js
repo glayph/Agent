@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CLI_EXE = process.platform === "win32" ? "Hiro-cli.exe" : "Hiro-cli";
+const CLI_EXE = process.platform === "win32" ? "miki-cli.exe" : "miki-cli";
 
 const requiredRuntimeFiles = [
   ["gateway", "packages/gateway/dist/index.js"],
@@ -40,6 +40,10 @@ function readPackage() {
 }
 
 function resolveRuntimeRoot() {
+  if (process.env.MIKI_RUNTIME_ROOT) {
+    return path.resolve(process.env.MIKI_RUNTIME_ROOT);
+  }
+  // Fall back to legacy env var for backward compatibility during transition
   if (process.env.Hiro_RUNTIME_ROOT) {
     return path.resolve(process.env.Hiro_RUNTIME_ROOT);
   }
@@ -55,10 +59,6 @@ function cliPath() {
   return runtimeRoot === PROJECT_ROOT
     ? path.join(PROJECT_ROOT, "packages", "cli", "dist", "bin", CLI_EXE)
     : runtimePath(path.join("bin", CLI_EXE));
-}
-
-function npmCommand() {
-  return { command: "npm", args: [] };
 }
 
 function missingRuntimeFiles() {
@@ -82,8 +82,7 @@ function ensureRuntime() {
 
   const onlyCliMissing = missing.length === 1 && missing[0][0] === "cli";
   const script = onlyCliMissing ? "build:cli" : "build";
-  const npm = npmCommand();
-  const result = spawnSync(npm.command, [...npm.args, "run", script], {
+  const result = spawnSync("npm", ["run", script], {
     cwd: PROJECT_ROOT,
     stdio: "inherit",
     shell: false,
@@ -110,12 +109,19 @@ function start(argv) {
   const executable = cliPath();
   const env = {
     ...process.env,
+    // New canonical env vars
+    MIKI_RUNTIME_ROOT: runtimeRoot,
+    MIKI_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+    MIKI_GATEWAY_ENTRY: runtimePath("packages/gateway/dist/index.js"),
+    MIKI_RUNTIME_LOADER: runtimePath("runtime-loader.mjs"),
+    MIKI_NODE: process.execPath,
+    MIKI_PACKAGE_VERSION: readPackage().version || "1.0.0",
+    // Legacy env vars kept during transition
     Hiro_RUNTIME_ROOT: runtimeRoot,
-    Hiro_WORKSPACE_DIR: process.env.Hiro_WORKSPACE_DIR || PROJECT_ROOT,
+    Hiro_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
     Hiro_GATEWAY_ENTRY: runtimePath("packages/gateway/dist/index.js"),
     Hiro_RUNTIME_LOADER: runtimePath("runtime-loader.mjs"),
     Hiro_NODE: process.execPath,
-    Hiro_PACKAGE_VERSION: readPackage().version || "1.0.0",
   };
 
   memoryChild = fork(path.join(PROJECT_ROOT, "packages", "memory", "src", "api", "server.js"));
@@ -127,12 +133,12 @@ function start(argv) {
     shell: false,
   });
 
-  child.on("error", (err) => fail(`Failed to start Hiro: ${err.message}`));
+  child.on("error", (err) => fail(`Failed to start Miki: ${err.message}`));
   child.on("exit", (code, signal) => {
     child = null;
     if (shuttingDown) process.exit(0);
     if (signal) {
-      console.error(`Hiro stopped by ${signal}.`);
+      console.error(`Miki stopped by ${signal}.`);
       process.exit(1);
     }
     process.exit(code ?? 0);
@@ -160,7 +166,7 @@ function terminateChildTree(force) {
 }
 
 function fail(message) {
-  console.error(`Hiro: ${message}`);
+  console.error(`Miki: ${message}`);
   process.exit(1);
 }
 
@@ -168,30 +174,36 @@ process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
 const argv = process.argv.slice(2);
+
+// Delegate setup/config commands to the config launcher
 if (argv[0] === "setup" || argv[0] === "config") {
   const result = spawnSync(process.execPath, [
-    path.join(PROJECT_ROOT, "bin", "Hiro.js"),
+    path.join(PROJECT_ROOT, "bin", "miki-config.js"),
     ...argv,
   ], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
-      Hiro_WORKSPACE_DIR: process.env.Hiro_WORKSPACE_DIR || PROJECT_ROOT,
+      MIKI_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+      Hiro_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
     },
     stdio: "inherit",
     shell: false,
   });
   process.exit(result.status ?? 1);
 }
+
+// Delegate doctor command to the doctor script
 if (argv[0] === "doctor") {
   const result = spawnSync(process.execPath, [
-    path.join(PROJECT_ROOT, "bin", "Hiro-doctor.mjs"),
+    path.join(PROJECT_ROOT, "bin", "miki-doctor.mjs"),
     ...argv.slice(1),
   ], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
-      Hiro_WORKSPACE_DIR: process.env.Hiro_WORKSPACE_DIR || PROJECT_ROOT,
+      MIKI_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+      Hiro_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
     },
     stdio: "inherit",
     shell: false,

@@ -1,18 +1,16 @@
 {
-  "name": "hiro",
+  "name": "miki",
   "version": "0.1.0",
-  "description": "Hiro - autonomous AI agent with full computer control (TypeScript)",
+  "description": "Miki - autonomous AI agent with full system access (TypeScript)",
   "license": "MIT",
   "author": "Earth",
   "type": "module",
   "main": "dist/runtime/packages/core/dist/api/index.js",
   "bin": {
-    "hiro": "bin/Hiro.js",
-    "Hiro": "bin/Hiro.js",
-    "mikiagent": "bin/Hiro.js",
-    "MikiAgent": "bin/Hiro.js",
-    "agent": "bin/Agent.js",
-    "Agent": "bin/Agent.js"
+    "miki": "bin/miki.js",
+    "Miki": "bin/miki.js",
+    "mikiagent": "bin/miki.js",
+    "MikiAgent": "bin/miki.js"
   },
   "files": [
     "dist/runtime/",
@@ -32,10 +30,10 @@
     "build:go-backend": "node scripts/build-go-backend.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "prepare:runtime": "node scripts/prepare-runtime-package.mjs",
-    "dev": "node scripts/build-runtime-if-stale.mjs && node bin/Hiro.js",
+    "dev": "node scripts/build-runtime-if-stale.mjs && node bin/miki.js",
     "dev:node": "node scripts/build-runtime-if-stale.mjs && node packages/gateway/dist/index.js",
     "start": "node packages/gateway/dist/index.js",
-    "doctor": "node bin/Hiro.js doctor",
+    "doctor": "node bin/miki-doctor.mjs",
     "test": "jest",
     "test:js": "jest --runInBand",
     "test:go": "node scripts/run-go-tests.mjs",

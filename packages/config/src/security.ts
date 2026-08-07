@@ -61,21 +61,25 @@ function bypassRestrictionsFromConfig(
  * doesn't set the key, matching the schema default in schema.ts.
  */
 export function isSandboxModeEnabled(workspaceDir: string | undefined): boolean {
-  if (!workspaceDir) return true;
+  // Default matches the Zod schema default in schema.ts (sandbox_mode: false):
+  // Miki is designed for full-system access, not workspace sandboxing, so
+  // omitting security.sandbox_mode from agent.yaml (or the file not existing
+  // yet) must resolve the same way validateRuntimeConfig would resolve it.
+  if (!workspaceDir) return false;
   const configPath = path.join(workspaceDir, "config", "agent.yaml");
   try {
     const parsed = yaml.load(fs.readFileSync(configPath, "utf-8"));
-    if (!isRecord(parsed)) return true;
+    if (!isRecord(parsed)) return false;
     const agent = parsed.agent;
-    if (!isRecord(agent)) return true;
+    if (!isRecord(agent)) return false;
     const security = agent.security;
-    if (!isRecord(security)) return true;
+    if (!isRecord(security)) return false;
     if (typeof security["sandbox_mode"] === "boolean") {
       return security["sandbox_mode"];
     }
-    return true;
+    return false;
   } catch {
-    return true;
+    return false;
   }
 }
 
