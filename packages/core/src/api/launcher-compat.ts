@@ -643,7 +643,10 @@ function setRuntimeSecret(
 ): void {
   vault.set(secretName, value);
   if (envKey) {
-    setConfiguredSecret(envKey, value);
+    // Workspace-scoped, not the global user config dir (see updateEnvVar for
+    // the same fix and rationale: this previously leaked channel secrets
+    // like Slack bot_token/app_token across every workspace).
+    setEnvSecret(envKey, value, configDir);
   }
 }
 
@@ -657,7 +660,11 @@ function runtimeSecretConfigured(
   } catch {
     return false;
   }
-  return Boolean(envKey && resolveConfiguredSecret(envKey));
+  // Legacy fallback: honor a manually exported shell env var. Deliberately
+  // checks process.env directly rather than resolveConfiguredSecret(), which
+  // would also consult the global user vault and reintroduce the
+  // cross-workspace secret leak fixed above.
+  return Boolean(envKey && process.env[envKey]?.trim());
 }
 
 function runtimeSecretValue(
@@ -4175,7 +4182,7 @@ export function createLauncherCompatRouter({
     });
   });
 
-  router.post("/gateway/start", async (req, res) => {
+  const gatewayStartOrRestart = async (req: Request, res: Response) => {
     const isRestart = req.path.endsWith("restart");
     const apply = await applyRuntimeChanges({
       reason: isRestart ? "gateway.restart" : "gateway.start",
@@ -4195,7 +4202,10 @@ export function createLauncherCompatRouter({
           ? `A full Hiro process restart is required to apply: ${pendingFields.join(", ")}`
           : undefined,
     });
-  });
+  };
+
+  router.post("/gateway/start", gatewayStartOrRestart);
+  router.post("/gateway/restart", gatewayStartOrRestart);
 
   router.post("/gateway/stop", (_req, res) => {
     res.status(200).json({
