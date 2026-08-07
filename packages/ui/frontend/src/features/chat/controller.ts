@@ -6,7 +6,7 @@ import {
   loadSessionMessages,
   mergeHistoryMessages,
 } from "@/features/chat/history"
-import { type hiroMessage, handlehiroMessage } from "@/features/chat/protocol"
+import { type mikiMessage, handlemikiMessage } from "@/features/chat/protocol"
 import {
   clearStoredSessionId,
   generateSessionId,
@@ -148,7 +148,7 @@ export async function connectChat() {
     const isHttps = typeof window !== "undefined" && window.location?.protocol === "https:"
     const host = typeof window !== "undefined" && window.location?.host ? window.location.host : "localhost:18800"
     const wsScheme = isHttps ? "wss:" : "ws:"
-    const wsUrl = `${wsScheme}//${host}/hiro/ws`
+    const wsUrl = `${wsScheme}//${host}/miki/ws`
     const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}`
     const socket = customWsFactory ? customWsFactory(url) : new WebSocket(url)
 
@@ -197,10 +197,10 @@ export async function connectChat() {
             : event.data instanceof ArrayBuffer
               ? new TextDecoder().decode(event.data)
               : String(event.data)
-        const message = JSON.parse(raw) as hiroMessage
-        handlehiroMessage(message, sessionId)
+        const message = JSON.parse(raw) as mikiMessage
+        handlemikiMessage(message, sessionId)
       } catch {
-        console.warn("Non-JSON message from hiro:", event.data)
+        console.warn("Non-JSON message from miki:", event.data)
       }
     }
 
@@ -250,7 +250,7 @@ export async function connectChat() {
       isConnecting = false
       return
     }
-    console.error("Failed to connect to hiro:", error)
+    console.error("Failed to connect to miki:", error)
     updateChatStore({ connectionState: "error" })
     isConnecting = false
     scheduleReconnect(generation, activeSessionIdRef)
@@ -356,7 +356,7 @@ function normalizeOutgoingAttachments(
     .map((attachment) => ({ ...attachment }))
 }
 
-function sendhiroMessage(
+function sendmikiMessage(
   socket: WebSocket,
   requestId: string,
   content: string,
@@ -437,10 +437,10 @@ export function sendChatMessage({
   }))
 
   try {
-    sendhiroMessage(socket, id, normalizedContent, normalizedAttachments)
+    sendmikiMessage(socket, id, normalizedContent, normalizedAttachments)
     return true
   } catch (error) {
-    console.error("Failed to send hiro message:", error)
+    console.error("Failed to send miki message:", error)
     updateChatStore((prev) => ({
       messages: prev.messages.filter((message) => message.id !== id),
       isTyping: false,
@@ -574,10 +574,10 @@ export function retryChatMessage(messageId: string) {
   })
 
   try {
-    sendhiroMessage(wsRef, requestId, normalizedContent, normalizedAttachments)
+    sendmikiMessage(wsRef, requestId, normalizedContent, normalizedAttachments)
     return true
   } catch (error) {
-    console.error("Failed to retry hiro message:", error)
+    console.error("Failed to retry miki message:", error)
     updateChatStore({ isTyping: false })
     return false
   }

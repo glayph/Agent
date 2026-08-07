@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ChatMessage } from "@hiro/config";
+import type { ChatMessage } from "@miki/config";
 import { AgentOrchestrator } from "./agent.js";
 import { type RuntimePaths } from "./paths.js";
 
@@ -45,7 +45,7 @@ describe("AgentOrchestrator workflow acceleration", () => {
 
   it("uses turbo parallelism for explicit superfast tool batches", async () => {
     workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-agent-acceleration-"),
+      path.join(os.tmpdir(), "Miki-agent-acceleration-"),
     );
     const configDir = path.join(workspaceDir, "config");
     fs.mkdirSync(configDir, { recursive: true });
@@ -145,7 +145,7 @@ describe("AgentOrchestrator workflow acceleration", () => {
 
   it("persists terminal LLM errors as assistant history messages", async () => {
     workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "Hiro-agent-error-history-"),
+      path.join(os.tmpdir(), "Miki-agent-error-history-"),
     );
     const configDir = path.join(workspaceDir, "config");
     fs.mkdirSync(configDir, { recursive: true });

@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import * as path from "path";
 import { SkillLoader } from "./skill-loader.js";
 import { type RuntimePaths, resolveDownloadedSkillsDir } from "./paths.js";
-import { SkillInstaller, type PluginContractKind } from "@hiro/installer";
+import { SkillInstaller, type PluginContractKind } from "@miki/installer";
 import { createSuccessResponse, createErrorResponse } from "./skill-utils.js";
 import {
   executeRuntimePluginTool,
@@ -83,7 +83,7 @@ async function installSkillDirect(
 ): Promise<{ result: SkillInstallResult }> {
   // Downloaded/installed skills always go to the canonical isolated
   // skills directory (runtimePaths.skillsDir — outside the source repo in
-  // production, e.g. ~/.local/share/Hiro/skills), never into the repo's
+  // production, e.g. ~/.local/share/Miki/skills), never into the repo's
   // own packages/skills/src tree where the agent's bundled skills live.
   // This keeps anything fetched from the internet cleanly separated from
   // core/bundled content, so cleaning up the workspace can never

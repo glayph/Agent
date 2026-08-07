@@ -1,6 +1,6 @@
 import * as path from "path";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import { createWorkspaceSecretVault } from "@hiro/config";
+import { createWorkspaceSecretVault } from "@miki/config";
 import type { AgentOrchestrator } from "../agent.js";
 import { SqliteAuditLog } from "../audit-log.js";
 import {
@@ -98,9 +98,9 @@ function pluginEnvironment(paths: RuntimePaths | string): NodeJS.ProcessEnv {
   const workspaceDir =
     typeof paths === "string" ? paths : (paths.sourceDir ?? paths.configDir);
   const env: NodeJS.ProcessEnv = {
-    Hiro_PLUGIN_SANDBOX: "1",
-    Hiro_PLUGIN_CHANNEL_RUNTIME: "1",
-    Hiro_WORKSPACE_DIR: workspaceDir,
+    Miki_PLUGIN_SANDBOX: "1",
+    Miki_PLUGIN_CHANNEL_RUNTIME: "1",
+    Miki_WORKSPACE_DIR: workspaceDir,
     NODE_ENV: "production",
   };
   for (const key of [

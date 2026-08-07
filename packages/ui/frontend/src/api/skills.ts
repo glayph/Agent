@@ -219,7 +219,7 @@ export async function deleteSkill(name: string): Promise<SkillActionResponse> {
     `/api/skills/${encodeURIComponent(name)}`,
     {
       method: "DELETE",
-      headers: { "X-Hiro-Confirm": "delete-skill" },
+      headers: { "X-Miki-Confirm": "delete-skill" },
     },
   )
 }

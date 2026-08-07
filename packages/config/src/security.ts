@@ -131,12 +131,12 @@ export function allowedCorsOriginsFromEnv(
     : { env: optionsOrEnv };
   const env = options.env ?? process.env;
   if (
-    boolFromEnv(env["Hiro_BYPASS_RESTRICTIONS"]) ||
+    boolFromEnv(env["Miki_BYPASS_RESTRICTIONS"]) ||
     bypassRestrictionsFromConfig(options.workspaceDir)
   ) {
     return new Set([CORS_ALLOW_ALL_ORIGINS]);
   }
-  const configured = env["Hiro_ALLOWED_ORIGINS"];
+  const configured = env["Miki_ALLOWED_ORIGINS"];
   const rawOrigins =
     configured && configured.trim()
       ? configured.split(",")
@@ -164,7 +164,7 @@ export function isAllowedCorsOrigin(
 ): boolean {
   if (!origin) return true;
   // Loopback bypass only applies when using default (non-explicit) origins.
-  // When Hiro_ALLOWED_ORIGINS is set explicitly, the configured list is authoritative.
+  // When Miki_ALLOWED_ORIGINS is set explicitly, the configured list is authoritative.
   if (
     !explicitOriginsConfigured &&
     !allowedOrigins.has(CORS_ALLOW_ALL_ORIGINS)
@@ -178,11 +178,11 @@ export function isAllowedCorsOrigin(
   );
 }
 
-// Returns true when the user has explicitly set Hiro_ALLOWED_ORIGINS
+// Returns true when the user has explicitly set Miki_ALLOWED_ORIGINS
 export function hasExplicitAllowedOrigins(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const raw = env["Hiro_ALLOWED_ORIGINS"];
+  const raw = env["Miki_ALLOWED_ORIGINS"];
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
@@ -259,7 +259,7 @@ export function isIpAllowedByCidrs(
 export function resolveAllowedCidrsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  const raw = env["Hiro_ALLOWED_CIDRS"];
+  const raw = env["Miki_ALLOWED_CIDRS"];
   if (!raw || !raw.trim()) return [];
   return raw
     .split(",")

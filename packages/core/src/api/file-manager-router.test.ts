@@ -28,7 +28,7 @@ async function withFileServer<T>(
   run: (baseUrl: string, workspaceDir: string, filesDir: string) => Promise<T>,
   options: { allowSystemWrite?: boolean | (() => boolean) } = {},
 ): Promise<T> {
-  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-files-"));
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-files-"));
   const filesDir = path.join(workspaceDir, "files");
   fs.mkdirSync(filesDir, { recursive: true });
 

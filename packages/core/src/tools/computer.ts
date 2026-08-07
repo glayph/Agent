@@ -53,7 +53,7 @@ interface ComputerObserveData {
 const COMPUTER_POWERSHELL_SCRIPT = String.raw`
 param([string]$PayloadBase64)
 
-function New-HiroResult {
+function New-MikiResult {
   param(
     [bool]$Ok,
     [string]$Action,
@@ -72,16 +72,16 @@ function New-HiroResult {
   return $result
 }
 
-function Initialize-HiroComputer {
+function Initialize-MikiComputer {
   Add-Type -AssemblyName UIAutomationClient | Out-Null
   Add-Type -AssemblyName UIAutomationTypes | Out-Null
 
-  if (-not ([System.Management.Automation.PSTypeName]'HiroNativeWin32').Type) {
+  if (-not ([System.Management.Automation.PSTypeName]'MikiNativeWin32').Type) {
     Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
-public static class HiroNativeWin32 {
+public static class MikiNativeWin32 {
   [DllImport("user32.dll")]
   public static extern IntPtr GetForegroundWindow();
 
@@ -107,7 +107,7 @@ public static class HiroNativeWin32 {
   }
 }
 
-function Get-HiroProperty {
+function Get-MikiProperty {
   param([object]$Object, [string]$Name)
   if ($null -eq $Object) { return $null }
   $property = $Object.PSObject.Properties[$Name]
@@ -115,7 +115,7 @@ function Get-HiroProperty {
   return $property.Value
 }
 
-function Get-HiroControlTypeName {
+function Get-MikiControlTypeName {
   param([object]$Element)
   try {
     return $Element.Current.ControlType.ProgrammaticName.Replace("ControlType.", "")
@@ -124,7 +124,7 @@ function Get-HiroControlTypeName {
   }
 }
 
-function Get-HiroRuntimeId {
+function Get-MikiRuntimeId {
   param([object]$Element)
   try {
     return (($Element.GetRuntimeId() | ForEach-Object { $_.ToString() }) -join ".")
@@ -133,7 +133,7 @@ function Get-HiroRuntimeId {
   }
 }
 
-function Get-HiroProcessName {
+function Get-MikiProcessName {
   param([int]$ProcessId)
   try {
     $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
@@ -144,18 +144,18 @@ function Get-HiroProcessName {
   }
 }
 
-function Get-HiroProcessIdFromHandle {
+function Get-MikiProcessIdFromHandle {
   param([int64]$Handle)
   try {
     [uint32]$processId = 0
-    [HiroNativeWin32]::GetWindowThreadProcessId([IntPtr]::new($Handle), [ref]$processId) | Out-Null
+    [MikiNativeWin32]::GetWindowThreadProcessId([IntPtr]::new($Handle), [ref]$processId) | Out-Null
     return [int]$processId
   } catch {
     return 0
   }
 }
 
-function Get-HiroElementValue {
+function Get-MikiElementValue {
   param([object]$Element)
   try {
     $pattern = $null
@@ -167,7 +167,7 @@ function Get-HiroElementValue {
   return ""
 }
 
-function Get-HiroElementInfo {
+function Get-MikiElementInfo {
   param(
     [object]$Element,
     [int]$Depth,
@@ -190,18 +190,18 @@ function Get-HiroElementInfo {
   return [ordered]@{
     name = [string]$current.Name
     automationId = [string]$current.AutomationId
-    controlType = Get-HiroControlTypeName $Element
+    controlType = Get-MikiControlTypeName $Element
     className = [string]$current.ClassName
-    runtimeId = Get-HiroRuntimeId $Element
+    runtimeId = Get-MikiRuntimeId $Element
     path = $Path
     processId = $processId
-    processName = Get-HiroProcessName $processId
+    processName = Get-MikiProcessName $processId
     windowHandle = $WindowHandle
     windowTitle = [string]$WindowTitle
     enabled = [bool]$current.IsEnabled
     offscreen = [bool]$current.IsOffscreen
     focusable = [bool]$current.IsKeyboardFocusable
-    value = Get-HiroElementValue $Element
+    value = Get-MikiElementValue $Element
     rect = [ordered]@{
       x = [double]$rect.X
       y = [double]$rect.Y
@@ -212,7 +212,7 @@ function Get-HiroElementInfo {
   }
 }
 
-function Test-HiroElementMatches {
+function Test-MikiElementMatches {
   param([object]$Info, [string]$Query)
   if (-not $Query) { return $true }
   $needle = $Query.ToLowerInvariant()
@@ -228,7 +228,7 @@ function Test-HiroElementMatches {
   return $haystack.ToLowerInvariant().Contains($needle)
 }
 
-function Get-HiroTopWindows {
+function Get-MikiTopWindows {
   param([int]$MaxWindows)
   $items = New-Object 'System.Collections.Generic.List[object]'
   $condition = New-Object System.Windows.Automation.PropertyCondition(
@@ -245,8 +245,8 @@ function Get-HiroTopWindows {
     try {
       $handle = [int64]$window.Current.NativeWindowHandle
       if ($handle -le 0) { continue }
-      if (-not [HiroNativeWin32]::IsWindowVisible([IntPtr]::new($handle))) { continue }
-      $info = Get-HiroElementInfo $window 0 "window.$i" $handle $window.Current.Name
+      if (-not [MikiNativeWin32]::IsWindowVisible([IntPtr]::new($handle))) { continue }
+      $info = Get-MikiElementInfo $window 0 "window.$i" $handle $window.Current.Name
       if ($info.name -or $info.processName) {
         $items.Add($info) | Out-Null
       }
@@ -256,32 +256,32 @@ function Get-HiroTopWindows {
   return $items
 }
 
-function Get-HiroActiveWindow {
-  $handle = [int64][HiroNativeWin32]::GetForegroundWindow()
+function Get-MikiActiveWindow {
+  $handle = [int64][MikiNativeWin32]::GetForegroundWindow()
   if ($handle -le 0) { return $null }
   try {
     $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($handle))
-    return Get-HiroElementInfo $element 0 "active" $handle $element.Current.Name
+    return Get-MikiElementInfo $element 0 "active" $handle $element.Current.Name
   } catch {
     return [ordered]@{
       windowHandle = $handle
-      processId = Get-HiroProcessIdFromHandle $handle
-      processName = Get-HiroProcessName (Get-HiroProcessIdFromHandle $handle)
+      processId = Get-MikiProcessIdFromHandle $handle
+      processName = Get-MikiProcessName (Get-MikiProcessIdFromHandle $handle)
     }
   }
 }
 
-function Find-HiroWindow {
+function Find-MikiWindow {
   param([object]$Payload)
-  $windowHandle = Get-HiroProperty $Payload "windowHandle"
+  $windowHandle = Get-MikiProperty $Payload "windowHandle"
   if ($windowHandle) {
     return [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new([int64]$windowHandle))
   }
 
-  $windowTitle = [string](Get-HiroProperty $Payload "windowTitle")
-  $processName = [string](Get-HiroProperty $Payload "processName")
+  $windowTitle = [string](Get-MikiProperty $Payload "windowTitle")
+  $processName = [string](Get-MikiProperty $Payload "processName")
   if ($windowTitle -or $processName) {
-    $windows = Get-HiroTopWindows 100
+    $windows = Get-MikiTopWindows 100
     foreach ($info in $windows) {
       $titleMatches = (-not $windowTitle) -or ([string]$info.name).ToLowerInvariant().Contains($windowTitle.ToLowerInvariant())
       $processMatches = (-not $processName) -or ([string]$info.processName).ToLowerInvariant().Contains($processName.ToLowerInvariant())
@@ -291,14 +291,14 @@ function Find-HiroWindow {
     }
   }
 
-  $activeHandle = [int64][HiroNativeWin32]::GetForegroundWindow()
+  $activeHandle = [int64][MikiNativeWin32]::GetForegroundWindow()
   if ($activeHandle -gt 0) {
     return [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($activeHandle))
   }
   return [System.Windows.Automation.AutomationElement]::RootElement
 }
 
-function Get-HiroElementTree {
+function Get-MikiElementTree {
   param(
     [object]$Root,
     [int]$MaxElements,
@@ -316,8 +316,8 @@ function Get-HiroElementTree {
   while ($queue.Count -gt 0 -and $items.Count -lt $MaxElements) {
     $node = $queue.Dequeue()
     try {
-      $info = Get-HiroElementInfo $node.Element $node.Depth $node.Path $rootHandle $rootTitle
-      if (Test-HiroElementMatches $info $Query) {
+      $info = Get-MikiElementInfo $node.Element $node.Depth $node.Path $rootHandle $rootTitle
+      if (Test-MikiElementMatches $info $Query) {
         $items.Add($info) | Out-Null
       }
 
@@ -340,16 +340,16 @@ function Get-HiroElementTree {
   return $items
 }
 
-function Find-HiroElement {
+function Find-MikiElement {
   param([object]$Root, [object]$Locator)
   if ($null -eq $Locator) { return $null }
 
-  $targetRuntimeId = [string](Get-HiroProperty $Locator "runtimeId")
-  $targetPath = [string](Get-HiroProperty $Locator "path")
-  $targetAutomationId = [string](Get-HiroProperty $Locator "automationId")
-  $targetName = [string](Get-HiroProperty $Locator "name")
-  $targetControlType = [string](Get-HiroProperty $Locator "controlType")
-  $targetClassName = [string](Get-HiroProperty $Locator "className")
+  $targetRuntimeId = [string](Get-MikiProperty $Locator "runtimeId")
+  $targetPath = [string](Get-MikiProperty $Locator "path")
+  $targetAutomationId = [string](Get-MikiProperty $Locator "automationId")
+  $targetName = [string](Get-MikiProperty $Locator "name")
+  $targetControlType = [string](Get-MikiProperty $Locator "controlType")
+  $targetClassName = [string](Get-MikiProperty $Locator "className")
 
   $queue = New-Object 'System.Collections.Generic.Queue[object]'
   $queue.Enqueue([pscustomobject]@{ Element = $Root; Depth = 0; Path = "0" })
@@ -362,7 +362,7 @@ function Find-HiroElement {
     $visited += 1
     $node = $queue.Dequeue()
     try {
-      $info = Get-HiroElementInfo $node.Element $node.Depth $node.Path ([int64]$Root.Current.NativeWindowHandle) ([string]$Root.Current.Name)
+      $info = Get-MikiElementInfo $node.Element $node.Depth $node.Path ([int64]$Root.Current.NativeWindowHandle) ([string]$Root.Current.Name)
       if ($targetRuntimeId -and $info.runtimeId -eq $targetRuntimeId) { return $node.Element }
       if ($targetPath -and $info.path -eq $targetPath) {
         $bestElement = $node.Element
@@ -402,7 +402,7 @@ function Find-HiroElement {
   return $null
 }
 
-function Invoke-HiroElement {
+function Invoke-MikiElement {
   param([object]$Element)
 
   $pattern = $null
@@ -437,7 +437,7 @@ function Invoke-HiroElement {
   return "SetFocus"
 }
 
-function Send-HiroKeys {
+function Send-MikiKeys {
   param([string]$SendKeys)
   if (-not $SendKeys) { throw "SendKeys payload is required." }
   try {
@@ -452,7 +452,7 @@ function Send-HiroKeys {
   }
 }
 
-function Set-HiroText {
+function Set-MikiText {
   param([object]$Element, [string]$Text)
   $pattern = $null
   if ($Element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
@@ -466,26 +466,26 @@ function Set-HiroText {
   $Element.SetFocus()
   Start-Sleep -Milliseconds 80
   Set-Clipboard -Value $Text
-  Send-HiroKeys "^a"
-  Send-HiroKeys "^v"
+  Send-MikiKeys "^a"
+  Send-MikiKeys "^v"
   return "ClipboardPaste"
 }
 
-function Focus-HiroWindow {
+function Focus-MikiWindow {
   param([object]$Window)
   $handle = [int64]$Window.Current.NativeWindowHandle
   if ($handle -gt 0) {
-    [HiroNativeWin32]::ShowWindowAsync([IntPtr]::new($handle), 9) | Out-Null
-    [HiroNativeWin32]::SetForegroundWindow([IntPtr]::new($handle)) | Out-Null
+    [MikiNativeWin32]::ShowWindowAsync([IntPtr]::new($handle), 9) | Out-Null
+    [MikiNativeWin32]::SetForegroundWindow([IntPtr]::new($handle)) | Out-Null
   }
   try { $Window.SetFocus() } catch {}
   Start-Sleep -Milliseconds 150
-  return Get-HiroElementInfo $Window 0 "focused" $handle $Window.Current.Name
+  return Get-MikiElementInfo $Window 0 "focused" $handle $Window.Current.Name
 }
 
-function Click-HiroAt {
+function Click-MikiAt {
   param([int]$X, [int]$Y, [string]$Button = "left", [bool]$DoubleClick = $false)
-  [HiroNativeWin32]::SetCursorPos($X, $Y) | Out-Null
+  [MikiNativeWin32]::SetCursorPos($X, $Y) | Out-Null
   Start-Sleep -Milliseconds 50
 
   $down = 0x0002 # MOUSEEVENTF_LEFTDOWN
@@ -498,122 +498,122 @@ function Click-HiroAt {
     $up   = 0x0040
   }
 
-  [HiroNativeWin32]::mouse_event([uint32]$down, 0, 0, 0, [UIntPtr]::Zero)
-  [HiroNativeWin32]::mouse_event([uint32]$up, 0, 0, 0, [UIntPtr]::Zero)
+  [MikiNativeWin32]::mouse_event([uint32]$down, 0, 0, 0, [UIntPtr]::Zero)
+  [MikiNativeWin32]::mouse_event([uint32]$up, 0, 0, 0, [UIntPtr]::Zero)
 
   if ($DoubleClick) {
     Start-Sleep -Milliseconds 80
-    [HiroNativeWin32]::mouse_event([uint32]$down, 0, 0, 0, [UIntPtr]::Zero)
-    [HiroNativeWin32]::mouse_event([uint32]$up, 0, 0, 0, [UIntPtr]::Zero)
+    [MikiNativeWin32]::mouse_event([uint32]$down, 0, 0, 0, [UIntPtr]::Zero)
+    [MikiNativeWin32]::mouse_event([uint32]$up, 0, 0, 0, [UIntPtr]::Zero)
   }
   Start-Sleep -Milliseconds 100
 }
 
-function Drag-HiroMouse {
+function Drag-MikiMouse {
   param([int]$FromX, [int]$FromY, [int]$ToX, [int]$ToY)
-  [HiroNativeWin32]::SetCursorPos($FromX, $FromY) | Out-Null
+  [MikiNativeWin32]::SetCursorPos($FromX, $FromY) | Out-Null
   Start-Sleep -Milliseconds 50
-  [HiroNativeWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) # Left down
+  [MikiNativeWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) # Left down
   Start-Sleep -Milliseconds 100
 
   $steps = 15
   for ($i = 1; $i -le $steps; $i++) {
     $currX = [int]($FromX + ($ToX - $FromX) * ($i / $steps))
     $currY = [int]($FromY + ($ToY - $FromY) * ($i / $steps))
-    [HiroNativeWin32]::SetCursorPos($currX, $currY) | Out-Null
+    [MikiNativeWin32]::SetCursorPos($currX, $currY) | Out-Null
     Start-Sleep -Milliseconds 15
   }
 
-  [HiroNativeWin32]::SetCursorPos($ToX, $ToY) | Out-Null
+  [MikiNativeWin32]::SetCursorPos($ToX, $ToY) | Out-Null
   Start-Sleep -Milliseconds 50
-  [HiroNativeWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) # Left up
+  [MikiNativeWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) # Left up
   Start-Sleep -Milliseconds 100
 }
 
-function Scroll-HiroMouse {
+function Scroll-MikiMouse {
   param([string]$Direction = "down", [int]$Amount = 3)
   $clicks = if ($Amount -gt 0) { $Amount } else { 3 }
   $delta = if ($Direction -eq "up" -or $Direction -eq "left") { 120 * $clicks } else { -120 * $clicks }
-  [HiroNativeWin32]::mouse_event(0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero) # MOUSEEVENTF_WHEEL
+  [MikiNativeWin32]::mouse_event(0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero) # MOUSEEVENTF_WHEEL
   Start-Sleep -Milliseconds 100
 }
 
-function Invoke-HiroComputer {
+function Invoke-MikiComputer {
   param([string]$PayloadJson)
 
   try {
-    Initialize-HiroComputer
+    Initialize-MikiComputer
     $payload = $PayloadJson | ConvertFrom-Json
     $action = [string]$payload.action
 
     if ($action -eq "observe") {
-      $maxElements = [int](Get-HiroProperty $payload "maxElements")
+      $maxElements = [int](Get-MikiProperty $payload "maxElements")
       if ($maxElements -le 0) { $maxElements = 80 }
       if ($maxElements -gt 300) { $maxElements = 300 }
-      $query = [string](Get-HiroProperty $payload "query")
-      $root = Find-HiroWindow $payload
+      $query = [string](Get-MikiProperty $payload "query")
+      $root = Find-MikiWindow $payload
       if ($null -eq $root) { throw "No target window could be resolved." }
-      $target = Get-HiroElementInfo $root 0 "target" ([int64]$root.Current.NativeWindowHandle) ([string]$root.Current.Name)
-      $elements = Get-HiroElementTree $root $maxElements $query 6
-      return New-HiroResult $true $action ([ordered]@{
-        activeWindow = Get-HiroActiveWindow
+      $target = Get-MikiElementInfo $root 0 "target" ([int64]$root.Current.NativeWindowHandle) ([string]$root.Current.Name)
+      $elements = Get-MikiElementTree $root $maxElements $query 6
+      return New-MikiResult $true $action ([ordered]@{
+        activeWindow = Get-MikiActiveWindow
         targetWindow = $target
-        topWindows = Get-HiroTopWindows 25
+        topWindows = Get-MikiTopWindows 25
         elements = $elements
         elementCount = $elements.Count
       }) "Observed accessible UI state without mouse input." $null
     }
 
     if ($action -eq "focus") {
-      $window = Find-HiroWindow $payload
+      $window = Find-MikiWindow $payload
       if ($null -eq $window) { throw "No target window could be resolved." }
-      return New-HiroResult $true $action (Focus-HiroWindow $window) "Focused window without mouse input." $null
+      return New-MikiResult $true $action (Focus-MikiWindow $window) "Focused window without mouse input." $null
     }
 
     if ($action -eq "invoke") {
-      $root = Find-HiroWindow $payload.window
-      $element = Find-HiroElement $root $payload.locator
+      $root = Find-MikiWindow $payload.window
+      $element = Find-MikiElement $root $payload.locator
       if ($null -eq $element) { throw "No matching UI element was found." }
-      $method = Invoke-HiroElement $element
-      return New-HiroResult $true $action ([ordered]@{
+      $method = Invoke-MikiElement $element
+      return New-MikiResult $true $action ([ordered]@{
         method = $method
-        element = Get-HiroElementInfo $element 0 "invoked" ([int64]$root.Current.NativeWindowHandle) ([string]$root.Current.Name)
+        element = Get-MikiElementInfo $element 0 "invoked" ([int64]$root.Current.NativeWindowHandle) ([string]$root.Current.Name)
       }) "Invoked UI element through accessibility patterns." $null
     }
 
     if ($action -eq "set_text") {
-      $root = Find-HiroWindow $payload.window
-      $element = Find-HiroElement $root $payload.locator
+      $root = Find-MikiWindow $payload.window
+      $element = Find-MikiElement $root $payload.locator
       if ($null -eq $element) { throw "No matching text-capable UI element was found." }
-      $method = Set-HiroText $element ([string]$payload.text)
-      return New-HiroResult $true $action ([ordered]@{
+      $method = Set-MikiText $element ([string]$payload.text)
+      return New-MikiResult $true $action ([ordered]@{
         method = $method
-        element = Get-HiroElementInfo $element 0 "set_text" ([int64]$root.Current.NativeWindowHandle) ([string]$root.Current.Name)
+        element = Get-MikiElementInfo $element 0 "set_text" ([int64]$root.Current.NativeWindowHandle) ([string]$root.Current.Name)
       }) "Set UI text without mouse input." $null
     }
 
     if ($action -eq "hotkey") {
       if ($payload.window) {
-        $window = Find-HiroWindow $payload.window
-        if ($null -ne $window) { Focus-HiroWindow $window | Out-Null }
+        $window = Find-MikiWindow $payload.window
+        if ($null -ne $window) { Focus-MikiWindow $window | Out-Null }
       }
-      Send-HiroKeys ([string]$payload.sendKeys)
-      return New-HiroResult $true $action ([ordered]@{ sendKeys = [string]$payload.sendKeys }) "Sent keyboard shortcut without mouse input." $null
+      Send-MikiKeys ([string]$payload.sendKeys)
+      return New-MikiResult $true $action ([ordered]@{ sendKeys = [string]$payload.sendKeys }) "Sent keyboard shortcut without mouse input." $null
     }
 
     if ($action -eq "clipboard_set") {
       Set-Clipboard -Value ([string]$payload.text)
-      return New-HiroResult $true $action ([ordered]@{ length = ([string]$payload.text).Length }) "Clipboard updated." $null
+      return New-MikiResult $true $action ([ordered]@{ length = ([string]$payload.text).Length }) "Clipboard updated." $null
     }
 
     if ($action -eq "clipboard_get") {
       $value = Get-Clipboard -Raw
-      return New-HiroResult $true $action ([ordered]@{ text = [string]$value }) "Clipboard read." $null
+      return New-MikiResult $true $action ([ordered]@{ text = [string]$value }) "Clipboard read." $null
     }
 
     if ($action -eq "clipboard_clear") {
       Set-Clipboard -Value ""
-      return New-HiroResult $true $action ([ordered]@{ length = 0 }) "Clipboard cleared." $null
+      return New-MikiResult $true $action ([ordered]@{ length = 0 }) "Clipboard cleared." $null
     }
 
     if ($action -eq "screenshot") {
@@ -629,7 +629,7 @@ function Invoke-HiroComputer {
       $bitmap.Dispose()
       $base64 = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($tempPath))
       Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
-      return New-HiroResult $true $action ([ordered]@{
+      return New-MikiResult $true $action ([ordered]@{
         screenshot = $base64
         width = $bounds.Width
         height = $bounds.Height
@@ -647,13 +647,13 @@ function Invoke-HiroComputer {
           startTime = if ($_.StartTime) { $_.StartTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
         }
       }
-      return New-HiroResult $true $action ([ordered]@{ processes = @($processes); count = $processes.Count }) "Listed top processes." $null
+      return New-MikiResult $true $action ([ordered]@{ processes = @($processes); count = $processes.Count }) "Listed top processes." $null
     }
 
     if ($action -eq "get_system_info") {
       $os = Get-CimInstance Win32_OperatingSystem
       $computer = Get-CimInstance Win32_ComputerSystem
-      return New-HiroResult $true $action ([ordered]@{
+      return New-MikiResult $true $action ([ordered]@{
         os = [string]$os.Caption
         version = [string]$os.Version
         architecture = [string]$os.OSArchitecture
@@ -675,7 +675,7 @@ function Invoke-HiroComputer {
           workingArea = "{0}x{1}+{2}+{3}" -f $_.WorkingArea.Width, $_.WorkingArea.Height, $_.WorkingArea.X, $_.WorkingArea.Y
         }
       }
-      return New-HiroResult $true $action ([ordered]@{ displays = @($displays); count = $displays.Count }) "Listed display information." $null
+      return New-MikiResult $true $action ([ordered]@{ displays = @($displays); count = $displays.Count }) "Listed display information." $null
     }
 
     if ($action -eq "list_windows") {
@@ -703,40 +703,40 @@ function Invoke-HiroComputer {
           }
         }
       } catch {}
-      return New-HiroResult $true "list_windows" $windows "Found $($windows.Count) windows" $null
+      return New-MikiResult $true "list_windows" $windows "Found $($windows.Count) windows" $null
     }
 
     if ($action -eq "click_at") {
-      $x = [int](Get-HiroProperty $payload "x")
-      $y = [int](Get-HiroProperty $payload "y")
-      $button = [string](Get-HiroProperty $payload "button")
+      $x = [int](Get-MikiProperty $payload "x")
+      $y = [int](Get-MikiProperty $payload "y")
+      $button = [string](Get-MikiProperty $payload "button")
       if (-not $button) { $button = "left" }
-      $doubleClick = [bool](Get-HiroProperty $payload "doubleClick")
-      Click-HiroAt $x $y $button $doubleClick
-      return New-HiroResult $true $action ([ordered]@{ x = $x; y = $y; button = $button; doubleClick = $doubleClick }) "Clicked coordinates ($x, $y)." $null
+      $doubleClick = [bool](Get-MikiProperty $payload "doubleClick")
+      Click-MikiAt $x $y $button $doubleClick
+      return New-MikiResult $true $action ([ordered]@{ x = $x; y = $y; button = $button; doubleClick = $doubleClick }) "Clicked coordinates ($x, $y)." $null
     }
 
     if ($action -eq "drag") {
-      $fromX = [int](Get-HiroProperty $payload "fromX")
-      $fromY = [int](Get-HiroProperty $payload "fromY")
-      $toX = [int](Get-HiroProperty $payload "toX")
-      $toY = [int](Get-HiroProperty $payload "toY")
-      Drag-HiroMouse $fromX $fromY $toX $toY
-      return New-HiroResult $true $action ([ordered]@{ fromX = $fromX; fromY = $fromY; toX = $toX; toY = $toY }) "Dragged mouse from ($fromX, $fromY) to ($toX, $toY)." $null
+      $fromX = [int](Get-MikiProperty $payload "fromX")
+      $fromY = [int](Get-MikiProperty $payload "fromY")
+      $toX = [int](Get-MikiProperty $payload "toX")
+      $toY = [int](Get-MikiProperty $payload "toY")
+      Drag-MikiMouse $fromX $fromY $toX $toY
+      return New-MikiResult $true $action ([ordered]@{ fromX = $fromX; fromY = $fromY; toX = $toX; toY = $toY }) "Dragged mouse from ($fromX, $fromY) to ($toX, $toY)." $null
     }
 
     if ($action -eq "scroll") {
-      $direction = [string](Get-HiroProperty $payload "direction")
+      $direction = [string](Get-MikiProperty $payload "direction")
       if (-not $direction) { $direction = "down" }
-      $amount = [int](Get-HiroProperty $payload "amount")
+      $amount = [int](Get-MikiProperty $payload "amount")
       if ($amount -le 0) { $amount = 3 }
-      Scroll-HiroMouse $direction $amount
-      return New-HiroResult $true $action ([ordered]@{ direction = $direction; amount = $amount }) "Scrolled $direction by $amount." $null
+      Scroll-MikiMouse $direction $amount
+      return New-MikiResult $true $action ([ordered]@{ direction = $direction; amount = $amount }) "Scrolled $direction by $amount." $null
     }
 
     if ($action -eq "terminate_app") {
-      $targetPid = Get-HiroProperty $payload "pid"
-      $processName = [string](Get-HiroProperty $payload "processName")
+      $targetPid = Get-MikiProperty $payload "pid"
+      $processName = [string](Get-MikiProperty $payload "processName")
       $terminated = 0
       if ($targetPid) {
         Stop-Process -Id [int]$targetPid -Force -ErrorAction Stop
@@ -750,17 +750,17 @@ function Invoke-HiroComputer {
       } else {
         throw "pid or processName is required to terminate application."
       }
-      return New-HiroResult $true $action ([ordered]@{ pid = $targetPid; processName = $processName; terminatedCount = $terminated }) "Application terminated." $null
+      return New-MikiResult $true $action ([ordered]@{ pid = $targetPid; processName = $processName; terminatedCount = $terminated }) "Application terminated." $null
     }
 
     throw "Unsupported computer action: $action"
   } catch {
-    return New-HiroResult $false ([string]$action) $null $null $_.Exception.Message
+    return New-MikiResult $false ([string]$action) $null $null $_.Exception.Message
   }
 }
 
 $PayloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($PayloadBase64))
-$result = Invoke-HiroComputer -PayloadJson $PayloadJson
+$result = Invoke-MikiComputer -PayloadJson $PayloadJson
 $result | ConvertTo-Json -Depth 16 -Compress
 `;
 
@@ -958,7 +958,7 @@ export class ComputerAgent {
     const payloadText = JSON.stringify({ action, ...payload });
     const payloadBase64 = Buffer.from(payloadText, "utf8").toString("base64");
     const scriptPath = this.ensurePowerShellScript();
-    const shell = process.env["Hiro_POWERSHELL"] || "powershell.exe";
+    const shell = process.env["Miki_POWERSHELL"] || "powershell.exe";
 
     const result = await execFileText(
       shell,
@@ -986,7 +986,7 @@ export class ComputerAgent {
 
   private ensurePowerShellScript(): string {
     if (ComputerAgent.scriptPath) return ComputerAgent.scriptPath;
-    const scriptPath = path.join(os.tmpdir(), "Hiro-computer-agent.ps1");
+    const scriptPath = path.join(os.tmpdir(), "Miki-computer-agent.ps1");
     try {
       const current = fs.existsSync(scriptPath)
         ? fs.readFileSync(scriptPath, "utf-8")

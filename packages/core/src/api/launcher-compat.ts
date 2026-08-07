@@ -35,7 +35,7 @@ import {
   validateRuntimeConfig,
   type ConfigValidationResult,
   type SecretVault,
-} from "@hiro/config";
+} from "@miki/config";
 
 import type { AgentOrchestrator } from "../agent.js";
 import type { SkillLoader } from "../skill-loader.js";
@@ -153,7 +153,7 @@ const QR_BINDING_FLOW_TTL_MS = 5 * 60 * 1000;
 const QR_BINDING_FLOW_GC_MS = 30 * 60 * 1000;
 const WEIXIN_BASE_URL = "https://ilinkai.weixin.qq.com";
 const WEIXIN_BOT_TYPE = "3";
-const WECOM_QR_SOURCE_ID = "Hiro";
+const WECOM_QR_SOURCE_ID = "Miki";
 const WECOM_QR_GENERATE_URL = "https://work.weixin.qq.com/ai/qc/generate";
 const WECOM_QR_QUERY_URL = "https://work.weixin.qq.com/ai/qc/query_result";
 const WECOM_DEFAULT_WEBSOCKET_URL = "wss://openws.work.weixin.qq.com";
@@ -183,7 +183,7 @@ const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
   onebot: ["access_token"],
   whatsapp: ["webhook_token"],
   wecom: ["secret", "corp_secret", "webhook_url"],
-  hiro: ["token"],
+  miki: ["token"],
   matrix: ["access_token"],
   irc: ["password", "nickserv_password", "sasl_password"],
   mqtt: ["username", "password"],
@@ -265,8 +265,8 @@ interface LauncherCompatOptions {
 
 export interface LauncherRuntimeAuthBridge {
   isDashboardAuthenticated(headers: IncomingHttpHeaders): boolean;
-  gethiroToken(): string | undefined;
-  ensurehiroToken(): string;
+  getmikiToken(): string | undefined;
+  ensuremikiToken(): string;
 }
 
 export type RuntimeApplyStatus = "applied" | "pending_restart" | "failed";
@@ -377,14 +377,14 @@ interface CompatState {
   tool_state?: Record<string, boolean>;
   web_search?: JsonRecord;
   oauth?: Record<string, JsonRecord>;
-  hiro_token?: string;
+  miki_token?: string;
   gateway_restart_required?: boolean;
   runtime_apply_status?: RuntimeApplyStatus;
   runtime_apply_error?: string;
   pending_restart_fields?: string[];
 }
 
-const AUTH_COOKIE = "Hiro_dashboard_session";
+const AUTH_COOKIE = "Miki_dashboard_session";
 const AUTH_COOKIE_MAX_AGE_SECONDS = 31 * 24 * 60 * 60;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAILED_LOGINS = 8;
@@ -392,7 +392,7 @@ const activeSessions = new Map<string, number>();
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 
 const CHANNEL_RUNTIME_NOTES = {
-  hiro: "Verified WebUI chat path through the gateway WebSocket proxy.",
+  miki: "Verified WebUI chat path through the gateway WebSocket proxy.",
   telegram: "Node Telegram adapter exists; requires a valid bot token.",
   discord:
     "Node Discord Gateway adapter supports inbound messages, outbound replies, filtering, reconnect, and API error surfacing.",
@@ -497,11 +497,11 @@ export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] = [
     runtime_note: CHANNEL_RUNTIME_NOTES.whatsapp,
   },
   {
-    name: "hiro",
-    display_name: "hiro",
-    config_key: "hiro",
+    name: "miki",
+    display_name: "miki",
+    config_key: "miki",
     runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.hiro,
+    runtime_note: CHANNEL_RUNTIME_NOTES.miki,
   },
   {
     name: "matrix",
@@ -899,7 +899,7 @@ async function runTelegramLiveProbe(
 ): Promise<ChannelRuntimeProbeCheck[]> {
   if (
     process.env["NODE_ENV"] === "test" &&
-    process.env["Hiro_ALLOW_TEST_LIVE_PROBES"] !== "true"
+    process.env["Miki_ALLOW_TEST_LIVE_PROBES"] !== "true"
   ) {
     return [
       {
@@ -1883,12 +1883,12 @@ function gatewayHostForPublic(publicMode: boolean): string {
 
 const WINDOWS_RUN_KEY =
   "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const WINDOWS_RUN_VALUE = "Hiro";
-const MACOS_LAUNCH_AGENT_ID = "io.Hiro.launcher";
-const LINUX_DESKTOP_FILE = "Hiro.desktop";
+const WINDOWS_RUN_VALUE = "Miki";
+const MACOS_LAUNCH_AGENT_ID = "io.Miki.launcher";
+const LINUX_DESKTOP_FILE = "Miki.desktop";
 
 function autostartCommand(paths: RuntimePaths): string {
-  return `"${process.execPath}" "${path.join(paths.binDir, "Hiro.js")}"`;
+  return `"${process.execPath}" "${path.join(paths.binDir, "Miki.js")}"`;
 }
 
 function autostartSupported(): boolean {
@@ -1986,7 +1986,7 @@ function setMacosAutostart(paths: RuntimePaths, enabled: boolean): void {
   }
 
   ensureDir(path.dirname(plistPath));
-  const scriptPath = path.join(paths.binDir, "Hiro.js");
+  const scriptPath = path.join(paths.binDir, "Miki.js");
   const wd = paths.sourceDir ?? paths.configDir;
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -2017,12 +2017,12 @@ function setLinuxAutostart(paths: RuntimePaths, enabled: boolean): void {
   }
 
   ensureDir(path.dirname(desktopPath));
-  const scriptPath = path.join(paths.binDir, "Hiro.js");
+  const scriptPath = path.join(paths.binDir, "Miki.js");
   const wd = paths.sourceDir ?? paths.configDir;
   const desktop = [
     "[Desktop Entry]",
     "Type=Application",
-    "Name=Hiro",
+    "Name=Miki",
     `Exec=${quoteDesktopExecArg(process.execPath)} ${quoteDesktopExecArg(scriptPath)}`,
     `Path=${wd}`,
     "Terminal=false",
@@ -2945,19 +2945,19 @@ export function createLauncherCompatRouter({
     writeJsonFile(statePath, state);
   };
 
-  const ensurehiroToken = (): string => {
-    if (!state.hiro_token) {
-      state.hiro_token = crypto.randomBytes(24).toString("base64url");
+  const ensuremikiToken = (): string => {
+    if (!state.miki_token) {
+      state.miki_token = crypto.randomBytes(24).toString("base64url");
       saveState();
     }
-    return state.hiro_token;
+    return state.miki_token;
   };
 
   registerRuntimeAuth?.({
     isDashboardAuthenticated: (headers: IncomingHttpHeaders) =>
       isAuthenticatedCookieHeader(headers.cookie),
-    gethiroToken: () => state.hiro_token,
-    ensurehiroToken,
+    getmikiToken: () => state.miki_token,
+    ensuremikiToken,
   });
 
   const normalizedModels = state.models.map(normalizeStoredModel);
@@ -3326,7 +3326,7 @@ export function createLauncherCompatRouter({
         status: "ready",
         summary:
           "Dashboard, REST, websocket, and channel entrypoints are mounted.",
-        evidence: ["/chat", "/hiro/ws", "/api", "/webhooks/*"],
+        evidence: ["/chat", "/miki/ws", "/api", "/webhooks/*"],
       },
       {
         id: "gateway",
@@ -4109,7 +4109,7 @@ export function createLauncherCompatRouter({
     if (
       !validateOneTimeBootstrapToken(
         String(req.params.token || ""),
-        process.env["Hiro_LAUNCHER_BOOTSTRAP_TOKEN"],
+        process.env["Miki_LAUNCHER_BOOTSTRAP_TOKEN"],
         consumedBootstrapTokens,
       )
     ) {
@@ -4142,7 +4142,7 @@ export function createLauncherCompatRouter({
     res.json({
       gateway_status: "running",
       gateway_start_allowed: true,
-      gateway_start_reason: "Gateway is managed by the running Hiro process.",
+      gateway_start_reason: "Gateway is managed by the running Miki process.",
       gateway_restart_required: state.gateway_restart_required === true,
       runtime_apply_status: state.runtime_apply_status || "applied",
       runtime_apply_error: state.runtime_apply_error,
@@ -4199,7 +4199,7 @@ export function createLauncherCompatRouter({
       pending_restart_fields: pendingFields,
       message:
         apply.pending_restart && pendingFields.length > 0
-          ? `A full Hiro process restart is required to apply: ${pendingFields.join(", ")}`
+          ? `A full Miki process restart is required to apply: ${pendingFields.join(", ")}`
           : undefined,
     });
   };
@@ -4212,7 +4212,7 @@ export function createLauncherCompatRouter({
       status: "unsupported",
       supported: false,
       error:
-        "Gateway stop is not supported by the in-process Node runtime. Stop Hiro with the parent process manager instead.",
+        "Gateway stop is not supported by the in-process Node runtime. Stop Miki with the parent process manager instead.",
       pid: process.pid,
       log_total: readLogLines(paths).length,
       log_run_id: 1,
@@ -5107,7 +5107,7 @@ export function createLauncherCompatRouter({
           channel,
           config: flattened,
           configuredSecrets,
-          hashiroToken: Boolean(state.hiro_token),
+          hasmikiToken: Boolean(state.miki_token),
           mode,
           extraChecks,
         }),
@@ -5166,40 +5166,40 @@ export function createLauncherCompatRouter({
     }
   });
 
-  const hiroInfo = (req: Request) => {
-    ensurehiroToken();
+  const mikiInfo = (req: Request) => {
+    ensuremikiToken();
     const protocol =
       req.headers["x-forwarded-proto"] === "https" ? "wss" : "ws";
     const host = req.headers.host || `127.0.0.1:${settings.corePort}`;
     return {
-      ws_url: `${protocol}://${host}/hiro/ws`,
+      ws_url: `${protocol}://${host}/miki/ws`,
       enabled: true,
       configured: true,
     };
   };
 
-  router.get("/hiro/info", (req, res) => {
-    res.json(hiroInfo(req));
+  router.get("/miki/info", (req, res) => {
+    res.json(mikiInfo(req));
   });
 
-  router.post("/hiro/token", (req, res) => {
-    state.hiro_token = crypto.randomBytes(24).toString("base64url");
+  router.post("/miki/token", (req, res) => {
+    state.miki_token = crypto.randomBytes(24).toString("base64url");
     saveState();
-    res.json(hiroInfo(req));
+    res.json(mikiInfo(req));
   });
 
-  router.post("/hiro/setup", async (req, res) => {
-    const info = hiroInfo(req);
+  router.post("/miki/setup", async (req, res) => {
+    const info = mikiInfo(req);
     const channels = {
       ...(isRecord(state.config?.channels)
         ? (state.config!.channels as JsonRecord)
         : {}),
     };
-    channels.hiro = {
+    channels.miki = {
       enabled: true,
-      type: "hiro",
+      type: "miki",
       settings: {
-        token: state.hiro_token,
+        token: state.miki_token,
         ws_url: info.ws_url,
         streaming: { enabled: true },
       },
@@ -5208,7 +5208,7 @@ export function createLauncherCompatRouter({
       const committed = commitConfig({ ...(state.config || {}), channels });
       const apply = await applyRuntimeChanges({
         channelsChanged: committed.channelsChanged,
-        reason: "hiro.setup",
+        reason: "miki.setup",
       });
       res.json({
         ...info,

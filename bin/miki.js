@@ -44,8 +44,8 @@ function resolveRuntimeRoot() {
     return path.resolve(process.env.MIKI_RUNTIME_ROOT);
   }
   // Fall back to legacy env var for backward compatibility during transition
-  if (process.env.Hiro_RUNTIME_ROOT) {
-    return path.resolve(process.env.Hiro_RUNTIME_ROOT);
+  if (process.env.Miki_RUNTIME_ROOT) {
+    return path.resolve(process.env.Miki_RUNTIME_ROOT);
   }
   const packagedCli = path.join(PROJECT_ROOT, "dist", "runtime", "bin", CLI_EXE);
   return exists(packagedCli) ? path.join(PROJECT_ROOT, "dist", "runtime") : PROJECT_ROOT;
@@ -117,11 +117,11 @@ function start(argv) {
     MIKI_NODE: process.execPath,
     MIKI_PACKAGE_VERSION: readPackage().version || "1.0.0",
     // Legacy env vars kept during transition
-    Hiro_RUNTIME_ROOT: runtimeRoot,
-    Hiro_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
-    Hiro_GATEWAY_ENTRY: runtimePath("packages/gateway/dist/index.js"),
-    Hiro_RUNTIME_LOADER: runtimePath("runtime-loader.mjs"),
-    Hiro_NODE: process.execPath,
+    Miki_RUNTIME_ROOT: runtimeRoot,
+    Miki_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+    Miki_GATEWAY_ENTRY: runtimePath("packages/gateway/dist/index.js"),
+    Miki_RUNTIME_LOADER: runtimePath("runtime-loader.mjs"),
+    Miki_NODE: process.execPath,
   };
 
   memoryChild = fork(path.join(PROJECT_ROOT, "packages", "memory", "src", "api", "server.js"));
@@ -185,7 +185,7 @@ if (argv[0] === "setup" || argv[0] === "config") {
     env: {
       ...process.env,
       MIKI_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
-      Hiro_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+      Miki_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
     },
     stdio: "inherit",
     shell: false,
@@ -203,7 +203,7 @@ if (argv[0] === "doctor") {
     env: {
       ...process.env,
       MIKI_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
-      Hiro_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+      Miki_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
     },
     stdio: "inherit",
     shell: false,

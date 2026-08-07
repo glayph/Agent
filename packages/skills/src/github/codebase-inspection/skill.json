@@ -4,7 +4,7 @@
   "description": "Inspect and analyze GitHub repositories with code parsing, dependency detection, and architecture overview",
   "category": "github",
   "tags": ["github", "code-analysis", "repositories", "inspection"],
-  "author": "Hiro",
+  "author": "Miki",
   "version": "1.0.0",
   "enabled": true,
   "dependencies": ["github-auth"],

@@ -2,9 +2,9 @@
 /**
  * build-release-artifacts.mjs
  *
- * Full build pipeline for Hiro:
+ * Full build pipeline for Miki:
  *   1. TypeScript compilation (tsc -b with project references)
- *   2. Go backend (ui/backend) + CLI (Hiro-cli) binaries
+ *   2. Go backend (ui/backend) + CLI (Miki-cli) binaries
  *   3. React frontend (Vite via pnpm)
  *   4. Runtime package assembly (prepare-runtime-package.mjs)
  */
@@ -57,11 +57,11 @@ function buildTypeScript() {
 function buildGoBackend() {
   const backendDir = path.join(root, "packages", "ui", "backend");
   const outDir = path.join(backendDir, "dist", "bin");
-  const exe = process.platform === "win32" ? "Hiro-web.exe" : "Hiro-web";
+  const exe = process.platform === "win32" ? "Miki-web.exe" : "Miki-web";
 
   fs.mkdirSync(outDir, { recursive: true });
 
-  log("Building Go backend (Hiro-web)...");
+  log("Building Go backend (Miki-web)...");
   const result = spawnSync(
     "go",
     ["build", "-trimpath", "-ldflags", "-s -w", "-o", path.join(outDir, exe), "."],
@@ -69,11 +69,11 @@ function buildGoBackend() {
   );
 
   if (result.error && result.error.code === "ENOENT") {
-    log("WARNING: Go not installed — skipping Hiro-web build");
+    log("WARNING: Go not installed — skipping Miki-web build");
     return;
   }
   if (result.status !== 0) {
-    log("WARNING: Hiro-web build failed — continuing without it");
+    log("WARNING: Miki-web build failed — continuing without it");
     return;
   }
   log(`Built ${exe}`);
@@ -82,11 +82,11 @@ function buildGoBackend() {
 function buildGoCli() {
   const cliDir = path.join(root, "packages", "cli");
   const outDir = path.join(cliDir, "dist", "bin");
-  const exe = process.platform === "win32" ? "Hiro-cli.exe" : "Hiro-cli";
+  const exe = process.platform === "win32" ? "Miki-cli.exe" : "Miki-cli";
 
   fs.mkdirSync(outDir, { recursive: true });
 
-  log("Building Go CLI (Hiro-cli)...");
+  log("Building Go CLI (Miki-cli)...");
   const result = spawnSync(
     "go",
     ["build", "-trimpath", "-ldflags", "-s -w", "-o", path.join(outDir, exe), "."],
@@ -94,11 +94,11 @@ function buildGoCli() {
   );
 
   if (result.error && result.error.code === "ENOENT") {
-    log("WARNING: Go not installed — skipping Hiro-cli build");
+    log("WARNING: Go not installed — skipping Miki-cli build");
     return;
   }
   if (result.status !== 0) {
-    log("WARNING: Hiro-cli build failed — continuing without it");
+    log("WARNING: Miki-cli build failed — continuing without it");
     return;
   }
   log(`Built ${exe}`);
@@ -124,7 +124,7 @@ function prepareRuntime() {
 // ── Main ───────────────────────────────────────────────────────────────────────
 function main() {
   const startTime = Date.now();
-  log("Starting full build for Hiro...");
+  log("Starting full build for Miki...");
 
   buildTypeScript();
   buildGoBackend();

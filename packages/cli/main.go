@@ -10,8 +10,8 @@ import (
 func main() {
 	cfg, err := parseConfig(os.Args[1:])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Hiro:", err)
-		fmt.Fprintln(os.Stderr, "Run `Hiro help` for usage.")
+		fmt.Fprintln(os.Stderr, "Miki:", err)
+		fmt.Fprintln(os.Stderr, "Run `Miki help` for usage.")
 		os.Exit(1)
 	}
 
@@ -25,7 +25,7 @@ func main() {
 			os.Exit(runPlain(cfg))
 		}
 		if err := runTUI(cfg); err != nil {
-			fmt.Fprintln(os.Stderr, "Hiro:", err)
+			fmt.Fprintln(os.Stderr, "Miki:", err)
 			os.Exit(1)
 		}
 	}

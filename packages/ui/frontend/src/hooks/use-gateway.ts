@@ -99,7 +99,7 @@ export function useGateway() {
         const pendingFields = response.pending_restart_fields ?? []
         const message =
           response.message ||
-          `A full Hiro process restart is required for: ${pendingFields.join(", ")}`
+          `A full Miki process restart is required for: ${pendingFields.join(", ")}`
         setError(message)
         updateGatewayStore({
           status: "running",

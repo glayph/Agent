@@ -26,7 +26,7 @@ export function registerMcpPrompts(server: McpServer): void {
           content: {
             type: "text" as const,
             text: compactLines([
-              "Analyze the Hiro agent's performance and suggest improvements.",
+              "Analyze the Miki agent's performance and suggest improvements.",
               `Focus area: ${args?.focus_area || "overall"}`,
               "",
               "Return a compact report with:",
@@ -64,7 +64,7 @@ export function registerMcpPrompts(server: McpServer): void {
           content: {
             type: "text" as const,
             text: compactLines([
-              "Create a detailed task plan for the Hiro agent.",
+              "Create a detailed task plan for the Miki agent.",
               "",
               `Objective: ${args.objective}`,
               `Priority: ${args.priority || "medium"}`,
@@ -108,7 +108,7 @@ export function registerMcpPrompts(server: McpServer): void {
           content: {
             type: "text" as const,
             text: compactLines([
-              "Debug the following Hiro agent issue.",
+              "Debug the following Miki agent issue.",
               "",
               `Issue: ${args.issue_description}`,
               `Severity: ${args.severity || "error"}`,

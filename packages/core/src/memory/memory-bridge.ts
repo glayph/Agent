@@ -2,7 +2,7 @@
  * memory-bridge.ts
  *
  * Bridges the CommonJS `graphrag-memory` package into the ESM TypeScript
- * @hiro/core package. Uses createRequire so that the CJS module is loaded
+ * @miki/core package. Uses createRequire so that the CJS module is loaded
  * correctly at runtime without needing it to be compiled to ESM first.
  *
  * Exposes a lazily-initialized singleton AgentMemoryIntegration instance

@@ -23,9 +23,9 @@ interface AssistantDetailVisibilityDecision {
 }
 
 export const ASSISTANT_DETAIL_VISIBILITY_STORAGE_KEY =
-  "Hiro:chat-assistant-detail-visibility"
+  "Miki:chat-assistant-detail-visibility"
 export const LEGACY_SHOW_ASSISTANT_DETAILS_STORAGE_KEY =
-  "Hiro:chat-show-thoughts"
+  "Miki:chat-show-thoughts"
 export const DEFAULT_ASSISTANT_DETAIL_VISIBILITY: AssistantDetailVisibility =
   "all"
 

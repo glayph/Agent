@@ -3312,7 +3312,7 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
-  hirocolors@1.1.1:
+  mikicolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
   picomatch@2.3.2:
@@ -4170,7 +4170,7 @@ snapshots:
     dependencies:
       '@babel/helper-validator-identifier': 7.28.5
       js-tokens: 4.0.0
-      hirocolors: 1.1.1
+      mikicolors: 1.1.1
 
   '@babel/compat-data@7.29.3': {}
 
@@ -7352,7 +7352,7 @@ snapshots:
       is-node-process: 1.2.0
       outvariant: 1.4.3
       path-to-regexp: 6.3.0
-      hirocolors: 1.1.1
+      mikicolors: 1.1.1
       rettime: 0.11.11
       statuses: 2.0.2
       strict-event-emitter: 0.5.1
@@ -7503,7 +7503,7 @@ snapshots:
 
   pathe@2.0.3: {}
 
-  hirocolors@1.1.1: {}
+  mikicolors@1.1.1: {}
 
   picomatch@2.3.2: {}
 
@@ -7524,7 +7524,7 @@ snapshots:
   postcss@8.5.14:
     dependencies:
       nanoid: 3.3.12
-      hirocolors: 1.1.1
+      mikicolors: 1.1.1
       source-map-js: 1.2.1
 
   powershell-utils@0.1.0: {}
@@ -8180,7 +8180,7 @@ snapshots:
     dependencies:
       browserslist: 4.28.2
       escalade: 3.2.0
-      hirocolors: 1.1.1
+      mikicolors: 1.1.1
 
   uri-js@4.4.1:
     dependencies:

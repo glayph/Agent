@@ -1,4 +1,4 @@
-import { settings } from "@hiro/config";
+import { settings } from "@miki/config";
 import {
   createProjectWorkflow,
   type ProjectTargetType,

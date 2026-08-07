@@ -1,6 +1,6 @@
 /**
  * Type declarations for the graphrag-memory (CommonJS) module, used from
- * the ESM TypeScript @hiro/core package via createRequire.
+ * the ESM TypeScript @miki/core package via createRequire.
  *
  * Only the surface used by the agent integration is typed here; the full
  * module exports additional methods that are not needed by core.

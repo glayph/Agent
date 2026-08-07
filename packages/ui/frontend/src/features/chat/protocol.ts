@@ -11,7 +11,7 @@ import {
   updateChatStore,
 } from "@/store/chat"
 
-export interface hiroMessage {
+export interface mikiMessage {
   type: string
   id?: string
   session_id?: string
@@ -91,8 +91,8 @@ function parseModelName(payload: Record<string, unknown>): string | undefined {
   return modelName || undefined
 }
 
-export function handlehiroMessage(
-  message: hiroMessage,
+export function handlemikiMessage(
+  message: mikiMessage,
   expectedSessionId: string,
 ) {
   if (message.session_id && message.session_id !== expectedSessionId) {
@@ -104,7 +104,7 @@ export function handlehiroMessage(
   switch (message.type) {
     case "message.create":
     case "media.create": {
-      const messageId = (payload.message_id as string) || `hiro-${Date.now()}`
+      const messageId = (payload.message_id as string) || `miki-${Date.now()}`
       const { content, kind, toolCalls } =
         parseAssistantMessageCreateState(payload)
       const attachments = parseAttachments(payload)
@@ -227,7 +227,7 @@ export function handlehiroMessage(
       const errorMessage =
         typeof payload.message === "string" ? payload.message : ""
 
-      console.error("hiro error:", payload)
+      console.error("miki error:", payload)
       if (errorMessage) {
         toast.error(errorMessage)
       }
@@ -244,6 +244,6 @@ export function handlehiroMessage(
       break
 
     default:
-      console.log("Unknown hiro message type:", message.type)
+      console.log("Unknown miki message type:", message.type)
   }
 }

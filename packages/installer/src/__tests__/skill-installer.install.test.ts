@@ -22,7 +22,7 @@ describe("SkillInstaller.install", () => {
         name: "contract_plugin",
         version: "1.0.0",
         description: "Plugin with marketplace contracts",
-        author: "Hiro",
+        author: "Miki",
         license: "MIT",
         permissions: ["network.http"],
         contracts: {
@@ -65,7 +65,7 @@ describe("SkillInstaller.install", () => {
 
     const installed = await installer.getRegistry().getSkill("contract_plugin");
     expect(installed?.description).toBe("Plugin with marketplace contracts");
-    expect(installed?.author).toBe("Hiro");
+    expect(installed?.author).toBe("Miki");
     expect(installed?.license).toBe("MIT");
     expect(installed?.assetsPath).toBe(result.assetsPath);
     expect(installed?.permissions).toEqual(["network.http"]);

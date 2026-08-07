@@ -5,7 +5,7 @@
 
 // Usage:
 //   agent [command] [options]
-//   Hiro [command] [options]
+//   Miki [command] [options]
 
 // Commands:
 //   start     Start the agent dashboard
@@ -17,7 +17,7 @@
 
 // This script dynamically launches the appropriate dashboard based on context:
 // - For npm package distribution: launches the express gateway
-// - For Windows installer: launches the native Hiro.exe wrapper
+// - For Windows installer: launches the native Miki.exe wrapper
 // - With --tray flag: launches in system tray mode for minimalist operation
 
 import process from "node:process";
@@ -50,9 +50,9 @@ const command = args[0] || "start";
 const options = args.slice(1);
 
 // Determine execution context
-const isWindowsInstaller = process.platform === "win32" && process.env["Hiro_INSTALLER"] === "1";
+const isWindowsInstaller = process.platform === "win32" && process.env["Miki_INSTALLER"] === "1";
 const isTrayMode = options.includes("--tray");
-const isNpmPackage = process.env["Hiro_NPM_PACKAGE"] === "1";
+const isNpmPackage = process.env["Miki_NPM_PACKAGE"] === "1";
 
 async function runCommand() {
   switch (command) {
@@ -100,8 +100,8 @@ async function startDashboard() {
 
   // Determine if we're launching with installer or normal mode
   if (isWindowsInstaller && !isTrayMode) {
-    // Use the native Hiro.exe wrapper for Windows installer
-    const exePath = join(getCurrentDir(), "..", "..", "installer", "windows", "launcher-go", "Hiro.exe");
+    // Use the native Miki.exe wrapper for Windows installer
+    const exePath = join(getCurrentDir(), "..", "..", "installer", "windows", "launcher-go", "Miki.exe");
 
     if (fs.existsSync(exePath)) {
       console.log("Launching dashboard via Windows installer wrapper...");
@@ -295,13 +295,13 @@ function showHelp() {
   console.log("  --tray           Launch in system tray mode (minimal interface)");
   console.log("  --help           Show help for specific command");
   console.log("\\nEnvironment Variables:");
-  console.log("  Hiro_INSTALLER=1    Indicates running from Windows installer");
-  console.log("  Hiro_NPM_PACKAGE=1  Indicates running from npm package");
+  console.log("  Miki_INSTALLER=1    Indicates running from Windows installer");
+  console.log("  Miki_NPM_PACKAGE=1  Indicates running from npm package");
   console.log("\\nExamples:");
   console.log("  agent start                    # Start dashboard normally");
   console.log("  agent start --tray            # Start in system tray mode");
   console.log("  agent doctor                   # Check system health");
-  console.log("\\nFor more information, visit: https://github.com/Hiro");
+  console.log("\\nFor more information, visit: https://github.com/Miki");
   console.log("For documentation, see: README.md");
 }
 

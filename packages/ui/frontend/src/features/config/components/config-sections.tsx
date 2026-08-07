@@ -157,7 +157,7 @@ export function AgentDefaultsSection({
           value={form.workspace}
           readOnly
           disabled
-          placeholder="~/.Hiro/workspace"
+          placeholder="~/.Miki/workspace"
         />
       </Field>
 
@@ -543,7 +543,7 @@ export function EvolutionSection({
         <Input
           value={form.evolutionStateDir}
           onChange={(e) => onFieldChange("evolutionStateDir", e.target.value)}
-          placeholder="e.g. /var/lib/Hiro/evolution"
+          placeholder="e.g. /var/lib/Miki/evolution"
         />
       </Field>
 

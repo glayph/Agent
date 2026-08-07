@@ -1,12 +1,12 @@
 {
-  "name": "@hiro/cli",
+  "name": "@miki/cli",
   "version": "1.0.0",
-  "description": "Hiro CLI entry point for npm package distribution",
+  "description": "Miki CLI entry point for npm package distribution",
   "main": "agent.js",
   "type": "module",
   "bin": {
     "agent": "agent.js",
-    "Hiro": "agent.js"
+    "Miki": "agent.js"
   },
   "scripts": {
     "start": "node agent.js start",

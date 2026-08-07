@@ -5,7 +5,7 @@ import type { AddressInfo } from "net";
 import * as os from "os";
 import * as path from "path";
 import express from "express";
-import { SkillRegistry, type PluginContracts } from "@hiro/installer";
+import { SkillRegistry, type PluginContracts } from "@miki/installer";
 import {
   canRunDashboardSetup,
   dashboardAccessDecision,
@@ -145,7 +145,7 @@ async function withLauncherCompatServer(
   } = {},
 ): Promise<void> {
   const workspaceDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "Hiro-config-api-"),
+    path.join(os.tmpdir(), "Miki-config-api-"),
   );
   const envSnapshot = new Map(
     TEST_ENV_KEYS.map((key) => [key, process.env[key]] as const),
@@ -1334,13 +1334,13 @@ describe("channel runtime probe", () => {
       configuredSecrets: ["token"],
       env: {
         TELEGRAM_BOT_TOKEN: "runtime-token",
-        Hiro_CHANNEL_LIVE_PROBES: "true",
+        Miki_CHANNEL_LIVE_PROBES: "true",
       },
     });
 
     expect(probe.check_mode).toBe("live");
     expect(probe.send_check?.status).toBe("skipped");
-    expect(probe.send_check?.message).toContain("Hiro_CHANNEL_ALLOW_LIVE_SEND");
+    expect(probe.send_check?.message).toContain("Miki_CHANNEL_ALLOW_LIVE_SEND");
   });
 
   it("reports Telegram disabled when startup is explicitly disabled", () => {
@@ -1363,12 +1363,12 @@ describe("channel runtime probe", () => {
     expect(probe.agent_connected).toBe(false);
   });
 
-  it("reports hiro ready without depending on a prior token-generation endpoint", () => {
+  it("reports miki ready without depending on a prior token-generation endpoint", () => {
     const probe = buildChannelRuntimeProbe({
       channel: {
-        name: "hiro",
-        display_name: "hiro",
-        config_key: "hiro",
+        name: "miki",
+        display_name: "miki",
+        config_key: "miki",
         runtime_status: "functional",
       },
       config: {},
@@ -2147,7 +2147,7 @@ describe("channel runtime probe", () => {
             settings: {
               broker: "mqtt://127.0.0.1:1883",
               agent_id: "miki",
-              topic_prefix: "/Hiro",
+              topic_prefix: "/Miki",
               qos: 1,
             },
           },
@@ -2156,7 +2156,7 @@ describe("channel runtime probe", () => {
       {},
     );
     const packet = buildMqttPublishPacket(
-      "/Hiro/miki/device-1/request",
+      "/Miki/miki/device-1/request",
       Buffer.from(JSON.stringify({ text: "inspect sensors" }), "utf-8"),
     );
     const parsed = parseMqttPackets(packet);
@@ -2166,7 +2166,7 @@ describe("channel runtime probe", () => {
     expect(runtimeConfig.qos).toBe(1);
     expect(mqttRequestInfo(publish.topic, runtimeConfig)).toEqual({
       clientId: "device-1",
-      responseTopic: "/Hiro/miki/device-1/response",
+      responseTopic: "/Miki/miki/device-1/response",
     });
     expect(parseMqttRequestPayload(publish.payload)).toBe("inspect sensors");
     expect(parseMqttPackets(parsed.remaining).packets).toEqual([]);
@@ -2274,7 +2274,7 @@ describe("channel runtime probe", () => {
       },
       config: {
         enabled: true,
-        settings: { server: "irc.libera.chat", nick: "Hiro" },
+        settings: { server: "irc.libera.chat", nick: "Miki" },
       },
       env: {},
     });
@@ -2293,7 +2293,7 @@ describe("channel runtime probe", () => {
             enabled: true,
             settings: {
               server: "irc.libera.chat",
-              nick: "Hiro",
+              nick: "Miki",
               channels: "#ops",
               allow_from: ["#ops", "alice"],
               group_trigger: { prefixes: ["!owl"] },
@@ -2306,18 +2306,18 @@ describe("channel runtime probe", () => {
 
     expect(runtimeConfig.enabled).toBe(true);
     const channelMention = parseIrcLine(
-      ":alice!u@host PRIVMSG #ops :Hiro: inspect this",
+      ":alice!u@host PRIVMSG #ops :Miki: inspect this",
     );
     const channelIgnored = parseIrcLine(
       ":mallory!u@host PRIVMSG #ops :inspect this",
     );
-    const dm = parseIrcLine(":alice!u@host PRIVMSG Hiro :inspect this");
+    const dm = parseIrcLine(":alice!u@host PRIVMSG Miki :inspect this");
 
     expect(shouldHandleIrcMessage(channelMention, runtimeConfig)).toBe(true);
     expect(shouldHandleIrcMessage(channelIgnored, runtimeConfig)).toBe(false);
     expect(shouldHandleIrcMessage(dm, runtimeConfig)).toBe(true);
     expect(
-      normalizeIrcPrompt("Hiro: !owl inspect this", "Hiro", ["!owl"]),
+      normalizeIrcPrompt("Miki: !owl inspect this", "Miki", ["!owl"]),
     ).toBe("inspect this");
   });
 });

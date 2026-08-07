@@ -41,7 +41,7 @@ import {
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useHiroChat } from "@/hooks/use-hiro-chat"
+import { useMikiChat } from "@/hooks/use-miki-chat"
 import { useSessionHistory } from "@/hooks/use-session-history"
 import type { AssistantDetailVisibility } from "@/store/chat"
 import type { ConnectionState } from "@/store/chat"
@@ -452,7 +452,7 @@ export function ChatPage() {
     retryMessage,
     switchSession,
     newChat,
-  } = useHiroChat()
+  } = useMikiChat()
   const retryableMessageIds = useMemo(
     () => getRetryableMessageIds(messages),
     [messages],
@@ -874,7 +874,7 @@ export function ChatPage() {
   )
 
   const handleModeClick = useCallback(() => {
-    window.dispatchEvent(new Event("Hiro:command"))
+    window.dispatchEvent(new Event("Miki:command"))
   }, [])
 
   const handleDeleteAsset = useCallback(

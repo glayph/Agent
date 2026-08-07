@@ -123,15 +123,15 @@ func resetGatewayTestState(t *testing.T) {
 	})
 }
 
-func TesthiroGatewayProtocol(t *testing.T) {
+func TestmikiGatewayProtocol(t *testing.T) {
 	resetGatewayTestState(t)
 
 	gateway.mu.Lock()
-	gateway.hiroToken = "ui-token"
+	gateway.mikiToken = "ui-token"
 	gateway.mu.Unlock()
 
-	if got := hiroGatewayProtocol(); got != tokenPrefix+"ui-token" {
-		t.Fatalf("hiroGatewayProtocol() = %q, want %q", got, tokenPrefix+"ui-token")
+	if got := mikiGatewayProtocol(); got != tokenPrefix+"ui-token" {
+		t.Fatalf("mikiGatewayProtocol() = %q, want %q", got, tokenPrefix+"ui-token")
 	}
 }
 
@@ -297,7 +297,7 @@ func TestStartGatewayLocked_UsesReloadedConfigForBootSignature(t *testing.T) {
 
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	cfg := config.DefaultConfig()
-	delete(cfg.Channels, "hiro")
+	delete(cfg.Channels, "miki")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -336,7 +336,7 @@ func TestStartGatewayLocked_UsesReloadedConfigForBootSignature(t *testing.T) {
 	}
 	expectedSignature := computeConfigSignature(updatedCfg)
 	if expectedSignature == originalSignature {
-		t.Fatal("expected EnsurehiroChannel() to change the config signature during gateway start")
+		t.Fatal("expected EnsuremikiChannel() to change the config signature during gateway start")
 	}
 	if bootSignature != expectedSignature {
 		t.Fatalf("bootConfigSignature = %q, want %q", bootSignature, expectedSignature)

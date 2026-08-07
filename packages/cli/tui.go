@@ -159,7 +159,7 @@ func (m tuiModel) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 
 func (m tuiModel) View() string {
 	if m.width == 0 || m.height == 0 {
-		return "Starting Hiro..."
+		return "Starting Miki..."
 	}
 	header := m.renderHeader()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.renderMenu(), m.renderLogs())
@@ -170,7 +170,7 @@ func (m tuiModel) View() string {
 func (m tuiModel) renderHeader() string {
 	state := m.runtime.State()
 	pill := pillStyle.Copy().Background(statusColor(state)).Render(strings.ToUpper(string(state)))
-	leftParts := []string{titleStyle.Render("Hiro"), "  ", pill}
+	leftParts := []string{titleStyle.Render("Miki"), "  ", pill}
 	if err := m.runtime.Error(); err != "" {
 		leftParts = append(leftParts, "  ", errorTextStyle.Render(truncateText(err, max(18, m.width/3))))
 	}
@@ -226,7 +226,7 @@ func (m tuiModel) renderFooter() string {
 		text = "Logs focused  Wheel/PgUp/PgDown/Home/End scroll  Tab menu  Q quit"
 	}
 	if m.confirmQuit {
-		text = "Shutdown Hiro? Enter confirms, Esc cancels"
+		text = "Shutdown Miki? Enter confirms, Esc cancels"
 	}
 	if err := firstNonEmpty(m.lastError, m.runtime.Error()); err != "" {
 		text = "Error: " + truncateText(err, max(16, m.width-12))

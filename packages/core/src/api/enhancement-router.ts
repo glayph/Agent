@@ -3,7 +3,7 @@ import * as path from "path";
 import {
   validateRuntimeConfig,
   type ConfigValidationResult,
-} from "@hiro/config";
+} from "@miki/config";
 import { SqliteAuditLog, type AuditEventType } from "../audit-log.js";
 import {
   AgentRunRecorder,

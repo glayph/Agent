@@ -44,7 +44,7 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
             <Input
               value={asString(config.nick)}
               onChange={(e) => onChange("nick", e.target.value)}
-              placeholder="Hiro"
+              placeholder="Miki"
             />
           </Field>
 

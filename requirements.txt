@@ -1,4 +1,4 @@
-# Hiro agent — Python runtime dependencies (INFORMATIONAL / MANUAL FALLBACK)
+# Miki agent — Python runtime dependencies (INFORMATIONAL / MANUAL FALLBACK)
 #
 # The agent no longer relies on this file to make these packages available.
 # Skills that need Python (or Ruby/Rust/Node) packages now declare them in

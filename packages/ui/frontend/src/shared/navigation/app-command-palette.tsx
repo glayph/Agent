@@ -30,7 +30,7 @@ import {
   CommandShortcut,
 } from "@/shared/ui/command"
 import { useGateway } from "@/hooks/use-gateway"
-import { useHiroChat } from "@/hooks/use-hiro-chat"
+import { useMikiChat } from "@/hooks/use-miki-chat"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
 import { type ThemePreference, useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
@@ -197,7 +197,7 @@ export function AppCommandPalette({
   const [search, setSearch] = React.useState("")
   const navigate = useNavigate()
   const { i18n, t } = useTranslation()
-  const { newChat } = useHiroChat()
+  const { newChat } = useMikiChat()
   const { preference, setTheme } = useTheme()
   const {
     state: gatewayState,
@@ -228,10 +228,10 @@ export function AppCommandPalette({
     }
     const onOpen = () => setOpen(true)
     window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("Hiro:command", onOpen)
+    window.addEventListener("Miki:command", onOpen)
     return () => {
       window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("Hiro:command", onOpen)
+      window.removeEventListener("Miki:command", onOpen)
     }
   }, [])
 

@@ -4,7 +4,7 @@ package api
 
 import "net/http"
 
-const destructiveConfirmationHeader = "X-Hiro-Confirm"
+const destructiveConfirmationHeader = "X-Miki-Confirm"
 
 func requireDestructiveConfirmation(w http.ResponseWriter, r *http.Request, expected string) bool {
 	if r.Header.Get(destructiveConfirmationHeader) == expected {

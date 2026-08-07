@@ -189,11 +189,11 @@ func TestHandleGetChannelConfig_ReturnsConfiguredStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	hiro := cfg.Channels.Get(config.Channelhiro)
-	if hiro == nil {
-		t.Fatal("missing hiro channel")
+	miki := cfg.Channels.Get(config.Channelmiki)
+	if miki == nil {
+		t.Fatal("missing miki channel")
 	}
-	hiro.Settings = config.RawNode(`{"streaming":{"enabled":true,"throttle_seconds":2,"min_growth_chars":80}}`)
+	miki.Settings = config.RawNode(`{"streaming":{"enabled":true,"throttle_seconds":2,"min_growth_chars":80}}`)
 	if err := config.InitChannelList(cfg.Channels); err != nil {
 		t.Fatalf("InitChannelList() error = %v", err)
 	}
@@ -205,13 +205,13 @@ func TestHandleGetChannelConfig_ReturnsConfiguredStreaming(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/channels/hiro/config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/channels/miki/config", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf(
-			"GET /api/channels/hiro/config status = %d, want %d, body=%s",
+			"GET /api/channels/miki/config status = %d, want %d, body=%s",
 			rec.Code,
 			http.StatusOK,
 			rec.Body.String(),

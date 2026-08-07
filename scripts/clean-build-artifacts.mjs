@@ -15,7 +15,7 @@ const targets = [
   "packages/skills/dist",
   "packages/ui/frontend/dist",
   "packages/ui/backend/dist",
-  "packages/Hiro-cli/dist",
+  "packages/Miki-cli/dist",
   "packages/ui/frontend/node_modules/node_modules",
 ];
 

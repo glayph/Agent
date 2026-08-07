@@ -12,7 +12,7 @@ function writeConfig(dir: string, content: string): string {
 
 describe("tool executor security", () => {
   it("rejects shell metacharacters when disabled", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-shell-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-shell-"));
     const configPath = writeConfig(
       dir,
       ["permissions:", "  shell_execute:", "    level: DISABLED"].join("\n"),
@@ -26,8 +26,8 @@ describe("tool executor security", () => {
   });
 
   it("allows shell execution outside any workspace in trusted full-access mode", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-shell-"));
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-shell-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-outside-"));
     const configPath = writeConfig(
       dir,
       [
@@ -50,7 +50,7 @@ describe("tool executor security", () => {
   });
 
   it("enforces max_file_size_mb for file reads", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-file-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-file-"));
     const configPath = writeConfig(
       dir,
       [
@@ -69,8 +69,8 @@ describe("tool executor security", () => {
   });
 
   it("allows absolute file paths anywhere on the filesystem", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-file-"));
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-file-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-outside-"));
     const outsidePath = path.join(outsideDir, "outside.txt");
     fs.writeFileSync(outsidePath, "outside-content", "utf-8");
     const configPath = writeConfig(
@@ -89,8 +89,8 @@ describe("tool executor security", () => {
   });
 
   it("allows file access via symlinks (no workspace restriction)", () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-file-"));
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-file-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-outside-"));
     fs.writeFileSync(path.join(outsideDir, "outside.txt"), "outside", "utf-8");
     const linkPath = path.join(workspaceDir, "outside-link");
     try {

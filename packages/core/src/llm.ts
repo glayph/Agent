@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { settings, resolveConfiguredSecret } from "@hiro/config";
+import { settings, resolveConfiguredSecret } from "@miki/config";
 import { MODEL_COSTS } from "./cost-calibrator.js";
 import {
   directProviderForModel,
@@ -88,7 +88,7 @@ export class LiteLLMMissingCredentialError extends LLMMissingCredentialError {
 export type Provider = "gemini" | "openai" | "openrouter";
 
 function workspaceDir(): string {
-  return process.env["Hiro_WORKSPACE_DIR"] || process.cwd();
+  return process.env["Miki_WORKSPACE_DIR"] || process.cwd();
 }
 
 function providerForModel(model: string): DirectProviderConfig | undefined {
@@ -136,7 +136,7 @@ export function updateClient(): void {
 export async function achatCompletion(
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
   extra?: Record<string, unknown>,
-): Promise<import("@hiro/config").LLMResponse> {
+): Promise<import("@miki/config").LLMResponse> {
   const maxRetries = 3;
   let lastError: Error | null = null;
   const modelName = settings.defaultModel;

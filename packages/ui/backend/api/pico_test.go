@@ -18,22 +18,22 @@ import (
 	ppid "github.com/sipeed/miki/pkg/pid"
 )
 
-func newhiroProxyRequest(method, path string) *http.Request {
+func newmikiProxyRequest(method, path string) *http.Request {
 	req := httptest.NewRequest(method, "http://launcher.local:18800"+path, nil)
 	req.Header.Set("Origin", "http://launcher.local:18800")
 	return req
 }
 
-func TestEnsurehiroChannel_FreshConfig(t *testing.T) {
+func TestEnsuremikiChannel_FreshConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	changed, err := h.EnsurehiroChannel()
+	changed, err := h.EnsuremikiChannel()
 	if err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 	if !changed {
-		t.Fatal("EnsurehiroChannel() should report changed on a fresh config")
+		t.Fatal("EnsuremikiChannel() should report changed on a fresh config")
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -41,26 +41,26 @@ func TestEnsurehiroChannel_FreshConfig(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
+	mikiCfg := decoded.(*config.mikiSettings)
 	if !bc.Enabled {
-		t.Error("expected hiro to be enabled after setup")
+		t.Error("expected miki to be enabled after setup")
 	}
-	if hiroCfg.Token.String() == "" {
+	if mikiCfg.Token.String() == "" {
 		t.Error("expected a non-empty token after setup")
 	}
 }
 
-func TestEnsurehiroChannel_DoesNotEnableTokenQuery(t *testing.T) {
+func TestEnsuremikiChannel_DoesNotEnableTokenQuery(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -68,23 +68,23 @@ func TestEnsurehiroChannel_DoesNotEnableTokenQuery(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
-	if hiroCfg.AllowTokenQuery {
+	mikiCfg := decoded.(*config.mikiSettings)
+	if mikiCfg.AllowTokenQuery {
 		t.Error("setup must not enable allow_token_query by default")
 	}
 }
 
-func TestEnsurehiroChannel_LeavesAllowOriginsEmptyByDefault(t *testing.T) {
+func TestEnsuremikiChannel_LeavesAllowOriginsEmptyByDefault(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -92,23 +92,23 @@ func TestEnsurehiroChannel_LeavesAllowOriginsEmptyByDefault(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
-	if len(hiroCfg.AllowOrigins) != 0 {
-		t.Errorf("allow_origins = %v, want empty", hiroCfg.AllowOrigins)
+	mikiCfg := decoded.(*config.mikiSettings)
+	if len(mikiCfg.AllowOrigins) != 0 {
+		t.Errorf("allow_origins = %v, want empty", mikiCfg.AllowOrigins)
 	}
 }
 
-func TestEnsurehiroChannel_NoOriginConfigurationRequired(t *testing.T) {
+func TestEnsuremikiChannel_NoOriginConfigurationRequired(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -116,44 +116,44 @@ func TestEnsurehiroChannel_NoOriginConfigurationRequired(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
-	if len(hiroCfg.AllowOrigins) != 0 {
-		t.Errorf("allow_origins = %v, want empty", hiroCfg.AllowOrigins)
+	mikiCfg := decoded.(*config.mikiSettings)
+	if len(mikiCfg.AllowOrigins) != 0 {
+		t.Errorf("allow_origins = %v, want empty", mikiCfg.AllowOrigins)
 	}
 }
 
-func TestEnsurehiroChannel_PreservesUserSettings(t *testing.T) {
+func TestEnsuremikiChannel_PreservesUserSettings(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 
 	// Pre-configure with custom user settings
 	cfg := config.DefaultConfig()
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
+	mikiCfg := decoded.(*config.mikiSettings)
 	bc.Enabled = true
-	hiroCfg.SetToken("user-custom-token")
-	hiroCfg.AllowTokenQuery = true
-	hiroCfg.AllowOrigins = []string{"https://myapp.example.com"}
+	mikiCfg.SetToken("user-custom-token")
+	mikiCfg.AllowTokenQuery = true
+	mikiCfg.AllowOrigins = []string{"https://myapp.example.com"}
 	if err = config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
 	h := NewHandler(configPath)
 
-	changed, err := h.EnsurehiroChannel()
+	changed, err := h.EnsuremikiChannel()
 	if err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 	if changed {
-		t.Error("EnsurehiroChannel() should not change a fully configured config")
+		t.Error("EnsuremikiChannel() should not change a fully configured config")
 	}
 
 	cfg, err = config.LoadConfig(configPath)
@@ -161,24 +161,24 @@ func TestEnsurehiroChannel_PreservesUserSettings(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc = cfg.Channels["hiro"]
+	bc = cfg.Channels["miki"]
 	decoded, err = bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg = decoded.(*config.hiroSettings)
-	if hiroCfg.Token.String() != "user-custom-token" {
-		t.Errorf("token = %q, want %q", hiroCfg.Token.String(), "user-custom-token")
+	mikiCfg = decoded.(*config.mikiSettings)
+	if mikiCfg.Token.String() != "user-custom-token" {
+		t.Errorf("token = %q, want %q", mikiCfg.Token.String(), "user-custom-token")
 	}
-	if !hiroCfg.AllowTokenQuery {
+	if !mikiCfg.AllowTokenQuery {
 		t.Error("user's allow_token_query=true must be preserved")
 	}
-	if len(hiroCfg.AllowOrigins) != 1 || hiroCfg.AllowOrigins[0] != "https://myapp.example.com" {
-		t.Errorf("allow_origins = %v, want [https://myapp.example.com]", hiroCfg.AllowOrigins)
+	if len(mikiCfg.AllowOrigins) != 1 || mikiCfg.AllowOrigins[0] != "https://myapp.example.com" {
+		t.Errorf("allow_origins = %v, want [https://myapp.example.com]", mikiCfg.AllowOrigins)
 	}
 }
 
-func TestEnsurehiroChannel_ExistingConfigWithoutSecurityFile(t *testing.T) {
+func TestEnsuremikiChannel_ExistingConfigWithoutSecurityFile(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 
 	cfg := config.DefaultConfig()
@@ -192,12 +192,12 @@ func TestEnsurehiroChannel_ExistingConfigWithoutSecurityFile(t *testing.T) {
 
 	h := NewHandler(configPath)
 
-	changed, err := h.EnsurehiroChannel()
+	changed, err := h.EnsuremikiChannel()
 	if err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 	if !changed {
-		t.Fatal("EnsurehiroChannel() should report changed when hiro is missing")
+		t.Fatal("EnsuremikiChannel() should report changed when miki is missing")
 	}
 
 	cfg, err = config.LoadConfig(configPath)
@@ -205,16 +205,16 @@ func TestEnsurehiroChannel_ExistingConfigWithoutSecurityFile(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
+	mikiCfg := decoded.(*config.mikiSettings)
 	if !bc.Enabled {
-		t.Error("expected hiro to be enabled after setup")
+		t.Error("expected miki to be enabled after setup")
 	}
-	if hiroCfg.Token.String() == "" {
+	if mikiCfg.Token.String() == "" {
 		t.Error("expected a non-empty token after setup")
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(configPath), config.SecurityConfigFile)); err != nil {
@@ -222,7 +222,7 @@ func TestEnsurehiroChannel_ExistingConfigWithoutSecurityFile(t *testing.T) {
 	}
 }
 
-func TestEnsurehiroChannel_ConfigureshiroWithoutGateway(t *testing.T) {
+func TestEnsuremikiChannel_ConfiguresmikiWithoutGateway(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 
 	cfg := config.DefaultConfig()
@@ -232,8 +232,8 @@ func TestEnsurehiroChannel_ConfigureshiroWithoutGateway(t *testing.T) {
 	}
 
 	h := NewHandler(configPath)
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -241,68 +241,68 @@ func TestEnsurehiroChannel_ConfigureshiroWithoutGateway(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
+	mikiCfg := decoded.(*config.mikiSettings)
 	if !bc.Enabled {
-		t.Error("expected hiro to be enabled after launcher startup setup")
+		t.Error("expected miki to be enabled after launcher startup setup")
 	}
-	if hiroCfg.Token.String() == "" {
+	if mikiCfg.Token.String() == "" {
 		t.Error("expected a non-empty token after launcher startup setup")
 	}
 }
 
-func TestEnsurehiroChannel_Idempotent(t *testing.T) {
+func TestEnsuremikiChannel_Idempotent(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
 	// First call sets things up
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("first EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("first EnsuremikiChannel() error = %v", err)
 	}
 
 	cfg1, _ := config.LoadConfig(configPath)
-	bc := cfg1.Channels["hiro"]
+	bc := cfg1.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
-	token1 := hiroCfg.Token.String()
+	mikiCfg := decoded.(*config.mikiSettings)
+	token1 := mikiCfg.Token.String()
 
 	// Second call should be a no-op
-	changed, err := h.EnsurehiroChannel()
+	changed, err := h.EnsuremikiChannel()
 	if err != nil {
-		t.Fatalf("second EnsurehiroChannel() error = %v", err)
+		t.Fatalf("second EnsuremikiChannel() error = %v", err)
 	}
 	if changed {
-		t.Error("second EnsurehiroChannel() should not report changed")
+		t.Error("second EnsuremikiChannel() should not report changed")
 	}
 
 	cfg2, _ := config.LoadConfig(configPath)
-	bc = cfg2.Channels["hiro"]
+	bc = cfg2.Channels["miki"]
 	decoded, err = bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg = decoded.(*config.hiroSettings)
-	if hiroCfg.Token.String() != token1 {
+	mikiCfg = decoded.(*config.mikiSettings)
+	if mikiCfg.Token.String() != token1 {
 		t.Error("token should not change on subsequent calls")
 	}
 }
 
-func TestHandlehiroSetup_DoesNotPersistRequestOrigin(t *testing.T) {
+func TestHandlemikiSetup_DoesNotPersistRequestOrigin(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	req := httptest.NewRequest("POST", "/api/hiro/setup", nil)
+	req := httptest.NewRequest("POST", "/api/miki/setup", nil)
 	req.Header.Set("Origin", "http://10.0.0.5:3000")
 	rec := httptest.NewRecorder()
 
-	h.handlehiroSetup(rec, req)
+	h.handlemikiSetup(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -313,25 +313,25 @@ func TestHandlehiroSetup_DoesNotPersistRequestOrigin(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
-	if len(hiroCfg.AllowOrigins) != 0 {
-		t.Errorf("allow_origins = %v, want empty", hiroCfg.AllowOrigins)
+	mikiCfg := decoded.(*config.mikiSettings)
+	if len(mikiCfg.AllowOrigins) != 0 {
+		t.Errorf("allow_origins = %v, want empty", mikiCfg.AllowOrigins)
 	}
 }
 
-func TestHandlehiroSetup_Response(t *testing.T) {
+func TestHandlemikiSetup_Response(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	req := httptest.NewRequest("POST", "/api/hiro/setup", nil)
+	req := httptest.NewRequest("POST", "/api/miki/setup", nil)
 	rec := httptest.NewRecorder()
 
-	h.handlehiroSetup(rec, req)
+	h.handlemikiSetup(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -343,7 +343,7 @@ func TestHandlehiroSetup_Response(t *testing.T) {
 	}
 
 	if _, ok := resp["token"]; ok {
-		t.Error("response must not expose the raw hiro token")
+		t.Error("response must not expose the raw miki token")
 	}
 	if resp["ws_url"] == nil || resp["ws_url"] == "" {
 		t.Error("response should contain ws_url")
@@ -359,18 +359,18 @@ func TestHandlehiroSetup_Response(t *testing.T) {
 	}
 }
 
-func TestHandleGethiroInfo_OmitsToken(t *testing.T) {
+func TestHandleGetmikiInfo_OmitsToken(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "http://launcher.local/api/hiro/info", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://launcher.local/api/miki/info", nil)
 	rec := httptest.NewRecorder()
 
-	h.handleGethiroInfo(rec, req)
+	h.handleGetmikiInfo(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -382,7 +382,7 @@ func TestHandleGethiroInfo_OmitsToken(t *testing.T) {
 	}
 
 	if _, ok := resp["token"]; ok {
-		t.Fatal("info response must not expose the raw hiro token")
+		t.Fatal("info response must not expose the raw miki token")
 	}
 	if resp["enabled"] != true {
 		t.Fatalf("enabled = %#v, want true", resp["enabled"])
@@ -395,28 +395,28 @@ func TestHandleGethiroInfo_OmitsToken(t *testing.T) {
 	}
 }
 
-func TestHandleRegenhiroToken_RefreshesGatewayTokenCache(t *testing.T) {
+func TestHandleRegenmikiToken_RefreshesGatewayTokenCache(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.EnsurehiroChannel(); err != nil {
-		t.Fatalf("EnsurehiroChannel() error = %v", err)
+	if _, err := h.EnsuremikiChannel(); err != nil {
+		t.Fatalf("EnsuremikiChannel() error = %v", err)
 	}
 
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	t.Cleanup(func() {
 		gateway.mu.Lock()
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 		gateway.mu.Unlock()
 	})
 
 	gateway.mu.Lock()
-	gateway.hiroToken = "stale-token"
+	gateway.mikiToken = "stale-token"
 	gateway.mu.Unlock()
 
-	req := httptest.NewRequest(http.MethodPost, "http://launcher.local/api/hiro/token", nil)
+	req := httptest.NewRequest(http.MethodPost, "http://launcher.local/api/miki/token", nil)
 	rec := httptest.NewRecorder()
-	h.handleRegenhiroToken(rec, req)
+	h.handleRegenmikiToken(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -427,23 +427,23 @@ func TestHandleRegenhiroToken_RefreshesGatewayTokenCache(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	token := decoded.(*config.hiroSettings).Token.String()
+	token := decoded.(*config.mikiSettings).Token.String()
 	if token == "" {
-		t.Fatal("expected regenerated hiro token to be persisted")
+		t.Fatal("expected regenerated miki token to be persisted")
 	}
 	if token == "stale-token" {
-		t.Fatal("expected regenerated hiro token to differ from stale cache")
+		t.Fatal("expected regenerated miki token to differ from stale cache")
 	}
 
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
-	if gateway.hiroToken != token {
-		t.Fatalf("gateway.hiroToken = %q, want %q", gateway.hiroToken, token)
+	if gateway.mikiToken != token {
+		t.Fatalf("gateway.mikiToken = %q, want %q", gateway.mikiToken, token)
 	}
 }
 
@@ -460,8 +460,8 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	handler := h.handleWebSocketProxy()
 
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hiro/ws" {
-			t.Fatalf("server1 path = %q, want %q", r.URL.Path, "/hiro/ws")
+		if r.URL.Path != "/miki/ws" {
+			t.Fatalf("server1 path = %q, want %q", r.URL.Path, "/miki/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "server1")
@@ -469,8 +469,8 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	defer server1.Close()
 
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hiro/ws" {
-			t.Fatalf("server2 path = %q, want %q", r.URL.Path, "/hiro/ws")
+		if r.URL.Path != "/miki/ws" {
+			t.Fatalf("server2 path = %q, want %q", r.URL.Path, "/miki/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "server2")
@@ -497,16 +497,16 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 		Port:  cfg.Gateway.Port,
 	})
 	origPidData := gateway.pidData
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	t.Cleanup(func() {
 		ppid.RemovePidFile(globalConfigDir())
 		gateway.pidData = origPidData
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 	})
 
 	gateway.pidData = &ppid.PidFileData{}
-	gateway.hiroToken = "hiro"
-	req1 := newhiroProxyRequest(http.MethodGet, "/hiro/ws")
+	gateway.mikiToken = "miki"
+	req1 := newmikiProxyRequest(http.MethodGet, "/miki/ws")
 	rec1 := httptest.NewRecorder()
 	handler(rec1, req1)
 
@@ -522,7 +522,7 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
-	req2 := newhiroProxyRequest(http.MethodGet, "/hiro/ws")
+	req2 := newmikiProxyRequest(http.MethodGet, "/miki/ws")
 	rec2 := httptest.NewRecorder()
 	handler(rec2, req2)
 
@@ -534,7 +534,7 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	}
 }
 
-func TestHandleWebSocketProxyLoadsCachedhiroTokenWhenMissing(t *testing.T) {
+func TestHandleWebSocketProxyLoadsCachedmikiTokenWhenMissing(t *testing.T) {
 	origMatcher := gatewayProcessMatcher
 	gatewayProcessMatcher = func(int) (bool, bool) { return true, true }
 	t.Cleanup(func() { gatewayProcessMatcher = origMatcher })
@@ -547,8 +547,8 @@ func TestHandleWebSocketProxyLoadsCachedhiroTokenWhenMissing(t *testing.T) {
 	handler := h.handleWebSocketProxy()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hiro/ws" {
-			t.Fatalf("path = %q, want %q", r.URL.Path, "/hiro/ws")
+		if r.URL.Path != "/miki/ws" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/miki/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "proxied")
@@ -558,14 +558,14 @@ func TestHandleWebSocketProxyLoadsCachedhiroTokenWhenMissing(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = mustGatewayTestPort(t, server.URL)
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
+	mikiCfg := decoded.(*config.mikiSettings)
 	bc.Enabled = true
-	hiroCfg.SetToken("cached-token")
+	mikiCfg.SetToken("cached-token")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -587,16 +587,16 @@ func TestHandleWebSocketProxyLoadsCachedhiroTokenWhenMissing(t *testing.T) {
 	})
 
 	origPidData := gateway.pidData
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	t.Cleanup(func() {
 		gateway.pidData = origPidData
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 	})
 
 	gateway.pidData = &ppid.PidFileData{}
-	gateway.hiroToken = ""
+	gateway.mikiToken = ""
 
-	req := newhiroProxyRequest(http.MethodGet, "/hiro/ws?session_id=test-session")
+	req := newmikiProxyRequest(http.MethodGet, "/miki/ws?session_id=test-session")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -606,8 +606,8 @@ func TestHandleWebSocketProxyLoadsCachedhiroTokenWhenMissing(t *testing.T) {
 	if body := rec.Body.String(); body != "proxied" {
 		t.Fatalf("body = %q, want %q", body, "proxied")
 	}
-	if gateway.hiroToken != "cached-token" {
-		t.Fatalf("gateway.hiroToken = %q, want %q", gateway.hiroToken, "cached-token")
+	if gateway.mikiToken != "cached-token" {
+		t.Fatalf("gateway.mikiToken = %q, want %q", gateway.mikiToken, "cached-token")
 	}
 }
 
@@ -624,8 +624,8 @@ func TestHandleWebSocketProxyLoadsPidDataOnDemand(t *testing.T) {
 	handler := h.handleWebSocketProxy()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hiro/ws" {
-			t.Fatalf("path = %q, want %q", r.URL.Path, "/hiro/ws")
+		if r.URL.Path != "/miki/ws" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/miki/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, r.Header.Get(protocolKey))
@@ -635,13 +635,13 @@ func TestHandleWebSocketProxyLoadsPidDataOnDemand(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = mustGatewayTestPort(t, server.URL)
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	bc.Enabled = true
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	decoded.(*config.hiroSettings).SetToken("ui-token")
+	decoded.(*config.mikiSettings).SetToken("ui-token")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -665,23 +665,23 @@ func TestHandleWebSocketProxyLoadsPidDataOnDemand(t *testing.T) {
 	})
 
 	origPidData := gateway.pidData
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	origStatus := gateway.runtimeStatus
 	t.Cleanup(func() {
 		gateway.mu.Lock()
 		gateway.pidData = origPidData
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 		gateway.runtimeStatus = origStatus
 		gateway.mu.Unlock()
 	})
 
 	gateway.mu.Lock()
 	gateway.pidData = nil
-	gateway.hiroToken = ""
+	gateway.mikiToken = ""
 	setGatewayRuntimeStatusLocked("stopped")
 	gateway.mu.Unlock()
 
-	req := newhiroProxyRequest(http.MethodGet, "/hiro/ws?session_id=test-session")
+	req := newmikiProxyRequest(http.MethodGet, "/miki/ws?session_id=test-session")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -704,25 +704,25 @@ func TestHandleWebSocketProxyLoadsPidDataOnDemand(t *testing.T) {
 	}
 }
 
-func TestCreatehiroHTTPProxyInjectsGatewayAuth(t *testing.T) {
+func TestCreatemikiHTTPProxyInjectsGatewayAuth(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
 	cfg := config.DefaultConfig()
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = 18790
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	bc.Enabled = true
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	decoded.(*config.hiroSettings).SetToken("ui-token")
+	decoded.(*config.mikiSettings).SetToken("ui-token")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
-	proxy := h.createhiroHTTPProxy("ui-token")
+	proxy := h.createmikiHTTPProxy("ui-token")
 	var capturedPath string
 	var capturedAuth string
 	proxy.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -736,15 +736,15 @@ func TestCreatehiroHTTPProxyInjectsGatewayAuth(t *testing.T) {
 		}, nil
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/hiro/media/attachment-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/miki/media/attachment-1", nil)
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if capturedPath != "/hiro/media/attachment-1" {
-		t.Fatalf("capturedPath = %q, want %q", capturedPath, "/hiro/media/attachment-1")
+	if capturedPath != "/miki/media/attachment-1" {
+		t.Fatalf("capturedPath = %q, want %q", capturedPath, "/miki/media/attachment-1")
 	}
 	expected := "Bearer ui-token"
 	if capturedAuth != expected {
@@ -752,17 +752,17 @@ func TestCreatehiroHTTPProxyInjectsGatewayAuth(t *testing.T) {
 	}
 }
 
-func TestHandlehiroMediaProxyUsesRawBearerToken(t *testing.T) {
+func TestHandlemikiMediaProxyUsesRawBearerToken(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("miki_HOME", home)
 
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
-	handler := h.handlehiroMediaProxy()
+	handler := h.handlemikiMediaProxy()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hiro/media/attachment-1" {
-			t.Fatalf("path = %q, want %q", r.URL.Path, "/hiro/media/attachment-1")
+		if r.URL.Path != "/miki/media/attachment-1" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/miki/media/attachment-1")
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer ui-token" {
 			t.Fatalf("Authorization = %q, want %q", got, "Bearer ui-token")
@@ -775,13 +775,13 @@ func TestHandlehiroMediaProxyUsesRawBearerToken(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = mustGatewayTestPort(t, server.URL)
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	bc.Enabled = true
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	decoded.(*config.hiroSettings).SetToken("ui-token")
+	decoded.(*config.mikiSettings).SetToken("ui-token")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -795,23 +795,23 @@ func TestHandlehiroMediaProxyUsesRawBearerToken(t *testing.T) {
 	})
 
 	origPidData := gateway.pidData
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	origCmd := gateway.cmd
 	t.Cleanup(func() {
 		gateway.mu.Lock()
 		gateway.pidData = origPidData
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 		gateway.cmd = origCmd
 		gateway.mu.Unlock()
 	})
 
 	gateway.mu.Lock()
 	gateway.pidData = &ppid.PidFileData{PID: cmd.Process.Pid}
-	gateway.hiroToken = "ui-token"
+	gateway.mikiToken = "ui-token"
 	gateway.cmd = cmd
 	gateway.mu.Unlock()
 
-	req := newhiroProxyRequest(http.MethodGet, "/hiro/media/attachment-1")
+	req := newmikiProxyRequest(http.MethodGet, "/miki/media/attachment-1")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -833,13 +833,13 @@ func TestHandleWebSocketProxyRejectsStalePidDataAfterProcessExit(t *testing.T) {
 	handler := h.handleWebSocketProxy()
 
 	cfg := config.DefaultConfig()
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	bc.Enabled = true
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	decoded.(*config.hiroSettings).SetToken("ui-token")
+	decoded.(*config.mikiSettings).SetToken("ui-token")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -851,13 +851,13 @@ func TestHandleWebSocketProxyRejectsStalePidDataAfterProcessExit(t *testing.T) {
 	_ = cmd.Wait()
 
 	origPidData := gateway.pidData
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	origCmd := gateway.cmd
 	origStatus := gateway.runtimeStatus
 	t.Cleanup(func() {
 		gateway.mu.Lock()
 		gateway.pidData = origPidData
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 		gateway.cmd = origCmd
 		gateway.runtimeStatus = origStatus
 		gateway.mu.Unlock()
@@ -865,12 +865,12 @@ func TestHandleWebSocketProxyRejectsStalePidDataAfterProcessExit(t *testing.T) {
 
 	gateway.mu.Lock()
 	gateway.pidData = &ppid.PidFileData{PID: cmd.Process.Pid, Token: "stale-token"}
-	gateway.hiroToken = "ui-token"
+	gateway.mikiToken = "ui-token"
 	gateway.cmd = cmd
 	setGatewayRuntimeStatusLocked("running")
 	gateway.mu.Unlock()
 
-	req := newhiroProxyRequest(http.MethodGet, "/hiro/ws?session_id=test-session")
+	req := newmikiProxyRequest(http.MethodGet, "/miki/ws?session_id=test-session")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -897,8 +897,8 @@ func TestHandleWebSocketProxy_AllowsArbitraryOrigin(t *testing.T) {
 	handler := h.handleWebSocketProxy()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hiro/ws" {
-			t.Fatalf("path = %q, want %q", r.URL.Path, "/hiro/ws")
+		if r.URL.Path != "/miki/ws" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/miki/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "proxied")
@@ -908,13 +908,13 @@ func TestHandleWebSocketProxy_AllowsArbitraryOrigin(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = mustGatewayTestPort(t, server.URL)
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	bc.Enabled = true
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	decoded.(*config.hiroSettings).SetToken("ui-token")
+	decoded.(*config.mikiSettings).SetToken("ui-token")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -937,16 +937,16 @@ func TestHandleWebSocketProxy_AllowsArbitraryOrigin(t *testing.T) {
 	})
 
 	origPidData := gateway.pidData
-	orighiroToken := gateway.hiroToken
+	origmikiToken := gateway.mikiToken
 	t.Cleanup(func() {
 		gateway.pidData = origPidData
-		gateway.hiroToken = orighiroToken
+		gateway.mikiToken = origmikiToken
 	})
 
 	gateway.pidData = &ppid.PidFileData{}
-	gateway.hiroToken = "ui-token"
+	gateway.mikiToken = "ui-token"
 
-	req := httptest.NewRequest(http.MethodGet, "http://launcher.local/hiro/ws?session_id=test-session", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://launcher.local/miki/ws?session_id=test-session", nil)
 	req.Header.Set("Origin", "http://evil.example")
 	rec := httptest.NewRecorder()
 	handler(rec, req)

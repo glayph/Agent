@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@hiro/config";
+import type { ChatMessage } from "@miki/config";
 import { buildAgentTokenBudget } from "./agent-token-budget.js";
 
 describe("buildAgentTokenBudget", () => {

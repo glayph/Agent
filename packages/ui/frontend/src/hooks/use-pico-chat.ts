@@ -58,7 +58,7 @@ export function formatMessageTime(dateRaw: number | string | Date): string {
   return date.format("ll LT")
 }
 
-export function useHiroChat() {
+export function useMikiChat() {
   const { messages, connectionState, isTyping, activeSessionId, contextUsage } =
     useAtomValue(chatAtom)
 

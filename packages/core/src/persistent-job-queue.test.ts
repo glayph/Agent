@@ -5,7 +5,7 @@ import { PersistentJobQueue } from "./persistent-job-queue.js";
 
 describe("persistent job queue", () => {
   it("persists queued jobs and recovers stale running jobs", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-jobs-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
     const filePath = path.join(tempDir, "queue.json");
     const queue = new PersistentJobQueue(filePath);
 
@@ -21,7 +21,7 @@ describe("persistent job queue", () => {
   });
 
   it("dead-letters jobs after max attempts", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-jobs-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
     const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
     const job = queue.enqueue("agent.run", {}, { maxAttempts: 1 });
     const running = queue.dequeue();
@@ -45,7 +45,7 @@ describe("persistent job queue", () => {
   });
 
   it("normalizes retry options and ignores malformed persisted jobs", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-jobs-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
     const filePath = path.join(tempDir, "queue.json");
     fs.writeFileSync(
       filePath,
@@ -91,7 +91,7 @@ describe("persistent job queue", () => {
   });
 
   it("cancels and explicitly retries queued work", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-jobs-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
     const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
     const job = queue.enqueue("channel.send", { body: "retry me" });
 

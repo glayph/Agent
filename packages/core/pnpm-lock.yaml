@@ -8,10 +8,10 @@ importers:
 
   .:
     dependencies:
-      '@hiro/config':
+      '@miki/config':
         specifier: file:../config
         version: file:../config
-      '@hiro/installer':
+      '@miki/installer':
         specifier: file:../installer
         version: file:../installer
       '@modelcontextprotocol/sdk':
@@ -57,11 +57,11 @@ importers:
 
 packages:
 
-  '@hiro/config@file:../config':
+  '@miki/config@file:../config':
     resolution: {directory: ../config, type: directory}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@hiro/installer@file:../installer':
+  '@miki/installer@file:../installer':
     resolution: {directory: ../installer, type: directory}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
@@ -983,15 +983,15 @@ packages:
 
 snapshots:
 
-  '@hiro/config@file:../config':
+  '@miki/config@file:../config':
     dependencies:
       dotenv: 16.6.1
       js-yaml: 4.3.0
       zod: 3.25.76
 
-  '@hiro/installer@file:../installer':
+  '@miki/installer@file:../installer':
     dependencies:
-      '@hiro/config': file:../config
+      '@miki/config': file:../config
       tar: 7.5.22
 
   '@hono/node-server@1.19.15(hono@4.12.32)':

@@ -7,10 +7,7 @@
   "type": "module",
   "main": "dist/runtime/packages/core/dist/api/index.js",
   "bin": {
-    "miki": "bin/miki.js",
-    "Miki": "bin/miki.js",
-    "mikiagent": "bin/miki.js",
-    "MikiAgent": "bin/miki.js"
+    "miki": "bin/miki.js"
   },
   "files": [
     "dist/runtime/",

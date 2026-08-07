@@ -33,7 +33,7 @@ const CHANNEL_IMPORTANCE_TAIL = [
   "wecom",
   "onebot",
   "matrix",
-  "hiro",
+  "miki",
   "irc",
   "whatsapp",
 ]
@@ -61,7 +61,7 @@ const CHANNEL_ICON_MAP: Record<
   whatsapp: IconBrandWhatsapp,
   matrix: IconBrandMatrix,
   onebot: IconRobot,
-  hiro: IconBrandChrome,
+  miki: IconBrandChrome,
   irc: IconMessages,
 }
 

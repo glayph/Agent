@@ -100,7 +100,7 @@ export function MessageCodeBlock({
 
   return (
     <div
-      data-Hiro-code-block=""
+      data-Miki-code-block=""
       className={cn(
         "not-prose bg-muted/50 text-foreground my-2.5 overflow-hidden rounded-md shadow-none",
         className,

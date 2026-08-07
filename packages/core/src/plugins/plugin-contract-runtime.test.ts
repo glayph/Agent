@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillRegistry } from "@hiro/installer";
+import { SkillRegistry } from "@miki/installer";
 import { SqliteAuditLog } from "../audit-log";
 import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";
 import {
@@ -289,11 +289,11 @@ describe("loadRuntimePluginContracts", () => {
     });
 
     const result = await executeRuntimePluginTool(workspaceDir, "local_echo", {
-      name: "Hiro",
+      name: "Miki",
     });
 
     expect(result.success).toBe(true);
-    expect(result.output).toBe("hello Hiro:true");
+    expect(result.output).toBe("hello Miki:true");
     expect(result.plugin?.name).toBe("plugin");
     expect(result.contract?.name).toBe("local_echo");
 

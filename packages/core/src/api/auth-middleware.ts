@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import * as crypto from "crypto";
 import type { IncomingHttpHeaders } from "http";
-import { getRequiredEnvSecret } from "@hiro/config/security";
+import { getRequiredEnvSecret } from "@miki/config/security";
 export {
   getSessionPermissionState,
   getSessionPermissions,
@@ -11,7 +11,7 @@ export {
   isToolEnabledForSession,
 } from "../mcp/permissions/session-permissions.js";
 
-const WEAK_API_KEY_SECRETS = ["Hiro-dev-key", "sk-anything"];
+const WEAK_API_KEY_SECRETS = ["Miki-dev-key", "sk-anything"];
 const API_KEY_SECRET_REQUIREMENTS = {
   weakValues: WEAK_API_KEY_SECRETS,
   minLength: 16,

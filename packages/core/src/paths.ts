@@ -1,7 +1,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { isSandboxModeEnabled } from "@hiro/config";
+import { isSandboxModeEnabled } from "@miki/config";
 
 export interface RuntimePaths {
   configDir: string;
@@ -16,7 +16,7 @@ export interface RuntimePaths {
 
 export type RuntimePathsInput = RuntimePaths | string;
 
-const Hiro_NS = "Hiro";
+const Miki_NS = "Miki";
 
 function osConfigRoot(): string {
   if (process.env["XDG_CONFIG_HOME"])
@@ -43,10 +43,10 @@ function osCacheRoot(): string {
 }
 
 function resolveLegacyDir(): string | null {
-  const envDir = process.env["Hiro_WORKSPACE_DIR"];
+  const envDir = process.env["Miki_WORKSPACE_DIR"];
   if (envDir) return path.resolve(envDir);
-  if (process.env["Hiro_RUNTIME_ROOT"])
-    return path.resolve(process.env["Hiro_RUNTIME_ROOT"]);
+  if (process.env["Miki_RUNTIME_ROOT"])
+    return path.resolve(process.env["Miki_RUNTIME_ROOT"]);
   return null;
 }
 
@@ -136,13 +136,13 @@ export function resolveDownloadedSkillsDir(
 
 export function resolveRuntimePaths(): RuntimePaths {
   const legacyDir = resolveLegacyDir();
-  const configDir = path.join(osConfigRoot(), Hiro_NS);
-  const dataDir = path.join(osDataRoot(), Hiro_NS);
-  const skillsDir = path.join(osDataRoot(), Hiro_NS, "skills");
-  const cacheDir = path.join(osCacheRoot(), Hiro_NS);
-  const binDir = path.join(osDataRoot(), Hiro_NS, "bin");
-  const docsDir = path.join(osDataRoot(), Hiro_NS, "docs");
-  const outputDir = path.join(osDataRoot(), Hiro_NS, "output");
+  const configDir = path.join(osConfigRoot(), Miki_NS);
+  const dataDir = path.join(osDataRoot(), Miki_NS);
+  const skillsDir = path.join(osDataRoot(), Miki_NS, "skills");
+  const cacheDir = path.join(osCacheRoot(), Miki_NS);
+  const binDir = path.join(osDataRoot(), Miki_NS, "bin");
+  const docsDir = path.join(osDataRoot(), Miki_NS, "docs");
+  const outputDir = path.join(osDataRoot(), Miki_NS, "output");
   const sourceDir = legacyDir ?? process.cwd();
 
   const paths: RuntimePaths = {

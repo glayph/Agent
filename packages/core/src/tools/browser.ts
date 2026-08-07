@@ -211,9 +211,9 @@ export class BrowserTool {
     try {
       await this.page.evaluate(() => {
         const doc = (globalThis as unknown as VirtualCursorGlobal).document;
-        if (doc.getElementById("Hiro-virtual-cursor")) return;
+        if (doc.getElementById("Miki-virtual-cursor")) return;
         const cursor = doc.createElement("div");
-        cursor.id = "Hiro-virtual-cursor";
+        cursor.id = "Miki-virtual-cursor";
         Object.assign(cursor.style, {
           position: "absolute",
           width: "24px",
@@ -262,7 +262,7 @@ export class BrowserTool {
         (args: { x: number; y: number }) => {
           const win = globalThis as unknown as VirtualCursorGlobal;
           const doc = win.document;
-          const cursor = doc.getElementById("Hiro-virtual-cursor");
+          const cursor = doc.getElementById("Miki-virtual-cursor");
           if (cursor) {
             const pageX = args.x + win.scrollX;
             const pageY = args.y + win.scrollY;
@@ -282,7 +282,7 @@ export class BrowserTool {
     try {
       await this.page.evaluate(() => {
         const doc = (globalThis as unknown as VirtualCursorGlobal).document;
-        const cursor = doc.getElementById("Hiro-virtual-cursor");
+        const cursor = doc.getElementById("Miki-virtual-cursor");
         if (cursor) {
           cursor.style.transform = "translate(-50%, -50%) scale(0.6)";
           cursor.style.backgroundColor = "rgba(255, 0, 0, 0.9)";

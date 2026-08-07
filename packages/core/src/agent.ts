@@ -7,7 +7,7 @@ import {
   ToolDefinition,
   LLMResponse,
   validateRuntimeConfig,
-} from "@hiro/config";
+} from "@miki/config";
 import { ToolRegistry } from "./tools/index.js";
 import { HeartbeatEngine, type IOrchestrator } from "./heartbeat.js";
 import { SelfImprovementEngine } from "./self-improvement/engine.js";

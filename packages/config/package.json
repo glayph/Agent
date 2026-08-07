@@ -1,7 +1,7 @@
 {
-  "name": "@hiro/config",
+  "name": "@miki/config",
   "version": "1.0.0",
-  "description": "Shared configuration, types, and utilities for the Hiro monorepo",
+  "description": "Shared configuration, types, and utilities for the Miki monorepo",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

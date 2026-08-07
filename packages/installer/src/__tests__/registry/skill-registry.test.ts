@@ -114,7 +114,7 @@ describe("SkillRegistry", () => {
       path: path.join(tmpDir, "github_ops.ts"),
       action: "installed",
       description: "GitHub operations",
-      author: "Hiro",
+      author: "Miki",
       license: "MIT",
       permissions: ["network.http"],
       contracts: {
@@ -140,7 +140,7 @@ describe("SkillRegistry", () => {
 
     const installed = await reloaded.getSkill("github_ops");
     expect(installed?.description).toBe("GitHub operations");
-    expect(installed?.author).toBe("Hiro");
+    expect(installed?.author).toBe("Miki");
     expect(installed?.contracts?.tools?.[0]?.name).toBe("github_pr_review");
     expect(installed?.plugin?.contracts?.hooks?.[0]?.name).toBe("after_run");
 

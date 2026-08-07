@@ -45,7 +45,7 @@ describe("agent run recorder", () => {
   });
 
   it("persists runs in sqlite and exports redacted evidence bundles", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-runs-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-runs-"));
     const dbPath = path.join(tempDir, "agent-runs.db");
     const recorder = new AgentRunRecorder(new SqliteAgentRunStore(dbPath));
     const run = recorder.create("ship secure feature", ["code"]);

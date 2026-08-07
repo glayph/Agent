@@ -135,7 +135,7 @@ export class ExternalMcpConnectorManager {
     if (existing) return existing.client;
 
     const client = new Client({
-      name: `Hiro-mcp-connector-${config.name}`,
+      name: `Miki-mcp-connector-${config.name}`,
       version: "1.0.0",
     });
     const transport = this.createTransport(config);

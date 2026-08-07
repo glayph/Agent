@@ -299,7 +299,7 @@ func validLauncherDashboardAuth(r *http.Request, cfg LauncherDashboardAuthConfig
 }
 
 func rejectLauncherDashboardAuth(w http.ResponseWriter, r *http.Request, canonicalPath string) {
-	if canonicalPath == "/hiro/ws" {
+	if canonicalPath == "/miki/ws" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

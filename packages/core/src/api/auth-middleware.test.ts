@@ -27,7 +27,7 @@ describe("API key auth configuration", () => {
 
   it("rejects weak API_KEY_SECRET when API auth is enabled", () => {
     process.env["ENABLE_API_KEY_AUTH"] = "true";
-    process.env["API_KEY_SECRET"] = "Hiro-dev-key";
+    process.env["API_KEY_SECRET"] = "Miki-dev-key";
 
     expect(() => validateApiKeyConfiguration()).toThrow(/unsafe default/);
   });

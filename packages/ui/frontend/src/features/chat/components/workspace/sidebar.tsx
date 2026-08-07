@@ -118,7 +118,7 @@ export function Sidebar({
           )}
           <div className="min-w-0">
             <div className="text-sidebar-foreground truncate text-sm font-semibold">
-              Hiro
+              Miki
             </div>
             <div className="text-muted-foreground truncate text-[11px] leading-none">
               {t("chat.workspace.agentConsole", {

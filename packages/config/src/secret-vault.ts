@@ -135,7 +135,7 @@ function resolveKey(options: FileEncryptedSecretVaultOptions): Buffer {
     return keyFromString(options.key);
   }
 
-  const envKey = process.env["Hiro_SECRET_VAULT_KEY"];
+  const envKey = process.env["Miki_SECRET_VAULT_KEY"];
   if (envKey?.trim()) {
     return keyFromString(envKey);
   }
@@ -303,7 +303,7 @@ export class FileEncryptedSecretVault implements SecretVault {
 
 function workspaceFromOptions(workspaceDir?: string): string {
   return path.resolve(
-    workspaceDir || process.env["Hiro_WORKSPACE_DIR"] || process.cwd(),
+    workspaceDir || process.env["Miki_WORKSPACE_DIR"] || process.cwd(),
   );
 }
 

@@ -20,7 +20,7 @@ export const PROVIDER_LLM_SECRET_KEYS = [
 ] as const;
 
 export function userConfigDir(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = env["MIKIAGENT_CONFIG_DIR"] || env["Hiro_USER_CONFIG_DIR"];
+  const explicit = env["MIKIAGENT_CONFIG_DIR"] || env["Miki_USER_CONFIG_DIR"];
   if (explicit?.trim()) return path.resolve(explicit.trim());
 
   if (process.platform === "win32") {

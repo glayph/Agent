@@ -72,7 +72,7 @@ vendor/
 
 # Package archives
 *.tgz
-test-hiro/
+test-miki/
 *.tar
 *.tar.gz
 *.zip
@@ -121,7 +121,7 @@ Desktop.ini
 
 # Local launcher binaries or scratch names kept from the previous ignore file
 clear
-Hiro
+Miki
 
 
 # continue

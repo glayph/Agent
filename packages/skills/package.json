@@ -1,7 +1,7 @@
 {
-  "name": "@hiro/skills",
+  "name": "@miki/skills",
   "version": "1.0.0",
-  "description": "Pre-bundled skills for Hiro",
+  "description": "Pre-bundled skills for Miki",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,7 +18,7 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\""
   },
   "dependencies": {
-    "@hiro/config": "file:../config"
+    "@miki/config": "file:../config"
   },
   "devDependencies": {
     "@types/node": "^20.0.0"

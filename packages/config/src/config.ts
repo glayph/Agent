@@ -40,7 +40,7 @@ export const BUILTIN_MODELS = [
 export function shouldWarnMissingApiKeys(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env["Hiro_WARN_MISSING_API_KEYS"] === "true";
+  return env["Miki_WARN_MISSING_API_KEYS"] === "true";
 }
 
 export class Settings {
@@ -58,28 +58,28 @@ export class Settings {
   get openrouterApiKey(): string {
     return resolveConfiguredSecret(
       "OPENROUTER_API_KEY",
-      process.env["Hiro_WORKSPACE_DIR"],
+      process.env["Miki_WORKSPACE_DIR"],
     );
   }
 
   get geminiApiKey(): string {
     return resolveConfiguredSecret(
       "GEMINI_API_KEY",
-      process.env["Hiro_WORKSPACE_DIR"],
+      process.env["Miki_WORKSPACE_DIR"],
     );
   }
 
   get googleApiKey(): string {
     return resolveConfiguredSecret(
       "GOOGLE_API_KEY",
-      process.env["Hiro_WORKSPACE_DIR"],
+      process.env["Miki_WORKSPACE_DIR"],
     );
   }
 
   get anthropicApiKey(): string {
     return resolveConfiguredSecret(
       "ANTHROPIC_API_KEY",
-      process.env["Hiro_WORKSPACE_DIR"],
+      process.env["Miki_WORKSPACE_DIR"],
     );
   }
 
@@ -186,7 +186,7 @@ export class Settings {
   get apiKey(): string {
     return resolveConfiguredSecret(
       "API_KEY",
-      process.env["Hiro_WORKSPACE_DIR"],
+      process.env["Miki_WORKSPACE_DIR"],
     );
   }
 
@@ -197,7 +197,7 @@ export class Settings {
   get telegramBotToken(): string {
     return resolveConfiguredSecret(
       "TELEGRAM_BOT_TOKEN",
-      process.env["Hiro_WORKSPACE_DIR"],
+      process.env["Miki_WORKSPACE_DIR"],
     );
   }
 

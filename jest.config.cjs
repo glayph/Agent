@@ -36,17 +36,17 @@ module.exports = {
     ],
   },
   moduleNameMapper: {
-    "^@hiro/config$":
+    "^@miki/config$":
       "<rootDir>/packages/config/src/index.ts",
-    "^@hiro/config/security$":
+    "^@miki/config/security$":
       "<rootDir>/packages/config/src/security.ts",
-    "^@hiro/installer$":
+    "^@miki/installer$":
       "<rootDir>/packages/installer/src/index.ts",
-    "^@hiro/skills$":
+    "^@miki/skills$":
       "<rootDir>/packages/skills/src/index.ts",
-    "^@hiro/core$":
+    "^@miki/core$":
       "<rootDir>/packages/core/src/index.ts",
-    "^@hiro/gateway$":
+    "^@miki/gateway$":
       "<rootDir>/packages/gateway/src/index.ts",
     "^openai$": "<rootDir>/packages/core/src/__mocks__/openai.ts",
     "^@anthropic-ai/sdk$": "<rootDir>/packages/core/src/__mocks__/@anthropic-ai/sdk.ts",

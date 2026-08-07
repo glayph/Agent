@@ -8,7 +8,7 @@
 //
 // miki Web Console - Web-based chat and management interface
 //
-// Provides a web UI for chatting with miki via the hiro Channel WebSocket,
+// Provides a web UI for chatting with miki via the miki Channel WebSocket,
 // with configuration management and gateway process control.
 //
 // Usage:
@@ -385,9 +385,9 @@ func main() {
 	flag.Parse()
 
 	// Initialize logger
-	hiroHome := utils.GetmikiHome()
+	mikiHome := utils.GetmikiHome()
 
-	f := filepath.Join(hiroHome, logPath, panicFile)
+	f := filepath.Join(mikiHome, logPath, panicFile)
 	panicFunc, err := logger.InitPanic(f)
 	if err != nil {
 		panic(fmt.Sprintf("error initializing panic log: %v", err))
@@ -402,7 +402,7 @@ func main() {
 			logger.DisableConsole()
 		}
 
-		f := filepath.Join(hiroHome, logPath, logFile)
+		f := filepath.Join(mikiHome, logPath, logFile)
 		if err = logger.EnableFileLogging(f); err != nil {
 			panic(fmt.Sprintf("error enabling file logging: %v", err))
 		}
@@ -436,7 +436,7 @@ func main() {
 	}
 
 	logger.InfoC("web", fmt.Sprintf("%s launcher starting (version %s)...", appName, appVersion))
-	logger.InfoC("web", fmt.Sprintf("%s Home: %s", appName, hiroHome))
+	logger.InfoC("web", fmt.Sprintf("%s Home: %s", appName, mikiHome))
 	if debug {
 		logger.InfoC("web", "Debug mode enabled")
 		logger.DebugC(
@@ -519,7 +519,7 @@ func main() {
 	}
 
 	// Open the bcrypt password store (creates the DB file on first run).
-	authStore, authStoreErr := dashboardauth.New(hiroHome)
+	authStore, authStoreErr := dashboardauth.New(mikiHome)
 	var passwordStore api.PasswordStore
 	if authStoreErr == nil {
 		passwordStore = authStore
@@ -589,8 +589,8 @@ func main() {
 	// API Routes (e.g. /api/status)
 	apiHandler = api.NewHandler(absPath)
 	apiHandler.SetDebug(debug)
-	if _, err = apiHandler.EnsurehiroChannel(); err != nil {
-		logger.ErrorC("web", fmt.Sprintf("Warning: failed to ensure hiro channel on startup: %v", err))
+	if _, err = apiHandler.EnsuremikiChannel(); err != nil {
+		logger.ErrorC("web", fmt.Sprintf("Warning: failed to ensure miki channel on startup: %v", err))
 	}
 	apiHandler.SetServerOptions(portNum, effectivePublic, explicitPublic, launcherCfg.AllowedCIDRs)
 	apiHandler.SetServerBindHost(hostInput, hostOverrideActive)

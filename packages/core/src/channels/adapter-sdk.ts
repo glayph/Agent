@@ -158,8 +158,8 @@ export async function runChannelAdapterProbe(
 }
 
 function resolveAdapterProbeMode(env: NodeJS.ProcessEnv) {
-  if (env.Hiro_CHANNEL_LIVE_PROBES === "true") return "live" as const;
-  if (env.Hiro_CHANNEL_SANDBOX_PROBES === "true") return "sandbox" as const;
+  if (env.Miki_CHANNEL_LIVE_PROBES === "true") return "live" as const;
+  if (env.Miki_CHANNEL_SANDBOX_PROBES === "true") return "sandbox" as const;
   return "mock" as const;
 }
 

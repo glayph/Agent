@@ -103,10 +103,10 @@ export function resolveIrcRuntimeConfig(
   const username =
     stringOrEmpty(env.IRC_USERNAME ?? settings.username ?? raw.username) ||
     nick ||
-    "Hiro";
+    "Miki";
   const realname =
     stringOrEmpty(env.IRC_REALNAME ?? settings.realname ?? raw.realname) ||
-    "Hiro Agent";
+    "Miki Agent";
 
   return {
     enabled:
@@ -260,7 +260,7 @@ export class IrcBot {
     }
     if (this.socket) {
       try {
-        this.write("QUIT :Hiro shutdown");
+        this.write("QUIT :Miki shutdown");
         this.socket.end();
         this.socket.destroy();
       } catch {

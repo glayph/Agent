@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { handlehiroMessage } from "./protocol"
+import { handlemikiMessage } from "./protocol"
 import { getChatState, updateChatStore } from "@/store/chat"
 
 const { toastError } = vi.hoisted(() => ({
@@ -33,7 +33,7 @@ describe("chat protocol flow", () => {
   it("creates assistant messages with attachments, model, context usage, and typing state", () => {
     updateChatStore({ isTyping: true })
 
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "message.create",
         session_id: "session-1",
@@ -51,7 +51,7 @@ describe("chat protocol flow", () => {
           attachments: [
             {
               type: "image",
-              url: "/hiro/media/cat.png",
+              url: "/miki/media/cat.png",
               filename: "cat.png",
               content_type: "image/png",
             },
@@ -78,7 +78,7 @@ describe("chat protocol flow", () => {
       attachments: [
         {
           type: "image",
-          url: "/hiro/media/cat.png",
+          url: "/miki/media/cat.png",
           filename: "cat.png",
           contentType: "image/png",
         },
@@ -88,7 +88,7 @@ describe("chat protocol flow", () => {
   })
 
   it("updates, creates missing updates, deletes, and ignores other sessions", () => {
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "message.create",
         session_id: "session-1",
@@ -97,7 +97,7 @@ describe("chat protocol flow", () => {
       "session-1",
     )
 
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "message.update",
         session_id: "session-1",
@@ -106,7 +106,7 @@ describe("chat protocol flow", () => {
       "session-1",
     )
 
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "message.update",
         session_id: "session-1",
@@ -115,7 +115,7 @@ describe("chat protocol flow", () => {
       "session-1",
     )
 
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "message.create",
         session_id: "other-session",
@@ -129,7 +129,7 @@ describe("chat protocol flow", () => {
       "Late arrival",
     ])
 
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "message.delete",
         session_id: "session-1",
@@ -155,10 +155,10 @@ describe("chat protocol flow", () => {
       ],
     })
 
-    handlehiroMessage({ type: "typing.start", session_id: "session-1" }, "session-1")
+    handlemikiMessage({ type: "typing.start", session_id: "session-1" }, "session-1")
     expect(getChatState().isTyping).toBe(true)
 
-    handlehiroMessage(
+    handlemikiMessage(
       {
         type: "error",
         session_id: "session-1",

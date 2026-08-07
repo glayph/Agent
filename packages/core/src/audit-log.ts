@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import * as fs from "fs";
 import * as path from "path";
-import { redactSecrets } from "@hiro/config";
+import { redactSecrets } from "@miki/config";
 
 export type AuditEventType =
   | "auth.login"

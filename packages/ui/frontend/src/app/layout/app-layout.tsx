@@ -34,10 +34,10 @@ function DeferredCommandPalette() {
     }
 
     window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("Hiro:command", enableAndOpen)
+    window.addEventListener("Miki:command", enableAndOpen)
     return () => {
       window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("Hiro:command", enableAndOpen)
+      window.removeEventListener("Miki:command", enableAndOpen)
     }
   }, [enabled])
 

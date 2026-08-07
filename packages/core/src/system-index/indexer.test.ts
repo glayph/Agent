@@ -5,7 +5,7 @@ import { normalizeRuntimePaths } from "../paths.js";
 import { SystemIndexer } from "./indexer.js";
 
 function makeWorkspace(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-system-index-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "Miki-system-index-"));
 }
 
 describe("SystemIndexer", () => {

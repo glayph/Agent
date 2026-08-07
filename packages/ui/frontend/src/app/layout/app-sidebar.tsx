@@ -96,7 +96,7 @@ function commandShortcutLabel(): string {
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? "Cmd K" : "Ctrl K"
 }
 
-const WORKSPACE_SIDEBAR_TOGGLE_EVENT = "Hiro:toggle-workspace-sidebar"
+const WORKSPACE_SIDEBAR_TOGGLE_EVENT = "Miki:toggle-workspace-sidebar"
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const routerState = useRouterState()
@@ -110,7 +110,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }
 
   const openCommand = () => {
-    window.dispatchEvent(new Event("Hiro:command"))
+    window.dispatchEvent(new Event("Miki:command"))
     if (isMobile) setOpenMobile(false)
   }
 
@@ -141,8 +141,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             to="/"
             onClick={closeMobileSidebar}
             className="bg-primary/10 text-primary mx-auto flex size-10 items-center justify-center overflow-hidden rounded-lg border p-0 shadow-sm hover:border-primary/40 hover:bg-primary/20 transition-colors"
-            aria-label="Hiro"
-            title="Hiro"
+            aria-label="Miki"
+            title="Miki"
           >
             <img
               src="/icon.png"

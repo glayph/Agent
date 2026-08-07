@@ -4,7 +4,7 @@ import {
   SkillInstaller,
   type InstalledSkill,
   type PluginContractKind,
-} from "@hiro/installer";
+} from "@miki/installer";
 import {
   normalizeRuntimePaths,
   resolveDownloadedSkillsDir,

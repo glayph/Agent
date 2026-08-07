@@ -57,14 +57,14 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const loaderDir = path.dirname(fileURLToPath(import.meta.url));
-const runtimeRoot = path.resolve(process.env.Hiro_RUNTIME_ROOT || loaderDir);
+const runtimeRoot = path.resolve(process.env.Miki_RUNTIME_ROOT || loaderDir);
 const packageMap = new Map([
-  ["@hiro/config", "packages/config/dist/index.js"],
-  ["@hiro/config/security", "packages/config/dist/security.js"],
-  ["@hiro/installer", "packages/installer/dist/index.js"],
-  ["@hiro/skills", "packages/skills/dist/index.js"],
-  ["@hiro/core", "packages/core/dist/api/index.js"],
-  ["@hiro/gateway", "packages/gateway/dist/index.js"],
+  ["@miki/config", "packages/config/dist/index.js"],
+  ["@miki/config/security", "packages/config/dist/security.js"],
+  ["@miki/installer", "packages/installer/dist/index.js"],
+  ["@miki/skills", "packages/skills/dist/index.js"],
+  ["@miki/core", "packages/core/dist/api/index.js"],
+  ["@miki/gateway", "packages/gateway/dist/index.js"],
 ]);
 
 export async function resolve(specifier, context, nextResolve) {

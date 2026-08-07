@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
-// Register runtime loader for @hiro/* package resolution
+// Register runtime loader for @miki/* package resolution
 const loaderPath = path.join(PROJECT_ROOT, "dist", "runtime", "runtime-loader.mjs");
 if (fs.existsSync(loaderPath)) {
   try {
@@ -170,7 +170,7 @@ async function configValidationCheck() {
   }
 
   try {
-    const { validateRuntimeConfig } = await import("@hiro/config/schema");
+    const { validateRuntimeConfig } = await import("@miki/config/schema");
     const result = validateRuntimeConfig(parsed);
     return check(
       "config_validation",
@@ -194,7 +194,7 @@ async function configValidationCheck() {
 async function secretVaultCheck() {
   try {
     const { inspectEnvSecretStatus } = await import(
-      "@hiro/config/secret-vault"
+      "@miki/config/secret-vault"
     );
     const secretStatus = inspectEnvSecretStatus({ workspaceDir: PROJECT_ROOT });
     const envOnly = secretStatus.filter((item) => item.envOnly).map((item) => item.key);

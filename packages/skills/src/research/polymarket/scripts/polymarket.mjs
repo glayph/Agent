@@ -37,7 +37,7 @@ async function get(url) {
   let res;
   try {
     res = await fetch(url, {
-      headers: { "User-Agent": "Hiro/1.0" },
+      headers: { "User-Agent": "Miki/1.0" },
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {

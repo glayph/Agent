@@ -194,7 +194,7 @@ function isProtectedLocation(
 }
 
 function allowSystemWriteFromEnv(): boolean {
-  const envVal = process.env["Hiro_FILE_MANAGER_ALLOW_SYSTEM_WRITE"];
+  const envVal = process.env["Miki_FILE_MANAGER_ALLOW_SYSTEM_WRITE"];
   if (envVal === "true") return true;
   return false;
 }

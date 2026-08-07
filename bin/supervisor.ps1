@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Hiro Gateway Process Supervisor
+    Miki Gateway Process Supervisor
 
 .DESCRIPTION
-    Monitors the Hiro gateway process and restarts it automatically on crash.
+    Monitors the Miki gateway process and restarts it automatically on crash.
     Designed for unattended 24/7 operation on Windows.
 
     Usage:
@@ -109,8 +109,8 @@ function Send-Webhook {
 
 function Start-Gateway {
     # Forward relevant env vars to the gateway
-    $env:Hiro_WORKSPACE_DIR = $WorkspaceDir
-    $env:Hiro_RUNTIME_ROOT  = $RepoRoot
+    $env:Miki_WORKSPACE_DIR = $WorkspaceDir
+    $env:Miki_RUNTIME_ROOT  = $RepoRoot
     if ($env:CORE_MAX_RESTARTS -eq $null) { $env:CORE_MAX_RESTARTS = "0" }
 
     if ($GatewayEntry) {
@@ -127,7 +127,7 @@ function Start-Gateway {
 # ── Main supervisor loop ──────────────────────────────────────────────────────
 
 Write-Log "=========================================="
-Write-Log "Hiro Supervisor starting"
+Write-Log "Miki Supervisor starting"
 Write-Log "  WorkspaceDir  : $WorkspaceDir"
 Write-Log "  MaxRestarts   : $(if ($MaxRestarts -eq 0) { 'unbounded' } else { $MaxRestarts })"
 Write-Log "  RestartDelay  : ${RestartDelayMs}ms"

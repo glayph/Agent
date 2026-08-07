@@ -8,14 +8,14 @@ import (
 	"golang.org/x/term"
 )
 
-const helpMarkdown = `# Hiro
+const helpMarkdown = `# Miki
 
-Minimal terminal control surface for the Hiro agent runtime.
+Minimal terminal control surface for the Miki agent runtime.
 
 ## Usage
 
 ` + "```" + `
-Hiro [start] [--host <host>] [--port <port>] [--debug] [--plain]
+Miki [start] [--host <host>] [--port <port>] [--debug] [--plain]
 ` + "```" + `
 
 ## Commands

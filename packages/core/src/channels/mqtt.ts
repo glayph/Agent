@@ -68,8 +68,8 @@ function normalizeQos(value: unknown): 0 | 1 {
 }
 
 function normalizeTopicPrefix(value: unknown): string {
-  const raw = stringOrEmpty(value) || "/Hiro";
-  return raw.replace(/\/+$/g, "") || "/Hiro";
+  const raw = stringOrEmpty(value) || "/Miki";
+  return raw.replace(/\/+$/g, "") || "/Miki";
 }
 
 function encodeRemainingLength(length: number): Buffer {
@@ -243,7 +243,7 @@ export function resolveMqttRuntimeConfig(
   );
   const clientId =
     stringOrEmpty(env.MQTT_CLIENT_ID ?? settings.client_id ?? raw.client_id) ||
-    `Hiro-${agentId || "agent"}`;
+    `Miki-${agentId || "agent"}`;
 
   return {
     enabled:

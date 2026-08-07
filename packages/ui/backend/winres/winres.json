@@ -8,10 +8,10 @@
     "#1": {
       "0409": {
         "identity": {
-          "name": "Hiro Launcher",
+          "name": "Miki Launcher",
           "version": "0.0.0.0"
         },
-        "description": "Hiro Launcher - Web-based configuration editor",
+        "description": "Miki Launcher - Web-based configuration editor",
         "minimum-os": "win7",
         "execution-level": "asInvoker",
         "dpi-awareness": "system",

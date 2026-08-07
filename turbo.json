@@ -35,7 +35,7 @@
   },
   "globalEnv": [
     "NODE_ENV",
-    "Hiro_RUNTIME_ROOT",
-    "Hiro_WORKSPACE_DIR"
+    "Miki_RUNTIME_ROOT",
+    "Miki_WORKSPACE_DIR"
   ]
 }

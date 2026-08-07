@@ -45,7 +45,7 @@ function writeSkill(
 
 function makeEngine(): { engine: SkillSearchEngine; skillsRoot: string } {
   const workspaceDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "Hiro-runtime-skill-"),
+    path.join(os.tmpdir(), "Miki-runtime-skill-"),
   );
   const skillsRoot = path.join(workspaceDir, "custom-skills");
   fs.mkdirSync(skillsRoot, { recursive: true });

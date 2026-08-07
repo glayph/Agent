@@ -211,7 +211,7 @@ function requestToken(req: Request): string {
   const queryToken = stringOrEmpty(req.query.token);
   return firstString(
     bearerToken(req.headers.authorization),
-    req.headers["x-Hiro-whatsapp-token"],
+    req.headers["x-Miki-whatsapp-token"],
     req.headers["x-whatsapp-bridge-token"],
     body.token,
     body.webhook_token,

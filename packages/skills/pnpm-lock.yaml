@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      '@hiro/config':
+      '@miki/config':
         specifier: file:../config
         version: file:../config
     devDependencies:
@@ -18,7 +18,7 @@ importers:
 
 packages:
 
-  '@hiro/config@file:../config':
+  '@miki/config@file:../config':
     resolution: {directory: ../config, type: directory}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
@@ -44,7 +44,7 @@ packages:
 
 snapshots:
 
-  '@hiro/config@file:../config':
+  '@miki/config@file:../config':
     dependencies:
       dotenv: 16.6.1
       js-yaml: 4.3.0

@@ -292,8 +292,8 @@ export class DiscordBot {
           intents: DISCORD_INTENTS,
           properties: {
             os: process.platform,
-            browser: "Hiro",
-            device: "Hiro",
+            browser: "Miki",
+            device: "Miki",
           },
         },
       }),
@@ -406,7 +406,7 @@ export class DiscordBot {
     if (!token) return;
     const headers = new Headers(init.headers || {});
     headers.set("Authorization", `Bot ${token}`);
-    headers.set("User-Agent", "Hiro Agent (https://Hiro.local, 1.0)");
+    headers.set("User-Agent", "Miki Agent (https://Miki.local, 1.0)");
     const res = await fetch(`${DISCORD_API_BASE}${path}`, {
       ...init,
       headers,

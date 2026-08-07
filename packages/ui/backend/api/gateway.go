@@ -23,13 +23,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sipeed/Hiro/pkg/config"
-	"github.com/sipeed/Hiro/pkg/health"
-	"github.com/sipeed/Hiro/pkg/logger"
-	"github.com/sipeed/Hiro/pkg/netbind"
-	ppid "github.com/sipeed/Hiro/pkg/pid"
-	"github.com/sipeed/Hiro/pkg/providers"
-	"github.com/sipeed/Hiro/web/backend/utils"
+	"github.com/sipeed/Miki/pkg/config"
+	"github.com/sipeed/Miki/pkg/health"
+	"github.com/sipeed/Miki/pkg/logger"
+	"github.com/sipeed/Miki/pkg/netbind"
+	ppid "github.com/sipeed/Miki/pkg/pid"
+	"github.com/sipeed/Miki/pkg/providers"
+	"github.com/sipeed/Miki/web/backend/utils"
 )
 
 // gateway holds the state for the managed gateway process.
@@ -42,40 +42,40 @@ var gateway = struct {
 	runtimeStatus       string
 	startupDeadline     time.Time
 	logs                *LogBuffer
-	pidData             *ppid.PidFileData // pid file data read from Hiro.pid.json
-	hiroToken           string            // cached raw hiro token for upstream gateway proxy injection
+	pidData             *ppid.PidFileData // pid file data read from Miki.pid.json
+	mikiToken           string            // cached raw miki token for upstream gateway proxy injection
 }{
 	runtimeStatus: "stopped",
 	logs:          NewLogBuffer(200),
 }
 
-// refreshhiroTokensLocked reads the hiro token from config and caches it.
+// refreshmikiTokensLocked reads the miki token from config and caches it.
 // Caller must hold gateway.mu (or be sole writer).
-func refreshhiroTokensLocked(configPath string) {
+func refreshmikiTokensLocked(configPath string) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return
 	}
-	var hiroCfg config.hiroSettings
-	if bc := cfg.Channels.GetByType(config.Channelhiro); bc != nil {
+	var mikiCfg config.mikiSettings
+	if bc := cfg.Channels.GetByType(config.Channelmiki); bc != nil {
 		decoded, err := bc.GetDecoded()
 		if err == nil && decoded != nil {
-			if p, ok := decoded.(*config.hiroSettings); ok {
-				hiroCfg = *p
+			if p, ok := decoded.(*config.mikiSettings); ok {
+				mikiCfg = *p
 			}
 		}
 	}
-	gateway.hiroToken = hiroCfg.Token.String()
+	gateway.mikiToken = mikiCfg.Token.String()
 }
 
-// ensurehiroTokenCachedLocked lazily fills the in-memory hiro token cache when
+// ensuremikiTokenCachedLocked lazily fills the in-memory miki token cache when
 // the launcher has already discovered a running gateway via pidData, but has
 // not yet refreshed the token into memory.
-func ensurehiroTokenCachedLocked(configPath string) {
-	if gateway.hiroToken != "" {
+func ensuremikiTokenCachedLocked(configPath string) {
+	if gateway.mikiToken != "" {
 		return
 	}
-	refreshhiroTokensLocked(configPath)
+	refreshmikiTokensLocked(configPath)
 }
 
 func (h *Handler) gatewayCommandArgs() []string {
@@ -91,15 +91,15 @@ const (
 	tokenPrefix = "token."
 )
 
-// hiroGatewayProtocol returns the gateway-facing hiro subprotocol that the
+// mikiGatewayProtocol returns the gateway-facing miki subprotocol that the
 // launcher should inject when proxying browser traffic upstream.
-func hiroGatewayProtocol() string {
+func mikiGatewayProtocol() string {
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
-	if gateway.hiroToken == "" {
+	if gateway.mikiToken == "" {
 		return ""
 	}
-	return tokenPrefix + gateway.hiroToken
+	return tokenPrefix + gateway.mikiToken
 }
 
 var (
@@ -159,7 +159,7 @@ func getGatewayHealthByURL(url string, timeout time.Duration) (*health.StatusRes
 	return &healthResponse, resp.StatusCode, nil
 }
 
-// isLikelyGatewayProcess returns whether PID appears to be an Hiro runtime
+// isLikelyGatewayProcess returns whether PID appears to be an Miki runtime
 // process plus whether inspection was conclusive on this platform/environment.
 func isLikelyGatewayProcess(pid int) (bool, bool) {
 	if pid <= 0 {
@@ -191,7 +191,7 @@ func isLikelyGatewayProcess(pid int) (bool, bool) {
 		// A CSV row means the process exists, but may have a custom executable
 		// name we cannot classify here.
 		if strings.HasPrefix(line, "\"") {
-			if strings.Contains(line, "\"Hiro.exe\"") {
+			if strings.Contains(line, "\"Miki.exe\"") {
 				return true, true
 			}
 			return false, true
@@ -214,7 +214,7 @@ func isLikelyGatewayProcess(pid int) (bool, bool) {
 }
 
 // looksLikeGatewayCommandLine checks whether a process command line likely
-// represents the Hiro CLI or the gateway entrypoint.
+// represents the Miki CLI or the gateway entrypoint.
 func looksLikeGatewayCommandLine(cmdline string) bool {
 	fields := strings.Fields(strings.ToLower(strings.TrimSpace(cmdline)))
 	if len(fields) == 0 {
@@ -223,7 +223,7 @@ func looksLikeGatewayCommandLine(cmdline string) bool {
 	for _, f := range fields {
 		token := strings.Trim(f, `"'`)
 		base := strings.TrimSuffix(filepath.Base(token), ".exe")
-		if base == "Hiro" || base == "Hiro.js" || base == "gateway" {
+		if base == "Miki" || base == "Miki.js" || base == "gateway" {
 			return true
 		}
 		if base == "index.js" && strings.Contains(token, "gateway") {
@@ -272,7 +272,7 @@ func (h *Handler) validateGatewayPidData(
 
 	if gatewayProcess, inspected := gatewayProcessMatcher(pidData.PID); inspected {
 		if !gatewayProcess {
-			return false, true, "pid process command is not Hiro"
+			return false, true, "pid process command is not Miki"
 		}
 		return true, true, ""
 	}
@@ -342,7 +342,7 @@ func (h *Handler) TryAutoStartGateway() {
 			logger.ErrorC("gateway", fmt.Sprintf("Failed to attach to running gateway (PID: %d): %v", pid, err))
 		} else {
 			gateway.pidData = pidData
-			refreshhiroTokensLocked(h.configPath)
+			refreshmikiTokensLocked(h.configPath)
 			logger.InfoC("gateway", fmt.Sprintf("Attached to running gateway via PID file (PID: %d)", pid))
 		}
 		gateway.mu.Unlock()
@@ -1035,8 +1035,8 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	}
 
 	// Start new process
-	// Locate the Hiro executable
-	execPath := utils.FindHiroBinary()
+	// Locate the Miki executable
+	execPath := utils.FindMikiBinary()
 	logger.InfoC("gateway", fmt.Sprintf("Starting gateway process (%s)", execPath))
 
 	cmd = gatewayExecCommand(execPath, h.gatewayCommandArgs()...)
@@ -1066,19 +1066,19 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	// Clear old logs for this new run
 	gateway.logs.Reset()
 
-	// Ensure hiro Channel is configured before starting gateway
-	changed, err := h.EnsurehiroChannel()
+	// Ensure miki Channel is configured before starting gateway
+	changed, err := h.EnsuremikiChannel()
 	if err != nil {
-		logger.ErrorC("gateway", fmt.Sprintf("Warning: failed to ensure hiro channel: %v", err))
-		// Non-fatal: gateway can still start without hiro channel
+		logger.ErrorC("gateway", fmt.Sprintf("Warning: failed to ensure miki channel: %v", err))
+		// Non-fatal: gateway can still start without miki channel
 	}
-	// Refresh cached hiro token in case EnsurehiroChannel generated a new one.
+	// Refresh cached miki token in case EnsuremikiChannel generated a new one.
 	// Already holding gateway.mu from caller.
 	if changed {
-		refreshhiroTokensLocked(h.configPath)
+		refreshmikiTokensLocked(h.configPath)
 		cfg, err = config.LoadConfig(h.configPath)
 		if err != nil {
-			return 0, fmt.Errorf("failed to reload config after ensuring hiro channel: %w", err)
+			return 0, fmt.Errorf("failed to reload config after ensuring miki channel: %w", err)
 		}
 		defaultModelName = strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
 	}
@@ -1093,7 +1093,7 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	gateway.bootConfigSignature = computeConfigSignature(cfg)
 	setGatewayRuntimeStatusLocked(initialStatus)
 	pid = cmd.Process.Pid
-	logger.InfoC("gateway", fmt.Sprintf("Started Hiro (PID: %d) from %s", pid, execPath))
+	logger.InfoC("gateway", fmt.Sprintf("Started Miki (PID: %d) from %s", pid, execPath))
 
 	// Capture stdout/stderr in background
 	go scanPipe(stdoutPipe, gateway.logs)
@@ -1136,16 +1136,16 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 				gateway.mu.Lock()
 				if gateway.cmd == cmd {
 					gateway.pidData = pd
-					var hiroCfg config.hiroSettings
-					if bc := cfg.Channels.GetByType(config.Channelhiro); bc != nil {
+					var mikiCfg config.mikiSettings
+					if bc := cfg.Channels.GetByType(config.Channelmiki); bc != nil {
 						decoded, err := bc.GetDecoded()
 						if err == nil && decoded != nil {
-							if p, ok := decoded.(*config.hiroSettings); ok {
-								hiroCfg = *p
+							if p, ok := decoded.(*config.mikiSettings); ok {
+								mikiCfg = *p
 							}
 						}
 					}
-					gateway.hiroToken = hiroCfg.Token.String()
+					gateway.mikiToken = mikiCfg.Token.String()
 					setGatewayRuntimeStatusLocked("running")
 				}
 				gateway.mu.Unlock()
@@ -1177,7 +1177,7 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	return pid, nil
 }
 
-// handleGatewayStart starts the Hiro subprocess.
+// handleGatewayStart starts the Miki subprocess.
 //
 //	POST /api/gateway/start
 func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {

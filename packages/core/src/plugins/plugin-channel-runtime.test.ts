@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createWorkspaceSecretVault } from "@hiro/config";
-import { SkillRegistry, type PluginContracts } from "@hiro/installer";
+import { createWorkspaceSecretVault } from "@miki/config";
+import { SkillRegistry, type PluginContracts } from "@miki/installer";
 import type { AgentOrchestrator } from "../agent";
 import { SqliteAuditLog } from "../audit-log";
 import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";

@@ -67,7 +67,7 @@ func (r *Runtime) startRuntime() error {
 	r.state = stateStarting
 	r.err = ""
 	r.start = time.Now()
-	r.appendLocked("Starting Hiro runtime...")
+	r.appendLocked("Starting Miki runtime...")
 	r.mu.Unlock()
 
 	if !fileExists(r.cfg.GatewayEntry) {
@@ -140,7 +140,7 @@ func (r *Runtime) Stop() error {
 }
 
 // StopDaemon sends a shutdown request to the running gateway backend.
-// Used by 'hiro stop' command.
+// Used by 'miki stop' command.
 func (r *Runtime) StopDaemon() error {
 	// Try reading PID file
 	pidFile := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway.pid")
@@ -161,7 +161,7 @@ func (r *Runtime) StopDaemon() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("Hiro backend (PID %d) is shutting down...\n", pid)
+		fmt.Printf("Miki backend (PID %d) is shutting down...\n", pid)
 		// Clean up PID file
 		_ = os.Remove(pidFile)
 		return nil
@@ -187,7 +187,7 @@ func (r *Runtime) forceStop() error {
 		return nil
 	}
 	r.state = stateStopping
-	r.appendLocked("Force stopping Hiro runtime...")
+	r.appendLocked("Force stopping Miki runtime...")
 	r.mu.Unlock()
 
 	if err := terminateProcessTree(cmd, 4*time.Second); err != nil {
@@ -430,8 +430,8 @@ func fileURL(path string) string {
 
 func runtimeEnv(base []string, cfg Config) []string {
 	env := append([]string(nil), base...)
-	env = setEnv(env, "Hiro_RUNTIME_ROOT", cfg.RuntimeRoot)
-	env = setEnv(env, "Hiro_WORKSPACE_DIR", cfg.WorkspaceDir)
+	env = setEnv(env, "Miki_RUNTIME_ROOT", cfg.RuntimeRoot)
+	env = setEnv(env, "Miki_WORKSPACE_DIR", cfg.WorkspaceDir)
 	env = setEnv(env, "GATEWAY_HOST", cfg.Host)
 	env = setEnv(env, "GATEWAY_PORT", fmt.Sprintf("%d", cfg.Port))
 	if cfg.Debug {

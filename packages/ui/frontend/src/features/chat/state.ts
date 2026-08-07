@@ -1,4 +1,4 @@
-const LAST_SESSION_STORAGE_KEY = "Hiro:last-session-id"
+const LAST_SESSION_STORAGE_KEY = "Miki:last-session-id"
 const UNIX_MS_THRESHOLD = 1e12
 
 function readStorageValue() {

@@ -53,7 +53,7 @@ export function LauncherAuthShell({
               O
             </div>
             <span className="font-mono text-sm font-semibold tracking-tight">
-              Hiro
+              Miki
             </span>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/40 p-1.5 shadow-sm backdrop-blur-md">

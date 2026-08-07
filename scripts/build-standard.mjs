@@ -82,7 +82,7 @@ function tryTurboBuild() {
 // Main build function
 function main() {
   const startTime = Date.now();
-  log("Starting Hiro build...");
+  log("Starting Miki build...");
 
   // Clean dist directories
   log("Cleaning previous builds...");

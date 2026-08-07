@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      '@hiro/config':
+      '@miki/config':
         specifier: file:../config
         version: file:../config
       tar:
@@ -195,7 +195,7 @@ packages:
   '@bcoe/v8-coverage@0.2.3':
     resolution: {integrity: sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==}
 
-  '@hiro/config@file:../config':
+  '@miki/config@file:../config':
     resolution: {directory: ../config, type: directory}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
@@ -1416,7 +1416,7 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
-  '@hiro/config@file:../config':
+  '@miki/config@file:../config':
     dependencies:
       dotenv: 16.6.1
       js-yaml: 4.3.0

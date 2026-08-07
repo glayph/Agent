@@ -1,7 +1,7 @@
 {
-  "name": "@hiro/core",
+  "name": "@miki/core",
   "version": "1.0.0",
-  "description": "Core agent engine for Hiro - orchestrator, memory, LLM, tools, self-improvement, and governance",
+  "description": "Core agent engine for Miki - orchestrator, memory, LLM, tools, self-improvement, and governance",
   "type": "module",
   "main": "dist/api/index.js",
   "types": "dist/api/index.d.ts",
@@ -28,8 +28,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
-    "@hiro/config": "file:../config",
-    "@hiro/installer": "file:../installer",
+    "@miki/config": "file:../config",
+    "@miki/installer": "file:../installer",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",

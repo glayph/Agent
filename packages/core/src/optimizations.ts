@@ -105,7 +105,7 @@ export class OptimizationHub {
   static generateSummary() {
     return `
 ╔═══════════════════════════════════════════════════════════════════╗
-║         Hiro ULTRA-ADVANCE OPTIMIZATIONS ACTIVE             ║
+║         Miki ULTRA-ADVANCE OPTIMIZATIONS ACTIVE             ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
 PHASE 1: LLM & MEMORY OPTIMIZATION

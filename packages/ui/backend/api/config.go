@@ -87,7 +87,7 @@ func (h *Handler) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load existing config and copy security credentials before validation,
-	// so that security-managed fields (e.g. hiro token) are available.
+	// so that security-managed fields (e.g. miki token) are available.
 	err = cfg.SecurityCopyFrom(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to apply security config: %v", err), http.StatusInternalServerError)
@@ -348,13 +348,13 @@ func validateConfig(cfg *config.Config) []string {
 		}
 	}
 
-	// hiro channel: token required when enabled
+	// miki channel: token required when enabled
 	{
-		bc := cfg.Channels.GetByType(config.Channelhiro)
+		bc := cfg.Channels.GetByType(config.Channelmiki)
 		if bc != nil && bc.Enabled {
 			if decoded, err := bc.GetDecoded(); err == nil && decoded != nil {
-				if c, ok := decoded.(*config.hiroSettings); ok && c.Token.String() == "" {
-					errs = append(errs, "channels.hiro.token is required when hiro channel is enabled")
+				if c, ok := decoded.(*config.mikiSettings); ok && c.Token.String() == "" {
+					errs = append(errs, "channels.miki.token is required when miki channel is enabled")
 				}
 			}
 		}

@@ -9,14 +9,14 @@ import {
 } from "@/shared/ui/sheet"
 import { cn } from "@/lib/utils"
 
-const WORKSPACE_SIDEBAR_STORAGE_KEY = "Hiro:workspace-sidebar-width"
+const WORKSPACE_SIDEBAR_STORAGE_KEY = "Miki:workspace-sidebar-width"
 const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY =
-  "Hiro:workspace-sidebar-collapsed"
+  "Miki:workspace-sidebar-collapsed"
 const WORKSPACE_SIDEBAR_DEFAULT_WIDTH = 240
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 208
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 420
 const WORKSPACE_SIDEBAR_COLLAPSE_WIDTH = 168
-const WORKSPACE_SIDEBAR_TOGGLE_EVENT = "Hiro:toggle-workspace-sidebar"
+const WORKSPACE_SIDEBAR_TOGGLE_EVENT = "Miki:toggle-workspace-sidebar"
 
 function clampWorkspaceSidebarWidth(value: number) {
   return Math.min(

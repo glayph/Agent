@@ -186,22 +186,22 @@ function envForProbeMode(
 ): NodeJS.ProcessEnv {
   const nextEnv: NodeJS.ProcessEnv = { ...(env || process.env) };
   if (mode === "live") {
-    nextEnv.Hiro_CHANNEL_LIVE_PROBES = "true";
-    delete nextEnv.Hiro_CHANNEL_SANDBOX_PROBES;
+    nextEnv.Miki_CHANNEL_LIVE_PROBES = "true";
+    delete nextEnv.Miki_CHANNEL_SANDBOX_PROBES;
   } else if (mode === "sandbox") {
-    nextEnv.Hiro_CHANNEL_SANDBOX_PROBES = "true";
-    delete nextEnv.Hiro_CHANNEL_LIVE_PROBES;
+    nextEnv.Miki_CHANNEL_SANDBOX_PROBES = "true";
+    delete nextEnv.Miki_CHANNEL_LIVE_PROBES;
   } else if (mode === "mock") {
-    delete nextEnv.Hiro_CHANNEL_LIVE_PROBES;
-    delete nextEnv.Hiro_CHANNEL_SANDBOX_PROBES;
+    delete nextEnv.Miki_CHANNEL_LIVE_PROBES;
+    delete nextEnv.Miki_CHANNEL_SANDBOX_PROBES;
   }
   return nextEnv;
 }
 
 function executableProbeEnabled(env: NodeJS.ProcessEnv): boolean {
   return (
-    env.Hiro_CHANNEL_LIVE_PROBES === "true" ||
-    env.Hiro_CHANNEL_SANDBOX_PROBES === "true"
+    env.Miki_CHANNEL_LIVE_PROBES === "true" ||
+    env.Miki_CHANNEL_SANDBOX_PROBES === "true"
   );
 }
 

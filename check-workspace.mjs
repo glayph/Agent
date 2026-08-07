@@ -13,7 +13,7 @@ const packages = [
     "packages/skills"
 ];
 
-console.log("Checking for workspace: ^ dependencies in Hiro packages...");
+console.log("Checking for workspace: ^ dependencies in Miki packages...");
 console.log("============================================");
 
 let hasWorkspaceDeps = false;

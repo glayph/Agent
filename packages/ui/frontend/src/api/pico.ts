@@ -1,14 +1,14 @@
 import { launcherFetch } from "@/api/http"
 
-// API client for hiro Channel configuration.
+// API client for miki Channel configuration.
 
-interface hiroInfoResponse {
+interface mikiInfoResponse {
   ws_url: string
   enabled: boolean
   configured?: boolean
 }
 
-interface hiroSetupResponse {
+interface mikiSetupResponse {
   ws_url: string
   enabled: boolean
   configured?: boolean
@@ -25,16 +25,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function gethiroInfo(): Promise<hiroInfoResponse> {
-  return request<hiroInfoResponse>("/api/hiro/info")
+export async function getmikiInfo(): Promise<mikiInfoResponse> {
+  return request<mikiInfoResponse>("/api/miki/info")
 }
 
-export async function regenhiroToken(): Promise<hiroInfoResponse> {
-  return request<hiroInfoResponse>("/api/hiro/token", { method: "POST" })
+export async function regenmikiToken(): Promise<mikiInfoResponse> {
+  return request<mikiInfoResponse>("/api/miki/token", { method: "POST" })
 }
 
-export async function setuphiro(): Promise<hiroSetupResponse> {
-  return request<hiroSetupResponse>("/api/hiro/setup", { method: "POST" })
+export async function setupmiki(): Promise<mikiSetupResponse> {
+  return request<mikiSetupResponse>("/api/miki/setup", { method: "POST" })
 }
 
-export type { hiroInfoResponse, hiroSetupResponse }
+export type { mikiInfoResponse, mikiSetupResponse }

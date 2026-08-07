@@ -6,7 +6,7 @@
  * - Configurable log levels per module
  */
 
-import { redactSecrets } from "@hiro/config";
+import { redactSecrets } from "@miki/config";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -228,4 +228,4 @@ export class StructuredLogger {
 }
 
 // Global logger instance
-export const globalLogger = new StructuredLogger("Hiro", false);
+export const globalLogger = new StructuredLogger("Miki", false);

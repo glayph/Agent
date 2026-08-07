@@ -9,10 +9,10 @@ import (
 func runPlain(cfg Config) int {
 	rt := NewRuntime(cfg)
 	if err := rt.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "Hiro:", err)
+		fmt.Fprintln(os.Stderr, "Miki:", err)
 		return 1
 	}
-	fmt.Println("Hiro")
+	fmt.Println("Miki")
 	fmt.Println("  Dashboard ", rt.DashboardURL())
 	fmt.Println("  Stop       Ctrl+C")
 	fmt.Println("")

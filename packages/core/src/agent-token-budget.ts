@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolDefinition } from "@hiro/config";
+import type { ChatMessage, ToolDefinition } from "@miki/config";
 import { CostCalibrator } from "./cost-calibrator.js";
 import {
   globalTokenBudgetManager,

@@ -52,18 +52,18 @@ func TestBuildWsURLUsesRequestHostWhenLauncherPublicSaved(t *testing.T) {
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = 18790
 
-	req := httptest.NewRequest("GET", "http://launcher.local/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "http://launcher.local/api/miki/info", nil)
 	req.Host = "192.168.1.9:18800"
 
-	if got := h.buildWsURL(req); got != "ws://192.168.1.9:18800/hiro/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://192.168.1.9:18800/hiro/ws")
+	if got := h.buildWsURL(req); got != "ws://192.168.1.9:18800/miki/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://192.168.1.9:18800/miki/ws")
 	}
 
-	if got := h.buildhiroEventsURL(req); got != "http://192.168.1.9:18800/hiro/events" {
-		t.Fatalf("buildhiroEventsURL() = %q, want %q", got, "http://192.168.1.9:18800/hiro/events")
+	if got := h.buildmikiEventsURL(req); got != "http://192.168.1.9:18800/miki/events" {
+		t.Fatalf("buildmikiEventsURL() = %q, want %q", got, "http://192.168.1.9:18800/miki/events")
 	}
-	if got := h.buildhiroSendURL(req); got != "http://192.168.1.9:18800/hiro/send" {
-		t.Fatalf("buildhiroSendURL() = %q, want %q", got, "http://192.168.1.9:18800/hiro/send")
+	if got := h.buildmikiSendURL(req); got != "http://192.168.1.9:18800/miki/send" {
+		t.Fatalf("buildmikiSendURL() = %q, want %q", got, "http://192.168.1.9:18800/miki/send")
 	}
 }
 
@@ -183,12 +183,12 @@ func TestBuildWsURLUsesWSSWhenForwardedProtoIsHTTPS(t *testing.T) {
 	cfg.Gateway.Host = "0.0.0.0"
 	cfg.Gateway.Port = 18790
 
-	req := httptest.NewRequest("GET", "http://launcher.local/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "http://launcher.local/api/miki/info", nil)
 	req.Host = "chat.example.com"
 	req.Header.Set("X-Forwarded-Proto", "https")
 
-	if got := h.buildWsURL(req); got != "wss://chat.example.com:443/hiro/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://chat.example.com:443/hiro/ws")
+	if got := h.buildWsURL(req); got != "wss://chat.example.com:443/miki/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://chat.example.com:443/miki/ws")
 	}
 }
 
@@ -200,16 +200,16 @@ func TestBuildWsURLUsesWSSWhenRequestIsTLS(t *testing.T) {
 	cfg.Gateway.Host = "0.0.0.0"
 	cfg.Gateway.Port = 18790
 
-	req := httptest.NewRequest("GET", "https://launcher.local/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "https://launcher.local/api/miki/info", nil)
 	req.Host = "secure.example.com"
 	req.TLS = &tls.ConnectionState{}
 
-	if got := h.buildWsURL(req); got != "wss://secure.example.com:443/hiro/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://secure.example.com:443/hiro/ws")
+	if got := h.buildWsURL(req); got != "wss://secure.example.com:443/miki/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://secure.example.com:443/miki/ws")
 	}
 }
 
-func TestBuildhiroURLsPreferXForwardedHost(t *testing.T) {
+func TestBuildmikiURLsPreferXForwardedHost(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	launcherPath := launcherconfig.PathForAppConfig(configPath)
 	if err := launcherconfig.Save(launcherPath, launcherconfig.Config{
@@ -226,20 +226,20 @@ func TestBuildhiroURLsPreferXForwardedHost(t *testing.T) {
 	cfg.Gateway.Host = "0.0.0.0"
 	cfg.Gateway.Port = 18790
 
-	req := httptest.NewRequest("GET", "http://127.0.0.1:18800/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "http://127.0.0.1:18800/api/miki/info", nil)
 	req.Host = "127.0.0.1:18800"
 	req.Header.Set("X-Forwarded-Host", "vscode-tunnel.example.com")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-Port", "443")
 
-	if got := h.buildhiroEventsURL(req); got != "https://vscode-tunnel.example.com:443/hiro/events" {
-		t.Fatalf("buildhiroEventsURL() = %q, want %q", got, "https://vscode-tunnel.example.com:443/hiro/events")
+	if got := h.buildmikiEventsURL(req); got != "https://vscode-tunnel.example.com:443/miki/events" {
+		t.Fatalf("buildmikiEventsURL() = %q, want %q", got, "https://vscode-tunnel.example.com:443/miki/events")
 	}
-	if got := h.buildhiroSendURL(req); got != "https://vscode-tunnel.example.com:443/hiro/send" {
-		t.Fatalf("buildhiroSendURL() = %q, want %q", got, "https://vscode-tunnel.example.com:443/hiro/send")
+	if got := h.buildmikiSendURL(req); got != "https://vscode-tunnel.example.com:443/miki/send" {
+		t.Fatalf("buildmikiSendURL() = %q, want %q", got, "https://vscode-tunnel.example.com:443/miki/send")
 	}
-	if got := h.buildWsURL(req); got != "wss://vscode-tunnel.example.com:443/hiro/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://vscode-tunnel.example.com:443/hiro/ws")
+	if got := h.buildWsURL(req); got != "wss://vscode-tunnel.example.com:443/miki/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://vscode-tunnel.example.com:443/miki/ws")
 	}
 }
 
@@ -251,13 +251,13 @@ func TestBuildWsURLPrefersForwardedHTTPOverTLS(t *testing.T) {
 	cfg.Gateway.Host = "0.0.0.0"
 	cfg.Gateway.Port = 18790
 
-	req := httptest.NewRequest("GET", "https://launcher.local/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "https://launcher.local/api/miki/info", nil)
 	req.Host = "chat.example.com"
 	req.TLS = &tls.ConnectionState{}
 	req.Header.Set("X-Forwarded-Proto", "http")
 
-	if got := h.buildWsURL(req); got != "ws://chat.example.com:80/hiro/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://chat.example.com:80/hiro/ws")
+	if got := h.buildWsURL(req); got != "ws://chat.example.com:80/miki/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://chat.example.com:80/miki/ws")
 	}
 }
 
@@ -265,15 +265,15 @@ func TestBuildWsURLDoesNotTrustOriginWhenProxyOmitsForwardedProto(t *testing.T) 
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	req := httptest.NewRequest("GET", "http://launcher.local/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "http://launcher.local/api/miki/info", nil)
 	req.Host = "fs-952210-xwj.miki.lan.sipeed.com"
 	req.Header.Set("Origin", "https://fs-952210-xwj.miki.lan.sipeed.com")
 
-	if got := h.buildWsURL(req); got != "ws://fs-952210-xwj.miki.lan.sipeed.com:80/hiro/ws" {
+	if got := h.buildWsURL(req); got != "ws://fs-952210-xwj.miki.lan.sipeed.com:80/miki/ws" {
 		t.Fatalf(
 			"buildWsURL() = %q, want %q",
 			got,
-			"ws://fs-952210-xwj.miki.lan.sipeed.com:80/hiro/ws",
+			"ws://fs-952210-xwj.miki.lan.sipeed.com:80/miki/ws",
 		)
 	}
 }
@@ -283,11 +283,11 @@ func TestBuildWsURLUsesRequestHostNotGatewayBindLoopback(t *testing.T) {
 	h := NewHandler(configPath)
 	h.SetServerOptions(18800, false, false, nil)
 
-	req := httptest.NewRequest("GET", "http://localhost:18800/api/hiro/info", nil)
+	req := httptest.NewRequest("GET", "http://localhost:18800/api/miki/info", nil)
 	req.Host = "localhost:18800"
 
-	if got := h.buildWsURL(req); got != "ws://localhost:18800/hiro/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://localhost:18800/hiro/ws")
+	if got := h.buildWsURL(req); got != "ws://localhost:18800/miki/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://localhost:18800/miki/ws")
 	}
 }
 

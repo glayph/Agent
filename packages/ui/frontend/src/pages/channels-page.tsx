@@ -191,7 +191,7 @@ function checkStatusClass(
 }
 
 const CHANNELS_WITHOUT_DOCS = new Set([
-  "hiro",
+  "miki",
   "wecom",
   "matrix",
   "irc",
@@ -323,8 +323,8 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
       ""
     ).toLowerCase()
     const base = language.startsWith("zh")
-      ? "https://docs.Hiro.io/zh-Hans/docs/channels"
-      : "https://docs.Hiro.io/docs/channels"
+      ? "https://docs.Miki.io/zh-Hans/docs/channels"
+      : "https://docs.Miki.io/docs/channels"
     return `${base}/${getChannelDocSlug(channel.name)}`
   }, [channel, i18n.language, i18n.resolvedLanguage])
 
@@ -646,7 +646,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
             configuredSecrets={configuredSecrets}
             hiddenKeys={hiddenKeys}
             requiredKeys={requiredKeys}
-            supportsStreaming={channel?.name === "hiro"}
+            supportsStreaming={channel?.name === "miki"}
             fieldErrors={fieldErrors}
             registerArrayFieldFlusher={registerArrayFieldFlusher}
             arrayFieldResetVersion={arrayFieldResetVersion}

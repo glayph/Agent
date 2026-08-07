@@ -86,7 +86,7 @@ function primaryCategory(entry) {
 /** Fetch a single paper by ID and print a BibTeX entry. */
 async function bibtex(arxivId) {
   const res = await fetch(`https://export.arxiv.org/api/query?id_list=${arxivId}`, {
-    headers: { "User-Agent": "Hiro/1.0" },
+    headers: { "User-Agent": "Miki/1.0" },
     signal: AbortSignal.timeout(15_000),
   });
   const xml = await res.text();
@@ -139,7 +139,7 @@ async function search({ query, author, category, ids, maxResults = 5, sort = "re
   const url = `https://export.arxiv.org/api/query?${params.toString()}`;
 
   const res = await fetch(url, {
-    headers: { "User-Agent": "Hiro/1.0" },
+    headers: { "User-Agent": "Miki/1.0" },
     signal: AbortSignal.timeout(15_000),
   });
   const xml = await res.text();

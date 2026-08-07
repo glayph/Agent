@@ -15,11 +15,11 @@
     "moduleResolution": "bundler",
 
     "paths": {
-      "@hiro/config": ["./packages/config/src/index.ts"],
-      "@hiro/config/security": ["./packages/config/src/security.ts"],
-      "@hiro/installer": ["./packages/installer/src/index.ts"],
-      "@hiro/core": ["./packages/core/src/index.ts"],
-      "@hiro/gateway": ["./packages/gateway/src/index.ts"]
+      "@miki/config": ["./packages/config/src/index.ts"],
+      "@miki/config/security": ["./packages/config/src/security.ts"],
+      "@miki/installer": ["./packages/installer/src/index.ts"],
+      "@miki/core": ["./packages/core/src/index.ts"],
+      "@miki/gateway": ["./packages/gateway/src/index.ts"]
     },
     "declaration": true,
     "declarationMap": true,

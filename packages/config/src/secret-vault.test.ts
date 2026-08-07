@@ -23,7 +23,7 @@ describe("encrypted secret vault", () => {
   });
 
   it("stores encrypted secrets and supports rotation and deletion", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-vault-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-vault-"));
     const vault = new FileEncryptedSecretVault({
       workspaceDir: tempDir,
       key: "test-key",
@@ -50,7 +50,7 @@ describe("encrypted secret vault", () => {
   });
 
   it("migrates env secrets into vault and prefers vault values afterwards", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-vault-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-vault-"));
     process.env["OPENAI_API_KEY"] = "sk-env-secret-value-1234567890";
 
     const migration = migrateEnvSecretsToVault({
@@ -84,7 +84,7 @@ describe("encrypted secret vault", () => {
   });
 
   it("backs up corrupt vault files and recovers with an empty vault", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-vault-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-vault-"));
     const vaultPath = path.join(tempDir, "data", "secret-vault.json");
     fs.mkdirSync(path.dirname(vaultPath), { recursive: true });
     fs.writeFileSync(vaultPath, "{not-json", "utf-8");

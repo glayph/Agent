@@ -7,7 +7,7 @@ import {
 } from "./agent-context.js";
 
 function makeWorkspace(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-agent-index-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "Miki-agent-index-"));
 }
 
 describe("agent system index context", () => {

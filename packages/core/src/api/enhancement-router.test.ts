@@ -32,7 +32,7 @@ interface TestJsonResponse {
 async function withServer<T>(
   handler: (baseUrl: string) => Promise<T>,
 ): Promise<T> {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-enh-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-enh-"));
   fs.mkdirSync(path.join(tempDir, "config"), { recursive: true });
   fs.writeFileSync(
     path.join(tempDir, "config", "agent.yaml"),

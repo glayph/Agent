@@ -3,17 +3,17 @@ import githubLightCss from "highlight.js/styles/github.css?inline"
 import { useEffect } from "react"
 
 const THEME_STYLE_ID = "hljs-theme-style"
-const THEME_STYLE_OWNER_ATTR = "data-Hiro-highlight-theme"
+const THEME_STYLE_OWNER_ATTR = "data-Miki-highlight-theme"
 const THEME_STYLE_OWNER_VALUE = "true"
 const MANAGED_THEME_STYLE_SELECTOR = `style[${THEME_STYLE_OWNER_ATTR}="${THEME_STYLE_OWNER_VALUE}"]`
 const ID_THEME_STYLE_SELECTOR = `style#${THEME_STYLE_ID}`
 const CHAT_CODE_BLOCK_OVERRIDES = `
-[data-Hiro-code-block] .hljs {
+[data-Miki-code-block] .hljs {
   background: transparent !important;
 }
 
-[data-Hiro-code-block] pre code.hljs,
-[data-Hiro-code-block] code.hljs {
+[data-Miki-code-block] pre code.hljs,
+[data-Miki-code-block] code.hljs {
   padding: 0 !important;
   background: transparent !important;
 }

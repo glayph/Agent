@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 const backendDir = path.join(root, "packages", "ui", "backend");
 const outDir = path.join(backendDir, "dist", "bin");
-const exe = process.platform === "win32" ? "Hiro-web.exe" : "Hiro-web";
+const exe = process.platform === "win32" ? "Miki-web.exe" : "Miki-web";
 
 fs.mkdirSync(outDir, { recursive: true });
 

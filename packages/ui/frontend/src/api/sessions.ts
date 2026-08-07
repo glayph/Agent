@@ -88,7 +88,7 @@ export function isSessionNotFoundError(error: unknown): boolean {
 export async function deleteSession(id: string): Promise<void> {
   const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: { "X-Hiro-Confirm": "delete-session" },
+    headers: { "X-Miki-Confirm": "delete-session" },
   })
   if (!res.ok) {
     throw new SessionApiError(

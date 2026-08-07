@@ -38,7 +38,7 @@ function tempWorkspace(name: string): string {
 
 describe("safety and recovery modules", () => {
   it("creates config/db backups and rolls them back with a pre-rollback backup", () => {
-    const workspace = tempWorkspace("Hiro-backup-");
+    const workspace = tempWorkspace("Miki-backup-");
     const configPath = path.join(workspace, "config", "agent.yaml");
     const dbPath = path.join(workspace, "data", "miki_memory.db");
     const walPath = path.join(workspace, "data", "miki_memory.db-wal");
@@ -64,7 +64,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("can skip high-volume operational stores for startup backups", () => {
-    const workspace = tempWorkspace("Hiro-backup-startup-fast-");
+    const workspace = tempWorkspace("Miki-backup-startup-fast-");
     const auditPath = path.join(workspace, "data", "audit.db");
     const memoryPath = path.join(workspace, "data", "miki_memory.db");
     const memoryWalPath = path.join(workspace, "data", "miki_memory.db-wal");
@@ -86,7 +86,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("prunes oldest backups when the retention limit is reached", () => {
-    const workspace = tempWorkspace("Hiro-backup-retention-");
+    const workspace = tempWorkspace("Miki-backup-retention-");
     const configPath = path.join(workspace, "config", "agent.yaml");
     const manager = new BackupManager(workspace, { maxBackups: 2 });
     const createdIds: string[] = [];
@@ -106,7 +106,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("rejects tampered backup manifests before rollback", () => {
-    const workspace = tempWorkspace("Hiro-backup-tamper-");
+    const workspace = tempWorkspace("Miki-backup-tamper-");
     const manager = new BackupManager(workspace);
     const backup = manager.createBackup("tamper-test");
     const manifestPath = path.join(
@@ -126,7 +126,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("runs migrations idempotently and reports dry-run results", () => {
-    const workspace = tempWorkspace("Hiro-migrate-");
+    const workspace = tempWorkspace("Miki-migrate-");
     const migration: MigrationDefinition = {
       id: "test-migration",
       description: "write marker",
@@ -144,7 +144,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("rejects unsafe migration definitions and changed paths", () => {
-    const workspace = tempWorkspace("Hiro-migrate-safety-");
+    const workspace = tempWorkspace("Miki-migrate-safety-");
 
     expect(
       () =>
@@ -175,7 +175,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("sanitizes malformed migration state entries", () => {
-    const workspace = tempWorkspace("Hiro-migrate-state-");
+    const workspace = tempWorkspace("Miki-migrate-state-");
     fs.writeFileSync(
       path.join(workspace, "data", "migrations.json"),
       JSON.stringify({
@@ -212,7 +212,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("detects secret leaks without exposing raw values", () => {
-    const workspace = tempWorkspace("Hiro-scan-");
+    const workspace = tempWorkspace("Miki-scan-");
     const docsDir = path.join(workspace, "docs");
     fs.mkdirSync(docsDir, { recursive: true });
     fs.writeFileSync(
@@ -244,7 +244,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("skips symlinked and oversized secret-scan candidates", () => {
-    const workspace = tempWorkspace("Hiro-scan-safety-");
+    const workspace = tempWorkspace("Miki-scan-safety-");
     const docsDir = path.join(workspace, "docs");
     fs.mkdirSync(docsDir, { recursive: true });
     fs.writeFileSync(
@@ -253,7 +253,7 @@ describe("safety and recovery modules", () => {
       "utf-8",
     );
 
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "Hiro-outside-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-outside-"));
     const outsideSecret = path.join(outside, "outside.md");
     fs.writeFileSync(outsideSecret, "sk-outside-secret-value-1234567890");
     const linkPath = path.join(docsDir, "linked.md");
@@ -277,7 +277,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("records safe-mode reasons and escalates watchdog failures", () => {
-    const workspace = tempWorkspace("Hiro-safe-");
+    const workspace = tempWorkspace("Miki-safe-");
     const safeMode = new SafeModeManager(
       path.join(workspace, "data", "safe-mode.json"),
     );
@@ -294,7 +294,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("sanitizes malformed safe-mode state and returns watchdog snapshots", () => {
-    const workspace = tempWorkspace("Hiro-safe-sanitize-");
+    const workspace = tempWorkspace("Miki-safe-sanitize-");
     const statePath = path.join(workspace, "data", "safe-mode.json");
     fs.writeFileSync(
       statePath,
@@ -344,7 +344,7 @@ describe("safety and recovery modules", () => {
   });
 
   it("builds a doctor report with stable check ids", async () => {
-    const workspace = tempWorkspace("Hiro-doctor-");
+    const workspace = tempWorkspace("Miki-doctor-");
     const report = await runDoctor(makePaths(workspace), {
       includeExternalChecks: false,
       includeMigrations: true,
@@ -364,7 +364,7 @@ describe("safety and recovery modules", () => {
     );
   });
 
-  it("exposes Hiro doctor as JSON from the launcher", () => {
+  it("exposes Miki doctor as JSON from the launcher", () => {
     const result = child_process.spawnSync(
       process.execPath,
       ["bin/miki-doctor.mjs", "--json", "--skip-external"],

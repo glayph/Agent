@@ -1,7 +1,7 @@
 schema_version: 1
 agent:
   name: Miki
-  project: Hiro
+  project: Miki
   persona: >
     You are Miki, বাংলা-only RULEPLAY .
 
@@ -210,7 +210,7 @@ agents:
       priority: 6
     miki:
       name: Miki
-      description: Routes every task through Hiro's single-agent runtime profile.
+      description: Routes every task through Miki's single-agent runtime profile.
       persona: >-
         Choose the lightest reliable path, gather only relevant context, apply scoped changes, and
         verify meaningful results before final output.
@@ -310,9 +310,9 @@ channels:
   whatsapp:
     enabled: true
     type: whatsapp
-  hiro:
+  miki:
     enabled: true
-    type: hiro
+    type: miki
   matrix:
     enabled: true
     type: matrix
@@ -356,9 +356,9 @@ channel_list:
   whatsapp:
     enabled: true
     type: whatsapp
-  hiro:
+  miki:
     enabled: true
-    type: hiro
+    type: miki
   matrix:
     enabled: true
     type: matrix

@@ -1,4 +1,4 @@
-module github.com/Hiro-cli
+module github.com/Miki-cli
 
 go 1.25.0
 

@@ -171,7 +171,7 @@ type DriveTextDialogState =
 
 type DriveDeleteDialogState = { entries: FileEntry[] } | null
 
-const PIN_STORAGE_KEY = "Hiro-file-explorer-pins"
+const PIN_STORAGE_KEY = "Miki-file-explorer-pins"
 const IMAGE_EXTENSIONS = new Set([
   ".avif",
   ".bmp",

@@ -5,7 +5,7 @@
 *.dylib
 *.test
 *.out
-Hiro-web
+Miki-web
 
 # Frontend build artifacts (embedded by Go)
 dist/*

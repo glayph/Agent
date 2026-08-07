@@ -11,12 +11,12 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const RUNTIME_ROOT = path.join(PROJECT_ROOT, "dist", "runtime");
 
-process.env.Hiro_RUNTIME_ROOT = process.env.Hiro_RUNTIME_ROOT || RUNTIME_ROOT;
-process.env.Hiro_WORKSPACE_DIR = process.env.Hiro_WORKSPACE_DIR || PROJECT_ROOT;
-process.env.Hiro_RUNTIME_LOADER = path.join(RUNTIME_ROOT, "runtime-loader.mjs");
-process.env.Hiro_NODE = process.execPath;
+process.env.Miki_RUNTIME_ROOT = process.env.Miki_RUNTIME_ROOT || RUNTIME_ROOT;
+process.env.Miki_WORKSPACE_DIR = process.env.Miki_WORKSPACE_DIR || PROJECT_ROOT;
+process.env.Miki_RUNTIME_LOADER = path.join(RUNTIME_ROOT, "runtime-loader.mjs");
+process.env.Miki_NODE = process.execPath;
 
-const loaderPath = pathToFileURL(process.env.Hiro_RUNTIME_LOADER).href;
+const loaderPath = pathToFileURL(process.env.Miki_RUNTIME_LOADER).href;
 register(loaderPath, pathToFileURL(PROJECT_ROOT + "/"));
 
 const gatewayPath = pathToFileURL(path.join(PROJECT_ROOT, "dist", "runtime", "packages", "gateway", "dist", "index.js")).href;
@@ -33,7 +33,7 @@ async function readSecretFromPrompt(label) {
 
 async function runConfigCommand() {
   const { resolveConfiguredSecret, setConfiguredSecret, userConfigDir } =
-    await import("@hiro/config");
+    await import("@miki/config");
   const [command, subcommand, keyArg, valueArg] = argv;
 
   if (command === "setup") {

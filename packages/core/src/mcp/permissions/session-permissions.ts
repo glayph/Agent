@@ -1,4 +1,4 @@
-import { redactSecrets } from "@hiro/config";
+import { redactSecrets } from "@miki/config";
 
 export interface SessionPermissionDecision {
   toolName: string;

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { resolveConfiguredSecret } from "@hiro/config";
+import { resolveConfiguredSecret } from "@miki/config";
 
 export type DirectProviderId =
   | "gemini"

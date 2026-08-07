@@ -12,7 +12,7 @@ const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
   onebot: ["access_token"],
   whatsapp: ["webhook_token"],
   wecom: ["secret", "corp_secret", "webhook_url"],
-  hiro: ["token"],
+  miki: ["token"],
   matrix: ["access_token"],
   irc: ["password", "nickserv_password", "sasl_password"],
   mqtt: ["username", "password"],
@@ -31,7 +31,7 @@ const CHANNEL_REQUIRED_FIELDS: Record<string, string[]> = {
   wecom: ["bot_id"],
   whatsapp: ["bridge_url"],
   whatsapp_native: ["config"],
-  hiro: ["token"],
+  miki: ["token"],
   maixcam: ["host"],
   matrix: ["homeserver_url", "user_id", "access_token"],
   irc: ["server", "nick"],
@@ -98,7 +98,7 @@ interface BuildChannelRuntimeProbeOptions {
   config: JsonRecord;
   configuredSecrets?: string[];
   env?: NodeJS.ProcessEnv;
-  hashiroToken?: boolean;
+  hasmikiToken?: boolean;
   mode?: ChannelProbeMode;
   extraChecks?: ChannelRuntimeProbeCheck[];
 }
@@ -236,7 +236,7 @@ function configuredFieldSetForEnv(
   for (const [field, envKey] of Object.entries(envMap)) {
     if (env[envKey]) fields.add(field);
   }
-  if (channelName === "hiro") fields.add("token");
+  if (channelName === "miki") fields.add("token");
   for (const field of Object.keys(config)) {
     if (fieldConfigured(config, field)) fields.add(field);
   }
@@ -330,7 +330,7 @@ export function buildChannelRuntimeProbe({
         : `Missing required saved fields: ${missingFields.join(", ")}.`,
   });
 
-  const enabledIsRequired = channel.name !== "hiro";
+  const enabledIsRequired = channel.name !== "miki";
   const disableEnvKey = CHANNEL_ENV_DISABLE_FLAGS[channel.name];
   const disabledByEnv = Boolean(
     disableEnvKey && env[disableEnvKey] === "false",
@@ -526,7 +526,7 @@ export function buildChannelRuntimeProbe({
     runtime_status: runtimeStatus,
     probe_status: probeStatus,
     agent_connected: probeStatus === "ready",
-    enabled: enabled || channel.name === "hiro",
+    enabled: enabled || channel.name === "miki",
     configured,
     missing_fields: missingFields,
     checks,
@@ -552,8 +552,8 @@ function classifyFailedProbe(
 }
 
 function resolveProbeMode(env: NodeJS.ProcessEnv): ChannelProbeMode {
-  if (env.Hiro_CHANNEL_LIVE_PROBES === "true") return "live";
-  if (env.Hiro_CHANNEL_SANDBOX_PROBES === "true") return "sandbox";
+  if (env.Miki_CHANNEL_LIVE_PROBES === "true") return "live";
+  if (env.Miki_CHANNEL_SANDBOX_PROBES === "true") return "sandbox";
   return "mock";
 }
 
@@ -591,12 +591,12 @@ function buildMockSendCheck({
       latency_ms: Date.now() - startedAt,
     };
   }
-  if (mode === "live" && env.Hiro_CHANNEL_ALLOW_LIVE_SEND !== "true") {
+  if (mode === "live" && env.Miki_CHANNEL_ALLOW_LIVE_SEND !== "true") {
     return {
       status: "skipped",
       mode,
       message:
-        "Live send check skipped; set Hiro_CHANNEL_ALLOW_LIVE_SEND=true to permit provider traffic.",
+        "Live send check skipped; set Miki_CHANNEL_ALLOW_LIVE_SEND=true to permit provider traffic.",
       latency_ms: Date.now() - startedAt,
     };
   }

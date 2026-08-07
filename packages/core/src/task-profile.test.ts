@@ -34,9 +34,9 @@ describe("agent task profile", () => {
     expect(profile.verificationDepth).toBe("integration");
   });
 
-  it("classifies Hiro-style multi-step work as complex", () => {
+  it("classifies Miki-style multi-step work as complex", () => {
     const profile = classifyAgentTask(
-      "Create an Hiro workflow roadmap, implement production-grade integration, then verify with benchmark and audit checks",
+      "Create an Miki workflow roadmap, implement production-grade integration, then verify with benchmark and audit checks",
     );
 
     expect(profile.complexity).toBe("complex");

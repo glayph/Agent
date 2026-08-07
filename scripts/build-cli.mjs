@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 const cliDir = path.join(root, "packages", "cli");
 const outDir = path.join(cliDir, "dist", "bin");
-const exe = process.platform === "win32" ? "Hiro-cli.exe" : "Hiro-cli";
+const exe = process.platform === "win32" ? "Miki-cli.exe" : "Miki-cli";
 
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -32,7 +32,7 @@ const result = spawnSync(
 );
 
 if (result.error && result.error.code === 'ENOENT') {
-  console.warn("Go is not installed on this system. Skipping Hiro-cli build.");
+  console.warn("Go is not installed on this system. Skipping Miki-cli build.");
   process.exit(0);
 }
 

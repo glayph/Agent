@@ -350,8 +350,8 @@ func TestHandlePatchConfig_NormalizesStringChannelArrayFields(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
 		"channel_list": {
-			"hiro": {
-				"type": "hiro",
+			"miki": {
+				"type": "miki",
 				"allow_from": " ou_a\u200b，\u2060ou_b\tou_c\u202e，ou_a ",
 				"group_trigger": {
 					"prefixes": "/，!;\n?，/"
@@ -387,37 +387,37 @@ func TestHandlePatchConfig_NormalizesStringChannelArrayFields(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	hiroChannel := cfg.Channels[config.Channelhiro]
-	if len(hiroChannel.AllowFrom) != 3 ||
-		hiroChannel.AllowFrom[0] != "ou_a" ||
-		hiroChannel.AllowFrom[1] != "ou_b" ||
-		hiroChannel.AllowFrom[2] != "ou_c" {
+	mikiChannel := cfg.Channels[config.Channelmiki]
+	if len(mikiChannel.AllowFrom) != 3 ||
+		mikiChannel.AllowFrom[0] != "ou_a" ||
+		mikiChannel.AllowFrom[1] != "ou_b" ||
+		mikiChannel.AllowFrom[2] != "ou_c" {
 		t.Fatalf(
-			"hiro allow_from = %#v, want [\"ou_a\", \"ou_b\", \"ou_c\"]",
-			hiroChannel.AllowFrom,
+			"miki allow_from = %#v, want [\"ou_a\", \"ou_b\", \"ou_c\"]",
+			mikiChannel.AllowFrom,
 		)
 	}
-	if len(hiroChannel.GroupTrigger.Prefixes) != 3 ||
-		hiroChannel.GroupTrigger.Prefixes[0] != "/" ||
-		hiroChannel.GroupTrigger.Prefixes[1] != "!;" ||
-		hiroChannel.GroupTrigger.Prefixes[2] != "?" {
+	if len(mikiChannel.GroupTrigger.Prefixes) != 3 ||
+		mikiChannel.GroupTrigger.Prefixes[0] != "/" ||
+		mikiChannel.GroupTrigger.Prefixes[1] != "!;" ||
+		mikiChannel.GroupTrigger.Prefixes[2] != "?" {
 		t.Fatalf(
-			"hiro group_trigger.prefixes = %#v, want [\"/\", \"!;\", \"?\"]",
-			hiroChannel.GroupTrigger.Prefixes,
+			"miki group_trigger.prefixes = %#v, want [\"/\", \"!;\", \"?\"]",
+			mikiChannel.GroupTrigger.Prefixes,
 		)
 	}
 
-	decoded, err := hiroChannel.GetDecoded()
+	decoded, err := mikiChannel.GetDecoded()
 	if err != nil {
-		t.Fatalf("GetDecoded() hiro error = %v", err)
+		t.Fatalf("GetDecoded() miki error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
-	if len(hiroCfg.AllowOrigins) != 2 ||
-		hiroCfg.AllowOrigins[0] != "https://a.example.com" ||
-		hiroCfg.AllowOrigins[1] != "http://localhost:5173" {
+	mikiCfg := decoded.(*config.mikiSettings)
+	if len(mikiCfg.AllowOrigins) != 2 ||
+		mikiCfg.AllowOrigins[0] != "https://a.example.com" ||
+		mikiCfg.AllowOrigins[1] != "http://localhost:5173" {
 		t.Fatalf(
-			"hiro allow_origins = %#v, want [\"https://a.example.com\", \"http://localhost:5173\"]",
-			hiroCfg.AllowOrigins,
+			"miki allow_origins = %#v, want [\"https://a.example.com\", \"http://localhost:5173\"]",
+			mikiCfg.AllowOrigins,
 		)
 	}
 
@@ -587,7 +587,7 @@ func TestHandlePatchConfig_RejectsNegativeStreamingDeliveryValues(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
 		"channel_list": {
-			"hiro": {
+			"miki": {
 				"settings": {
 					"streaming": {
 						"enabled": true,
@@ -761,14 +761,14 @@ func TestHandlePatchConfig_CreatesMissingChannelWithTypeAndSecret(t *testing.T) 
 	}
 }
 
-// setuphiroEnabledEnv creates a test environment with hiro channel enabled and
+// setupmikiEnabledEnv creates a test environment with miki channel enabled and
 // its token stored only in .security.yml (not in the JSON payload).
-func setuphiroEnabledEnv(t *testing.T) (string, func()) {
+func setupmikiEnabledEnv(t *testing.T) (string, func()) {
 	t.Helper()
 
 	tmp := t.TempDir()
 	oldHome := os.Getenv("HOME")
-	oldhiroHome := os.Getenv("miki_HOME")
+	oldmikiHome := os.Getenv("miki_HOME")
 
 	if err := os.Setenv("HOME", tmp); err != nil {
 		t.Fatalf("set HOME: %v", err)
@@ -784,14 +784,14 @@ func setuphiroEnabledEnv(t *testing.T) (string, func()) {
 		APIKeys:   config.SimpleSecureStrings("sk-default"),
 	}}
 	cfg.Agents.Defaults.ModelName = "custom-default"
-	bc := cfg.Channels["hiro"]
+	bc := cfg.Channels["miki"]
 	decoded, err := bc.GetDecoded()
 	if err != nil {
 		t.Fatalf("GetDecoded() error = %v", err)
 	}
-	hiroCfg := decoded.(*config.hiroSettings)
+	mikiCfg := decoded.(*config.mikiSettings)
 	bc.Enabled = true
-	hiroCfg.Token = *config.NewSecureString("test-hiro-token")
+	mikiCfg.Token = *config.NewSecureString("test-miki-token")
 
 	configPath := filepath.Join(tmp, "config.json")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
@@ -800,24 +800,24 @@ func setuphiroEnabledEnv(t *testing.T) (string, func()) {
 
 	cleanup := func() {
 		_ = os.Setenv("HOME", oldHome)
-		if oldhiroHome == "" {
+		if oldmikiHome == "" {
 			_ = os.Unsetenv("miki_HOME")
 		} else {
-			_ = os.Setenv("miki_HOME", oldhiroHome)
+			_ = os.Setenv("miki_HOME", oldmikiHome)
 		}
 	}
 	return configPath, cleanup
 }
 
-func TestHandleUpdateConfig_SucceedsWhenhiroTokenInSecurityOnly(t *testing.T) {
-	configPath, cleanup := setuphiroEnabledEnv(t)
+func TestHandleUpdateConfig_SucceedsWhenmikiTokenInSecurityOnly(t *testing.T) {
+	configPath, cleanup := setupmikiEnabledEnv(t)
 	defer cleanup()
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// PUT request with hiro enabled but no token in JSON — token is in .security.yml
+	// PUT request with miki enabled but no token in JSON — token is in .security.yml
 	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{
 		"version": 1,
 		"agents": {
@@ -827,7 +827,7 @@ func TestHandleUpdateConfig_SucceedsWhenhiroTokenInSecurityOnly(t *testing.T) {
 			}
 		},
 		"channels": {
-			"hiro": {
+			"miki": {
 				"enabled": true,
 				"ping_interval": 30,
 				"read_timeout": 60,
@@ -857,15 +857,15 @@ func TestHandleUpdateConfig_SucceedsWhenhiroTokenInSecurityOnly(t *testing.T) {
 	}
 }
 
-func TestHandlePatchConfig_SucceedsWhenhiroTokenInSecurityOnly(t *testing.T) {
-	configPath, cleanup := setuphiroEnabledEnv(t)
+func TestHandlePatchConfig_SucceedsWhenmikiTokenInSecurityOnly(t *testing.T) {
+	configPath, cleanup := setupmikiEnabledEnv(t)
 	defer cleanup()
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// PATCH request changing an unrelated field — hiro token still in .security.yml
+	// PATCH request changing an unrelated field — miki token still in .security.yml
 	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
 		"gateway": {
 			"log_level": "info"

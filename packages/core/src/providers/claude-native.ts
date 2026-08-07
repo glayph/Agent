@@ -19,7 +19,7 @@ import type {
   ChatCompletionAssistantMessageParam,
   ChatCompletionToolMessageParam,
 } from "openai/resources/chat/completions/completions.js";
-import type { LLMResponse } from "@hiro/config";
+import type { LLMResponse } from "@miki/config";
 import {
   LLMRateLimitError,
   LLMTimeoutError,

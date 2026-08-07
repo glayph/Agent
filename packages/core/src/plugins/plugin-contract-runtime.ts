@@ -7,7 +7,7 @@ import {
   SkillInstaller,
   type PluginContractCatalogEntry,
   type PluginContractKind,
-} from "@hiro/installer";
+} from "@miki/installer";
 import {
   normalizeRuntimePaths,
   resolveDownloadedSkillsDir,
@@ -667,12 +667,12 @@ function buildPluginEnvironment(
   },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    Hiro_PLUGIN_SANDBOX: "1",
-    Hiro_WORKSPACE_DIR: paths.sourceDir || paths.configDir,
-    Hiro_SANDBOX_FILESYSTEM: sandbox.filesystem,
-    Hiro_SANDBOX_NETWORK: sandbox.network.toString(),
-    Hiro_SANDBOX_SECRETS: sandbox.secrets.toString(),
-    Hiro_SANDBOX_SHELL: sandbox.shell.toString(),
+    Miki_PLUGIN_SANDBOX: "1",
+    Miki_WORKSPACE_DIR: paths.sourceDir || paths.configDir,
+    Miki_SANDBOX_FILESYSTEM: sandbox.filesystem,
+    Miki_SANDBOX_NETWORK: sandbox.network.toString(),
+    Miki_SANDBOX_SECRETS: sandbox.secrets.toString(),
+    Miki_SANDBOX_SHELL: sandbox.shell.toString(),
     NODE_ENV: "production",
   };
 

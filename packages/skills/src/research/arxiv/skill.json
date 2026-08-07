@@ -4,7 +4,7 @@
   "description": "Search and analyze research papers from arXiv with filtering by category, date, and keywords",
   "category": "research",
   "tags": ["research", "papers", "arxiv", "academic"],
-  "author": "Hiro",
+  "author": "Miki",
   "version": "1.0.0",
   "enabled": true,
   "dependencies": [],

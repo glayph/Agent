@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
-const cliExe = process.platform === "win32" ? "Hiro-cli.exe" : "Hiro-cli";
-const webExe = process.platform === "win32" ? "Hiro-web.exe" : "Hiro-web";
+const cliExe = process.platform === "win32" ? "Miki-cli.exe" : "Miki-cli";
+const webExe = process.platform === "win32" ? "Miki-web.exe" : "Miki-web";
 
 const requiredOutputs = [
   "packages/config/dist/index.js",

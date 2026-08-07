@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillRegistry } from "@hiro/installer";
+import { SkillRegistry } from "@miki/installer";
 import { ToolRegistry } from "../tools/registry/executor";
 import { registerRuntimePluginTools } from "./plugin-tool-registration";
 import { resolveDownloadedSkillsDir, type RuntimePaths } from "../paths.js";

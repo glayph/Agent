@@ -16,18 +16,18 @@ import (
 	ppid "github.com/sipeed/miki/pkg/pid"
 )
 
-// registerhiroRoutes binds hiro Channel management endpoints to the ServeMux.
-func (h *Handler) registerhiroRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/hiro/info", h.handleGethiroInfo)
-	mux.HandleFunc("POST /api/hiro/token", h.handleRegenhiroToken)
-	mux.HandleFunc("POST /api/hiro/setup", h.handlehiroSetup)
+// registermikiRoutes binds miki Channel management endpoints to the ServeMux.
+func (h *Handler) registermikiRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/miki/info", h.handleGetmikiInfo)
+	mux.HandleFunc("POST /api/miki/token", h.handleRegenmikiToken)
+	mux.HandleFunc("POST /api/miki/setup", h.handlemikiSetup)
 
-	// WebSocket proxy: forward /hiro/ws to gateway
+	// WebSocket proxy: forward /miki/ws to gateway
 	// This allows the frontend to connect via the same port as the web UI,
 	// avoiding the need to expose extra ports for WebSocket communication.
-	mux.HandleFunc("GET /hiro/ws", h.handleWebSocketProxy())
-	mux.HandleFunc("GET /hiro/media/{id}", h.handlehiroMediaProxy())
-	mux.HandleFunc("HEAD /hiro/media/{id}", h.handlehiroMediaProxy())
+	mux.HandleFunc("GET /miki/ws", h.handleWebSocketProxy())
+	mux.HandleFunc("GET /miki/media/{id}", h.handlemikiMediaProxy())
+	mux.HandleFunc("HEAD /miki/media/{id}", h.handlemikiMediaProxy())
 }
 
 // createWsProxy creates a reverse proxy to the current gateway WebSocket endpoint.
@@ -59,7 +59,7 @@ func (h *Handler) createWsProxy(origProtocol string, upstreamProtocol string) *h
 	return wsProxy
 }
 
-func (h *Handler) createhiroHTTPProxy(token string) *httputil.ReverseProxy {
+func (h *Handler) createmikiHTTPProxy(token string) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			target := h.gatewayProxyURL()
@@ -67,7 +67,7 @@ func (h *Handler) createhiroHTTPProxy(token string) *httputil.ReverseProxy {
 			r.Out.Header.Set("Authorization", "Bearer "+token)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			logger.Errorf("Failed to proxy hiro HTTP request: %v", err)
+			logger.Errorf("Failed to proxy miki HTTP request: %v", err)
 			http.Error(w, "Gateway unavailable: "+err.Error(), http.StatusBadGateway)
 		},
 	}
@@ -75,7 +75,7 @@ func (h *Handler) createhiroHTTPProxy(token string) *httputil.ReverseProxy {
 
 func (h *Handler) gatewayAvailableForProxy() bool {
 	gateway.mu.Lock()
-	ensurehiroTokenCachedLocked(h.configPath)
+	ensuremikiTokenCachedLocked(h.configPath)
 	cachedPID := gateway.pidData
 	trackedCmd := gateway.cmd
 	gateway.mu.Unlock()
@@ -106,31 +106,31 @@ func (h *Handler) gatewayAvailableForProxy() bool {
 	return available
 }
 
-func decodehiroSettings(cfg *config.Config) (config.hiroSettings, bool) {
+func decodemikiSettings(cfg *config.Config) (config.mikiSettings, bool) {
 	if cfg == nil {
-		return config.hiroSettings{}, false
+		return config.mikiSettings{}, false
 	}
 
-	bc := cfg.Channels.GetByType(config.Channelhiro)
+	bc := cfg.Channels.GetByType(config.Channelmiki)
 	if bc == nil {
-		return config.hiroSettings{}, false
+		return config.mikiSettings{}, false
 	}
 
-	var hiroCfg config.hiroSettings
-	if err := bc.Decode(&hiroCfg); err != nil {
-		return config.hiroSettings{}, false
+	var mikiCfg config.mikiSettings
+	if err := bc.Decode(&mikiCfg); err != nil {
+		return config.mikiSettings{}, false
 	}
 
-	return hiroCfg, bc.Enabled
+	return mikiCfg, bc.Enabled
 }
 
-func (h *Handler) writehiroInfoResponse(
+func (h *Handler) writemikiInfoResponse(
 	w http.ResponseWriter,
 	r *http.Request,
 	cfg *config.Config,
 	changed *bool,
 ) {
-	hiroCfg, enabled := decodehiroSettings(cfg)
+	mikiCfg, enabled := decodemikiSettings(cfg)
 
 	resp := map[string]any{
 		"ws_url":  h.buildWsURL(r),
@@ -139,7 +139,7 @@ func (h *Handler) writehiroInfoResponse(
 	if changed != nil {
 		resp["changed"] = *changed
 	}
-	if hiroCfg.Token.String() != "" {
+	if mikiCfg.Token.String() != "" {
 		resp["configured"] = true
 	}
 
@@ -148,7 +148,7 @@ func (h *Handler) writehiroInfoResponse(
 }
 
 // handleWebSocketProxy wraps a reverse proxy to handle WebSocket connections.
-// It relies on launcher dashboard auth, then injects the raw hiro token only
+// It relies on launcher dashboard auth, then injects the raw miki token only
 // on the upstream gateway request.
 func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -158,10 +158,10 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 			return
 		}
 
-		upstreamProtocol := hiroGatewayProtocol()
+		upstreamProtocol := mikiGatewayProtocol()
 		if upstreamProtocol == "" {
-			logger.Warn("hiro token unavailable for WebSocket proxy")
-			http.Error(w, "hiro channel not configured", http.StatusServiceUnavailable)
+			logger.Warn("miki token unavailable for WebSocket proxy")
+			http.Error(w, "miki channel not configured", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -174,46 +174,46 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	}
 }
 
-func (h *Handler) handlehiroMediaProxy() http.HandlerFunc {
+func (h *Handler) handlemikiMediaProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !h.gatewayAvailableForProxy() {
-			logger.Warnf("Gateway not available for hiro media proxy")
+			logger.Warnf("Gateway not available for miki media proxy")
 			http.Error(w, "Gateway not available", http.StatusServiceUnavailable)
 			return
 		}
 
 		gateway.mu.Lock()
-		hiroToken := gateway.hiroToken
+		mikiToken := gateway.mikiToken
 		gateway.mu.Unlock()
 
-		if hiroToken == "" {
-			logger.Warnf("Missing hiro token for media proxy")
-			http.Error(w, "Invalid hiro token", http.StatusForbidden)
+		if mikiToken == "" {
+			logger.Warnf("Missing miki token for media proxy")
+			http.Error(w, "Invalid miki token", http.StatusForbidden)
 			return
 		}
 
-		h.createhiroHTTPProxy(hiroToken).ServeHTTP(w, r)
+		h.createmikiHTTPProxy(mikiToken).ServeHTTP(w, r)
 	}
 }
 
-// handleGethiroInfo returns non-secret hiro connection info for the launcher UI.
+// handleGetmikiInfo returns non-secret miki connection info for the launcher UI.
 //
-//	GET /api/hiro/info
-func (h *Handler) handleGethiroInfo(w http.ResponseWriter, r *http.Request) {
+//	GET /api/miki/info
+func (h *Handler) handleGetmikiInfo(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	h.writehiroInfoResponse(w, r, cfg, nil)
+	h.writemikiInfoResponse(w, r, cfg, nil)
 }
 
-// handleRegenhiroToken rotates the raw hiro WebSocket token and returns
+// handleRegenmikiToken rotates the raw miki WebSocket token and returns
 // non-secret connection info for the launcher UI.
 //
-//	POST /api/hiro/token
-func (h *Handler) handleRegenhiroToken(w http.ResponseWriter, r *http.Request) {
+//	POST /api/miki/token
+func (h *Handler) handleRegenmikiToken(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
@@ -221,10 +221,10 @@ func (h *Handler) handleRegenhiroToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := generateSecureToken()
-	if bc := cfg.Channels.GetByType(config.Channelhiro); bc != nil {
+	if bc := cfg.Channels.GetByType(config.Channelmiki); bc != nil {
 		decoded, err := bc.GetDecoded()
 		if err == nil && decoded != nil {
-			if settings, ok := decoded.(*config.hiroSettings); ok {
+			if settings, ok := decoded.(*config.mikiSettings); ok {
 				settings.Token = *config.NewSecureString(token)
 			}
 		}
@@ -236,15 +236,15 @@ func (h *Handler) handleRegenhiroToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	gateway.mu.Lock()
-	gateway.hiroToken = token
+	gateway.mikiToken = token
 	gateway.mu.Unlock()
 
-	h.writehiroInfoResponse(w, r, cfg, nil)
+	h.writemikiInfoResponse(w, r, cfg, nil)
 }
 
-// EnsurehiroChannel enables the hiro channel with sane defaults if it isn't
+// EnsuremikiChannel enables the miki channel with sane defaults if it isn't
 // already configured. Returns true when the config was modified.
-func (h *Handler) EnsurehiroChannel() (bool, error) {
+func (h *Handler) EnsuremikiChannel() (bool, error) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to load config: %w", err)
@@ -252,10 +252,10 @@ func (h *Handler) EnsurehiroChannel() (bool, error) {
 
 	changed := false
 
-	bc := cfg.Channels.GetByType(config.Channelhiro)
+	bc := cfg.Channels.GetByType(config.Channelmiki)
 	if bc == nil {
-		bc = &config.Channel{Type: config.Channelhiro}
-		cfg.Channels["hiro"] = bc
+		bc = &config.Channel{Type: config.Channelmiki}
+		cfg.Channels["miki"] = bc
 	}
 
 	if !bc.Enabled {
@@ -264,9 +264,9 @@ func (h *Handler) EnsurehiroChannel() (bool, error) {
 	}
 
 	if decoded, err := bc.GetDecoded(); err == nil && decoded != nil {
-		if hiroCfg, ok := decoded.(*config.hiroSettings); ok {
-			if hiroCfg.Token.String() == "" {
-				hiroCfg.Token = *config.NewSecureString(generateSecureToken())
+		if mikiCfg, ok := decoded.(*config.mikiSettings); ok {
+			if mikiCfg.Token.String() == "" {
+				mikiCfg.Token = *config.NewSecureString(generateSecureToken())
 				changed = true
 			}
 		}
@@ -281,24 +281,24 @@ func (h *Handler) EnsurehiroChannel() (bool, error) {
 	return changed, nil
 }
 
-// handlehiroSetup automatically configures everything needed for the hiro Channel to work.
+// handlemikiSetup automatically configures everything needed for the miki Channel to work.
 //
-//	POST /api/hiro/setup
-func (h *Handler) handlehiroSetup(w http.ResponseWriter, r *http.Request) {
-	changed, err := h.EnsurehiroChannel()
+//	POST /api/miki/setup
+func (h *Handler) handlemikiSetup(w http.ResponseWriter, r *http.Request) {
+	changed, err := h.EnsuremikiChannel()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Reload config (EnsurehiroChannel may have modified it).
+	// Reload config (EnsuremikiChannel may have modified it).
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	h.writehiroInfoResponse(w, r, cfg, &changed)
+	h.writemikiInfoResponse(w, r, cfg, &changed)
 }
 
 // generateSecureToken creates a random 32-character hex string.

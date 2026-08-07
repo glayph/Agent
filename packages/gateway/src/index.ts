@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
 import * as dotenv from "dotenv";
-import { loadConfiguredSecretsIntoEnv, reloadProviderSecretsIntoEnv } from "@hiro/config";
+import { loadConfiguredSecretsIntoEnv, reloadProviderSecretsIntoEnv } from "@miki/config";
 import {
   allowedCorsOriginsFromEnv,
   hasExplicitAllowedOrigins,
@@ -15,7 +15,7 @@ import {
   normalizeCorsOrigin,
   resolveAllowedCidrsFromEnv,
   isIpAllowedByCidrs,
-} from "@hiro/config/security";
+} from "@miki/config/security";
 import { rewriteMcpProxyPath } from "./runtime-utils.js";
 import {
   createRelayWebSocketServer,
@@ -50,10 +50,10 @@ function booleanEnv(key: string, fallback: boolean): boolean {
 
 const inferredRuntimeRoot = path.resolve(__dirname, "../../..");
 const runtimeRoot = path.resolve(
-  process.env["Hiro_RUNTIME_ROOT"] || inferredRuntimeRoot,
+  process.env["Miki_RUNTIME_ROOT"] || inferredRuntimeRoot,
 );
 const workspaceDir = path.resolve(
-  process.env["Hiro_WORKSPACE_DIR"] || runtimeRoot,
+  process.env["Miki_WORKSPACE_DIR"] || runtimeRoot,
 );
 dotenv.config({ path: path.join(workspaceDir, ".env") });
 loadConfiguredSecretsIntoEnv(undefined, workspaceDir);
@@ -168,8 +168,8 @@ function startCore(): child_process.ChildProcess {
       cwd: config.workspaceDir,
       env: {
         ...process.env,
-        Hiro_RUNTIME_ROOT: config.runtimeRoot,
-        Hiro_WORKSPACE_DIR: config.workspaceDir,
+        Miki_RUNTIME_ROOT: config.runtimeRoot,
+        Miki_WORKSPACE_DIR: config.workspaceDir,
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
       },
@@ -317,7 +317,7 @@ function stopCoreHealthMonitor(): void {
 
 // ── Auth helper for gateway control routes ───────────────────────────────────
 
-const GATEWAY_DASHBOARD_COOKIE = "Hiro_dashboard_session";
+const GATEWAY_DASHBOARD_COOKIE = "Miki_dashboard_session";
 
 function parseCookieValue(
   cookieHeader: string | string[] | undefined,
@@ -434,7 +434,7 @@ app.use((req, res, next) => {
 });
 
 // ── CIDR enforcement middleware ──────────────────────────────────────────────
-// When Hiro_ALLOWED_CIDRS is set, reject non-loopback clients not in the list.
+// When Miki_ALLOWED_CIDRS is set, reject non-loopback clients not in the list.
 const configuredAllowedCidrs = resolveAllowedCidrsFromEnv();
 if (configuredAllowedCidrs.length > 0) {
   app.use((req, res, next) => {
@@ -635,7 +635,7 @@ const server = http.createServer(app);
 
 // ── WebSocket relay ──────────────────────────────────────────────────────────
 
-const WS_PATHS = ["/hiro/ws", "/ws/chat", "/ws", "/chat/ws"];
+const WS_PATHS = ["/miki/ws", "/ws/chat", "/ws", "/chat/ws"];
 const wss = createRelayWebSocketServer();
 const activeWsConnections = new Set<WSWebSocket>();
 

@@ -132,7 +132,7 @@ export function getRequiredFieldKeys(channelName: string): string[] {
       return ["bridge_url"]
     case "whatsapp_native":
       return ["config"]
-    case "hiro":
+    case "miki":
       return ["token"]
     case "matrix":
       return ["homeserver_url", "user_id", "access_token"]

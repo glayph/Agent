@@ -12,13 +12,13 @@ import * as fs from "fs";
 
 import { AgentOrchestrator } from "../agent.js";
 import type { AgentTask } from "../task-queue.js";
-import { settings } from "@hiro/config";
+import { settings } from "@miki/config";
 import {
   allowedCorsOriginsFromEnv,
   hasExplicitAllowedOrigins,
   isAllowedCorsOrigin,
   normalizeCorsOrigin,
-} from "@hiro/config/security";
+} from "@miki/config/security";
 import { TelegramBot } from "../channels/telegram.js";
 import { DiscordBot } from "../channels/discord.js";
 import { SlackBot } from "../channels/slack.js";
@@ -374,8 +374,8 @@ function rejectUpgrade(
   socket.destroy();
 }
 
-function ishiroBearerAuthenticated(request: http.IncomingMessage): boolean {
-  const configuredToken = launcherRuntimeAuth?.gethiroToken();
+function ismikiBearerAuthenticated(request: http.IncomingMessage): boolean {
+  const configuredToken = launcherRuntimeAuth?.getmikiToken();
   if (!configuredToken) return false;
   const authorization = firstHeaderValue(request.headers.authorization);
   const incomingToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
@@ -393,7 +393,7 @@ function isWebSocketUpgradeAuthorized(
   if (launcherRuntimeAuth?.isDashboardAuthenticated(request.headers)) {
     return true;
   }
-  return pathname === "/hiro/ws" && ishiroBearerAuthenticated(request);
+  return pathname === "/miki/ws" && ismikiBearerAuthenticated(request);
 }
 
 validateApiKeyConfiguration();
@@ -414,7 +414,7 @@ app.use(
       "MCP-Session-ID",
       "X-Session-ID",
       "X-Line-Signature",
-      "X-Hiro-WhatsApp-Token",
+      "X-Miki-WhatsApp-Token",
       "X-WhatsApp-Bridge-Token",
       "X-DingTalk-Timestamp",
       "X-DingTalk-Signature",
@@ -525,7 +525,7 @@ const wss = new WebSocketServer({
   noServer: true,
   maxPayload: 5 * 1024 * 1024, // 5MB
 });
-const hiroWss = new WebSocketServer({
+const mikiWss = new WebSocketServer({
   noServer: true,
   maxPayload: 5 * 1024 * 1024,
 });
@@ -547,13 +547,13 @@ server.on("upgrade", (request, socket, head) => {
     });
     return;
   }
-  if (pathname === "/hiro/ws") {
+  if (pathname === "/miki/ws") {
     if (!isWebSocketUpgradeAuthorized(request, pathname)) {
       rejectUpgrade(socket, 401, "Unauthorized");
       return;
     }
-    hiroWss.handleUpgrade(request, socket, head, (ws) => {
-      hiroWss.emit("connection", ws, request);
+    mikiWss.handleUpgrade(request, socket, head, (ws) => {
+      mikiWss.emit("connection", ws, request);
     });
     return;
   }
@@ -566,7 +566,7 @@ let wsPingTimer: NodeJS.Timeout | null = null;
 
 function _setupWSPing(): void {
   wsPingTimer = setInterval(() => {
-    for (const server of [wss, hiroWss]) {
+    for (const server of [wss, mikiWss]) {
       server.clients.forEach((ws) => {
         const aliveWs = ws as AliveWebSocket;
         if (aliveWs.__alive === false) {
@@ -581,7 +581,7 @@ function _setupWSPing(): void {
   wsPingTimer.unref?.();
 }
 
-function _sendhiro(ws: WebSocket, message: Record<string, unknown>): void {
+function _sendmiki(ws: WebSocket, message: Record<string, unknown>): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(message));
   }
@@ -604,14 +604,14 @@ function _asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-interface hiroContextUsage {
+interface mikiContextUsage {
   used_tokens: number;
   total_tokens: number;
   compress_at_tokens: number;
   used_percent: number;
 }
 
-function _normalizehiroContextUsage(value: unknown): hiroContextUsage | null {
+function _normalizemikiContextUsage(value: unknown): mikiContextUsage | null {
   const raw = _asRecord(value);
   const used = Number(raw.used_tokens);
   const total = Number(raw.total_tokens);
@@ -634,11 +634,11 @@ function _normalizehiroContextUsage(value: unknown): hiroContextUsage | null {
   };
 }
 
-function _hiroContextUsage(
+function _mikiContextUsage(
   content: string,
   explicitUsage?: unknown,
-): hiroContextUsage {
-  const normalized = _normalizehiroContextUsage(explicitUsage);
+): mikiContextUsage {
+  const normalized = _normalizemikiContextUsage(explicitUsage);
   if (normalized) return normalized;
 
   const used = Math.max(1, Math.ceil(content.length / 4));
@@ -651,14 +651,14 @@ function _hiroContextUsage(
   };
 }
 
-hiroWss.on("connection", (ws, req) => {
+mikiWss.on("connection", (ws, req) => {
   const aliveWs = ws as AliveWebSocket;
   aliveWs.__alive = true;
   ws.on("pong", () => {
     aliveWs.__alive = true;
   });
 
-  const url = new URL(req.url || "/hiro/ws", "http://127.0.0.1");
+  const url = new URL(req.url || "/miki/ws", "http://127.0.0.1");
   const sessionId = url.searchParams.get("session_id") || crypto.randomUUID();
 
   ws.on("message", async (raw) => {
@@ -666,7 +666,7 @@ hiroWss.on("connection", (ws, req) => {
       Buffer.isBuffer(raw) ? raw : Buffer.from(raw.toString()),
     );
     if (!data) {
-      _sendhiro(ws, {
+      _sendmiki(ws, {
         type: "error",
         session_id: sessionId,
         payload: { message: "Invalid JSON payload" },
@@ -675,16 +675,16 @@ hiroWss.on("connection", (ws, req) => {
     }
 
     if (data.type === "ping") {
-      _sendhiro(ws, { type: "pong", session_id: sessionId });
+      _sendmiki(ws, { type: "pong", session_id: sessionId });
       return;
     }
 
     if (data.type !== "message.send") {
-      _sendhiro(ws, {
+      _sendmiki(ws, {
         type: "error",
         session_id: sessionId,
         payload: {
-          message: `Unsupported hiro message type: ${String(data.type)}`,
+          message: `Unsupported miki message type: ${String(data.type)}`,
         },
       });
       return;
@@ -702,7 +702,7 @@ hiroWss.on("connection", (ws, req) => {
       : [];
 
     if (!content && media.length === 0) {
-      _sendhiro(ws, {
+      _sendmiki(ws, {
         type: "error",
         session_id: sessionId,
         payload: {
@@ -715,10 +715,10 @@ hiroWss.on("connection", (ws, req) => {
 
     const assistantMessageId = `assistant-${requestId}`;
     let fullResponse = "";
-    let lastContextUsage: hiroContextUsage | null = null;
+    let lastContextUsage: mikiContextUsage | null = null;
 
-    _sendhiro(ws, { type: "typing.start", session_id: sessionId });
-    _sendhiro(ws, {
+    _sendmiki(ws, { type: "typing.start", session_id: sessionId });
+    _sendmiki(ws, {
       type: "message.create",
       id: crypto.randomUUID(),
       session_id: sessionId,
@@ -748,7 +748,7 @@ hiroWss.on("connection", (ws, req) => {
           event = { type: "stream_chunk", content: chunk };
         }
 
-        const eventContextUsage = _normalizehiroContextUsage(
+        const eventContextUsage = _normalizemikiContextUsage(
           event.context_usage,
         );
         if (eventContextUsage) {
@@ -758,7 +758,7 @@ hiroWss.on("connection", (ws, req) => {
         if (event.type === "stream_chunk") {
           fullResponse +=
             typeof event.content === "string" ? event.content : "";
-          _sendhiro(ws, {
+          _sendmiki(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
             session_id: sessionId,
@@ -767,14 +767,14 @@ hiroWss.on("connection", (ws, req) => {
               message_id: assistantMessageId,
               content: fullResponse,
               model_name: orchestrator.modelName,
-              context_usage: _hiroContextUsage(fullResponse, lastContextUsage),
+              context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
             },
           });
           continue;
         }
 
         if (event.type === "tool_call") {
-          _sendhiro(ws, {
+          _sendmiki(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
             session_id: sessionId,
@@ -805,7 +805,7 @@ hiroWss.on("connection", (ws, req) => {
         }
       }
 
-      _sendhiro(ws, {
+      _sendmiki(ws, {
         type: "message.update",
         id: crypto.randomUUID(),
         session_id: sessionId,
@@ -814,13 +814,13 @@ hiroWss.on("connection", (ws, req) => {
           message_id: assistantMessageId,
           content: fullResponse,
           model_name: orchestrator.modelName,
-          context_usage: _hiroContextUsage(fullResponse, lastContextUsage),
+          context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
         },
       });
-      _sendhiro(ws, { type: "typing.stop", session_id: sessionId });
+      _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
     } catch (err: unknown) {
-      _sendhiro(ws, { type: "typing.stop", session_id: sessionId });
-      _sendhiro(ws, {
+      _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+      _sendmiki(ws, {
         type: "error",
         session_id: sessionId,
         payload: {
@@ -1027,7 +1027,7 @@ wss.on("connection", (ws) => {
 // Enhanced API endpoints with circuit breaker protection
 app.get("/", (_req, res) => {
   res.json({
-    service: "Hiro Core API",
+    service: "Miki Core API",
     version: "1.0.0",
     status: "running",
     provider: orchestrator.provider,
@@ -1041,7 +1041,7 @@ function uniqueResolvedPaths(paths: string[]): string[] {
 
 function resolveDashboardDirs(): string[] {
   const candidates: string[] = [];
-  const runtimeRoot = process.env["Hiro_RUNTIME_ROOT"];
+  const runtimeRoot = process.env["Miki_RUNTIME_ROOT"];
   if (runtimeRoot) {
     candidates.push(
       path.join(runtimeRoot, "packages", "ui", "frontend", "dist"),
@@ -1129,7 +1129,7 @@ app.get("/status", (_req, res) => {
   res.json({
     status: "idle",
     agent: agentConfig.name || "Miki",
-    project: agentConfig.project || "Hiro",
+    project: agentConfig.project || "Miki",
     llm_provider: orchestrator.provider,
     llm_model: orchestrator.modelName,
     heartbeat: hb,
@@ -1786,7 +1786,7 @@ async function shutdown() {
   shutdownInProgress = true;
   console.log("Shutting down...");
   _clearWSPing();
-  await Promise.all([closeWebSocketServer(wss), closeWebSocketServer(hiroWss)]);
+  await Promise.all([closeWebSocketServer(wss), closeWebSocketServer(mikiWss)]);
   await closeHttpServer(server, {
     timeoutMs: 5000,
     onForceClose: () =>

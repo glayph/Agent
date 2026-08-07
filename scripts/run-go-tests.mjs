@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 
 const modules = [
-  "packages/Hiro-cli",
+  "packages/Miki-cli",
   "packages/ui/backend",
 ];
 

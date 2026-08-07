@@ -46,12 +46,12 @@ function fixPackage(dir, pkgName) {
 
 function main() {
   const packageNames = [
-    "@hiro/cli",
-    "@hiro/config", 
-    "@hiro/core",
-    "@hiro/gateway",
-    "@hiro/installer",
-    "@hiro/skills",
+    "@miki/cli",
+    "@miki/config", 
+    "@miki/core",
+    "@miki/gateway",
+    "@miki/installer",
+    "@miki/skills",
   ];
 
   log("Fixing workspace protocol dependencies...");
@@ -61,7 +61,7 @@ function main() {
     const fullPkgPath = path.join(root, "packages", pkgName.split("/")[1]);
     if (fs.existsSync(fullPkgPath)) {
       fixPackage(fullPkgPath, pkgName);
-    } else if (pkgName === "@hiro/cli" && fs.existsSync(path.join(root, "packages", "cli"))) {
+    } else if (pkgName === "@miki/cli" && fs.existsSync(path.join(root, "packages", "cli"))) {
       fixPackage(path.join(root, "packages", "cli"), pkgName);
     }
   }

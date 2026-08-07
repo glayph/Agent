@@ -52,8 +52,8 @@ import { ScrollArea } from "@/shared/ui/scroll-area"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 
-const PINNED_SESSIONS_STORAGE_KEY = "Hiro.chat.history.pinned"
-const RENAMED_SESSIONS_STORAGE_KEY = "Hiro.chat.history.renamed"
+const PINNED_SESSIONS_STORAGE_KEY = "Miki.chat.history.pinned"
+const RENAMED_SESSIONS_STORAGE_KEY = "Miki.chat.history.renamed"
 
 function readPinnedSessionIds(): string[] {
   if (typeof window === "undefined") {

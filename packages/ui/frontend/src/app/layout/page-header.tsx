@@ -47,7 +47,7 @@ export function PageHeader({
     return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? "Cmd K" : "Ctrl K"
   }, [])
   const openCommand = () => {
-    window.dispatchEvent(new Event("Hiro:command"))
+    window.dispatchEvent(new Event("Miki:command"))
   }
 
   return (

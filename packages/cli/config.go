@@ -33,18 +33,18 @@ type Config struct {
 }
 
 func parseConfig(args []string) (Config, error) {
-	workspaceDir := firstNonEmpty(os.Getenv("Hiro_WORKSPACE_DIR"), discoverWorkspaceDir())
-	runtimeRoot := firstNonEmpty(os.Getenv("Hiro_RUNTIME_ROOT"), defaultRuntimeRoot(workspaceDir))
+	workspaceDir := firstNonEmpty(os.Getenv("Miki_WORKSPACE_DIR"), discoverWorkspaceDir())
+	runtimeRoot := firstNonEmpty(os.Getenv("Miki_RUNTIME_ROOT"), defaultRuntimeRoot(workspaceDir))
 	cfg := Config{
 		Command:       commandStart,
 		WorkspaceDir:  workspaceDir,
 		RuntimeRoot:   runtimeRoot,
-		GatewayEntry:  firstNonEmpty(os.Getenv("Hiro_GATEWAY_ENTRY"), filepath.Join(runtimeRoot, "packages", "gateway", "dist", "index.js")),
-		RuntimeLoader: firstNonEmpty(os.Getenv("Hiro_RUNTIME_LOADER"), filepath.Join(runtimeRoot, "runtime-loader.mjs")),
-		NodePath:      firstNonEmpty(os.Getenv("Hiro_NODE"), "node"),
+		GatewayEntry:  firstNonEmpty(os.Getenv("Miki_GATEWAY_ENTRY"), filepath.Join(runtimeRoot, "packages", "gateway", "dist", "index.js")),
+		RuntimeLoader: firstNonEmpty(os.Getenv("Miki_RUNTIME_LOADER"), filepath.Join(runtimeRoot, "runtime-loader.mjs")),
+		NodePath:      firstNonEmpty(os.Getenv("Miki_NODE"), "node"),
 		Host:          firstNonEmpty(os.Getenv("GATEWAY_HOST"), "127.0.0.1"),
 		Port:          intFromEnv("GATEWAY_PORT", 18800),
-		Version:       firstNonEmpty(os.Getenv("Hiro_PACKAGE_VERSION"), packageVersion(workspaceDir)),
+		Version:       firstNonEmpty(os.Getenv("Miki_PACKAGE_VERSION"), packageVersion(workspaceDir)),
 	}
 
 	for i := 0; i < len(args); i++ {
@@ -132,7 +132,7 @@ func discoverWorkspaceDir() string {
 		return "."
 	}
 	for dir := wd; ; dir = filepath.Dir(dir) {
-		if fileExists(filepath.Join(dir, "package.json")) && fileExists(filepath.Join(dir, "bin", "Hiro.js")) {
+		if fileExists(filepath.Join(dir, "package.json")) && fileExists(filepath.Join(dir, "bin", "Miki.js")) {
 			return dir
 		}
 		parent := filepath.Dir(dir)

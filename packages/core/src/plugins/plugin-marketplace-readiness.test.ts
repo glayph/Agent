@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { SkillRegistry, type PluginContracts } from "@hiro/installer";
+import { SkillRegistry, type PluginContracts } from "@miki/installer";
 import { SqliteAuditLog } from "../audit-log";
 import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";
 import { buildPluginMarketplaceReadinessReport } from "./plugin-marketplace-readiness";
@@ -89,7 +89,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
     );
     await registerPlugin(workspaceDir, {
       description: "GitHub review automation plugin",
-      author: "Hiro",
+      author: "Miki",
       license: "MIT",
       files: {
         "tools/review.js": "process.stdin.resume();",
@@ -132,7 +132,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
     workspaceDir = createWorkspace();
     await registerPlugin(workspaceDir, {
       description: "Remote lookup plugin",
-      author: "Hiro",
+      author: "Miki",
       license: "MIT",
       files: {
         "tools/lookup.js": "process.stdin.resume();",
@@ -175,7 +175,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
     await registerPlugin(workspaceDir, {
       name: "undeclared_remote_plugin",
       description: "Remote plugin with incomplete manifest permissions",
-      author: "Hiro",
+      author: "Miki",
       license: "MIT",
       files: {
         "tools/remote.js": [
@@ -221,7 +221,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
     workspaceDir = createWorkspace();
     await registerPlugin(workspaceDir, {
       description: "Local provider catalog plugin",
-      author: "Hiro",
+      author: "Miki",
       license: "MIT",
       contracts: {
         providers: [
@@ -282,7 +282,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
     workspaceDir = createWorkspace();
     await registerPlugin(workspaceDir, {
       description: "Audited plugin",
-      author: "Hiro",
+      author: "Miki",
       license: "MIT",
       contracts: {
         tools: [
