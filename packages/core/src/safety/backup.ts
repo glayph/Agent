@@ -296,6 +296,18 @@ export class BackupManager {
       const backupPath = path.resolve(backupRoot, entry.backupPath);
       assertInsideWorkspace(this.workspaceDir, source);
       assertInsideWorkspace(backupRoot, backupPath);
+      if (entry.kind === "directory") {
+        // copyRecursive() only overlays files from the backup onto the
+        // destination; it never removes files that exist in the
+        // destination but not in the backup. Without clearing the
+        // destination first, rollback is not a true restore: any file
+        // added under this directory after the backup was taken would
+        // survive the rollback untouched. The pre-rollback safety backup
+        // above already captured the current (pre-restore) state, so it
+        // is safe to delete the destination before copying the backup
+        // back in.
+        deleteRecursive(source);
+      }
       copyRecursive(backupPath, source);
     }
 

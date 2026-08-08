@@ -63,6 +63,23 @@ describe("safety and recovery modules", () => {
     expect(manager.listBackups().length).toBeGreaterThanOrEqual(2);
   });
 
+  it("removes files added to a directory after the backup was taken when rolling back", () => {
+    const workspace = tempWorkspace("Miki-backup-added-file-");
+    const manager = new BackupManager(workspace);
+    const backup = manager.createBackup("pre-add");
+
+    const addedFile = path.join(workspace, "config", "added-after-backup.yaml");
+    fs.writeFileSync(addedFile, "should: not-survive-rollback\n", "utf-8");
+    expect(fs.existsSync(addedFile)).toBe(true);
+
+    manager.rollback(backup.id);
+
+    expect(fs.existsSync(addedFile)).toBe(false);
+    expect(
+      fs.readFileSync(path.join(workspace, "config", "agent.yaml"), "utf-8"),
+    ).toContain("name: Test");
+  });
+
   it("can skip high-volume operational stores for startup backups", () => {
     const workspace = tempWorkspace("Miki-backup-startup-fast-");
     const auditPath = path.join(workspace, "data", "audit.db");
