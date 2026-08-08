@@ -1427,10 +1427,10 @@ async function handleChatRequest(req: Request, res: Response): Promise<void> {
   }
 }
 
-app.post("/chat", handleChatRequest);
+app.post("/chat", requireHttpAuth, handleChatRequest);
 
 // ... rest of the endpoints remain the same but with requestId added
-app.get("/improvement/status", (_req, res) => {
+app.get("/improvement/status", requireHttpAuth, (_req, res) => {
   try {
     const si = orchestrator.selfImprovement.getStatus();
     const sg = orchestrator.skillGovernance.getStatus();
@@ -1444,7 +1444,7 @@ app.get("/improvement/status", (_req, res) => {
   }
 });
 
-app.get("/improvement/tunings", (_req, res) => {
+app.get("/improvement/tunings", requireHttpAuth, (_req, res) => {
   try {
     const tunings = orchestrator.selfImprovement.getAccumulatedTunings();
     res.json({
@@ -1456,7 +1456,7 @@ app.get("/improvement/tunings", (_req, res) => {
   }
 });
 
-app.post("/improvement/force-reflection", async (_req, res) => {
+app.post("/improvement/force-reflection", requireHttpAuth, async (_req, res) => {
   try {
     const result = await orchestrator.selfImprovement.runReflectionCycle({
       force: true,
@@ -1471,7 +1471,7 @@ app.post("/improvement/force-reflection", async (_req, res) => {
   }
 });
 
-app.post("/improvement/force-optimization", async (_req, res) => {
+app.post("/improvement/force-optimization", requireHttpAuth, async (_req, res) => {
   try {
     const body = (_req.body || {}) as Record<string, unknown>;
     const result = await orchestrator.selfImprovement.runOptimizationCycle({
@@ -1488,7 +1488,7 @@ app.post("/improvement/force-optimization", async (_req, res) => {
   }
 });
 
-app.post("/improvement/force-tuning", async (_req, res) => {
+app.post("/improvement/force-tuning", requireHttpAuth, async (_req, res) => {
   try {
     const tuning = await orchestrator.selfImprovement.runPromptTuningCycle({
       force: true,
@@ -1504,7 +1504,7 @@ app.post("/improvement/force-tuning", async (_req, res) => {
 });
 
 // ── Task Queue Endpoints ─────────────────────────────────────────────────
-app.get("/tasks", (_req, res) => {
+app.get("/tasks", requireHttpAuth, (_req, res) => {
   try {
     const stats = orchestrator.getTaskQueueStats();
     res.json({
@@ -1521,7 +1521,7 @@ app.get("/tasks", (_req, res) => {
   }
 });
 
-app.post("/tasks", (_req, res) => {
+app.post("/tasks", requireHttpAuth, (_req, res) => {
   try {
     const body = (_req.body || {}) as Record<string, unknown>;
     const sessionId =
@@ -1557,7 +1557,7 @@ app.post("/tasks", (_req, res) => {
   }
 });
 
-app.get("/tasks/scheduled", (_req, res) => {
+app.get("/tasks/scheduled", requireHttpAuth, (_req, res) => {
   try {
     res.json({
       scheduled: orchestrator.getScheduledTasks(),
@@ -1570,7 +1570,7 @@ app.get("/tasks/scheduled", (_req, res) => {
   }
 });
 
-app.post("/tasks/scheduled", (_req, res) => {
+app.post("/tasks/scheduled", requireHttpAuth, (_req, res) => {
   try {
     const body = (_req.body || {}) as Record<string, unknown>;
     const sessionId =
@@ -1625,7 +1625,7 @@ app.post("/tasks/scheduled", (_req, res) => {
   }
 });
 
-app.delete("/tasks/scheduled/:scheduledTaskId", (_req, res) => {
+app.delete("/tasks/scheduled/:scheduledTaskId", requireHttpAuth, (_req, res) => {
   const scheduledTaskId = _req.params["scheduledTaskId"];
   try {
     const cancelled = orchestrator.cancelScheduledTask(scheduledTaskId);
@@ -1638,7 +1638,7 @@ app.delete("/tasks/scheduled/:scheduledTaskId", (_req, res) => {
   }
 });
 
-app.get("/tasks/session/:sessionId", (_req, res) => {
+app.get("/tasks/session/:sessionId", requireHttpAuth, (_req, res) => {
   const sessionId = _req.params["sessionId"];
   try {
     const tasks = orchestrator.getTasksBySession(sessionId);
@@ -1651,7 +1651,7 @@ app.get("/tasks/session/:sessionId", (_req, res) => {
   }
 });
 
-app.get("/tasks/:taskId", (_req, res) => {
+app.get("/tasks/:taskId", requireHttpAuth, (_req, res) => {
   const taskId = _req.params["taskId"];
   try {
     const task = orchestrator.getTask(taskId);
@@ -1668,7 +1668,7 @@ app.get("/tasks/:taskId", (_req, res) => {
   }
 });
 
-app.delete("/tasks/:taskId", (_req, res) => {
+app.delete("/tasks/:taskId", requireHttpAuth, (_req, res) => {
   const taskId = _req.params["taskId"];
   try {
     const cancelled = orchestrator.cancelTask(taskId);
@@ -1682,7 +1682,7 @@ app.delete("/tasks/:taskId", (_req, res) => {
 });
 
 // ── Model Management Endpoints ─────────────────────────────────────────────
-app.get("/models", (_req, res) => {
+app.get("/models", requireHttpAuth, (_req, res) => {
   try {
     const models = {
       available: settings.getSupportedModels(),
@@ -1696,7 +1696,7 @@ app.get("/models", (_req, res) => {
   }
 });
 
-app.post("/models", (req, res) => {
+app.post("/models", requireHttpAuth, (req, res) => {
   const { model_name } = req.body;
   if (!model_name) {
     res.status(400).json({ detail: "model_name is required" });
@@ -1709,7 +1709,7 @@ app.post("/models", (req, res) => {
   });
 });
 
-app.delete("/models/:modelName", (req, res) => {
+app.delete("/models/:modelName", requireHttpAuth, (req, res) => {
   const { modelName } = req.params;
   if (!modelName) {
     res.status(400).json({ detail: "modelName is required" });
@@ -1721,7 +1721,7 @@ app.delete("/models/:modelName", (req, res) => {
   });
 });
 
-app.put("/models/active", (req, res) => {
+app.put("/models/active", requireHttpAuth, (req, res) => {
   const { model_name } = req.body;
   if (!model_name) {
     res.status(400).json({ detail: "model_name is required" });
@@ -1759,7 +1759,7 @@ app.get("/metrics", (_req, res) => {
 });
 
 // ── System Monitoring Endpoints ──────────────────────────────────────────────
-app.get("/system/stats", (_req, res) => {
+app.get("/system/stats", requireHttpAuth, (_req, res) => {
   try {
     const stats = getSystemStats();
     res.json({
@@ -1771,7 +1771,7 @@ app.get("/system/stats", (_req, res) => {
   }
 });
 
-app.get("/system/health", (_req, res) => {
+app.get("/system/health", requireHttpAuth, (_req, res) => {
   try {
     const stats = getSystemStats();
     const isHealthy =
