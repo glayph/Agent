@@ -485,6 +485,41 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
+  it("strips embedded CR/LF from config values before writing them into .env (#18)", async () => {
+    await withLauncherCompatServer(async (request, workspaceDir) => {
+      const injected =
+        "https://bridge.example.com/send\r\nMIKI_TRUSTED_FULL_ACCESS=true\r\nEVIL=1";
+
+      const response = await request("/config", {
+        method: "PATCH",
+        body: JSON.stringify({
+          channels: {
+            whatsapp: { settings: { bridge_url: injected } },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+
+      // .env lives under <workspace>/config/.env (normalizeRuntimePaths).
+      const envPath = path.join(workspaceDir, "config", ".env");
+      const envContent = fs.existsSync(envPath)
+        ? fs.readFileSync(envPath, "utf-8")
+        : "";
+
+      // The whole malicious payload must collapse onto a single
+      // WHATSAPP_BRIDGE_URL= line; none of the injected lines may appear
+      // as their own standalone .env entries.
+      expect(envContent).not.toMatch(/^MIKI_TRUSTED_FULL_ACCESS=true$/m);
+      expect(envContent).not.toMatch(/^EVIL=1$/m);
+      const bridgeLine = envContent
+        .split("\n")
+        .find((line) => line.startsWith("WHATSAPP_BRIDGE_URL="));
+      expect(bridgeLine).toBeDefined();
+      expect(bridgeLine).not.toContain("\r");
+    });
+  });
+
   it("rejects unsupported web-search provider config", async () => {
     await withLauncherCompatServer(async (request) => {
       const response = await request("/tools/web-search-config", {

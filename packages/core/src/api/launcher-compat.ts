@@ -1838,7 +1838,13 @@ function noteLoginFailure(req: Request): void {
   existing.count += 1;
 }
 
-function updateEnvVar(paths: RuntimePaths, key: string, value: string): void {
+function updateEnvVar(paths: RuntimePaths, key: string, rawValue: string): void {
+  // Strip embedded CR/LF before this value is ever turned into a raw
+  // `KEY=value` line. Without this, a dashboard config value containing a
+  // newline (e.g. a webhook URL, nickname, or channel list) could inject
+  // extra lines into .env and silently change unrelated runtime config
+  // after restart.
+  const value = rawValue.replace(/[\r\n]+/g, " ").trim();
   const envPath = path.join(paths.configDir, ".env");
   let content = "";
   try {
