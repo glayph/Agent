@@ -1,8 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
+import { normalizeRuntimePaths, resolveDownloadedSkillsDir, type RuntimePaths } from "./paths.js";
 import type { RuntimeRequirement } from "./runtime-fetch/types.js";
+import { SkillRegistry, type InstalledSkill } from "@miki/installer";
 
 export interface SkillMetadata {
   id: string;
@@ -38,6 +39,7 @@ export interface SearchResult {
 
 export class SkillSearchEngine {
   private skillsDirs: string[];
+  private downloadedSkillsDir: string;
   private skillCache: Map<string, SkillMetadata> = new Map();
   private lastCacheTime: number = 0;
   private cacheDurationMs: number = 24 * 60 * 60 * 1000;
@@ -55,6 +57,15 @@ export class SkillSearchEngine {
         ...additionalDirs.map((dir) => path.resolve(dir)),
       ]),
     );
+    // Marketplace/plugin installs go through SkillInstaller, which (per
+    // resolveDownloadedSkillsDir's sandbox_mode contract) writes to
+    // <dataDir>/downloaded-skills, not userSkillsDir, and tracks them as
+    // flat <name>.ts + <name>_assets/ files in its own SkillRegistry state
+    // file rather than the categories.json/skills.json layout scanSkillsDir
+    // expects. Without this, installed-skill metadata is invisible to
+    // search/listing from the moment of install, and appears "lost" every
+    // time the cache is rebuilt (server restart, refreshCache(), TTL expiry).
+    this.downloadedSkillsDir = resolveDownloadedSkillsDir(runtimePaths);
   }
 
   async search(query: SearchQuery): Promise<SearchResult> {
@@ -160,7 +171,42 @@ export class SkillSearchEngine {
     for (const skillsDir of this.skillsDirs) {
       this.scanSkillsDir(skillsDir);
     }
+    await this.scanInstalledRegistry();
     this.lastCacheTime = now;
+  }
+
+  /**
+   * Merges skills installed via SkillInstaller (tracked in its own
+   * SkillRegistry state file at downloadedSkillsDir) into skillCache.
+   * These never live under a categories.json/skills.json category folder,
+   * so scanSkillsDir() can never see them on its own. A curated/bundled
+   * skill with the same id always wins on collision.
+   */
+  private async scanInstalledRegistry(): Promise<void> {
+    try {
+      const registry = new SkillRegistry(this.downloadedSkillsDir);
+      await registry.init();
+      const installed: InstalledSkill[] = await registry.listInstalled();
+      for (const skill of installed) {
+        if (!skill.name || this.skillCache.has(skill.name)) continue;
+        this.skillCache.set(skill.name, {
+          id: skill.name,
+          name: skill.name,
+          description: skill.description || "",
+          category: "marketplace",
+          tags: [],
+          author: skill.author,
+          version: skill.version || "0.0.0",
+          enabled: true,
+          path: skill.assetsPath || skill.path,
+        });
+      }
+    } catch (err) {
+      console.error(
+        `Failed to load installed-skill registry from ${this.downloadedSkillsDir}:`,
+        err,
+      );
+    }
   }
 
   private scanSkillsDir(skillsDir: string): void {
