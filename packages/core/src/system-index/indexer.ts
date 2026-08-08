@@ -204,8 +204,12 @@ export class SystemIndexer {
     this.db.remove(path.resolve(filePath));
   }
 
-  search(query: string, limit = 25): SystemIndexSearchResult[] {
-    return this.db.search(query, limit);
+  search(query: string, limit = 25, offset = 0): SystemIndexSearchResult[] {
+    return this.db.search(query, limit, offset);
+  }
+
+  searchCount(query: string): number {
+    return this.db.searchCount(query);
   }
 
   roots(): string[] {

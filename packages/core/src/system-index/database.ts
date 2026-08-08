@@ -172,8 +172,9 @@ export class SystemIndexDatabase {
     return row.count;
   }
 
-  search(query: string, limit: number): SystemIndexSearchResult[] {
+  search(query: string, limit: number, offset = 0): SystemIndexSearchResult[] {
     const normalizedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    const normalizedOffset = Math.max(0, Math.floor(offset) || 0);
     const queryText = ftsQuery(query);
     if (!queryText) return [];
 
@@ -195,9 +196,9 @@ export class SystemIndexDatabase {
           JOIN system_index_files AS files ON files.path = system_index_fts.path
           WHERE system_index_fts MATCH ?
           ORDER BY score ASC
-          LIMIT ?`,
+          LIMIT ? OFFSET ?`,
         )
-        .all(queryText, normalizedLimit) as SearchRow[];
+        .all(queryText, normalizedLimit, normalizedOffset) as SearchRow[];
       return rows.map(rowToSearchResult);
     } catch {
       const pattern = likePattern(query);
@@ -218,10 +219,41 @@ export class SystemIndexDatabase {
           WHERE name LIKE ? ESCAPE '\\'
              OR path LIKE ? ESCAPE '\\'
           ORDER BY modified_at_ms DESC
-          LIMIT ?`,
+          LIMIT ? OFFSET ?`,
         )
-        .all(pattern, pattern, normalizedLimit) as SearchRow[];
+        .all(pattern, pattern, normalizedLimit, normalizedOffset) as SearchRow[];
       return rows.map(rowToSearchResult);
+    }
+  }
+
+  /**
+   * Total number of files matching query, ignoring limit/offset. Lets
+   * callers compute page counts / hasMore without over-fetching rows.
+   */
+  searchCount(query: string): number {
+    const queryText = ftsQuery(query);
+    if (!queryText) return 0;
+
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+          FROM system_index_fts
+          WHERE system_index_fts MATCH ?`,
+        )
+        .get(queryText) as CountRow;
+      return row.count;
+    } catch {
+      const pattern = likePattern(query);
+      const row = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+          FROM system_index_files
+          WHERE name LIKE ? ESCAPE '\\'
+             OR path LIKE ? ESCAPE '\\'`,
+        )
+        .get(pattern, pattern) as CountRow;
+      return row.count;
     }
   }
 
