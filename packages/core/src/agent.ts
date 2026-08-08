@@ -1668,25 +1668,31 @@ export class AgentOrchestrator {
           last3.map((t) => `- ${t}`).join("\n") +
           "\n";
       }
+    }
 
-      const plan = this.skillGovernance.selfPlanner.getActivePlan();
-      if (plan) {
-        const summary = this.skillGovernance.selfPlanner.planSummary();
-        if (summary) {
-          interface PlanStep {
-            status?: string;
-            description?: string;
-          }
-          const steps: PlanStep[] = plan.steps || [];
-          const pending = steps.filter((s) => s.status === "pending");
-          const inProgress = steps.filter((s) => s.status === "in_progress");
-          dynamicStateBlock += "\n[ACTIVE PLAN]\nPlan: ...\n";
-          for (const s of inProgress) {
-            dynamicStateBlock += `  IN PROGRESS: ${s.description}\n`;
-          }
-          for (const s of pending.slice(0, 3)) {
-            dynamicStateBlock += `  PENDING: ${s.description}\n`;
-          }
+    // Active goals/plan must inject into every normal chat turn regardless
+    // of turn_profile.enabled -- turn_profile only gates self-improvement
+    // tuning notes above, it was never meant to gate goal awareness.
+    // (Previously nested inside the turn_profile check, so an active plan
+    // silently never reached the model unless Turn Profile was explicitly
+    // turned on.)
+    const plan = this.skillGovernance.selfPlanner.getActivePlan();
+    if (plan) {
+      const summary = this.skillGovernance.selfPlanner.planSummary();
+      if (summary) {
+        interface PlanStep {
+          status?: string;
+          description?: string;
+        }
+        const steps: PlanStep[] = plan.steps || [];
+        const pending = steps.filter((s) => s.status === "pending");
+        const inProgress = steps.filter((s) => s.status === "in_progress");
+        dynamicStateBlock += "\n[ACTIVE PLAN]\nPlan: ...\n";
+        for (const s of inProgress) {
+          dynamicStateBlock += `  IN PROGRESS: ${s.description}\n`;
+        }
+        for (const s of pending.slice(0, 3)) {
+          dynamicStateBlock += `  PENDING: ${s.description}\n`;
         }
       }
     }
