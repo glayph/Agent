@@ -122,14 +122,27 @@ export function relayWs(
 
   clientWs.on("close", cleanup);
   clientWs.on("error", cleanup);
-  coreWs.on("close", () => {
-    activeConnections.delete(clientWs);
-    clearInterval(idleTimer);
-  });
-  coreWs.on("error", () => {
-    activeConnections.delete(clientWs);
-    clearInterval(idleTimer);
-  });
+  // Previously these only removed bookkeeping (activeConnections/idleTimer)
+  // and left clientWs open indefinitely -- if the core backend restarted,
+  // crashed, or otherwise dropped the connection, the browser/CLI client
+  // would hang with a "connected" socket that would never receive another
+  // message and was never told to close. Now mirrors the upstream state
+  // onto the downstream client and reuses cleanup() for the rest.
+  const closeClientAfterUpstreamGone = (reason: string) => {
+    try {
+      if (
+        clientWs.readyState === WSWebSocket.OPEN ||
+        clientWs.readyState === WSWebSocket.CONNECTING
+      ) {
+        clientWs.close(1011, reason);
+      }
+    } catch {
+      /* ignore */
+    }
+    cleanup();
+  };
+  coreWs.on("close", () => closeClientAfterUpstreamGone("Upstream connection closed"));
+  coreWs.on("error", () => closeClientAfterUpstreamGone("Upstream connection error"));
 }
 
 export function closeWebSocketServer(wss: WebSocketServer): Promise<void> {
