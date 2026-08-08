@@ -30,10 +30,6 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
 
-function asBool(value: unknown): boolean {
-  return value === true
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>
@@ -104,7 +100,7 @@ export function DiscordForm({
             <SwitchCardField
               label={t("channels.field.mentionOnly")}
               hint={t("channels.form.desc.mentionOnly")}
-              checked={asBool(groupTriggerConfig.mention_only)}
+              checked={groupTriggerConfig.mention_only !== false}
               onCheckedChange={(checked) => {
                 onChange("group_trigger", {
                   ...groupTriggerConfig,
