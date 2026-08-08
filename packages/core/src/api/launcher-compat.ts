@@ -3318,14 +3318,46 @@ export function createLauncherCompatRouter({
     const authStatus: FlowComponentStatus = isAuthInitialized(state.auth)
       ? "ready"
       : "partial";
+    // Verify the React dashboard build is actually present on disk before
+    // calling the UI branch "ready" -- mirrors the same dist-path
+    // resolution api/index.ts uses to serve /web, kept local here (not
+    // imported) to avoid a circular dependency between the two router
+    // modules.
+    const uiStatus: FlowComponentStatus = (() => {
+      try {
+        const runtimeRoot = path.dirname(process.execPath);
+        const candidateDirs = [
+          path.join(runtimeRoot, "packages", "ui", "frontend", "dist"),
+          paths.sourceDir
+            ? path.join(
+                paths.sourceDir,
+                "packages",
+                "ui",
+                "frontend",
+                "dist",
+              )
+            : null,
+        ].filter((dir): dir is string => !!dir);
+        const dashboardBuilt = candidateDirs.some((dir) =>
+          fs.existsSync(path.join(dir, "index.html")),
+        );
+        return dashboardBuilt ? "ready" : "partial";
+      } catch {
+        return "error" as FlowComponentStatus;
+      }
+    })();
 
     const components: FlowComponent[] = [
       {
         id: "ui",
         label: "Web UI / CLI / App",
-        status: "ready",
+        status: uiStatus,
         summary:
-          "Dashboard, REST, websocket, and channel entrypoints are mounted.",
+          uiStatus === "ready"
+            ? "Dashboard build found on disk; REST, websocket, and channel entrypoints are mounted."
+            : uiStatus === "partial"
+              ? "REST/websocket/channel entrypoints are mounted, but no built dashboard (index.html) was found on disk -- the web UI itself may not be servable."
+              : "Failed to verify dashboard build location.",
         evidence: ["/chat", "/miki/ws", "/api", "/webhooks/*"],
       },
       {
