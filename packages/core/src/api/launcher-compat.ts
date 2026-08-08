@@ -1452,6 +1452,19 @@ function syncAgentYaml(paths: RuntimePaths, config: JsonRecord): void {
   next.channels = channels;
   next.channel_list = channels;
 
+  // The scheduler/cron gate in the agent runtime reads agent.yaml's
+  // top-level `tools.cron`, but the dashboard Cron settings are saved
+  // through syncToolsYaml() into tools.yaml's `runtime.cron`. Mirror the
+  // cron block here too so the "Allow Shell Execution" switch and the
+  // exec timeout actually reach the runtime that enforces them.
+  const uiCron = recordOrEmpty(recordOrEmpty(config.tools).cron);
+  if (Object.keys(uiCron).length > 0) {
+    next.tools = {
+      ...recordOrEmpty(next.tools),
+      cron: { ...recordOrEmpty(recordOrEmpty(next.tools).cron), ...uiCron },
+    };
+  }
+
   const existingHeartbeat = recordOrEmpty(next.heartbeat);
   const heartbeat = recordOrEmpty(config.heartbeat);
   const intervalSeconds = numberOrUndefined(
