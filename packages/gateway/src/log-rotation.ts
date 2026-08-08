@@ -35,6 +35,13 @@ export class RotatingWriteStream {
   private stream: fs.WriteStream;
   private bytesWritten = 0;
   private rotating = false;
+  // Writes that arrive while a rotation is in progress. this.stream is
+  // being end()'d during rotate(); calling .write() on it after end() emits
+  // an unhandled 'error' event that crashes the whole gateway process
+  // (this stream carries the core backend's piped stdout/stderr, so this
+  // could fire on every log rotation in a long-running deployment).
+  // Buffered here and flushed onto the fresh stream once rotation finishes.
+  private pendingWrites: Buffer[] = [];
 
   constructor(filePath: string, options: RotatingWriteStreamOptions = {}) {
     this.filePath = filePath;
@@ -48,14 +55,27 @@ export class RotatingWriteStream {
       this.bytesWritten = 0;
     }
 
-    this.stream = fs.createWriteStream(filePath, { flags: "a" });
+    this.stream = this._createStream();
+  }
+
+  private _createStream(): fs.WriteStream {
+    const stream = fs.createWriteStream(this.filePath, { flags: "a" });
+    stream.on("error", (err) => {
+      console.error("[RotatingWriteStream] Stream error:", err);
+    });
+    return stream;
   }
 
   /** Write data to the stream; triggers rotation if threshold exceeded. */
   write(data: string | Buffer): void {
     const chunk = typeof data === "string" ? Buffer.from(data, "utf-8") : data;
     this.bytesWritten += chunk.length;
-    this.stream.write(chunk);
+
+    if (this.rotating) {
+      this.pendingWrites.push(chunk);
+    } else {
+      this.stream.write(chunk);
+    }
 
     if (this.bytesWritten >= this.maxBytes && !this.rotating) {
       this.rotate().catch((err) =>
@@ -109,8 +129,15 @@ export class RotatingWriteStream {
       console.error("[RotatingWriteStream] Failed to rotate:", err);
     } finally {
       // Re-open fresh stream
-      this.stream = fs.createWriteStream(this.filePath, { flags: "a" });
+      this.stream = this._createStream();
       this.rotating = false;
+      if (this.pendingWrites.length > 0) {
+        const buffered = this.pendingWrites;
+        this.pendingWrites = [];
+        for (const chunk of buffered) {
+          this.stream.write(chunk);
+        }
+      }
     }
   }
 
