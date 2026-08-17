@@ -1,0 +1,38 @@
+/*
+ * Scoped overrides for the Smart Work Monitoring canvas.
+ * Only touches React Flow's own classes, and only within
+ * `.agent-monitor-flow`, so nothing here leaks into the rest of the app.
+ */
+
+.agent-monitor-flow {
+  background: #0b0c0f;
+}
+
+.agent-monitor-flow .react-flow__renderer {
+  background: transparent;
+}
+
+.agent-monitor-flow .react-flow__selection {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.agent-monitor-flow .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.agent-monitor-flow .react-flow__handle {
+  border-radius: 999px;
+}
+
+.agent-monitor-flow .react-flow__pane {
+  cursor: default;
+}
+
+.agent-monitor-flow .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.agent-monitor-flow .react-flow__attribution {
+  display: none;
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.db
+*.db-*
+data/
+.env
+.DS_Store
+*.tsbuildinfo
+.turbo
