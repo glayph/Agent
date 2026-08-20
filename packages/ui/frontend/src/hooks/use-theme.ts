@@ -3,50 +3,78 @@ import { useCallback, useEffect, useState } from "react"
 export type ThemePreference = "system" | "light" | "dark"
 export type ResolvedTheme = "light" | "dark"
 
-function getStoredTheme(): ThemePreference {
-  if (typeof window === "undefined") return "system"
-  const stored = localStorage.getItem("theme")
-  return stored === "light" || stored === "dark" || stored === "system"
-    ? stored
-    : "system"
+function readStoredPreference(): ThemePreference {
+  if (typeof window === "undefined") return "light"
+
+  try {
+    const stored = window.localStorage.getItem("theme")
+    if (stored === "light" || stored === "dark" || stored === "system") {
+      return stored
+    }
+  } catch {
+    // Theme persistence is optional.
+  }
+
+  return "system"
 }
 
-function getSystemTheme(): ResolvedTheme {
+function systemTheme(): ResolvedTheme {
   if (typeof window === "undefined") return "light"
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light"
 }
 
+function resolveTheme(preference: ThemePreference): ResolvedTheme {
+  return preference === "system" ? systemTheme() : preference
+}
+
 export function useTheme() {
-  const [preference, setPreference] = useState<ThemePreference>(getStoredTheme)
-  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(getSystemTheme)
-  const theme: ResolvedTheme =
-    preference === "system" ? systemTheme : preference
+  const [preference, setPreference] = useState<ThemePreference>(
+    readStoredPreference,
+  )
+  const [theme, setResolvedTheme] = useState<ResolvedTheme>(() =>
+    resolveTheme(readStoredPreference()),
+  )
 
   useEffect(() => {
     const root = document.documentElement
-    if (theme === "dark") {
-      root.classList.add("dark")
-    } else {
-      root.classList.remove("dark")
-    }
-    root.dataset.themePreference = preference
-    localStorage.setItem("theme", preference)
-  }, [preference, theme])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
     const media = window.matchMedia("(prefers-color-scheme: dark)")
-    const sync = () => setSystemTheme(media.matches ? "dark" : "light")
-    sync()
-    media.addEventListener("change", sync)
-    return () => media.removeEventListener("change", sync)
+
+    const applyTheme = () => {
+      const nextTheme = resolveTheme(preference)
+      root.classList.toggle("dark", nextTheme === "dark")
+      root.dataset.themePreference = preference
+      root.dataset.theme = nextTheme
+      root.style.colorScheme = nextTheme
+      setResolvedTheme(nextTheme)
+    }
+
+    applyTheme()
+    if (preference !== "system") return
+
+    media.addEventListener("change", applyTheme)
+    return () => media.removeEventListener("change", applyTheme)
+  }, [preference])
+
+  const setTheme = useCallback((next: ThemePreference) => {
+    setPreference(next)
+    try {
+      window.localStorage.setItem("theme", next)
+    } catch {
+      // Theme persistence is optional.
+    }
   }, [])
 
   const toggleTheme = useCallback(() => {
-    setPreference(theme === "dark" ? "light" : "dark")
-  }, [theme])
+    const next: ThemePreference = theme === "dark" ? "light" : "dark"
+    setTheme(next)
+  }, [setTheme, theme])
 
-  return { theme, preference, setTheme: setPreference, toggleTheme }
+  return {
+    theme,
+    preference,
+    setTheme,
+    toggleTheme,
+  }
 }

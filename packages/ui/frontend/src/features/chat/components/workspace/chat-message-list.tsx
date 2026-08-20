@@ -3,11 +3,13 @@ import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
+import { LiveActivityStrip } from "@/features/chat/components/live-activity-strip"
 import { TypingIndicator } from "@/features/chat/components/typing-indicator"
 import { Button } from "@/shared/ui/button"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
 import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
 import { shouldShowAssistantMessage } from "@/store/chat"
+import type { MonitorNode } from "@/features/monitor/store"
 
 import { ChatMessage as WorkspaceChatMessage } from "./chat-message"
 
@@ -26,6 +28,10 @@ interface ChatMessageListProps {
   onDeleteMessage: (messageId: string) => void
   onForkMessage: (messageId: string) => void
   onRetryMessage: (messageId: string) => void
+  onInspectMessage?: (messageId: string) => void
+  liveActivityNodes?: MonitorNode[]
+  selectedActivityNodeId?: string
+  onActivitySelect?: (node: MonitorNode) => void
 }
 
 export function ChatMessageList({
@@ -43,6 +49,10 @@ export function ChatMessageList({
   onDeleteMessage,
   onForkMessage,
   onRetryMessage,
+  onInspectMessage,
+  liveActivityNodes = [],
+  selectedActivityNodeId,
+  onActivitySelect,
 }: ChatMessageListProps) {
   const { t } = useTranslation()
   const renderableMessages = useMemo(
@@ -68,17 +78,26 @@ export function ChatMessageList({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="h-full min-h-0 overflow-y-auto px-4 py-6 [background:var(--chat-surface)] sm:px-6 sm:py-8"
+      data-chat-scroll="true"
+      className="h-full min-h-0 overflow-y-auto px-4 py-4 [background:var(--chat-surface)] sm:px-6 sm:py-7 lg:px-8"
     >
-      <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-6 pb-4 sm:gap-8">
+      <div className="mx-auto flex w-full max-w-[var(--chat-content-width)] flex-col gap-6 pb-8 sm:gap-7 sm:pb-10">
         {messages.length === 0 && !isTyping && (
-          <div className="border-border/60 bg-card/72 rounded-lg border">
+          <div className="border-0 bg-transparent py-4 sm:py-8">
             <ChatEmptyState
               hasAvailableModels={hasAvailableModels}
               defaultModelName={defaultModelName}
               isConnected={isGatewayRunning}
             />
           </div>
+        )}
+
+        {onActivitySelect && liveActivityNodes.length > 0 && (
+          <LiveActivityStrip
+            nodes={liveActivityNodes}
+            selectedNodeId={selectedActivityNodeId}
+            onSelect={onActivitySelect}
+          />
         )}
 
         {hiddenCount > 0 && (
@@ -102,11 +121,12 @@ export function ChatMessageList({
             onDelete={onDeleteMessage}
             onFork={onForkMessage}
             onRetry={onRetryMessage}
+            onInspect={onInspectMessage}
           />
         ))}
 
         {isTyping && (
-          <div className="border-border/65 bg-card/72 rounded-md border px-2.5 py-2">
+          <div className="border-0 bg-transparent px-0 py-1">
             <TypingIndicator />
           </div>
         )}

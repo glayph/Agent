@@ -72,7 +72,6 @@ const ALLOWED_ENTRYPOINT_EXTENSIONS = new Set([
   ".cjs",
   ".js",
   ".mjs",
-  ".py",
   ".ts",
   ".tsx",
 ]);

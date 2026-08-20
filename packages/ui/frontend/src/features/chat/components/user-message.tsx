@@ -64,7 +64,7 @@ export const UserMessage = memo(function UserMessage({
               height={360}
               loading="lazy"
               decoding="async"
-              className="max-h-[clamp(10rem,34svh,18rem)] max-w-full rounded-md object-cover"
+              className="max-h-[clamp(10rem,34svh,18rem)] max-w-full rounded-2xl border border-border/60 object-cover shadow-sm"
             />
           ))}
         </div>
@@ -84,7 +84,7 @@ export const UserMessage = memo(function UserMessage({
         >
           <div
             className={cn(
-              "wrap-break-word rounded-[1.35rem] border px-4 py-2 text-[14px] leading-5 whitespace-pre-wrap [background:var(--chat-user-bubble)] [border-color:var(--chat-user-border)] [box-shadow:var(--chat-user-shadow)] [color:var(--chat-user-text)]",
+              "wrap-break-word rounded-xl rounded-br-sm border px-3 py-2 text-[14px] leading-5 whitespace-pre-wrap transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)] [border-color:var(--chat-user-border)] [box-shadow:var(--chat-user-shadow)] [color:var(--chat-user-text)]",
               isCommand && "font-mono text-[12.5px]",
             )}
           >

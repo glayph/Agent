@@ -23,7 +23,7 @@ ui/frontend/
     │   ├── system.ts                System health API
     │   ├── agent-runs.ts            Agent run history API
     │   ├── goals.ts                 Goal tracking API
-    │   ├── hiro.ts                  hiro channels API
+    │   ├── miki.ts                  miki channels API
     │   ├── launcher-auth.ts         Launcher authentication API
     │   ├── oauth.ts                 OAuth flow API
     │   └── safety.ts                Safety/backup API

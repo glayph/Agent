@@ -1102,7 +1102,11 @@ export class MultiAgentRunStrategy {
           ...this.baseDecision,
           selected: {
             ...this.baseDecision.selected,
-            id: step.assignedSpecialist ?? this.baseDecision.selected.id,
+            id:
+              step.assignedSpecialist ??
+              this.baseDecision.selected?.id ??
+              this.availableSpecialists[0] ??
+              "miki",
           },
         },
         task: {
@@ -1158,7 +1162,10 @@ export class MultiAgentRunStrategy {
   > {
     const delegations = plan.steps.map(async (step) => {
       const specialistId =
-        step.assignedSpecialist ?? this.baseDecision.selected.id;
+        step.assignedSpecialist ??
+        this.baseDecision.selected?.id ??
+        this.availableSpecialists[0] ??
+        "miki";
       const decision: AgentRouteDecision = {
         ...this.baseDecision,
         selected: {

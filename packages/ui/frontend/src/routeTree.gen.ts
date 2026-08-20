@@ -21,6 +21,7 @@ import { Route as LauncherLoginRouteImport } from './routes/launcher-login'
 import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelsRouteImport } from './routes/models'
+import { Route as AgentAutomationsRouteImport } from './routes/agent/automations'
 import { Route as AgentHubRouteImport } from './routes/agent/hub'
 import { Route as AgentMonitorRouteImport } from './routes/agent/monitor'
 import { Route as AgentRunRouteImport } from './routes/agent/run'
@@ -32,6 +33,11 @@ import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as AgentsSwarmRouteImport } from './routes/agents.swarm'
 import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
 import { Route as ConfigRawRouteImport } from './routes/config.raw'
+import { Route as AgentAutomationsIndexRouteImport } from './routes/agent/automations.index'
+import { Route as AgentAutomationsConnectionsRouteImport } from './routes/agent/automations.connections'
+import { Route as AgentAutomationsCreateRouteImport } from './routes/agent/automations.create'
+import { Route as AgentAutomationsHistoryRouteImport } from './routes/agent/automations.history'
+import { Route as AgentAutomationsListRouteImport } from './routes/agent/automations.list'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -93,6 +99,11 @@ const ModelsRoute = ModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentAutomationsRoute = AgentAutomationsRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => AgentRoute,
+} as any)
 const AgentHubRoute = AgentHubRouteImport.update({
   id: '/hub',
   path: '/hub',
@@ -148,6 +159,32 @@ const ConfigRawRoute = ConfigRawRouteImport.update({
   path: '/raw',
   getParentRoute: () => ConfigRoute,
 } as any)
+const AgentAutomationsIndexRoute = AgentAutomationsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
+const AgentAutomationsConnectionsRoute =
+  AgentAutomationsConnectionsRouteImport.update({
+    id: '/connections',
+    path: '/connections',
+    getParentRoute: () => AgentAutomationsRoute,
+  } as any)
+const AgentAutomationsCreateRoute = AgentAutomationsCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
+const AgentAutomationsHistoryRoute = AgentAutomationsHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
+const AgentAutomationsListRoute = AgentAutomationsListRouteImport.update({
+  id: '/list',
+  path: '/list',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -162,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/run': typeof AgentRunRoute
@@ -173,6 +211,11 @@ export interface FileRoutesByFullPath {
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
   '/agents/': typeof AgentsIndexRoute
+  '/agent/automations/connections': typeof AgentAutomationsConnectionsRoute
+  '/agent/automations/create': typeof AgentAutomationsCreateRoute
+  '/agent/automations/history': typeof AgentAutomationsHistoryRoute
+  '/agent/automations/list': typeof AgentAutomationsListRoute
+  '/agent/automations/': typeof AgentAutomationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -197,6 +240,11 @@ export interface FileRoutesByTo {
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
   '/agents': typeof AgentsIndexRoute
+  '/agent/automations/connections': typeof AgentAutomationsConnectionsRoute
+  '/agent/automations/create': typeof AgentAutomationsCreateRoute
+  '/agent/automations/history': typeof AgentAutomationsHistoryRoute
+  '/agent/automations/list': typeof AgentAutomationsListRoute
+  '/agent/automations': typeof AgentAutomationsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -212,6 +260,7 @@ export interface FileRoutesById {
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/run': typeof AgentRunRoute
@@ -223,6 +272,11 @@ export interface FileRoutesById {
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
   '/agents/': typeof AgentsIndexRoute
+  '/agent/automations/connections': typeof AgentAutomationsConnectionsRoute
+  '/agent/automations/create': typeof AgentAutomationsCreateRoute
+  '/agent/automations/history': typeof AgentAutomationsHistoryRoute
+  '/agent/automations/list': typeof AgentAutomationsListRoute
+  '/agent/automations/': typeof AgentAutomationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -239,6 +293,7 @@ export interface FileRouteTypes {
     | '/launcher-setup'
     | '/logs'
     | '/models'
+    | '/agent/automations'
     | '/agent/hub'
     | '/agent/monitor'
     | '/agent/run'
@@ -250,6 +305,11 @@ export interface FileRouteTypes {
     | '/channels/$name'
     | '/config/raw'
     | '/agents/'
+    | '/agent/automations/connections'
+    | '/agent/automations/create'
+    | '/agent/automations/history'
+    | '/agent/automations/list'
+    | '/agent/automations/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -274,6 +334,11 @@ export interface FileRouteTypes {
     | '/channels/$name'
     | '/config/raw'
     | '/agents'
+    | '/agent/automations/connections'
+    | '/agent/automations/create'
+    | '/agent/automations/history'
+    | '/agent/automations/list'
+    | '/agent/automations'
   id:
     | '__root__'
     | '/'
@@ -288,6 +353,7 @@ export interface FileRouteTypes {
     | '/launcher-setup'
     | '/logs'
     | '/models'
+    | '/agent/automations'
     | '/agent/hub'
     | '/agent/monitor'
     | '/agent/run'
@@ -299,6 +365,11 @@ export interface FileRouteTypes {
     | '/channels/$name'
     | '/config/raw'
     | '/agents/'
+    | '/agent/automations/connections'
+    | '/agent/automations/create'
+    | '/agent/automations/history'
+    | '/agent/automations/list'
+    | '/agent/automations/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -402,6 +473,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModelsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent/automations': {
+      id: '/agent/automations'
+      path: '/automations'
+      fullPath: '/agent/automations'
+      preLoaderRoute: typeof AgentAutomationsRouteImport
+      parentRoute: typeof AgentRoute
+    }
     '/agent/hub': {
       id: '/agent/hub'
       path: '/hub'
@@ -479,6 +557,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigRawRouteImport
       parentRoute: typeof ConfigRoute
     }
+    '/agent/automations/': {
+      id: '/agent/automations/'
+      path: '/'
+      fullPath: '/agent/automations/'
+      preLoaderRoute: typeof AgentAutomationsIndexRouteImport
+      parentRoute: typeof AgentAutomationsRoute
+    }
+    '/agent/automations/connections': {
+      id: '/agent/automations/connections'
+      path: '/connections'
+      fullPath: '/agent/automations/connections'
+      preLoaderRoute: typeof AgentAutomationsConnectionsRouteImport
+      parentRoute: typeof AgentAutomationsRoute
+    }
+    '/agent/automations/create': {
+      id: '/agent/automations/create'
+      path: '/create'
+      fullPath: '/agent/automations/create'
+      preLoaderRoute: typeof AgentAutomationsCreateRouteImport
+      parentRoute: typeof AgentAutomationsRoute
+    }
+    '/agent/automations/history': {
+      id: '/agent/automations/history'
+      path: '/history'
+      fullPath: '/agent/automations/history'
+      preLoaderRoute: typeof AgentAutomationsHistoryRouteImport
+      parentRoute: typeof AgentAutomationsRoute
+    }
+    '/agent/automations/list': {
+      id: '/agent/automations/list'
+      path: '/list'
+      fullPath: '/agent/automations/list'
+      preLoaderRoute: typeof AgentAutomationsListRouteImport
+      parentRoute: typeof AgentAutomationsRoute
+    }
   }
 }
 
@@ -494,7 +607,27 @@ const ChannelsRouteRouteWithChildren = ChannelsRouteRoute._addFileChildren(
   ChannelsRouteRouteChildren,
 )
 
+interface AgentAutomationsRouteChildren {
+  AgentAutomationsConnectionsRoute: typeof AgentAutomationsConnectionsRoute
+  AgentAutomationsCreateRoute: typeof AgentAutomationsCreateRoute
+  AgentAutomationsHistoryRoute: typeof AgentAutomationsHistoryRoute
+  AgentAutomationsListRoute: typeof AgentAutomationsListRoute
+  AgentAutomationsIndexRoute: typeof AgentAutomationsIndexRoute
+}
+
+const AgentAutomationsRouteChildren: AgentAutomationsRouteChildren = {
+  AgentAutomationsConnectionsRoute: AgentAutomationsConnectionsRoute,
+  AgentAutomationsCreateRoute: AgentAutomationsCreateRoute,
+  AgentAutomationsHistoryRoute: AgentAutomationsHistoryRoute,
+  AgentAutomationsListRoute: AgentAutomationsListRoute,
+  AgentAutomationsIndexRoute: AgentAutomationsIndexRoute,
+}
+
+const AgentAutomationsRouteWithChildren =
+  AgentAutomationsRoute._addFileChildren(AgentAutomationsRouteChildren)
+
 interface AgentRouteChildren {
+  AgentAutomationsRoute: typeof AgentAutomationsRouteWithChildren
   AgentHubRoute: typeof AgentHubRoute
   AgentMonitorRoute: typeof AgentMonitorRoute
   AgentRunRoute: typeof AgentRunRoute
@@ -504,6 +637,7 @@ interface AgentRouteChildren {
 }
 
 const AgentRouteChildren: AgentRouteChildren = {
+  AgentAutomationsRoute: AgentAutomationsRouteWithChildren,
   AgentHubRoute: AgentHubRoute,
   AgentMonitorRoute: AgentMonitorRoute,
   AgentRunRoute: AgentRunRoute,

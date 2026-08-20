@@ -12,11 +12,12 @@
     "./agent-memory-integration": "./src/agent-memory-integration.js",
     "./regions": "./src/regions.js",
     "./temporary-memory": "./src/temporary-memory.js",
-    "./multi-hop-retriever": "./src/multi-hop-retriever.js"
+    "./multi-hop-retriever": "./src/multi-hop-retriever.js",
+    "./graph-cognitive-memory": "./src/graph-cognitive-memory.js"
   },
   "scripts": {
     "build": "echo 'No build step needed'",
-    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js"
+    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js"
   },
   "keywords": [
     "miki",

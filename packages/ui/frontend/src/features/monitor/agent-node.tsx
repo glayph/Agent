@@ -1,15 +1,20 @@
-import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { Handle, type NodeProps, Position } from "@xyflow/react"
 import { AnimatePresence, motion } from "framer-motion"
 import { memo, useMemo } from "react"
 
+import {
+  activityStatusLabel,
+  activitySummary,
+  activityTitle,
+} from "@/features/monitor/activity-copy"
+import { StatusIcon } from "@/features/monitor/node-visuals"
 import {
   NODE_TYPE_ACCENT,
   NODE_TYPE_ICON,
   NODE_TYPE_LABEL,
   STATUS_COLOR,
-  StatusIcon,
-} from "@/features/monitor/node-visuals"
-import { toggleNodeUIState, type MonitorNode } from "@/features/monitor/store"
+} from "@/features/monitor/node-visuals.constants"
+import { type MonitorNode, toggleNodeUIState } from "@/features/monitor/store"
 import { cn } from "@/lib/utils"
 
 function formatDuration(ms?: number): string | null {
@@ -24,7 +29,10 @@ function AgentNodeInner({ data }: NodeProps) {
   const accent = NODE_TYPE_ACCENT[node.type]
   const statusColor = STATUS_COLOR[node.status]
   const expanded = node.uiState === "expanded"
-  const duration = useMemo(() => formatDuration(node.durationMs), [node.durationMs])
+  const duration = useMemo(
+    () => formatDuration(node.durationMs),
+    [node.durationMs],
+  )
 
   const isActive = node.status === "running" || node.status === "retrying"
 
@@ -57,7 +65,7 @@ function AgentNodeInner({ data }: NodeProps) {
             : `0 0 0 1px rgba(255,255,255,0.06), 0 2px 10px rgba(0,0,0,0.4)`,
         }}
         className={cn(
-          "select-none overflow-hidden rounded-xl border border-white/[0.06] bg-[#181a20]",
+          "overflow-hidden rounded-xl border border-white/[0.06] bg-[#181a20] select-none",
           "font-mono",
         )}
         style={{
@@ -86,9 +94,9 @@ function AgentNodeInner({ data }: NodeProps) {
                 <Icon size={13} style={{ color: accent }} />
                 <span
                   className="truncate text-[11px] font-semibold tracking-wide text-white/90"
-                  title={node.label}
+                  title={activityTitle(node)}
                 >
-                  {node.label}
+                      {activityTitle(node)}
                 </span>
                 <span className="ml-auto shrink-0">
                   <StatusIcon status={node.status} size={13} />
@@ -98,7 +106,7 @@ function AgentNodeInner({ data }: NodeProps) {
               {/* Body */}
               <div className="flex flex-1 flex-col gap-1.5 overflow-hidden px-3 py-2 text-[10.5px] leading-tight text-white/60">
                 <div className="flex items-center justify-between">
-                  <span className="text-white/35">Type</span>
+                  <span className="text-white/35">Activity</span>
                   <span style={{ color: accent }}>
                     {NODE_TYPE_LABEL[node.type]}
                   </span>
@@ -106,8 +114,7 @@ function AgentNodeInner({ data }: NodeProps) {
                 <div className="flex items-center justify-between">
                   <span className="text-white/35">Status</span>
                   <span style={{ color: statusColor }} className="capitalize">
-                    {node.status}
-                    {node.attempt ? ` (retry ${node.attempt})` : ""}
+                    {activityStatusLabel(node.status)}
                   </span>
                 </div>
                 {duration && (
@@ -122,18 +129,14 @@ function AgentNodeInner({ data }: NodeProps) {
                     <span className="text-white/70">Parallel</span>
                   </div>
                 )}
-                {(node.outputPreview || node.error) && (
-                  <div className="mt-1 min-h-0 flex-1 overflow-hidden rounded-md bg-black/40 p-1.5">
-                    <p
-                      className={cn(
-                        "line-clamp-4 break-words",
-                        node.error ? "text-red-300/80" : "text-white/50",
-                      )}
-                    >
-                      {node.error || node.outputPreview}
-                    </p>
-                  </div>
-                )}
+                <p
+                  className={cn(
+                    "mt-1 line-clamp-3 break-words text-[11px] leading-4",
+                    node.status === "failed" ? "text-red-300/80" : "text-white/50",
+                  )}
+                >
+                  {activitySummary(node)}
+                </p>
               </div>
 
               {/* Progress bar for running state */}
@@ -171,7 +174,11 @@ function AgentNodeInner({ data }: NodeProps) {
                   className="pointer-events-none absolute inset-0 rounded-xl"
                   style={{ border: `1px solid ${accent}` }}
                   animate={{ opacity: [0.15, 0.6, 0.15] }}
-                  transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                  transition={{
+                    duration: 1.6,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
                 />
               )}
             </motion.div>

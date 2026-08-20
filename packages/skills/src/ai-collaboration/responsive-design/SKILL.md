@@ -2,11 +2,11 @@
 name: responsive-design
 description: "Build layouts that work from 320px mobile to ultrawide desktop using mobile-first methodology."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [responsive, mobile-first, cross-device, adaptive]
     related_skills: [css-styling]
 ---

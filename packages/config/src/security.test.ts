@@ -19,6 +19,11 @@ describe("security helpers", () => {
     }
   });
 
+  it("uses process.env safely when no CORS options are supplied", () => {
+    expect(() => allowedCorsOriginsFromEnv()).not.toThrow();
+    expect(() => isAllowedCorsOrigin("http://localhost:5173")).not.toThrow();
+  });
+
   it("allows only configured CORS origins", () => {
     const allowed = allowedCorsOriginsFromEnv({
       Miki_ALLOWED_ORIGINS: "http://localhost:18800,http://127.0.0.1:18800",

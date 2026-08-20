@@ -136,13 +136,34 @@ export function resolveDownloadedSkillsDir(
 
 export function resolveRuntimePaths(): RuntimePaths {
   const legacyDir = resolveLegacyDir();
-  const configDir = path.join(osConfigRoot(), Miki_NS);
-  const dataDir = path.join(osDataRoot(), Miki_NS);
-  const skillsDir = path.join(osDataRoot(), Miki_NS, "skills");
-  const cacheDir = path.join(osCacheRoot(), Miki_NS);
-  const binDir = path.join(osDataRoot(), Miki_NS, "bin");
-  const docsDir = path.join(osDataRoot(), Miki_NS, "docs");
-  const outputDir = path.join(osDataRoot(), Miki_NS, "output");
+  // An explicit runtime root is an isolation boundary for supervised, test,
+  // and multi-instance deployments. Do not silently fall back to the shared
+  // OS-level Miki directories when the supervisor has selected a runtime.
+  const explicitRuntimeRoot = readMikiEnv("MIKI_RUNTIME_ROOT");
+  const runtimeRoot = explicitRuntimeRoot
+    ? path.resolve(explicitRuntimeRoot)
+    : undefined;
+  const configDir = runtimeRoot
+    ? path.join(runtimeRoot, "config")
+    : path.join(osConfigRoot(), Miki_NS);
+  const dataDir = runtimeRoot
+    ? path.join(runtimeRoot, "data")
+    : path.join(osDataRoot(), Miki_NS);
+  const skillsDir = runtimeRoot
+    ? path.join(runtimeRoot, "skills")
+    : path.join(osDataRoot(), Miki_NS, "skills");
+  const cacheDir = runtimeRoot
+    ? path.join(runtimeRoot, "cache")
+    : path.join(osCacheRoot(), Miki_NS);
+  const binDir = runtimeRoot
+    ? path.join(runtimeRoot, "bin")
+    : path.join(osDataRoot(), Miki_NS, "bin");
+  const docsDir = runtimeRoot
+    ? path.join(runtimeRoot, "docs")
+    : path.join(osDataRoot(), Miki_NS, "docs");
+  const outputDir = runtimeRoot
+    ? path.join(runtimeRoot, "output")
+    : path.join(osDataRoot(), Miki_NS, "output");
   const sourceDir = legacyDir ?? process.cwd();
 
   const paths: RuntimePaths = {

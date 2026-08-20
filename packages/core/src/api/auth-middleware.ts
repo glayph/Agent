@@ -121,14 +121,14 @@ export function validateApiKey(
   }
 
   const auth = authenticateApiKeyHeaders(req.headers);
-  if (!auth.ok) {
-    return res.status(auth.status).json({
-      error: auth.error,
-      detail: auth.detail,
-    });
+  if (!("status" in auth)) {
+    return next();
   }
 
-  next();
+  return res.status(auth.status).json({
+    error: auth.error,
+    detail: auth.detail,
+  });
 }
 
 export function validateRequiredApiKey(
@@ -137,12 +137,12 @@ export function validateRequiredApiKey(
   next: NextFunction,
 ) {
   const auth = authenticateApiKeyHeaders(req.headers);
-  if (!auth.ok) {
-    return res.status(auth.status).json({
-      error: auth.error,
-      detail: auth.detail,
-    });
+  if (!("status" in auth)) {
+    return next();
   }
 
-  next();
+  return res.status(auth.status).json({
+    error: auth.error,
+    detail: auth.detail,
+  });
 }

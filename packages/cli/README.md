@@ -1,137 +1,75 @@
-# Agent CLI package for public npm distribution
+# Agent Miki CLI package
 
-This directory contains the CLI agent entry point that serves as the main interface when the miki project is distributed via npm. Unlike the system-level packages that are grouped under `packages/` in the monorepo structure, this package is intended to be published and installed as a standalone npm package.
+This directory contains the command-line entry point and terminal interface for the Agent Miki runtime. The JavaScript launcher starts the built gateway for npm/desktop-style usage, while the Go companion provides a native terminal dashboard with live runtime controls and logs.
 
-## Overview
-
-The `@hiro/cli` package provides:
-
-1. **Entry Point**: `agent.js` - Main CLI script that launches the miki dashboard
-2. **CLI Commands**: start, doctor, install, uninstall, version, help
-3. **Runtime Support**: Express gateway launching, system tray integration
-4. **Platform Detection**: Works on Windows, macOS, and Linux
-
-## Key Features
-
-- **npm Package Integration**: Can be installed via `npm install @hiro/cli`
-- **Multiple Platforms**: Works on Windows, macOS, and Linux systems
-- **Multiple Interfaces**: 
-  - Normal dashboard mode
-  - System tray mode (for minimalist operation)
-  - Windows installer mode
-- **System Diagnostics**: `agent doctor` command for health checks
-- **Installation/Uninstallation**: Proper package lifecycle management
-
-## Usage
+## Commands
 
 ```bash
-# Install the CLI package
-npm install @hiro/cli
-
-# Start the dashboard
 agent start
-
-# Run diagnostics
 agent doctor
-
-# Show version information
+agent install
+agent uninstall
+agent uninstall --purge
 agent version
-
-# Show help
 agent help
 ```
 
-## Runtime Requirements
+`agent uninstall` retains the workspace data by default. Use `agent uninstall --purge` only when deleting the `data`, `logs`, and `config` directories is intentional.
 
-- Node.js: `^20.19.0 || ^22.13.0 || >=24`
-- Platform: Windows, macOS, or Linux
-- Dependencies: dotenv, express, http-proxy-middleware, ws, zod
+## JavaScript launcher
 
-## Package Structure
+The Node.js launcher supports Node.js `^20.19.0 || ^22.13.0 || >=24` and resolves the gateway from the sibling `packages/gateway/dist/index.js` build. For an installed or relocated distribution, set `MIKI_GATEWAY_PATH` to the built gateway entry file. The workspace used by install and uninstall can be set with `MIKI_WORKSPACE_DIR`.
 
+The `doctor` command checks the CLI entrypoint, package manifest, gateway build, Node.js runtime, and TCP/IP availability. It exits with an error when `agent start` cannot find a gateway build unless an explicit gateway path is supplied.
+
+## Go terminal interface
+
+The Go companion requires Go 1.25 or newer as declared in `go.mod`. It supports:
+
+```bash
+Miki start [--host <host>] [--port <port>] [--debug] [--plain]
+Miki help
+Miki version
 ```
-@hiro/cli/
-├── agent.js           # Main CLI entry point
-├── package.json       # Package metadata
-└── README.md          # Package documentation
+
+In a terminal, `Miki start` opens the Bubble Tea dashboard. In a non-terminal environment, it automatically uses plain mode. Stop, Shutdown, and Restart terminate or restart the managed gateway process tree; they do not merely detach while claiming the service has stopped.
+
+## Environment variables
+
+- `MIKI_INSTALLER=1`: enable Windows installer mode when the native wrapper exists.
+- `MIKI_WORKSPACE_DIR`: choose the data, log, and configuration workspace.
+- `MIKI_GATEWAY_PATH`: provide an explicit built JavaScript gateway entrypoint to the Node launcher.
+- `MIKI_GATEWAY_ENTRY`: provide an explicit gateway entrypoint to the Go terminal interface.
+- `MIKI_RUNTIME_ROOT`: set the runtime distribution root used by the Go interface.
+- `MIKI_RUNTIME_LOADER`: optionally load a Node runtime loader before starting the gateway.
+- `MIKI_NODE`: choose the Node executable used by the Go interface.
+- `GATEWAY_HOST` and `GATEWAY_PORT`: choose the gateway bind address and port.
+
+Legacy mixed-case variables remain supported where the runtime already documents them, but canonical `MIKI_*` variables take precedence.
+
+## Package contents
+
+```text
+packages/cli/
+├── agent.js                     # Node.js launcher and lifecycle CLI
+├── package.json                 # npm package metadata and commands
+├── main.go, config.go           # Go terminal entrypoint and argument parsing
+├── runtime.go                   # Managed gateway process lifecycle
+├── plain.go                     # Non-interactive runtime output
+├── tui.go and styles.go         # Bubble Tea terminal dashboard
+├── process_unix.go              # Unix process-group termination
+├── process_windows.go           # Windows process termination
+└── *_test.go                    # Go regression tests
 ```
 
-## CLI Command Reference
+## Validation
 
-| Command | Description |
-|---------|-------------|
-| `agent start` | Start the miki dashboard and agent runtime |
-| `agent doctor` | Run system diagnostics and health checks |
-| `agent install` | Install miki (npm package mode) |
-| `agent uninstall` | Uninstall miki from system |
-| `agent version` | Show version and build information |
-| `agent help` | Show comprehensive help information |
+From this directory:
 
-## Flag Support
+```bash
+node --check agent.js
+node agent.js doctor
+go test ./...
+```
 
-- `--tray` - Launch in system tray mode (minimal interface)
-- `--help` - Show help for specific command
-
-## Environment Variables
-
-- `Hiro_INSTALLER=1` - Indicates running from Windows installer
-- `Hiro_NPM_PACKAGE=1` - Indicates running from npm package
-
-## CLI Behavior
-
-The CLI detects the installation context and adapts behavior accordingly:
-
-1. **NPM Package Mode**: Launches the Express gateway dashboard
-2. **Windows Installer Mode**: Uses native Hiro.exe wrapper for optimized system integration
-3. **System Tray Mode**: Provides minimal interface with system tray integration
-
-## Package Installation
-
-When installed via npm, this package:
-
-1. Creates necessary directories (data, logs, config)
-2. Sets up proper environment variables
-3. Provides proper CLI entry points
-4. Supports both normal and tray-based operation modes
-
-## Integration with miki Runtime
-
-This package integrates with the full miki runtime stack:
-
-- **Gateway**: Express gateway server
-- **Core**: Agent runtime API
-- **Memory**: GraphRAG memory system
-- **Skills**: Pre-bundled skills library
-- **Channels**: 11+ channel adapters (Telegram, Discord, Slack, Matrix, etc.)
-- **Dashboard**: React-based management interface
-- **Installation**: Skill installation and management system
-
-## Security Considerations
-
-When using this package in production:
-
-- Ensure proper permissions on data and log directories
-- Use environment variables for sensitive configuration
-- Consider using `agent doctor` for periodic system health checks
-- Keep the package updated for security patches
-
-## Package Maintenance
-
-After publishing to npm:
-
-- Run `npm publish` to release updates
-- Use `agent doctor` to verify installation health
-- Check environment requirements before running
-- Monitor package health using npm tools
-
-## Technical Details
-
-The `agent.js` script is a standalone Node.js application that:
-
-- Parses command line arguments
-- Detects execution context (npm vs installer)
-- Launches the appropriate runtime
-- Provides comprehensive error handling
-- Offers system tray integration for minimalism
-
-This package enables users to easily install and run the miki AI agent platform via npm, making it accessible to both developers and end users without complex installation procedures.
+The CLI audit verifies install directory creation, non-destructive uninstall, explicit purge deletion, gateway startup with an injected stub, Go runtime lifecycle, occupied-port failure handling, log buffering, configuration parsing, and TUI helpers.

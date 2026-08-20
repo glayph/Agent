@@ -2,11 +2,11 @@
 name: requesting-code-review
 description: "Pre-commit review: security scan, quality gates, auto-fix."
 version: 2.0.0
-author: Hiro (adapted from obra/superpowers + MorAlekss)
+author: Miki (adapted from obra/superpowers + MorAlekss)
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [code-review, security, verification, quality, pre-commit, auto-fix]
     related_skills: [writing-plans, test-driven-development, github-code-review]
 ---

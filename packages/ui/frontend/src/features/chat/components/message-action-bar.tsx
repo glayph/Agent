@@ -3,6 +3,7 @@ import {
   IconCopy,
   IconGitFork,
   IconInfoCircle,
+  IconSearch,
   IconPencil,
   IconRefresh,
   IconTrash,
@@ -38,6 +39,7 @@ interface MessageActionBarProps {
   deleteConfirmCancelLabel?: string
   deleteConfirmActionLabel?: string
   modelLabel?: string
+  inspectorLabel?: string
   align?: "start" | "end"
   placement?: "floating" | "inline"
   className?: string
@@ -47,6 +49,7 @@ interface MessageActionBarProps {
   onDelete?: () => void
   onFork?: () => void
   onRetry?: () => void
+  onInspect?: () => void
 }
 
 function MetadataIcon({
@@ -126,6 +129,8 @@ export function MessageActionBar({
   onDelete,
   onFork,
   onRetry,
+  onInspect,
+  inspectorLabel,
 }: MessageActionBarProps) {
   const { t } = useTranslation()
   const { copy, isCopied } = useCopyToClipboard()
@@ -217,6 +222,11 @@ export function MessageActionBar({
               </AlertDialogContent>
             </AlertDialog>
           </>
+        )}
+        {onInspect && (
+          <ActionButton label={inspectorLabel ?? "Inspect"} onClick={onInspect}>
+            <IconSearch className="size-3.5" />
+          </ActionButton>
         )}
         {modelLabel && (
           <MetadataIcon label={modelLabel}>

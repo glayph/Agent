@@ -1,6 +1,12 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
+import {
+  completeConnectionFromOpaqueToken,
+  listPlatforms,
+  startBrowserPlatformConnection,
+  type PlatformProvider,
+} from "@/api/automations"
 import { isSessionNotFoundError } from "@/api/sessions"
 import {
   loadSessionMessages,
@@ -10,8 +16,8 @@ import { type mikiMessage, handlemikiMessage } from "@/features/chat/protocol"
 import { handleMonitorMessage } from "@/features/monitor/protocol"
 import {
   clearStoredSessionId,
-  generateSessionId,
   readStoredSessionId,
+  SINGLE_CHAT_SESSION_ID,
 } from "@/features/chat/state"
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import i18n from "@/i18n"
@@ -327,7 +333,7 @@ export async function hydrateActiveSession() {
 
       clearStoredSessionId()
       if (isMissingStoredSession) {
-        setActiveSessionId(generateSessionId())
+        setActiveSessionId(SINGLE_CHAT_SESSION_ID)
       }
       updateChatStore({
         messages: [],
@@ -379,6 +385,87 @@ function sendmikiMessage(
   )
 }
 
+const PROVIDER_ALIASES: Array<{ provider: PlatformProvider; aliases: string[] }> = [
+  { provider: "facebook", aliases: ["facebook", "fb", "ফেসবুক"] },
+  { provider: "youtube", aliases: ["youtube", "yt", "ইউটিউব"] },
+  { provider: "x", aliases: ["twitter", "x.com", " x ", "টুইটার"] },
+  { provider: "telegram", aliases: ["telegram", "tg", "টেলিগ্রাম"] },
+  { provider: "whatsapp", aliases: ["whatsapp", "wa", "হোয়াটসঅ্যাপ"] },
+  { provider: "instagram", aliases: ["instagram", "ig", "ইনস্টাগ্রাম"] },
+  { provider: "linkedin", aliases: ["linkedin", "লিংকডইন"] },
+  { provider: "discord", aliases: ["discord"] },
+  { provider: "slack", aliases: ["slack"] },
+  { provider: "webhook", aliases: ["webhook", "ওয়েবহুক"] },
+]
+
+function detectPlatform(content: string): PlatformProvider | null {
+  const normalized = ` ${content.toLowerCase()} `
+  for (const item of PROVIDER_ALIASES) {
+    if (item.aliases.some((alias) => normalized.includes(alias))) {
+      return item.provider
+    }
+  }
+  return null
+}
+
+function extractPlatformToken(content: string): string | null {
+  const match = content.match(
+    /(?:token|api\s*key|access\s*token|bot\s*token|টোকেন|এপিআই\s*কি)\s*(?:is|হলো|হচ্ছে|:|=)?\s*(?:["'`]([^"'`]+)["'`]|([A-Za-z0-9._~+/=-]{8,}))/i,
+  )
+  const token = match?.[1] ?? match?.[2]
+  return token?.trim() || null
+}
+
+function isPlatformConnectionIntent(content: string): boolean {
+  return /(?:connect|সংযোগ|কানেক্ট|যোগ|setup|সেটআপ|configure|কনফিগার|token|api\s*key|টোকেন|এপিআই|oauth|ওআউথ)/i.test(content)
+}
+
+async function handlePlatformConnectionIntent(content: string): Promise<boolean | null> {
+  if (!isPlatformConnectionIntent(content)) return null
+  const provider = detectPlatform(content)
+  if (!provider) return null
+
+  const token = extractPlatformToken(content)
+  if (token) {
+    try {
+      const platforms = await listPlatforms()
+      const descriptor = platforms.platforms.find((item) => item.id === provider)
+      const result = await completeConnectionFromOpaqueToken(
+        provider,
+        `${descriptor?.label ?? provider} account`,
+        token,
+        descriptor?.requiredScopes,
+      )
+      toast.success(
+        `${descriptor?.label ?? provider} token stored securely. Connection requires validation before external actions.`,
+      )
+      void result
+      return true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Platform token could not be stored securely.")
+      return false
+    }
+  }
+
+  const popup = typeof window !== "undefined"
+    ? window.open("about:blank", "_blank", "popup,width=960,height=760")
+    : null
+  if (!popup) {
+    toast.error("The browser popup was blocked. Open Automation Center → Connections and try again.")
+    return false
+  }
+  try {
+    const result = await startBrowserPlatformConnection(provider)
+    popup.location.href = result.browser.url
+    toast.success(`${provider} official setup opened. Complete login and consent in the browser, then finish the connection in Connections.`)
+    return true
+  } catch (error) {
+    popup?.close()
+    toast.error(error instanceof Error ? error.message : "Could not start the official browser setup.")
+    return false
+  }
+}
+
 function findNearestUserMessage(
   messages: ChatMessage[],
   startIndex: number,
@@ -393,24 +480,10 @@ function findNearestUserMessage(
   return null
 }
 
-function cloneChatMessage(message: ChatMessage): ChatMessage {
-  return {
-    ...message,
-    attachments: message.attachments?.map((attachment) => ({ ...attachment })),
-    toolCalls: message.toolCalls?.map((toolCall) => ({
-      ...toolCall,
-      function: toolCall.function ? { ...toolCall.function } : undefined,
-      extraContent: toolCall.extraContent
-        ? { ...toolCall.extraContent }
-        : undefined,
-    })),
-  }
-}
-
-export function sendChatMessage({
+export async function sendChatMessage({
   content,
   attachments = [],
-}: SendChatMessageInput) {
+}: SendChatMessageInput): Promise<boolean> {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
     return false
@@ -421,6 +494,13 @@ export function sendChatMessage({
 
   if (!normalizedContent && normalizedAttachments.length === 0) {
     return false
+  }
+
+  if (normalizedContent && normalizedAttachments.length === 0) {
+    const connectionResult = await handlePlatformConnectionIntent(normalizedContent)
+    if (connectionResult !== null) {
+      return connectionResult
+    }
   }
 
   const socket = wsRef
@@ -496,6 +576,12 @@ export function editChatMessage({
 }
 
 export async function forkChatSessionFromMessage(messageId: string) {
+  // Forking would create a second conversation, which is intentionally
+  // disabled in the single-chat console.
+  void messageId
+  return false
+
+  /* istanbul ignore next -- retained legacy implementation for migration
   const state = getChatState()
   const messageIndex = state.messages.findIndex(
     (message) => message.id === messageId,
@@ -524,6 +610,7 @@ export async function forkChatSessionFromMessage(messageId: string) {
   }
 
   return true
+  */
 }
 
 export function retryChatMessage(messageId: string) {
@@ -589,6 +676,10 @@ export function retryChatMessage(messageId: string) {
 }
 
 export async function switchChatSession(sessionId: string) {
+  // Session switching is not part of the single-chat product surface.
+  if (sessionId !== SINGLE_CHAT_SESSION_ID) {
+    return
+  }
   if (sessionId === activeSessionIdRef) {
     return
   }
@@ -616,6 +707,11 @@ export async function switchChatSession(sessionId: string) {
 }
 
 export async function newChatSession() {
+  // There is exactly one persistent conversation; never clear it or mint a
+  // new session from the UI.
+  return
+
+  /* istanbul ignore next -- legacy multi-session implementation
   if (getChatState().messages.length === 0) {
     return
   }
@@ -632,7 +728,8 @@ export async function newChatSession() {
   if (store.get(gatewayAtom).status === "running") {
     shouldMaintainConnection = true
     await connectChat()
-  }
+  return
+  */
 }
 
 export function initializeChatStore() {
@@ -641,7 +738,11 @@ export function initializeChatStore() {
   }
 
   initialized = true
-  activeSessionIdRef = getChatState().activeSessionId
+  const currentSessionId = getChatState().activeSessionId
+  if (currentSessionId !== SINGLE_CHAT_SESSION_ID) {
+    setActiveSessionId(SINGLE_CHAT_SESSION_ID)
+  }
+  activeSessionIdRef = SINGLE_CHAT_SESSION_ID
   let lastGatewayStatus: GatewayState | null = null
 
   const syncConnectionWithGateway = (force: boolean = false) => {

@@ -1,5 +1,6 @@
 import {
   IconActivityHeartbeat,
+  IconClockPlay,
   IconAtom,
   IconBroadcast,
   IconFolder,
@@ -11,8 +12,6 @@ import {
   IconSparkles,
   IconTimeline,
   IconTools,
-  IconRobot,
-  IconTopologyStar3,
 } from "@tabler/icons-react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
@@ -80,12 +79,7 @@ const primaryNav: NavItem[] = [
   { titleKey: "navigation.skills", url: "/agent/skills", icon: IconSparkles },
   { titleKey: "navigation.tools", url: "/agent/tools", icon: IconTools },
   { titleKey: "navigation.runs", url: "/agent/runs", icon: IconTimeline },
-  {
-    titleKey: "navigation.monitor",
-    url: "/agent/monitor",
-    icon: IconTopologyStar3,
-  },
-  { titleKey: "navigation.agents", url: "/agents", icon: IconRobot },
+  { titleKey: "navigation.automations", url: "/agent/automations", icon: IconClockPlay },
   { titleKey: "navigation.config", url: "/config", icon: IconSettings },
   { titleKey: "navigation.logs", url: "/logs", icon: IconListDetails },
   {
@@ -148,7 +142,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <Link
             to="/"
             onClick={closeMobileSidebar}
-            className="bg-primary/10 text-primary mx-auto flex size-10 items-center justify-center overflow-hidden rounded-lg border p-0 shadow-sm hover:border-primary/40 hover:bg-primary/20 transition-colors"
+            className="bg-primary/10 text-primary mx-auto flex size-9 items-center justify-center overflow-hidden rounded-lg border p-0 shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/20"
             aria-label="Miki"
             title="Miki"
           >
@@ -186,6 +180,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         )}
                       >
                         <Icon className="size-4" />
+
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right">{label}</TooltipContent>

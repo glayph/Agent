@@ -1,6 +1,4 @@
 import { pathToFileURL } from "url";
-import * as fs from "fs";
-import * as path from "path";
 
 export function rewriteApiProxyPath(p: string): string {
   return `/api${p}`;

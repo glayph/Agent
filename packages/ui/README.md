@@ -1,16 +1,16 @@
-# Hiro Web
+# Miki Web
 
-`web/` contains the standalone WebUI launcher for Hiro.
-It is not just a frontend: it is a small launcher service that bundles a React dashboard, exposes a backend API, manages launcher authentication, and starts or attaches to the `Hiro` runtime process.
+`web/` contains the standalone WebUI launcher for Miki.
+It is not just a frontend: it is a small launcher service that bundles a React dashboard, exposes a backend API, manages launcher authentication, and starts or attaches to the `Miki` runtime process.
 
-![Hiro Launcher](./Hiro-launcher.png)
+![Miki Launcher](./Miki-launcher.png)
 
 ## What This Directory Provides
 
-- A browser-based chat UI backed by the hiro channel WebSocket proxy.
+- A browser-based chat UI backed by the miki channel WebSocket proxy.
 - A dashboard for models, credentials, channels, agent tools, skills, logs, and runtime settings.
 - A launcher process that can auto-open the browser, show a system tray menu, and persist launcher-specific settings.
-- A controlled way to start, stop, restart, and inspect the `Hiro` subprocess.
+- A controlled way to start, stop, restart, and inspect the `Miki` subprocess.
 - A single-binary deployment target where the frontend is embedded into the Go backend.
 
 ## Architecture
@@ -19,26 +19,26 @@ This directory is a small monorepo:
 
 - `backend/`
   - Go HTTP server and launcher runtime.
-  - Serves REST APIs, authentication endpoints, channel helper flows, and the hiro WebSocket reverse proxy.
+  - Serves REST APIs, authentication endpoints, channel helper flows, and the miki WebSocket reverse proxy.
   - Embeds compiled frontend assets from `backend/dist`.
 - `frontend/`
   - Vite + React 19 + TanStack Router SPA.
   - Provides the launcher dashboard and chat UI.
 
-At runtime the launcher and the main Hiro engine are separate processes:
+At runtime the launcher and the main Miki engine are separate processes:
 
 1. The launcher starts the web backend on port `18800` by default.
 2. The launcher serves the dashboard and handles dashboard authentication.
-3. When allowed, it starts or attaches to `Hiro`.
+3. When allowed, it starts or attaches to `Miki`.
 4. The frontend talks only to the launcher backend.
-5. The launcher proxies chat traffic to the gateway through `/hiro/ws`.
+5. The launcher proxies chat traffic to the gateway through `/miki/ws`.
 
 ## Dashboard Capabilities
 
 The current frontend exposes these major pages and flows:
 
 - `/`
-  - Chat UI with session history, default model selection, and hiro channel messaging.
+  - Chat UI with session history, default model selection, and miki channel messaging.
 - `/models`
   - Add, edit, delete, and set the default model.
   - Supports API-key models, OAuth-backed models, and local/CLI-backed models.
@@ -47,7 +47,7 @@ The current frontend exposes these major pages and flows:
   - Current built-in flows: OpenAI, Anthropic, and Google Antigravity.
 - `/channels/*`
   - Configure supported channels from a shared catalog.
-  - Current catalog: `weixin`, `telegram`, `discord`, `slack`, `line`, `onebot`, `wecom`, `whatsapp`, `hiro`, `matrix`, `irc`, `mqtt`.
+  - Current catalog: `weixin`, `telegram`, `discord`, `slack`, `line`, `onebot`, `wecom`, `whatsapp`, `miki`, `matrix`, `irc`, `mqtt`.
   - Legacy config-only forms remain in source but are no longer surfaced in the default catalog.
   - Includes QR-based binding helpers for WeChat and WeCom.
 - `/agent/skills`
@@ -66,16 +66,16 @@ The UI currently supports English and Simplified Chinese, plus light and dark th
 
 ### Config Resolution
 
-The launcher uses the same Hiro config file as the main binary.
+The launcher uses the same Miki config file as the main binary.
 
-- Default app config path: `~/.Hiro/config.json`
-- Override with environment variable: `Hiro_CONFIG`
-- Override with a positional CLI argument: `Hiro-launcher /path/to/config.json`
+- Default app config path: `~/.Miki/config.json`
+- Override with environment variable: `Miki_CONFIG`
+- Override with a positional CLI argument: `Miki-launcher /path/to/config.json`
 
 Launcher-only settings are stored beside that app config:
 
 - File name: `launcher-config.json`
-- Default location: `~/.Hiro/launcher-config.json`
+- Default location: `~/.Miki/launcher-config.json`
 
 That file currently stores:
 
@@ -91,20 +91,20 @@ If they are omitted, stored launcher settings are used.
 If the target config file does not exist, the launcher tries to bootstrap it automatically by running:
 
 ```bash
-Hiro onboard
+Miki onboard
 ```
 
-The launcher looks for the main Hiro binary in this order:
+The launcher looks for the main Miki binary in this order:
 
-1. `Hiro_BINARY`
-2. A `Hiro` binary in the same directory as the launcher
-3. `Hiro` from `PATH`
+1. `Miki_BINARY`
+2. A `Miki` binary in the same directory as the launcher
+3. `Miki` from `PATH`
 
-If onboarding or gateway startup cannot find the main binary, set `Hiro_BINARY` explicitly.
+If onboarding or gateway startup cannot find the main binary, set `Miki_BINARY` explicitly.
 
 ### Gateway Management
 
-The launcher manages `Hiro`.
+The launcher manages `Miki`.
 
 On startup it tries to auto-start or attach to the gateway, but only when startup preconditions pass. In the current code, the main checks are:
 
@@ -118,7 +118,7 @@ When a gateway process is started by the launcher, the launcher:
 - captures stdout and stderr into an in-memory ring buffer
 - tracks transient states such as `starting`, `restarting`, and `stopping`
 - marks restart-required when the default model or enabled tool set changed since boot
-- ensures the hiro channel is configured before startup
+- ensures the miki channel is configured before startup
 
 ### Launcher Authentication
 
@@ -132,7 +132,7 @@ The dashboard is protected by password login.
 - On supported platforms, the password is stored as a bcrypt hash in `launcher-auth.db`.
 - On platforms where the SQLite password store is unavailable, the launcher stores the bcrypt hash in `launcher-config.json`.
 - Legacy `launcher_token` values are migrated once into password login and are removed from saved launcher config.
-- `Hiro_LAUNCHER_TOKEN` is deprecated and ignored; after upgrading from env-token auth, open `/launcher-setup` to create a password.
+- `Miki_LAUNCHER_TOKEN` is deprecated and ignored; after upgrading from env-token auth, open `/launcher-setup` to create a password.
 - URL token login and `Authorization: Bearer` dashboard auth are not supported.
 
 ### Network Exposure
@@ -183,8 +183,8 @@ make dev
 
 This does three things:
 
-1. Builds `../build/Hiro` for launcher development.
-2. Starts the Go backend with `Hiro_BINARY` pointing at that binary.
+1. Builds `../build/Miki` for launcher development.
+2. Starts the Go backend with `Miki_BINARY` pointing at that binary.
 3. Starts the Vite frontend dev server.
 
 Use this when you want the full launcher flow during development.
@@ -217,12 +217,12 @@ This:
 1. Installs frontend dependencies when needed.
 2. Builds the frontend into `backend/dist`.
 3. Embeds those assets into the Go backend.
-4. Produces `build/Hiro-launcher`.
+4. Produces `build/Miki-launcher`.
 
 Override the output path if needed:
 
 ```bash
-make build OUTPUT=/tmp/Hiro-launcher
+make build OUTPUT=/tmp/Miki-launcher
 ```
 
 From the repository root you can also use:
@@ -234,10 +234,10 @@ make build-launcher
 That writes the platform-specific launcher to:
 
 ```text
-build/Hiro-launcher-<platform>-<arch>
+build/Miki-launcher-<platform>-<arch>
 ```
 
-and refreshes the `build/Hiro-launcher` symlink.
+and refreshes the `build/Miki-launcher` symlink.
 
 ### Frontend-Only Builds
 
@@ -257,10 +257,10 @@ pnpm build:backend
 Examples:
 
 ```bash
-./build/Hiro-launcher
-./build/Hiro-launcher -console
-./build/Hiro-launcher -public
-./build/Hiro-launcher -port 18800 /path/to/config.json
+./build/Miki-launcher
+./build/Miki-launcher -console
+./build/Miki-launcher -public
+./build/Miki-launcher -port 18800 /path/to/config.json
 ```
 
 Current launcher flags:
@@ -344,12 +344,12 @@ Check these in the dashboard:
 - the model has credentials or OAuth state
 - local models such as Ollama or vLLM are reachable
 
-### The launcher cannot find `Hiro`
+### The launcher cannot find `Miki`
 
 Set the main binary explicitly:
 
 ```bash
-export Hiro_BINARY=/absolute/path/to/Hiro
+export Miki_BINARY=/absolute/path/to/Miki
 ```
 
 This affects onboarding and gateway subprocess startup.
@@ -365,4 +365,4 @@ If you run only `make dev-backend`, either run `make dev-frontend` alongside it 
 - Configuration guide: [`../docs/guides/configuration.md`](../docs/guides/configuration.md)
 - Providers: [`../docs/guides/providers.md`](../docs/guides/providers.md)
 - Troubleshooting: [`../docs/operations/troubleshooting.md`](../docs/operations/troubleshooting.md)
-- Official docs site: [docs.Hiro.io](https://docs.Hiro.io)
+- Official docs site: [docs.Miki.io](https://docs.Miki.io)

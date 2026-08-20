@@ -2,11 +2,11 @@
 name: html-semantic
 description: "Generate accessible, semantically correct HTML5 with proper landmark elements and ARIA attributes."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [html5, semantic-markup, accessibility, seo]
     related_skills: [accessibility, css-styling]
 ---

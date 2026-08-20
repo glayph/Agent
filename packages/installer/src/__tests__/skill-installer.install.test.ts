@@ -53,6 +53,23 @@ describe("SkillInstaller.install", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it("serializes descriptions without template-literal injection", async () => {
+    const manifestPath = path.join(pluginDir, "plugin.json");
+    const description = "unsafe `; ${globalThis.process?.env?.SECRET ?? \"none\"}";
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      description: string;
+    };
+    manifest.description = description;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+
+    const result = await installer.install(pluginDir);
+
+    expect(result.success).toBe(true);
+    expect(fs.readFileSync(result.path, "utf8")).toContain(
+      `export const DESCRIPTION = ${JSON.stringify(description)};`,
+    );
+  });
+
   it("persists validated plugin contracts into installed state", async () => {
     const result = await installer.install(pluginDir);
 

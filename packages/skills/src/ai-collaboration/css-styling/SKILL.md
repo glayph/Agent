@@ -2,11 +2,11 @@
 name: css-styling
 description: "Generate production-ready CSS with modern layout techniques (Grid, Flexbox) and responsive patterns."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [css, grid, flexbox, layouts, tailwind]
     related_skills: [responsive-design, html-semantic]
 ---

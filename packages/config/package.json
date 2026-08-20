@@ -13,6 +13,14 @@
     "./security": {
       "import": "./dist/security.js",
       "types": "./dist/security.d.ts"
+    },
+    "./schema": {
+      "import": "./dist/schema.js",
+      "types": "./dist/schema.d.ts"
+    },
+    "./secret-vault": {
+      "import": "./dist/secret-vault.js",
+      "types": "./dist/secret-vault.d.ts"
     }
   },
   "scripts": {

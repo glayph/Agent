@@ -2,11 +2,11 @@
 name: wireframing
 description: "Generate text-based wireframes, screen flows, and interactive prototype specs for web and mobile."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [wireframing, prototyping, mockups, interaction-design]
     related_skills: [visual-design, user-centered-design]
 ---

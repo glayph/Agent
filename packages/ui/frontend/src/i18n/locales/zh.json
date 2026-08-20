@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "drive": "System",
+    "drive": "Drive",
     "chat": "对话",
     "model_group": "模型",
     "models": "模型",
@@ -10,6 +10,7 @@
     "skills": "技能",
     "tools": "工具",
     "runs": "Runs",
+    "automations": "自动化",
     "monitor": "监控",
     "services": "服务",
     "channels_group": "频道",
@@ -385,7 +386,8 @@
         "unsupportedProvider": "该服务商不能设为默认聊天模型。"
       },
       "deleteDisabled": {
-        "isDefault": "无法删除默认模型"
+        "isDefault": "无法删除默认模型",
+        "isVirtual": "无法删除虚拟模型"
       }
     },
     "defaultOnSave": {

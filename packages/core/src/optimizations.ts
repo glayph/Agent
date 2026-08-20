@@ -19,6 +19,8 @@ export * from "./tools/tool-warmer.js";
 export * from "./agent-tot.js";
 export * from "./agent-planner.js";
 export * from "./contextual-tool-pruner.js";
+export * from "./adaptive-capability-selector.js";
+export * from "./plan-capability-analyzer.js";
 export * from "./agent-confidence.js";
 
 // Phase 4: Performance & Observability

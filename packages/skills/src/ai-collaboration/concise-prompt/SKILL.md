@@ -2,11 +2,11 @@
 name: concise-prompt
 description: "Compress verbose instructions into minimal, high-density prompts without losing meaning."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [prompt-engineering, compression, token-efficiency]
     related_skills: [semantic-summarization]
 ---

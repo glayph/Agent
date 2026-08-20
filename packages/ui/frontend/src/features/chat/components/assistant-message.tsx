@@ -36,6 +36,7 @@ interface AssistantMessageProps {
   onDelete?: () => void
   onFork?: () => void
   onRetry?: () => void
+  onInspect?: () => void
 }
 
 const EMPTY_ATTACHMENTS: ChatAttachment[] = []
@@ -43,14 +44,27 @@ const EMPTY_TOOL_CALLS: ChatToolCall[] = []
 const LONG_MESSAGE_CHAR_LIMIT = 1500
 const LONG_MESSAGE_LINE_LIMIT = 14
 
+function isRateLimitConnectionError(content: string): boolean {
+  const normalized = content.toLowerCase()
+  return (
+    normalized.includes("429") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("rate_limit") ||
+    normalized.includes("quota") ||
+    normalized.includes("resource_exhausted") ||
+    normalized.includes("too many requests")
+  )
+}
+
 function isCredentialConnectionError(content: string): boolean {
   const normalized = content.toLowerCase()
   return (
-    normalized.includes("model needs credentials") ||
-    (normalized.includes("error calling llm") &&
-      (normalized.includes("no connected db") ||
-        normalized.includes("check credentials") ||
-        normalized.includes("credential")))
+    !isRateLimitConnectionError(normalized) &&
+    (normalized.includes("model needs credentials") ||
+      (normalized.includes("error calling llm") &&
+        (normalized.includes("no connected db") ||
+          normalized.includes("check credentials") ||
+          normalized.includes("credential"))))
   )
 }
 
@@ -73,6 +87,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   onDelete,
   onFork,
   onRetry,
+  onInspect,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const isThought = kind === "thought"
@@ -97,6 +112,13 @@ export const AssistantMessage = memo(function AssistantMessage({
     ? t("chat.reasoningLabel")
     : t("chat.toolCallsLabel")
   const trimmedModelName = modelName?.trim() ?? ""
+  const isRateLimitError = useMemo(
+    () =>
+      !isCollapsedBlock &&
+      hasText &&
+      isRateLimitConnectionError(trimmedContent),
+    [hasText, isCollapsedBlock, trimmedContent],
+  )
   const isCredentialError = useMemo(
     () =>
       !isCollapsedBlock &&
@@ -114,16 +136,20 @@ export const AssistantMessage = memo(function AssistantMessage({
     ? t("chat.showLess", { defaultValue: "Show less" })
     : t("chat.showMore", { defaultValue: "Show more" })
   return (
-    <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-1.5">
+    <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-2 px-1">
       {(hasText || isCollapsedBlock || hasToolCalls) && (
         <div
           data-chat-bubble="assistant"
-          className="group group/message-bubble relative flex w-full max-w-full flex-col"
+          className={cn(
+            "group group/message-bubble relative flex w-full max-w-full flex-col rounded-xl border border-transparent bg-transparent px-1.5 py-1.5 shadow-none transition-colors hover:bg-background/25",
+            isCollapsedBlock &&
+              "rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
+          )}
           title={formattedTimestamp || undefined}
         >
           <div
             className={cn(
-              "relative shadow-none [color:var(--chat-assistant-text)]",
+              "relative [color:var(--chat-assistant-text)]",
               isCollapsedBlock && "text-muted-foreground",
             )}
           >
@@ -237,6 +263,25 @@ export const AssistantMessage = memo(function AssistantMessage({
                   })}
                 </div>
               )}
+            {isRateLimitError && (
+              <div className="py-0.5 text-[14px] leading-6">
+                <div
+                  data-chat-alert="rate-limit"
+                  className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1"
+                >
+                  <IconAlertCircle
+                    className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] leading-5 font-semibold [color:var(--chat-alert-text)]">
+                    {t("chat.errors.rateLimitTitle", {
+                      defaultValue: "Model quota or rate limit reached",
+                    })}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {isCredentialError && (
               <div className="py-0.5 text-[14px] leading-6">
                 <div
@@ -283,7 +328,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                     "prose dark:prose-invert prose-headings:mt-2 prose-headings:mb-1 prose-li:my-0.5 prose-ol:my-2 prose-p:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/50 prose-pre:p-0 prose-pre:text-foreground relative max-w-none [overflow-wrap:anywhere] break-words",
                     isThought
                       ? "prose-p:my-1 prose-p:whitespace-pre-wrap py-0 text-[13px] leading-6 opacity-70"
-                      : "prose-p:whitespace-pre-wrap py-0 text-[15px] leading-7",
+                      : "prose-p:whitespace-pre-wrap py-0 text-[14px] leading-6",
                     isBodyCompact && "max-h-72 overflow-hidden",
                   )}
                 >
@@ -358,6 +403,10 @@ export const AssistantMessage = memo(function AssistantMessage({
               onDelete={onDelete}
               onFork={onFork}
               onRetry={onRetry}
+              onInspect={onInspect}
+              inspectorLabel={t("chat.actions.inspect", {
+                defaultValue: "Inspect agent",
+              })}
               modelLabel={
                 trimmedModelName
                   ? t("chat.actions.modelInfo", {
@@ -372,14 +421,14 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
 
       {imageAttachments.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {imageAttachments.map((attachment, index) => (
             <a
               key={`${attachment.url}-${index}`}
               href={attachment.url}
               target="_blank"
               rel="noreferrer"
-              className="group/img bg-muted/30 focus-visible:ring-ring/30 relative overflow-hidden rounded-lg transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              className="group/img bg-muted/30 focus-visible:ring-ring/30 relative overflow-hidden rounded-xl border border-border/60 transition-colors focus-visible:ring-2 focus-visible:outline-none"
             >
               <img
                 src={attachment.url}

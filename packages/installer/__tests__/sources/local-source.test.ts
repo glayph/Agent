@@ -19,10 +19,10 @@ describe("fetchSkill local", () => {
       description: "A test plugin",
       permissions: ["network.http"],
       contracts: {
-        tools: [{ name: "local_tool", entrypoint: "local_test_plugin.py" }],
+        tools: [{ name: "local_tool", entrypoint: "local_test_plugin.js" }],
         channels: [{ name: "local_channel" }],
       },
-      plugin: { entrypoint: "local_test_plugin.py" },
+      plugin: { entrypoint: "local_test_plugin.js" },
     };
 
     fs.writeFileSync(
@@ -31,8 +31,8 @@ describe("fetchSkill local", () => {
       "utf-8",
     );
     fs.writeFileSync(
-      path.join(srcDir, "local_test_plugin.py"),
-      'def execute():\n    return "ok"\n',
+      path.join(srcDir, "local_test_plugin.js"),
+      'export function execute() { return "ok"; }\n',
       "utf-8",
     );
   });
@@ -57,7 +57,7 @@ describe("fetchSkill local", () => {
     expect(result.manifest.contracts?.channels?.[0]?.name).toBe(
       "local_channel",
     );
-    expect(result.entrypoint).toBe("local_test_plugin.py");
+    expect(result.entrypoint).toBe("local_test_plugin.js");
 
     const entryPath = path.join(result.filesDir, result.entrypoint);
     expect(fs.existsSync(entryPath)).toBe(true);

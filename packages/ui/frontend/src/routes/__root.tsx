@@ -43,14 +43,6 @@ const RootLayout = () => {
       (m) => m.routeId === "/launcher-login" || m.routeId === "/launcher-setup",
     )
 
-  // The Smart Work Monitoring canvas is a deliberate blank slate — no
-  // sidebar, no header chrome, nothing but the node graph. It still needs
-  // the auth gate below (unlike auth pages), so it's handled separately
-  // from `isAuthPage` and only skips the AppLayout wrapper further down.
-  const isMonitorPage =
-    windowPath.startsWith("/agent/monitor") ||
-    routerState.pathname.startsWith("/agent/monitor")
-
   const [authError, setAuthError] = useState<string | null>(null)
   const [authGateState, setAuthGateState] = useState<AuthGateState>("checking")
 
@@ -110,14 +102,6 @@ const RootLayout = () => {
 
   if (authGateState === "checking" || authGateState === "redirecting") {
     return <AuthGateFallback />
-  }
-
-  if (isMonitorPage) {
-    return (
-      <div className="h-dvh w-dvw overflow-hidden">
-        <Outlet />
-      </div>
-    )
   }
 
   return (

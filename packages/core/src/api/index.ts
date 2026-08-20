@@ -12,7 +12,11 @@ import * as fs from "fs";
 
 import { AgentOrchestrator } from "../agent.js";
 import type { AgentTask } from "../task-queue.js";
-import { settings, readMikiEnv } from "@miki/config";
+import {
+  createWorkspaceSecretVault,
+  settings,
+  readMikiEnv,
+} from "@miki/config";
 import {
   allowedCorsOriginsFromEnv,
   hasExplicitAllowedOrigins,
@@ -20,7 +24,10 @@ import {
   normalizeCorsOrigin,
   isLoopbackAddress,
 } from "@miki/config/security";
-import { runWithCallOrigin, type CallOrigin } from "../tools/executor/call-context.js";
+import {
+  runWithCallOrigin,
+  type CallOrigin,
+} from "../tools/executor/call-context.js";
 import { TelegramBot } from "../channels/telegram.js";
 import { DiscordBot } from "../channels/discord.js";
 import { SlackBot } from "../channels/slack.js";
@@ -41,6 +48,7 @@ import {
   buildWorkflowAccelerationPlan,
   buildWorkflowDecisionPattern,
 } from "../workflow-accelerator.js";
+import { analyzePlanCapabilities } from "../plan-capability-analyzer.js";
 import { createSessionRouter } from "./session-router.js";
 import { createRuntimeApprovalRouter } from "./runtime-approval-router.js";
 import { getSystemStats } from "./system-monitoring.js";
@@ -51,10 +59,13 @@ import { globalMetricsCollector } from "../metrics-collector.js";
 import { initializeSafetyAtStartup } from "../safety/startup.js";
 import { getErrorMessage } from "../errors.js";
 import { SqliteAuditLog } from "../audit-log.js";
+import { PersistentJobQueue } from "../persistent-job-queue.js";
+import { PersistentJobRunner } from "../persistent-job-runner.js";
 import { resolveRuntimePaths } from "../paths.js";
 import crypto from "crypto";
 import {
   getRequiredApiKeySecret,
+  apiKeyFromHeaders,
   validateRequiredApiKey,
   isApiKeyRequestAuthenticated,
   validateApiKeyConfiguration,
@@ -68,10 +79,74 @@ import {
   createLauncherCompatRouter,
   type LauncherRuntimeAuthBridge,
 } from "./launcher-compat.js";
+import {
+  getPlatformDescriptor,
+  isSupportedPlatformProvider,
+  listPlatformDescriptors,
+  type CompleteConnectionInput,
+  type BeginConnectionInput,
+} from "../platform-connections.js";
 
 globalStartupTimer.start("core.process_start");
 
 const runtimePaths = resolveRuntimePaths();
+// The dashboard stores provider credentials in the runtime config vault. Make
+// that location explicit before AgentOrchestrator constructs its LLM path so
+// live requests do not fall back to the legacy source workspace.
+process.env.MIKI_CONFIG_DIR = runtimePaths.configDir;
+
+/**
+ * Load workspace runtime values before constructing AgentOrchestrator.
+ * The launcher compatibility router loads the same file later, but that is
+ * too late for the orchestrator constructor: a supervisor started without a
+ * sourced shell .env would otherwise boot with the legacy gpt/openrouter
+ * defaults while the dashboard correctly reports the persisted Gemini model.
+ */
+function bootstrapWorkspaceEnv(configDir: string): void {
+  const envPath = path.join(configDir, ".env");
+  try {
+    const contents = fs.readFileSync(envPath, "utf8");
+    for (const rawLine of contents.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!match) continue;
+      const [, key, rawValue] = match;
+      if (process.env[key] !== undefined && process.env[key] !== "") continue;
+      let value = rawValue.trim();
+      if (
+        value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+      ) {
+        value = value.slice(1, -1);
+      }
+      process.env[key] = value;
+    }
+  } catch {
+    // A missing workspace .env is valid for installations using process env.
+  }
+}
+
+bootstrapWorkspaceEnv(runtimePaths.configDir);
+if (process.env.MIKI_MODEL || process.env.DEFAULT_MODEL) {
+  const bootModel = process.env.MIKI_MODEL || process.env.DEFAULT_MODEL!;
+  settings.setModel(bootModel);
+  settings.provider =
+    process.env.MIKI_PROVIDER ||
+    (bootModel.startsWith("gemini/") ||
+    bootModel.startsWith("google/") ||
+    bootModel.startsWith("gemini-")
+      ? "google"
+      : bootModel.startsWith("anthropic/")
+        ? "anthropic"
+        : bootModel.startsWith("openai/") || bootModel.startsWith("gpt-")
+          ? "openai"
+          : "openrouter");
+}
+
+const SINGLE_CHAT_SESSION_ID = "miki-main-chat";
+const chatRunQueues = new Map<string, Promise<void>>();
 
 // Helper function for model switching
 function getProviderForModel(model: string): string {
@@ -213,6 +288,51 @@ const permissionAuditLog = new SqliteAuditLog(
   path.join(runtimePaths.dataDir, "audit.db"),
 );
 const orchestrator = new AgentOrchestrator(runtimePaths);
+const persistentJobQueue = new PersistentJobQueue(
+  path.join(runtimePaths.dataDir, "runtime-jobs.json"),
+);
+const persistentJobRunner = new PersistentJobRunner(persistentJobQueue, {
+  pollIntervalMs: Number(process.env.MIKI_JOB_POLL_MS) || 500,
+  maxConcurrent: Number(process.env.MIKI_JOB_CONCURRENCY) || 1,
+});
+persistentJobRunner.register("agent.message", async (job) => {
+  const payload = job.payload;
+  const sessionId =
+    typeof payload.sessionId === "string"
+      ? payload.sessionId
+      : "miki-main-chat";
+  const message = typeof payload.message === "string" ? payload.message : "";
+  if (!message.trim())
+    throw new Error("agent.message requires payload.message");
+  let response = "";
+  for await (const chunk of orchestrator.runAgentLoop(sessionId, message)) {
+    try {
+      const event = JSON.parse(chunk) as Record<string, unknown>;
+      if (event.type === "stream_chunk" && typeof event.content === "string") {
+        response += event.content;
+      }
+    } catch {
+      // Non-JSON chunks are intentionally ignored; the agent protocol is JSONL.
+    }
+  }
+  const event = payload.event;
+  return {
+    sessionId,
+    response,
+    eventId:
+      event && typeof event === "object" && typeof (event as Record<string, unknown>).eventId === "string"
+        ? (event as Record<string, unknown>).eventId
+        : undefined,
+    correlationId:
+      event && typeof event === "object" && typeof (event as Record<string, unknown>).correlationId === "string"
+        ? (event as Record<string, unknown>).correlationId
+        : undefined,
+    replyRoute:
+      event && typeof event === "object" && (event as Record<string, unknown>).replyRoute
+        ? (event as Record<string, unknown>).replyRoute
+        : undefined,
+  };
+});
 
 const telegramBot = new TelegramBot(orchestrator);
 const discordBot = new DiscordBot(orchestrator);
@@ -324,6 +444,8 @@ const launcherCompatRouter = createLauncherCompatRouter({
 const enhancementRouter = createEnhancementRouter({
   workspaceDir,
   runtimePaths,
+  jobQueue: persistentJobQueue,
+  jobRunner: persistentJobRunner,
 });
 
 function persistAgentTask(_task: AgentTask): void {
@@ -507,6 +629,12 @@ app.use((_req, _res, next) => {
 // shadowed by the compat router's /skills/:name catch-all.
 app.use("/api/skills", skillsRouter);
 
+// Mount the authenticated enhancement runtime before the compatibility router.
+// The compatibility router owns `/api` and installs a dashboard-session guard;
+// mounting enhancements after it would shadow these routes and reject valid
+// API-key requests before `requireHttpAuth` can run.
+app.use("/api/enhancements", requireHttpAuth, enhancementRouter);
+
 // Mount /api/chat before the compat router so it is not shadowed by the
 // compat router's unconditional `router.use(requireDashboardAuth)`. The
 // gateway rewrites incoming "/chat" requests to "/api/chat" before proxying
@@ -519,13 +647,448 @@ app.use("/api/skills", skillsRouter);
 // /chat route below (line ~1449) and the rest of the direct control
 // surface. Mounting this route with no auth middleware at all would let
 // any client that can reach core run the full agent loop -- including
-// whatever tools are configured, e.g. shell_execute under
-// TRUSTED_FULL_ACCESS -- with zero authentication (#17).
+// whatever tools are configured, e.g. shell_execute under TRUSTED_FULL_ACCESS --
+// with zero authentication (#17).
 app.post("/api/chat", requireHttpAuth, handleChatRequest);
 
 // UI compatibility API used by the bundled dashboard.
 app.use("/api", launcherCompatRouter);
-app.use("/api/enhancements", enhancementRouter);
+
+const automationManager = orchestrator.getAutomationManager();
+const platformConnectionStore = orchestrator.platformConnectionStore;
+const automationTargets = new Set([
+  "internal",
+  "research",
+  "facebook",
+  "youtube",
+]);
+const automationApprovalModes = new Set(["none", "review", "publish"]);
+
+function parseAutomationRunAt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
+function parseAutomationBody(body: unknown): Record<string, unknown> {
+  return body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : {};
+}
+
+app.get("/api/automations", requireHttpAuth, (req, res) => {
+  const rawLimit = Number(req.query["limit"]);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(500, rawLimit))
+    : 100;
+  res.json({
+    automations: automationManager.list(limit),
+    requestId: (req as AuthenticatedRequest).requestId,
+  });
+});
+
+app.post("/api/automations", requireHttpAuth, (req, res) => {
+  try {
+    const body = parseAutomationBody(req.body);
+    const objective = typeof body.objective === "string" ? body.objective : "";
+    const steps = Array.isArray(body.steps)
+      ? body.steps.filter((value): value is string => typeof value === "string")
+      : undefined;
+    const runAt = parseAutomationRunAt(body.runAt ?? body.run_at);
+    const cronExpression =
+      typeof body.cronExpression === "string"
+        ? body.cronExpression
+        : typeof body.cron_expression === "string"
+          ? body.cron_expression
+          : undefined;
+    const target =
+      typeof body.target === "string" && automationTargets.has(body.target)
+        ? (body.target as "internal" | "research" | "facebook" | "youtube")
+        : undefined;
+    const approvalMode =
+      typeof body.approvalMode === "string" &&
+      automationApprovalModes.has(body.approvalMode)
+        ? (body.approvalMode as "none" | "review" | "publish")
+        : undefined;
+    const automation = automationManager.create({
+      name: typeof body.name === "string" ? body.name : undefined,
+      objective,
+      sessionId:
+        typeof body.sessionId === "string" ? body.sessionId : undefined,
+      steps,
+      target,
+      approvalMode,
+      cronExpression,
+      runAt,
+      timezone: typeof body.timezone === "string" ? body.timezone : undefined,
+      maxAttempts:
+        typeof body.maxAttempts === "number" ? body.maxAttempts : undefined,
+    });
+    res
+      .status(201)
+      .json({ automation, requestId: (req as AuthenticatedRequest).requestId });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/automations/:automationId", requireHttpAuth, (req, res) => {
+  const automation = automationManager.get(req.params.automationId);
+  if (!automation) {
+    res.status(404).json({ error: "Automation not found" });
+    return;
+  }
+  res.json({ automation, requestId: (req as AuthenticatedRequest).requestId });
+});
+
+app.get(
+  "/api/automations/:automationId/executions",
+  requireHttpAuth,
+  (req, res) => {
+    const automation = automationManager.get(req.params.automationId);
+    if (!automation) {
+      res.status(404).json({ error: "Automation not found" });
+      return;
+    }
+    const rawLimit = Number(req.query["limit"]);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.max(1, Math.min(500, rawLimit))
+      : 100;
+    res.json({
+      executions: automationManager.executions(automation.id, limit),
+      requestId: (req as AuthenticatedRequest).requestId,
+    });
+  },
+);
+
+app.patch("/api/automations/:automationId", requireHttpAuth, (req, res) => {
+  try {
+    const body = parseAutomationBody(req.body);
+    const steps = Array.isArray(body.steps)
+      ? body.steps.filter((value): value is string => typeof value === "string")
+      : undefined;
+    const runAt =
+      body.runAt === null || body.run_at === null
+        ? null
+        : parseAutomationRunAt(body.runAt ?? body.run_at);
+    const cronExpression =
+      body.cronExpression === null || body.cron_expression === null
+        ? null
+        : typeof (body.cronExpression ?? body.cron_expression) === "string"
+          ? String(body.cronExpression ?? body.cron_expression)
+          : undefined;
+    const target =
+      typeof body.target === "string" && automationTargets.has(body.target)
+        ? (body.target as "internal" | "research" | "facebook" | "youtube")
+        : undefined;
+    const approvalMode =
+      typeof body.approvalMode === "string" &&
+      automationApprovalModes.has(body.approvalMode)
+        ? (body.approvalMode as "none" | "review" | "publish")
+        : undefined;
+    const automation = automationManager.update(req.params.automationId, {
+      name: typeof body.name === "string" ? body.name : undefined,
+      objective:
+        typeof body.objective === "string" ? body.objective : undefined,
+      steps,
+      target,
+      approvalMode,
+      cronExpression,
+      runAt,
+      timezone: typeof body.timezone === "string" ? body.timezone : undefined,
+      maxAttempts:
+        typeof body.maxAttempts === "number" ? body.maxAttempts : undefined,
+    });
+    res.json({
+      automation,
+      requestId: (req as AuthenticatedRequest).requestId,
+    });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+for (const [action, handler] of [
+  ["pause", (id: string) => automationManager.pause(id)],
+  ["resume", (id: string) => automationManager.resume(id)],
+  ["cancel", (id: string) => automationManager.cancel(id)],
+] as const) {
+  app.post(
+    `/api/automations/:automationId/${action}`,
+    requireHttpAuth,
+    (req, res) => {
+      try {
+        const automation = handler(req.params.automationId);
+        res.json({
+          automation,
+          requestId: (req as AuthenticatedRequest).requestId,
+        });
+      } catch (error: unknown) {
+        res.status(404).json({ error: getErrorMessage(error) });
+      }
+    },
+  );
+}
+
+app.post(
+  "/api/automations/:automationId/run-now",
+  requireHttpAuth,
+  (req, res) => {
+    try {
+      const execution = automationManager.runNow(req.params.automationId);
+      res
+        .status(202)
+        .json({
+          execution,
+          requestId: (req as AuthenticatedRequest).requestId,
+        });
+    } catch (error: unknown) {
+      res.status(404).json({ error: getErrorMessage(error) });
+    }
+  },
+);
+
+// Browser-first provider connection surface. These endpoints persist only
+// opaque credential references and connection metadata; raw passwords, OTPs,
+// access tokens, and API keys are never accepted in the connection session API.
+app.get("/api/platforms", requireHttpAuth, (req, res) => {
+  res.json({
+    platforms: listPlatformDescriptors(),
+    requestId: (req as AuthenticatedRequest).requestId,
+  });
+});
+
+app.get("/api/connections", requireHttpAuth, (req, res) => {
+  const rawLimit = Number(req.query["limit"]);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(500, rawLimit))
+    : 100;
+  res.json({
+    connections: platformConnectionStore.listConnections(limit),
+    requestId: (req as AuthenticatedRequest).requestId,
+  });
+});
+
+app.post("/api/connections/browser/start", requireHttpAuth, (req, res) => {
+  try {
+    const body = parseAutomationBody(req.body);
+    const provider = body.provider;
+    if (!isSupportedPlatformProvider(provider)) {
+      res
+        .status(400)
+        .json({ error: "A supported platform provider is required" });
+      return;
+    }
+    const info = getPlatformDescriptor(provider);
+    const scopes = Array.isArray(body.scopes)
+      ? body.scopes.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : info.requiredScopes;
+    const session = platformConnectionStore.begin({
+      provider,
+      scopes,
+    } satisfies BeginConnectionInput);
+    res.status(201).json({
+      session,
+      browser: {
+        action: "open_official_url",
+        url: session.officialUrl,
+        expectedDomain: session.expectedDomain,
+        requiresUserHandoff: true,
+        message: session.userActionRequired,
+      },
+      requestId: (req as AuthenticatedRequest).requestId,
+    });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/connections/token", requireHttpAuth, (req, res) => {
+  try {
+    const body = parseAutomationBody(req.body);
+    const provider = body.provider;
+    if (!isSupportedPlatformProvider(provider)) {
+      res
+        .status(400)
+        .json({ error: "A supported platform provider is required" });
+      return;
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    const accountLabel =
+      typeof body.accountLabel === "string" ? body.accountLabel.trim() : "";
+    if (!token) {
+      res.status(400).json({ error: "A provider token is required" });
+      return;
+    }
+    if (!accountLabel) {
+      res.status(400).json({ error: "An account label is required" });
+      return;
+    }
+    if (token.length > 16_384) {
+      res.status(413).json({ error: "Provider token is too large" });
+      return;
+    }
+    const info = getPlatformDescriptor(provider);
+    const scopes = Array.isArray(body.scopes)
+      ? body.scopes.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : info.requiredScopes;
+    const session = platformConnectionStore.begin({ provider, scopes });
+    const credentialRef = `platform/${provider}/${crypto.randomUUID()}`;
+    const vault = createWorkspaceSecretVault(runtimePaths.dataDir);
+    // The raw token is accepted only on this authenticated transport boundary;
+    // it is immediately written to the encrypted vault and never forwarded to
+    // the model, WebSocket chat history, logs, or the connection metadata DB.
+    vault.set(credentialRef, token);
+    const result = platformConnectionStore.complete(session.id, {
+      accountLabel,
+      externalAccountId:
+        typeof body.externalAccountId === "string"
+          ? body.externalAccountId
+          : undefined,
+      scopes,
+      credentialRef,
+      expiresAt:
+        typeof body.expiresAt === "string" ? body.expiresAt : undefined,
+    });
+    res.status(201).json({
+      ...result,
+      credentialStored: true,
+      requestId: (req as AuthenticatedRequest).requestId,
+    });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post(
+  "/api/connections/browser/:sessionId/opened",
+  requireHttpAuth,
+  (req, res) => {
+    try {
+      const session = platformConnectionStore.markBrowserOpened(
+        req.params.sessionId,
+      );
+      res.json({ session, requestId: (req as AuthenticatedRequest).requestId });
+    } catch (error: unknown) {
+      res.status(400).json({ error: getErrorMessage(error) });
+    }
+  },
+);
+
+app.get("/api/connections/browser/:sessionId", requireHttpAuth, (req, res) => {
+  const session = platformConnectionStore.getSession(req.params.sessionId);
+  if (!session) {
+    res.status(404).json({ error: "Browser connection session not found" });
+    return;
+  }
+  res.json({ session, requestId: (req as AuthenticatedRequest).requestId });
+});
+
+app.post(
+  "/api/connections/browser/:sessionId/complete",
+  requireHttpAuth,
+  (req, res) => {
+    try {
+      const body = parseAutomationBody(req.body);
+      // The callback accepts an opaque vault reference only. Raw secrets must be
+      // entered on the official provider page or through the managed vault flow.
+      for (const field of [
+        "token",
+        "apiKey",
+        "api_key",
+        "secret",
+        "password",
+        "accessToken",
+        "refreshToken",
+      ]) {
+        if (typeof body[field] === "string" && body[field].trim()) {
+          res
+            .status(400)
+            .json({
+              error:
+                "Raw credentials are not accepted here. Complete provider login in the browser and return an opaque credential reference.",
+            });
+          return;
+        }
+      }
+      const input: CompleteConnectionInput = {
+        accountLabel:
+          typeof body.accountLabel === "string" ? body.accountLabel : "",
+        externalAccountId:
+          typeof body.externalAccountId === "string"
+            ? body.externalAccountId
+            : undefined,
+        scopes: Array.isArray(body.scopes)
+          ? body.scopes.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : undefined,
+        credentialRef:
+          typeof body.credentialRef === "string"
+            ? body.credentialRef
+            : undefined,
+        expiresAt:
+          typeof body.expiresAt === "string" ? body.expiresAt : undefined,
+      };
+      const result = platformConnectionStore.complete(
+        req.params.sessionId,
+        input,
+      );
+      res
+        .status(201)
+        .json({
+          ...result,
+          requestId: (req as AuthenticatedRequest).requestId,
+        });
+    } catch (error: unknown) {
+      res.status(400).json({ error: getErrorMessage(error) });
+    }
+  },
+);
+
+app.post(
+  "/api/connections/:connectionId/validate",
+  requireHttpAuth,
+  (req, res) => {
+    try {
+      const connection = platformConnectionStore.validate(
+        req.params.connectionId,
+      );
+      res.json({
+        connection,
+        requestId: (req as AuthenticatedRequest).requestId,
+      });
+    } catch (error: unknown) {
+      res.status(400).json({ error: getErrorMessage(error) });
+    }
+  },
+);
+
+app.post(
+  "/api/connections/:connectionId/revoke",
+  requireHttpAuth,
+  (req, res) => {
+    try {
+      const connection = platformConnectionStore.revoke(
+        req.params.connectionId,
+      );
+      res.json({
+        connection,
+        requestId: (req as AuthenticatedRequest).requestId,
+      });
+    } catch (error: unknown) {
+      res.status(400).json({ error: getErrorMessage(error) });
+    }
+  },
+);
+
 app.use("/enhancements", (_req, res) => {
   res.status(404).json({
     error: "Use /api/enhancements with dashboard authentication.",
@@ -693,9 +1256,10 @@ function _getToolFeedbackConfig(): ToolFeedbackConfig {
 
   return {
     enabled,
-    maxArgsLength: Number.isFinite(maxArgsLength) && maxArgsLength > 0
-      ? Math.floor(maxArgsLength)
-      : 300,
+    maxArgsLength:
+      Number.isFinite(maxArgsLength) && maxArgsLength > 0
+        ? Math.floor(maxArgsLength)
+        : 300,
     separateMessages,
   };
 }
@@ -712,6 +1276,52 @@ function _previewToolOutput(output: unknown, maxLength: number): string {
     typeof output === "string" ? output : JSON.stringify(output ?? "");
   if (full.length <= maxLength) return full;
   return full.slice(0, maxLength) + "…";
+}
+
+function _toolPath(input: unknown): string {
+  const record = _asRecord(input);
+  const value = typeof record.path === "string" ? record.path.trim() : "";
+  return value || "the requested path";
+}
+
+function _toolActionDescription(tool: unknown, input: unknown): string {
+  const name = typeof tool === "string" ? tool : "tool";
+  const target = _toolPath(input);
+  if (name === "file_read") return `Reading file: ${target}`;
+  if (name === "file_write") return `Editing file: ${target}`;
+  if (name === "file_delete") {
+    return _asRecord(input).dryRun === true
+      ? `Checking deletion without changing the file: ${target}`
+      : `Deleting file: ${target}`;
+  }
+  return `Running tool: ${name}`;
+}
+
+function _toolResultDescription(
+  tool: unknown,
+  input: unknown,
+  ok: boolean,
+  output: unknown,
+  durationMs: unknown,
+  maxLength: number,
+): string {
+  const action = _toolActionDescription(tool, input);
+  const elapsed = Number(durationMs);
+  const timing = Number.isFinite(elapsed)
+    ? ` (${Math.max(0, Math.round(elapsed))} ms)`
+    : "";
+  if (ok) {
+    return `${action
+      .replace(
+        /^Checking deletion without changing the file:/,
+        "Deletion check completed:",
+      )
+      .replace(/^Reading file:/, "File read completed:")
+      .replace(/^Editing file:/, "File edit completed:")
+      .replace(/^Deleting file:/, "File deletion completed:")}${timing}`;
+  }
+  const detail = _previewToolOutput(output, maxLength).trim();
+  return `${action} failed${detail ? `: ${detail}` : ""}${timing}`;
 }
 
 interface mikiContextUsage {
@@ -761,15 +1371,17 @@ function _mikiContextUsage(
   };
 }
 
-mikiWss.on("connection", (ws, req) => {
+mikiWss.on("connection", (ws, _req) => {
   const aliveWs = ws as AliveWebSocket;
   aliveWs.__alive = true;
   ws.on("pong", () => {
     aliveWs.__alive = true;
   });
 
-  const url = new URL(req.url || "/miki/ws", "http://127.0.0.1");
-  const sessionId = url.searchParams.get("session_id") || crypto.randomUUID();
+  // The console deliberately exposes one persistent conversation only.
+  // Ignore client-provided IDs so another tab or stale URL cannot create a
+  // second chat session on the backend.
+  const sessionId = SINGLE_CHAT_SESSION_ID;
 
   ws.on("message", async (raw) => {
     const data = _parseJsonMessage(
@@ -823,60 +1435,317 @@ mikiWss.on("connection", (ws, req) => {
       return;
     }
 
-    const assistantMessageId = `assistant-${requestId}`;
-    let fullResponse = "";
-    let lastContextUsage: mikiContextUsage | null = null;
-    const toolFeedback = _getToolFeedbackConfig();
-    let toolFeedbackCounter = 0;
+    const previousRun = chatRunQueues.get(sessionId) ?? Promise.resolve();
+    const currentRun = previousRun
+      .catch(() => undefined)
+      .then(async () => {
+        const assistantMessageId = `assistant-${requestId}`;
+        let fullResponse = "";
+        let lastContextUsage: mikiContextUsage | null = null;
+        const toolFeedback = _getToolFeedbackConfig();
+        let toolFeedbackCounter = 0;
+        const toolInputs = new Map<number, unknown>();
+        const toolFeedbackMessageIds = new Map<number, string>();
 
-    _sendmiki(ws, { type: "typing.start", session_id: sessionId });
-    _sendmiki(ws, {
-      type: "message.create",
-      id: crypto.randomUUID(),
-      session_id: sessionId,
-      timestamp: Date.now(),
-      payload: {
-        message_id: assistantMessageId,
-        content: "",
-        placeholder: true,
-        model_name: orchestrator.modelName,
-      },
-    });
-    _sendmiki(ws, {
-      type: "node.run_start",
-      id: crypto.randomUUID(),
-      session_id: sessionId,
-      timestamp: Date.now(),
-      payload: { run_id: assistantMessageId, objective: content },
-    });
+        _sendmiki(ws, { type: "typing.start", session_id: sessionId });
+        _sendmiki(ws, {
+          type: "message.create",
+          id: crypto.randomUUID(),
+          session_id: sessionId,
+          timestamp: Date.now(),
+          payload: {
+            message_id: assistantMessageId,
+            content: "",
+            placeholder: true,
+            model_name: orchestrator.modelName,
+          },
+        });
+        _sendmiki(ws, {
+          type: "node.run_start",
+          id: crypto.randomUUID(),
+          session_id: sessionId,
+          timestamp: Date.now(),
+          payload: { run_id: assistantMessageId, objective: content },
+        });
 
-    const messageForAgent =
-      media.length > 0
-        ? `${content}\n\nAttached media:\n${media.join("\n")}`.trim()
-        : content;
+        const messageForAgent =
+          media.length > 0
+            ? `${content}\n\nAttached media:\n${media.join("\n")}`.trim()
+            : content;
 
-    try {
-      for await (const chunk of orchestrator.runAgentLoop(
-        sessionId,
-        messageForAgent,
-      )) {
-        let event: Record<string, unknown>;
         try {
-          event = JSON.parse(chunk) as Record<string, unknown>;
-        } catch {
-          event = { type: "stream_chunk", content: chunk };
-        }
+          for await (const chunk of orchestrator.runAgentLoop(
+            sessionId,
+            messageForAgent,
+          )) {
+            let event: Record<string, unknown>;
+            try {
+              event = JSON.parse(chunk) as Record<string, unknown>;
+            } catch {
+              event = { type: "stream_chunk", content: chunk };
+            }
 
-        const eventContextUsage = _normalizemikiContextUsage(
-          event.context_usage,
-        );
-        if (eventContextUsage) {
-          lastContextUsage = eventContextUsage;
-        }
+            const eventContextUsage = _normalizemikiContextUsage(
+              event.context_usage,
+            );
+            if (eventContextUsage) {
+              lastContextUsage = eventContextUsage;
+            }
 
-        if (event.type === "stream_chunk") {
-          fullResponse +=
-            typeof event.content === "string" ? event.content : "";
+            if (event.type === "stream_chunk") {
+              fullResponse +=
+                typeof event.content === "string" ? event.content : "";
+              _sendmiki(ws, {
+                type: "message.update",
+                id: crypto.randomUUID(),
+                session_id: sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  message_id: assistantMessageId,
+                  content: fullResponse,
+                  model_name: orchestrator.modelName,
+                  context_usage: _mikiContextUsage(
+                    fullResponse,
+                    lastContextUsage,
+                  ),
+                },
+              });
+              continue;
+            }
+
+            if (event.type === "tool_execution_plan") {
+              _sendmiki(ws, {
+                type: "node.plan",
+                id: crypto.randomUUID(),
+                session_id: sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  run_id: assistantMessageId,
+                  total: event.total,
+                  levels: event.levels,
+                  parallelizable: event.parallelizable,
+                  acceleration_mode: event.acceleration_mode,
+                  max_parallel_tool_calls: event.max_parallel_tool_calls,
+                  decision_pattern: event.decision_pattern,
+                  speed_class: event.speed_class,
+                  expected_latency: event.expected_latency,
+                  verification_depth: event.verification_depth,
+                },
+              });
+              continue;
+            }
+
+            if (event.type === "tool_call") {
+              const invocationIndex = Number(event.invocation_index ?? 0);
+              const toolInput = event.input;
+              toolInputs.set(invocationIndex, toolInput);
+              const nodeId = `${assistantMessageId}-node-${invocationIndex}`;
+              _sendmiki(ws, {
+                type: "node.spawn",
+                id: crypto.randomUUID(),
+                session_id: sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  run_id: assistantMessageId,
+                  node_id: nodeId,
+                  node_type: "tool",
+                  label: event.tool,
+                  status: "running",
+                  invocation_index: invocationIndex,
+                  level: event.level,
+                  parallel: event.parallel,
+                  input: toolInput,
+                  action: _toolActionDescription(event.tool, toolInput),
+                },
+              });
+
+              if (!toolFeedback.enabled) {
+                // Tool Feedback is disabled: skip emitting a chat execution
+                // note, per the tool_feedback.enabled setting from the config
+                // UI. The node graph event above still fires regardless, since
+                // it drives a separate monitoring surface, not the chat log.
+                continue;
+              }
+
+              const argsPreview = _previewToolArgs(
+                event.input,
+                toolFeedback.maxArgsLength,
+              );
+              const toolCallPayload = {
+                id: crypto.randomUUID(),
+                type: "function",
+                function: {
+                  name: event.tool,
+                  arguments: argsPreview,
+                },
+                extra_content: {
+                  tool_feedback_explanation: _toolActionDescription(
+                    event.tool,
+                    toolInput,
+                  ),
+                },
+              };
+
+              if (toolFeedback.separateMessages) {
+                // Each tool feedback update gets its own chat message instead
+                // of reusing the streaming placeholder/progress message.
+                toolFeedbackCounter += 1;
+                const toolMessageId = `${assistantMessageId}-tool-${toolFeedbackCounter}`;
+                toolFeedbackMessageIds.set(invocationIndex, toolMessageId);
+                _sendmiki(ws, {
+                  type: "message.create",
+                  id: crypto.randomUUID(),
+                  session_id: sessionId,
+                  timestamp: Date.now(),
+                  payload: {
+                    message_id: toolMessageId,
+                    content: "",
+                    kind: "tool_calls",
+                    tool_calls: [toolCallPayload],
+                    model_name: orchestrator.modelName,
+                  },
+                });
+              } else {
+                _sendmiki(ws, {
+                  type: "message.update",
+                  id: crypto.randomUUID(),
+                  session_id: sessionId,
+                  timestamp: Date.now(),
+                  payload: {
+                    message_id: assistantMessageId,
+                    content: fullResponse,
+                    kind: "tool_calls",
+                    tool_calls: [toolCallPayload],
+                  },
+                });
+              }
+              continue;
+            }
+
+            if (event.type === "tool_retry") {
+              const nodeId = `${assistantMessageId}-node-${event.invocation_index ?? 0}`;
+              _sendmiki(ws, {
+                type: "node.update",
+                id: crypto.randomUUID(),
+                session_id: sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  run_id: assistantMessageId,
+                  node_id: nodeId,
+                  status: "retrying",
+                  attempt: event.attempt,
+                  delay_ms: event.delay_ms,
+                },
+              });
+              continue;
+            }
+
+            if (event.type === "tool_result") {
+              const invocationIndex = Number(event.invocation_index ?? 0);
+              const toolInput = toolInputs.get(invocationIndex);
+              const nodeId = `${assistantMessageId}-node-${invocationIndex}`;
+              _sendmiki(ws, {
+                type: "node.complete",
+                id: crypto.randomUUID(),
+                session_id: sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  run_id: assistantMessageId,
+                  node_id: nodeId,
+                  status: event.ok ? "completed" : "failed",
+                  ok: event.ok,
+                  duration_ms: event.duration_ms,
+                  action: _toolActionDescription(event.tool, toolInput),
+                  result_message: _toolResultDescription(
+                    event.tool,
+                    toolInput,
+                    event.ok === true,
+                    event.output,
+                    event.duration_ms,
+                    toolFeedback.maxArgsLength,
+                  ),
+                  output_preview: _previewToolOutput(
+                    event.output,
+                    toolFeedback.maxArgsLength,
+                  ),
+                },
+              });
+
+              if (toolFeedback.enabled) {
+                const messageId = toolFeedback.separateMessages
+                  ? toolFeedbackMessageIds.get(invocationIndex)
+                  : assistantMessageId;
+                if (messageId) {
+                  _sendmiki(ws, {
+                    type: "message.update",
+                    id: crypto.randomUUID(),
+                    session_id: sessionId,
+                    timestamp: Date.now(),
+                    payload: {
+                      message_id: messageId,
+                      content: _toolResultDescription(
+                        event.tool,
+                        toolInput,
+                        event.ok === true,
+                        event.output,
+                        event.duration_ms,
+                        toolFeedback.maxArgsLength,
+                      ),
+                      kind: "tool_calls",
+                      tool_calls: [
+                        {
+                          id: crypto.randomUUID(),
+                          type: "function",
+                          function: {
+                            name: event.tool,
+                            arguments: _previewToolArgs(
+                              toolInput,
+                              toolFeedback.maxArgsLength,
+                            ),
+                          },
+                          extra_content: {
+                            tool_feedback_explanation: _toolResultDescription(
+                              event.tool,
+                              toolInput,
+                              event.ok === true,
+                              event.output,
+                              event.duration_ms,
+                              toolFeedback.maxArgsLength,
+                            ),
+                          },
+                        },
+                      ],
+                    },
+                  });
+                }
+              }
+              continue;
+            }
+
+            if (event.type === "tool_concurrency_metrics") {
+              _sendmiki(ws, {
+                type: "node.metrics",
+                id: crypto.randomUUID(),
+                session_id: sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  run_id: assistantMessageId,
+                  stats: event.stats,
+                  locks: event.locks,
+                },
+              });
+              continue;
+            }
+
+            if (event.type === "error") {
+              throw new Error(
+                typeof event.content === "string"
+                  ? event.content
+                  : "Agent error",
+              );
+            }
+          }
+
           _sendmiki(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
@@ -889,211 +1758,45 @@ mikiWss.on("connection", (ws, req) => {
               context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
             },
           });
-          continue;
-        }
-
-        if (event.type === "tool_execution_plan") {
+          _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
           _sendmiki(ws, {
-            type: "node.plan",
+            type: "node.run_end",
+            id: crypto.randomUUID(),
+            session_id: sessionId,
+            timestamp: Date.now(),
+            payload: { run_id: assistantMessageId, status: "completed" },
+          });
+        } catch (err: unknown) {
+          _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+          _sendmiki(ws, {
+            type: "error",
+            session_id: sessionId,
+            payload: {
+              request_id: requestId,
+              message: getErrorMessage(err),
+            },
+          });
+          _sendmiki(ws, {
+            type: "node.run_end",
             id: crypto.randomUUID(),
             session_id: sessionId,
             timestamp: Date.now(),
             payload: {
               run_id: assistantMessageId,
-              total: event.total,
-              levels: event.levels,
-              parallelizable: event.parallelizable,
-              acceleration_mode: event.acceleration_mode,
-              max_parallel_tool_calls: event.max_parallel_tool_calls,
-              decision_pattern: event.decision_pattern,
-              speed_class: event.speed_class,
-              expected_latency: event.expected_latency,
-              verification_depth: event.verification_depth,
+              status: "failed",
+              error: getErrorMessage(err),
             },
           });
-          continue;
         }
-
-        if (event.type === "tool_call") {
-          const nodeId = `${assistantMessageId}-node-${event.invocation_index ?? 0}`;
-          _sendmiki(ws, {
-            type: "node.spawn",
-            id: crypto.randomUUID(),
-            session_id: sessionId,
-            timestamp: Date.now(),
-            payload: {
-              run_id: assistantMessageId,
-              node_id: nodeId,
-              node_type: "tool",
-              label: event.tool,
-              status: "running",
-              invocation_index: event.invocation_index,
-              level: event.level,
-              parallel: event.parallel,
-              input: event.input,
-            },
-          });
-
-          if (!toolFeedback.enabled) {
-            // Tool Feedback is disabled: skip emitting a chat execution
-            // note, per the tool_feedback.enabled setting from the config
-            // UI. The node graph event above still fires regardless, since
-            // it drives a separate monitoring surface, not the chat log.
-            continue;
-          }
-
-          const argsPreview = _previewToolArgs(
-            event.input,
-            toolFeedback.maxArgsLength,
-          );
-          const toolCallPayload = {
-            id: crypto.randomUUID(),
-            type: "function",
-            function: {
-              name: event.tool,
-              arguments: argsPreview,
-            },
-          };
-
-          if (toolFeedback.separateMessages) {
-            // Each tool feedback update gets its own chat message instead
-            // of reusing the streaming placeholder/progress message.
-            toolFeedbackCounter += 1;
-            const toolMessageId = `${assistantMessageId}-tool-${toolFeedbackCounter}`;
-            _sendmiki(ws, {
-              type: "message.create",
-              id: crypto.randomUUID(),
-              session_id: sessionId,
-              timestamp: Date.now(),
-              payload: {
-                message_id: toolMessageId,
-                content: "",
-                kind: "tool_calls",
-                tool_calls: [toolCallPayload],
-                model_name: orchestrator.modelName,
-              },
-            });
-          } else {
-            _sendmiki(ws, {
-              type: "message.update",
-              id: crypto.randomUUID(),
-              session_id: sessionId,
-              timestamp: Date.now(),
-              payload: {
-                message_id: assistantMessageId,
-                content: fullResponse,
-                kind: "tool_calls",
-                tool_calls: [toolCallPayload],
-              },
-            });
-          }
-          continue;
-        }
-
-        if (event.type === "tool_retry") {
-          const nodeId = `${assistantMessageId}-node-${event.invocation_index ?? 0}`;
-          _sendmiki(ws, {
-            type: "node.update",
-            id: crypto.randomUUID(),
-            session_id: sessionId,
-            timestamp: Date.now(),
-            payload: {
-              run_id: assistantMessageId,
-              node_id: nodeId,
-              status: "retrying",
-              attempt: event.attempt,
-              delay_ms: event.delay_ms,
-            },
-          });
-          continue;
-        }
-
-        if (event.type === "tool_result") {
-          const nodeId = `${assistantMessageId}-node-${event.invocation_index ?? 0}`;
-          _sendmiki(ws, {
-            type: "node.complete",
-            id: crypto.randomUUID(),
-            session_id: sessionId,
-            timestamp: Date.now(),
-            payload: {
-              run_id: assistantMessageId,
-              node_id: nodeId,
-              status: event.ok ? "completed" : "failed",
-              ok: event.ok,
-              duration_ms: event.duration_ms,
-              output_preview: _previewToolOutput(
-                event.output,
-                toolFeedback.maxArgsLength,
-              ),
-            },
-          });
-          continue;
-        }
-
-        if (event.type === "tool_concurrency_metrics") {
-          _sendmiki(ws, {
-            type: "node.metrics",
-            id: crypto.randomUUID(),
-            session_id: sessionId,
-            timestamp: Date.now(),
-            payload: {
-              run_id: assistantMessageId,
-              stats: event.stats,
-              locks: event.locks,
-            },
-          });
-          continue;
-        }
-
-        if (event.type === "error") {
-          throw new Error(
-            typeof event.content === "string" ? event.content : "Agent error",
-          );
-        }
-      }
-
-      _sendmiki(ws, {
-        type: "message.update",
-        id: crypto.randomUUID(),
-        session_id: sessionId,
-        timestamp: Date.now(),
-        payload: {
-          message_id: assistantMessageId,
-          content: fullResponse,
-          model_name: orchestrator.modelName,
-          context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
-        },
       });
-      _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
-      _sendmiki(ws, {
-        type: "node.run_end",
-        id: crypto.randomUUID(),
-        session_id: sessionId,
-        timestamp: Date.now(),
-        payload: { run_id: assistantMessageId, status: "completed" },
-      });
-    } catch (err: unknown) {
-      _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
-      _sendmiki(ws, {
-        type: "error",
-        session_id: sessionId,
-        payload: {
-          request_id: requestId,
-          message: getErrorMessage(err),
-        },
-      });
-      _sendmiki(ws, {
-        type: "node.run_end",
-        id: crypto.randomUUID(),
-        session_id: sessionId,
-        timestamp: Date.now(),
-        payload: {
-          run_id: assistantMessageId,
-          status: "failed",
-          error: getErrorMessage(err),
-        },
-      });
-    }
+    chatRunQueues.set(sessionId, currentRun);
+    void currentRun
+      .finally(() => {
+        if (chatRunQueues.get(sessionId) === currentRun) {
+          chatRunQueues.delete(sessionId);
+        }
+      })
+      .catch(() => undefined);
   });
 });
 
@@ -1402,7 +2105,7 @@ app.get("/status", (_req, res) => {
   });
 });
 
-app.post("/agent/route-preview", (req, res) => {
+app.post("/agent/route-preview", async (req, res) => {
   try {
     const body = (req.body || {}) as { message?: unknown };
     const message = typeof body.message === "string" ? body.message.trim() : "";
@@ -1414,6 +2117,14 @@ app.post("/agent/route-preview", (req, res) => {
       });
     }
     const decision = orchestrator.routeAgentTask(message);
+    const capabilityReport = analyzePlanCapabilities(
+      message,
+      {
+        skills: await skillLoader.getAllSkillsMetadata(),
+        tools: orchestrator.tools.getToolDefinitions(),
+      },
+      `${decision.profile.complexity}/${decision.profile.executionStyle}`,
+    );
     const acceleration = buildWorkflowAccelerationPlan(
       decision.profile,
       decision,
@@ -1434,6 +2145,7 @@ app.post("/agent/route-preview", (req, res) => {
       summary: summarizeAgentRoute(decision),
       acceleration,
       decisionPattern,
+      capabilityReport,
       requestId: (req as AuthenticatedRequest).requestId,
     });
   } catch (e: unknown) {
@@ -1446,7 +2158,20 @@ app.post("/agent/route-preview", (req, res) => {
 });
 
 function isHttpRequestAuthorized(req: Request): boolean {
-  if (isApiKeyRequestAuthenticated(req.headers)) return true;
+  const apiKey = apiKeyFromHeaders(req.headers);
+  const apiKeyAuth = isApiKeyRequestAuthenticated(req.headers);
+  if (process.env.MIKI_DEBUG_AUTH === "true") {
+    let expectedLength = 0;
+    try {
+      expectedLength = getRequiredApiKeySecret().length;
+    } catch {
+      // Configuration errors are represented by the auth result.
+    }
+    console.warn(
+      `[auth-debug] path=${req.path} headerPresent=${Boolean(apiKey)} headerLength=${apiKey.length} expectedLength=${expectedLength} apiKeyAuth=${apiKeyAuth}`,
+    );
+  }
+  if (apiKeyAuth) return true;
   if (launcherRuntimeAuth?.isDashboardAuthenticated(req.headers)) return true;
   return false;
 }
@@ -1615,7 +2340,10 @@ async function handleChatRequest(req: Request, res: Response): Promise<void> {
   try {
     let fullResponse = "";
     await runWithCallOrigin(resolveCallOrigin(req), async () => {
-      for await (const chunk of orchestrator.runAgentLoop(session_id, message)) {
+      for await (const chunk of orchestrator.runAgentLoop(
+        session_id,
+        message,
+      )) {
         const data = JSON.parse(chunk);
         if (data.type === "stream_chunk") {
           fullResponse += data.content;
@@ -1668,37 +2396,45 @@ app.get("/improvement/tunings", requireHttpAuth, (_req, res) => {
   }
 });
 
-app.post("/improvement/force-reflection", requireHttpAuth, async (_req, res) => {
-  try {
-    const result = await orchestrator.selfImprovement.runReflectionCycle({
-      force: true,
-    });
-    res.json({
-      success: result !== null && result !== undefined,
-      result,
-      requestId: (_req as AuthenticatedRequest).requestId,
-    });
-  } catch (e: unknown) {
-    res.status(500).json({ detail: getErrorMessage(e) });
-  }
-});
+app.post(
+  "/improvement/force-reflection",
+  requireHttpAuth,
+  async (_req, res) => {
+    try {
+      const result = await orchestrator.selfImprovement.runReflectionCycle({
+        force: true,
+      });
+      res.json({
+        success: result !== null && result !== undefined,
+        result,
+        requestId: (_req as AuthenticatedRequest).requestId,
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ detail: getErrorMessage(e) });
+    }
+  },
+);
 
-app.post("/improvement/force-optimization", requireHttpAuth, async (_req, res) => {
-  try {
-    const body = (_req.body || {}) as Record<string, unknown>;
-    const result = await orchestrator.selfImprovement.runOptimizationCycle({
-      force: true,
-      apply: body["apply"] === true || body["apply_code"] === true,
-    });
-    res.json({
-      success: result !== null && result !== undefined,
-      result,
-      requestId: (_req as AuthenticatedRequest).requestId,
-    });
-  } catch (e: unknown) {
-    res.status(500).json({ detail: getErrorMessage(e) });
-  }
-});
+app.post(
+  "/improvement/force-optimization",
+  requireHttpAuth,
+  async (_req, res) => {
+    try {
+      const body = (_req.body || {}) as Record<string, unknown>;
+      const result = await orchestrator.selfImprovement.runOptimizationCycle({
+        force: true,
+        apply: body["apply"] === true || body["apply_code"] === true,
+      });
+      res.json({
+        success: result !== null && result !== undefined,
+        result,
+        requestId: (_req as AuthenticatedRequest).requestId,
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ detail: getErrorMessage(e) });
+    }
+  },
+);
 
 app.post("/improvement/force-tuning", requireHttpAuth, async (_req, res) => {
   try {
@@ -1837,18 +2573,22 @@ app.post("/tasks/scheduled", requireHttpAuth, (_req, res) => {
   }
 });
 
-app.delete("/tasks/scheduled/:scheduledTaskId", requireHttpAuth, (_req, res) => {
-  const scheduledTaskId = _req.params["scheduledTaskId"];
-  try {
-    const cancelled = orchestrator.cancelScheduledTask(scheduledTaskId);
-    res.json({
-      success: cancelled,
-      requestId: (_req as AuthenticatedRequest).requestId,
-    });
-  } catch (e: unknown) {
-    res.status(500).json({ detail: getErrorMessage(e) });
-  }
-});
+app.delete(
+  "/tasks/scheduled/:scheduledTaskId",
+  requireHttpAuth,
+  (_req, res) => {
+    const scheduledTaskId = _req.params["scheduledTaskId"];
+    try {
+      const cancelled = orchestrator.cancelScheduledTask(scheduledTaskId);
+      res.json({
+        success: cancelled,
+        requestId: (_req as AuthenticatedRequest).requestId,
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ detail: getErrorMessage(e) });
+    }
+  },
+);
 
 app.get("/tasks/session/:sessionId", requireHttpAuth, (_req, res) => {
   const sessionId = _req.params["sessionId"];
@@ -2057,6 +2797,9 @@ server.listen(settings.corePort, settings.coreHost, () => {
       console.warn(`Background tasks startup: ${getErrorMessage(e)}`),
     );
 
+  persistentJobRunner.start();
+  console.log("Persistent job worker started");
+
   channelRuntimeManager.startAll();
   console.log(
     `Channel runtime bootstrap completed in ${Date.now() - bootStart}ms (non-blocking)`,
@@ -2091,6 +2834,7 @@ async function shutdown() {
   } catch (e: unknown) {
     console.warn(`Background tasks shutdown: ${getErrorMessage(e) || e}`);
   }
+  await persistentJobRunner.stop();
   channelRuntimeManager.stopAll();
   try {
     if (orchestrator.tools?.browser?.close) {

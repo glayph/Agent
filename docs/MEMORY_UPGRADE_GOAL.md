@@ -6,7 +6,7 @@ Single goal: fix and upgrade the memory system so it is robust, fast, and closer
 1. ~~No FTS / weak keyword search (LIKE only)~~ ✅ FTS5 (unicode61) for events + entities
 2. ~~Extremely weak entity extraction (English Capitalized regex only; no Bengali)~~ ✅ Unicode-aware + stable Unicode entity ids
 3. ~~No algorithmic context budget (plain slice)~~ ✅ Priority sections under token budget
-4. ~~Package still named graphrag-memory / residual Hiro naming~~ ✅ `@miki/memory`
+4. ~~Package still named graphrag-memory / residual Miki naming~~ ✅ `@miki/memory`
 5. ~~Init race (fire-and-forget initialize)~~ ✅ `initializeSync()` + bridge awaits schema
 6. ~~Foundation for future embeddings (pluggable, offline-first)~~ ✅ `embedding-provider.js` (hash/noop)
 

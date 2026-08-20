@@ -115,7 +115,7 @@ export class SkillInstaller {
 
         await fs.promises.writeFile(
           skillTsPath,
-          `// Plugin: ${manifest.name} v${manifest.version}\nexport const DESCRIPTION = \`${manifest.description}\`;\n`,
+          `// Plugin: ${manifest.name} v${manifest.version}\nexport const DESCRIPTION = ${JSON.stringify(manifest.description)};\n`,
           "utf-8",
         );
 

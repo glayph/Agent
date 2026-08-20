@@ -1,10 +1,22 @@
-import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { normalizeAgentError, type NormalizedAgentError } from "./errors.js";
 
 export type JobStatus =
-  "queued" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "dead_letter";
+
+export interface PersistentJobCheckpoint {
+  id: string;
+  step: string;
+  status: "started" | "completed" | "failed";
+  updatedAt: string;
+  data?: Record<string, unknown>;
+}
 
 export interface PersistentJob {
   id: string;
@@ -18,13 +30,19 @@ export interface PersistentJob {
   updatedAt: string;
   runAfter: number;
   progress: number;
+  idempotencyKey?: string;
+  leaseOwner?: string;
+  leaseUntil?: number;
+  checkpoint?: PersistentJobCheckpoint;
   error?: NormalizedAgentError;
+  result?: unknown;
 }
 
 export interface EnqueueJobOptions {
   priority?: number;
   maxAttempts?: number;
   delayMs?: number;
+  idempotencyKey?: string;
 }
 
 export interface ListJobsOptions {
@@ -50,6 +68,17 @@ export class PersistentJobQueue {
     payload: Record<string, unknown>,
     options: EnqueueJobOptions = {},
   ): PersistentJob {
+    const idempotencyKey = normalizeOptionalString(options.idempotencyKey);
+    if (idempotencyKey) {
+      const existing = [...this.jobs.values()].find(
+        (job) =>
+          job.idempotencyKey === idempotencyKey &&
+          job.status !== "dead_letter" &&
+          job.status !== "cancelled",
+      );
+      if (existing) return { ...existing };
+    }
+
     const now = new Date().toISOString();
     const job: PersistentJob = {
       id: crypto.randomUUID(),
@@ -63,29 +92,52 @@ export class PersistentJobQueue {
       updatedAt: now,
       runAfter: Date.now() + normalizeNonNegativeInt(options.delayMs, 0),
       progress: 0,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     };
     this.jobs.set(job.id, job);
     this.save();
     return { ...job };
   }
 
-  dequeue(now = Date.now()): PersistentJob | null {
+  dequeue(
+    now = Date.now(),
+    workerId?: string,
+    leaseDurationMs = 30_000,
+  ): PersistentJob | null {
     const job = [...this.jobs.values()]
-      .filter((item) => item.status === "queued" && item.runAfter <= now)
+      .filter(
+        (item) =>
+          (item.status === "queued" && item.runAfter <= now) ||
+          (item.status === "running" && (item.leaseUntil ?? 0) <= now),
+      )
       .sort((a, b) => b.priority - a.priority || a.runAfter - b.runAfter)[0];
     if (!job) return null;
     job.status = "running";
     job.attempts += 1;
+    if (workerId) {
+      job.leaseOwner = workerId;
+      job.leaseUntil = now + normalizePositiveInt(leaseDurationMs, 30_000);
+    } else {
+      job.leaseOwner = undefined;
+      job.leaseUntil = undefined;
+    }
     job.updatedAt = new Date().toISOString();
     this.save();
     return { ...job };
   }
 
-  complete(jobId: string): PersistentJob | null {
+  complete(
+    jobId: string,
+    result?: unknown,
+    workerId?: string,
+  ): PersistentJob | null {
     const job = this.jobs.get(jobId);
-    if (!job) return null;
+    if (!job || !this.ownsLease(job, workerId)) return null;
     job.status = "completed";
     job.progress = 100;
+    job.leaseOwner = undefined;
+    job.leaseUntil = undefined;
+    if (result !== undefined) job.result = result;
     job.updatedAt = new Date().toISOString();
     this.save();
     return { ...job };
@@ -95,13 +147,44 @@ export class PersistentJobQueue {
     jobId: string,
     error: unknown,
     retryDelayMs = 60_000,
+    workerId?: string,
   ): PersistentJob | null {
     const job = this.jobs.get(jobId);
-    if (!job) return null;
+    if (!job || !this.ownsLease(job, workerId)) return null;
     job.error = normalizeAgentError(error);
     job.status = job.attempts >= job.maxAttempts ? "dead_letter" : "queued";
     job.runAfter = Date.now() + normalizeNonNegativeInt(retryDelayMs, 0);
+    job.leaseOwner = undefined;
+    job.leaseUntil = undefined;
     job.updatedAt = new Date().toISOString();
+    this.save();
+    return { ...job };
+  }
+
+  heartbeat(
+    jobId: string,
+    workerId: string,
+    leaseDurationMs = 30_000,
+  ): PersistentJob | null {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status !== "running" || job.leaseOwner !== workerId) {
+      return null;
+    }
+    job.leaseUntil = Date.now() + normalizePositiveInt(leaseDurationMs, 30_000);
+    job.updatedAt = new Date().toISOString();
+    this.save();
+    return { ...job };
+  }
+
+  checkpoint(
+    jobId: string,
+    checkpoint: Omit<PersistentJobCheckpoint, "updatedAt">,
+    workerId?: string,
+  ): PersistentJob | null {
+    const job = this.jobs.get(jobId);
+    if (!job || !this.ownsLease(job, workerId)) return null;
+    job.checkpoint = { ...checkpoint, updatedAt: new Date().toISOString() };
+    job.updatedAt = job.checkpoint.updatedAt;
     this.save();
     return { ...job };
   }
@@ -116,6 +199,8 @@ export class PersistentJobQueue {
     job.attempts = 0;
     job.progress = 0;
     job.runAfter = Date.now() + normalizeNonNegativeInt(delayMs, 0);
+    job.leaseOwner = undefined;
+    job.leaseUntil = undefined;
     job.error = undefined;
     job.updatedAt = new Date().toISOString();
     this.save();
@@ -126,6 +211,8 @@ export class PersistentJobQueue {
     const job = this.jobs.get(jobId);
     if (!job || ["completed", "dead_letter"].includes(job.status)) return false;
     job.status = "cancelled";
+    job.leaseOwner = undefined;
+    job.leaseUntil = undefined;
     job.updatedAt = new Date().toISOString();
     this.save();
     return true;
@@ -160,9 +247,7 @@ export class PersistentJobQueue {
       cancelled: 0,
       dead_letter: 0,
     };
-    for (const job of this.jobs.values()) {
-      initial[job.status] += 1;
-    }
+    for (const job of this.jobs.values()) initial[job.status] += 1;
     return initial;
   }
 
@@ -177,9 +262,12 @@ export class PersistentJobQueue {
           .map((job) => [job.id, job]),
       );
       let recovered = false;
+      const now = Date.now();
       for (const job of this.jobs.values()) {
-        if (job.status === "running") {
+        if (job.status === "running" && (!job.leaseUntil || job.leaseUntil <= now)) {
           job.status = "queued";
+          job.leaseOwner = undefined;
+          job.leaseUntil = undefined;
           job.updatedAt = new Date().toISOString();
           recovered = true;
         }
@@ -199,6 +287,16 @@ export class PersistentJobQueue {
     fs.writeFileSync(tmpPath, `${JSON.stringify(body, null, 2)}\n`, "utf-8");
     fs.renameSync(tmpPath, this.filePath);
   }
+
+  private ownsLease(job: PersistentJob, workerId?: string): boolean {
+    return !workerId || !job.leaseOwner || job.leaseOwner === workerId;
+  }
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {

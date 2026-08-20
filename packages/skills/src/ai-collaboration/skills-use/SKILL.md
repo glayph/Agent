@@ -2,11 +2,11 @@
 name: skills-use
 description: "Explain skill loading, triggering, lifecycle, and best practices — help users understand why skills do or don't activate."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [skills, usage, activation, lifecycle, troubleshooting]
     related_skills: [skills-finder, skills-creator]
 ---

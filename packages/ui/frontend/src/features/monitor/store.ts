@@ -11,16 +11,14 @@ import { atom, getDefaultStore } from "jotai"
  */
 
 export type MonitorNodeStatus =
-  | "pending"
-  | "running"
-  | "retrying"
-  | "completed"
-  | "failed"
+  "pending" | "running" | "retrying" | "completed" | "failed"
 
 export type MonitorNodeType =
   | "tool"
   | "skill"
   | "plugin"
+  | "file"
+  | "command"
   | "pattern"
   | "system"
 
@@ -36,6 +34,8 @@ export interface MonitorNode {
   level: number
   parallel: boolean
   input?: unknown
+  action?: string
+  resultMessage?: string
   outputPreview?: string
   attempt?: number
   durationMs?: number
@@ -76,6 +76,9 @@ export interface MonitorState {
   edges: Record<string, MonitorEdge>
   /** Order nodes were spawned in, for stable fallback layout. */
   nodeOrder: string[]
+  /** Shared focus between chat activity affordances and the monitor surface. */
+  selectedRunId?: string
+  selectedNodeId?: string
 }
 
 const initialState: MonitorState = {
@@ -83,6 +86,8 @@ const initialState: MonitorState = {
   nodes: {},
   edges: {},
   nodeOrder: [],
+  selectedRunId: undefined,
+  selectedNodeId: undefined,
 }
 
 export const monitorAtom = atom<MonitorState>(initialState)
@@ -95,8 +100,7 @@ export function getMonitorState(): MonitorState {
 
 export function updateMonitorStore(
   updater:
-    | Partial<MonitorState>
-    | ((prev: MonitorState) => Partial<MonitorState>),
+    Partial<MonitorState> | ((prev: MonitorState) => Partial<MonitorState>),
 ) {
   const prev = store.get(monitorAtom)
   const patch = typeof updater === "function" ? updater(prev) : updater
@@ -105,6 +109,60 @@ export function updateMonitorStore(
 
 export function resetMonitorStore() {
   store.set(monitorAtom, initialState)
+}
+
+export function clearMonitorRun(runId: string) {
+  updateMonitorStore((prev) => {
+    const nodeIds = new Set(
+      Object.values(prev.nodes)
+        .filter((node) => node.runId === runId)
+        .map((node) => node.id),
+    )
+    if (nodeIds.size === 0 && !prev.runs[runId]) return {}
+
+    const nodes = Object.fromEntries(
+      Object.entries(prev.nodes).filter(([nodeId]) => !nodeIds.has(nodeId)),
+    )
+    const edges = Object.fromEntries(
+      Object.entries(prev.edges).filter(
+        ([, edge]) => edge.runId !== runId,
+      ),
+    )
+    const selectedNodeId = nodeIds.has(prev.selectedNodeId ?? "")
+      ? undefined
+      : prev.selectedNodeId
+    const selectedRunId = prev.selectedRunId === runId
+      ? undefined
+      : prev.selectedRunId
+
+    return {
+      runs: Object.fromEntries(
+        Object.entries(prev.runs).filter(([id]) => id !== runId),
+      ),
+      nodes,
+      edges,
+      nodeOrder: prev.nodeOrder.filter((nodeId) => !nodeIds.has(nodeId)),
+      selectedNodeId,
+      selectedRunId,
+    }
+  })
+}
+
+export function selectMonitorRun(runId?: string) {
+  updateMonitorStore({
+    selectedRunId: runId,
+    selectedNodeId: undefined,
+  })
+}
+
+export function selectMonitorNode(nodeId?: string) {
+  updateMonitorStore((prev) => {
+    const node = nodeId ? prev.nodes[nodeId] : undefined
+    return {
+      selectedNodeId: nodeId,
+      selectedRunId: node?.runId ?? prev.selectedRunId,
+    }
+  })
 }
 
 export function toggleNodeUIState(nodeId: string) {

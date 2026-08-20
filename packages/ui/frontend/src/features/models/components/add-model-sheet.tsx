@@ -421,7 +421,7 @@ export function AddModelSheet({
         model_name: modelName,
         provider: provider || undefined,
         model: modelId,
-        api_base: submittedApiBase,
+        api_base: submittedApiBase || undefined,
         api_key: form.apiKey.trim() || undefined,
         proxy: form.proxy.trim() || undefined,
         auth_method: authMethodLocked

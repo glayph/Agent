@@ -94,7 +94,7 @@ export class AgentDelegator {
         routeDecision: {
           mode: decision.mode,
           reasons: decision.reasons,
-          complexity: decision.profile.complexity,
+          complexity: decision.profile?.complexity ?? "unknown",
         },
       },
       "orchestrator",

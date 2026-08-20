@@ -1,11 +1,10 @@
-/*
- * Scoped overrides for the Smart Work Monitoring canvas.
- * Only touches React Flow's own classes, and only within
- * `.agent-monitor-flow`, so nothing here leaks into the rest of the app.
+/**
+ * Scoped React Flow styling for Miki's connected workflow canvas.
+ * All colors inherit from the shared Material Orange theme tokens.
  */
 
 .agent-monitor-flow {
-  background: #0b0c0f;
+  background: var(--background);
 }
 
 .agent-monitor-flow .react-flow__renderer {
@@ -13,24 +12,44 @@
 }
 
 .agent-monitor-flow .react-flow__selection {
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
 .agent-monitor-flow .react-flow__edge-path {
   stroke-linecap: round;
+  stroke-width: 2.25;
 }
 
 .agent-monitor-flow .react-flow__handle {
   border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--card) 72%, transparent);
 }
 
 .agent-monitor-flow .react-flow__pane {
-  cursor: default;
+  cursor: grab;
 }
 
 .agent-monitor-flow .react-flow__pane.dragging {
   cursor: grabbing;
+}
+
+.agent-monitor-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.agent-monitor-flow .react-flow__controls-button {
+  border-bottom-color: color-mix(in srgb, var(--border) 62%, transparent);
+  background: transparent;
+  color: var(--foreground);
+}
+
+.agent-monitor-flow .react-flow__controls-button:hover {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
 .agent-monitor-flow .react-flow__attribution {

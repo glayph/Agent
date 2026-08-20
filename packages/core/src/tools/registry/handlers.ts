@@ -10,6 +10,11 @@ import type { CrawlerAgent } from "../crawler.js";
 import type { ShellExecutor } from "../executor/shell.js";
 import type { FileSecurityExecutor } from "../executor/file-security.js";
 import type { RuntimeFetcher } from "../../runtime-fetch/index.js";
+import type {
+  CompleteConnectionInput,
+  PlatformProvider,
+  SqlitePlatformConnectionStore,
+} from "../../platform-connections.js";
 
 export type ToolHandler = (
   args: Record<string, unknown>,
@@ -24,6 +29,7 @@ interface ToolHandlerContext {
   crawler: CrawlerAgent;
   orchestrator?: AgentOrchestrator | null;
   runtimeFetcher?: RuntimeFetcher | null;
+  platformConnectionStore?: SqlitePlatformConnectionStore | null;
 }
 
 // Shell Handlers
@@ -31,8 +37,9 @@ export async function handleShellExecute(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const cmd = args["cmd"] as string;
-  const workingDir = args["working_dir"] as string | undefined;
+  const cmd = typeof args["cmd"] === "string" ? args["cmd"] : "";
+  const workingDir =
+    typeof args["working_dir"] === "string" ? args["working_dir"] : undefined;
   const timeout = (args["timeout"] as number) ?? 30;
   const res = await this.executor.runShell(cmd, workingDir, timeout);
   if (res.error) return `Execution Error: ${res.error}`;
@@ -44,28 +51,45 @@ export async function handleShellExecute(
 }
 
 // File Handlers
+function requireFileOperationSuccess(
+  toolName: "file_read" | "file_write" | "file_delete",
+  output: string,
+): string {
+  if (output.trimStart().startsWith("Error:")) {
+    throw new Error(
+      `${toolName} failed: ${output.slice(output.indexOf("Error:") + 6).trim()}`,
+    );
+  }
+  return output;
+}
+
 export async function handleFileRead(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return this.fileOps.readFile((args["path"] as string) || "");
+  const path = (args["path"] as string) || "";
+  return requireFileOperationSuccess("file_read", this.fileOps.readFile(path));
 }
 
 export async function handleFileWrite(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return this.fileOps.writeFile(
-    (args["path"] as string) || "",
+  const path = (args["path"] as string) || "";
+  const output = this.fileOps.writeFile(
+    path,
     (args["content"] as string) || "",
   );
+  return requireFileOperationSuccess("file_write", output);
 }
 
 export async function handleFileDelete(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return this.fileOps.deleteFile((args["path"] as string) || "");
+  const path = (args["path"] as string) || "";
+  const output = this.fileOps.deleteFile(path, args["dryRun"] === true);
+  return requireFileOperationSuccess("file_delete", output);
 }
 
 // Browser Handlers
@@ -74,6 +98,103 @@ export async function handleBrowserNavigate(
   args: Record<string, unknown>,
 ): Promise<string> {
   return await this.browser.navigate((args["url"] as string) || "");
+}
+
+// Browser-first platform connection handlers. These handlers deliberately do
+// not accept raw tokens, API keys, passwords, or OTPs. Provider login remains
+// on the official site, while Miki stores only an opaque connection reference.
+function requirePlatformConnectionStore(
+  context: ToolHandlerContext,
+): SqlitePlatformConnectionStore {
+  if (!context.platformConnectionStore) {
+    throw new Error("Platform connection service is not available");
+  }
+  return context.platformConnectionStore;
+}
+
+export async function handlePlatformConnectionStart(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const provider = typeof args["provider"] === "string" ? args["provider"] : "";
+  const store = requirePlatformConnectionStore(this);
+  const scopes = Array.isArray(args["scopes"])
+    ? args["scopes"].filter((value): value is string => typeof value === "string")
+    : undefined;
+  const session = store.begin({ provider: provider as PlatformProvider, scopes });
+  let browserStatus = "official page opened";
+  try {
+    await this.browser.navigate(session.officialUrl);
+    store.markBrowserOpened(session.id);
+  } catch (error: unknown) {
+    browserStatus = `browser handoff requires user action: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return JSON.stringify({
+    action: "platform_connection_started",
+    sessionId: session.id,
+    provider: session.provider,
+    officialUrl: session.officialUrl,
+    expectedDomain: session.expectedDomain,
+    expiresAt: session.expiresAt,
+    browserStatus,
+    userAction: session.userActionRequired,
+  });
+}
+
+export async function handlePlatformConnectionStatus(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const sessionId = typeof args["sessionId"] === "string" ? args["sessionId"] : "";
+  if (!sessionId) throw new Error("sessionId is required");
+  const session = requirePlatformConnectionStore(this).getSession(sessionId);
+  if (!session) throw new Error("Browser connection session not found");
+  return JSON.stringify({ session });
+}
+
+export async function handlePlatformConnectionComplete(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const sessionId = typeof args["sessionId"] === "string" ? args["sessionId"] : "";
+  const accountLabel = typeof args["accountLabel"] === "string" ? args["accountLabel"] : "";
+  if (!sessionId || !accountLabel.trim()) {
+    throw new Error("sessionId and accountLabel are required");
+  }
+  for (const key of ["token", "apiKey", "api_key", "secret", "password", "accessToken", "refreshToken"]) {
+    if (typeof args[key] === "string" && String(args[key]).trim()) {
+      throw new Error("Raw credentials are never accepted by Chat tools. Complete login in the official browser page.");
+    }
+  }
+  const input: CompleteConnectionInput = {
+    accountLabel,
+    externalAccountId: typeof args["externalAccountId"] === "string" ? args["externalAccountId"] : undefined,
+    scopes: Array.isArray(args["scopes"])
+      ? args["scopes"].filter((value): value is string => typeof value === "string")
+      : undefined,
+    credentialRef: typeof args["credentialRef"] === "string" ? args["credentialRef"] : undefined,
+    expiresAt: typeof args["expiresAt"] === "string" ? args["expiresAt"] : undefined,
+  };
+  const result = requirePlatformConnectionStore(this).complete(sessionId, input);
+  return JSON.stringify({ action: "platform_connection_recorded", ...result });
+}
+
+export async function handlePlatformConnectionValidate(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const connectionId = typeof args["connectionId"] === "string" ? args["connectionId"] : "";
+  if (!connectionId) throw new Error("connectionId is required");
+  return JSON.stringify({ connection: requirePlatformConnectionStore(this).validate(connectionId) });
+}
+
+export async function handlePlatformConnectionRevoke(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const connectionId = typeof args["connectionId"] === "string" ? args["connectionId"] : "";
+  if (!connectionId) throw new Error("connectionId is required");
+  return JSON.stringify({ connection: requirePlatformConnectionStore(this).revoke(connectionId) });
 }
 
 export async function handleBrowserClick(
@@ -524,8 +645,7 @@ export async function handleRuntimeEnsure(
   if (!this.runtimeFetcher) {
     return JSON.stringify({
       outcome: "failed",
-      error:
-        "Runtime fetcher is not initialized on this agent instance.",
+      error: "Runtime fetcher is not initialized on this agent instance.",
     });
   }
   const skillId = args["skill_id"] as string;

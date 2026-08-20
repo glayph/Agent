@@ -261,7 +261,7 @@ export class SlackBot {
     await this.handleEvent(event, envelope.payload?.team_id);
   }
 
-  private async handleEvent(event: SlackEvent, teamId?: string): Promise<void> {
+  private async handleEvent(event: SlackEvent, _teamId?: string): Promise<void> {
     const config = this.runtimeConfig;
     if (!config || !shouldHandleSlackEvent(event, this.botUserId, config)) {
       return;

@@ -6,6 +6,7 @@ export const MemoryConsolidationDaemon: any;
 export const AgentMemoryIntegration: any;
 export const TemporaryMemory: any;
 export const MultiHopRetriever: any;
+export const GraphCognitiveMemory: any;
 
 export const REGIONS: Readonly<{
   LONG_TERM: 'long_term';

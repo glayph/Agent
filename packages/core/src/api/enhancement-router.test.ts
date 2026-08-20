@@ -253,6 +253,35 @@ describe("enhancement router", () => {
     });
   });
 
+  it("deduplicates inbound events by the Idempotency-Key header", async () => {
+    await withServer(async (baseUrl) => {
+      const payload = {
+        channel: "webhook",
+        senderId: "sender-1",
+        sessionId: "session-1",
+        text: "deduplicate me",
+      };
+      const headers = {
+        "content-type": "application/json",
+        "idempotency-key": "enhancement-router-idempotency-1",
+      };
+      const first = await jsonFetch(baseUrl, "/enhancements/events/inbound", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const second = await jsonFetch(baseUrl, "/enhancements/events/inbound", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      expect(first.response.status).toBe(202);
+      expect(second.response.status).toBe(202);
+      expect(first.body.job?.id).toBe(second.body.job?.id);
+    });
+  });
+
   it("rejects invalid agent run and evidence payloads", async () => {
     await withServer(async (baseUrl) => {
       const blankObjective = await jsonFetch(

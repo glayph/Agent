@@ -121,6 +121,18 @@ export function multiHopRetrieve(opts: Record<string, unknown> = {}): unknown {
 /**
  * Temporary memory helper (project-scoped scratch). Returns null if not ready.
  */
+export function getNodeGraphContext(query: string, limit = 8): unknown[] {
+  if (!_tkg) return [];
+  const fn = (_tkg as { getNodeGraphContext?: (q: string, n?: number) => unknown[] }).getNodeGraphContext;
+  return typeof fn === "function" ? fn.call(_tkg, query, limit) : [];
+}
+
+export function getNodeGraphSnapshot(limit = 100): unknown {
+  if (!_tkg) return { nodes: [], edges: [] };
+  const fn = (_tkg as { getNodeGraphSnapshot?: (n?: number) => unknown }).getNodeGraphSnapshot;
+  return typeof fn === "function" ? fn.call(_tkg, limit) : { nodes: [], edges: [] };
+}
+
 export function getTemporaryMemory(): unknown | null {
   if (!_tkg) return null;
   const fn = (_tkg as { getTemporaryMemory?: () => unknown }).getTemporaryMemory;

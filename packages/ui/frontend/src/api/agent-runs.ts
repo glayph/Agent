@@ -130,7 +130,7 @@ export async function listAgentRuns(limit = 100): Promise<AgentRunsResponse> {
 
 export async function getAgentRun(runId: string): Promise<AgentRunResponse> {
   return request<AgentRunResponse>(
-    `/api/agent/runs/${encodeURIComponent(runId)}`,
+    `/api/enhancements/agent/runs/${encodeURIComponent(runId)}`,
   )
 }
 

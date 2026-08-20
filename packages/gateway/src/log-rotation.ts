@@ -92,6 +92,7 @@ export class RotatingWriteStream {
   /** Rotate the log file: compress current → .1.gz, shift older files, start fresh. */
   private async rotate(): Promise<void> {
     this.rotating = true;
+    let rotationSucceeded = false;
     try {
       // Close current stream first
       await new Promise<void>((resolve, reject) => {
@@ -122,21 +123,31 @@ export class RotatingWriteStream {
       // Compress current log → .1.gz
       await this._compressFile(this.filePath, `${this.filePath}.1.gz`);
 
-      // Truncate the current log file
+      // Truncate the current log file. Buffered writes are accounted for in
+      // finally after the replacement stream is opened.
       fs.writeFileSync(this.filePath, "", { encoding: "utf-8" });
-      this.bytesWritten = 0;
+      rotationSucceeded = true;
     } catch (err) {
       console.error("[RotatingWriteStream] Failed to rotate:", err);
     } finally {
-      // Re-open fresh stream
+      // Re-open fresh stream and flush writes that arrived while the old
+      // stream was being closed/compressed. When rotation succeeded, the
+      // fresh file starts at zero, so retain the buffered byte count instead
+      // of silently resetting it to zero. If the buffered data itself crosses
+      // the threshold, schedule the next rotation after the flush.
       this.stream = this._createStream();
+      const buffered = this.pendingWrites;
+      this.pendingWrites = [];
       this.rotating = false;
-      if (this.pendingWrites.length > 0) {
-        const buffered = this.pendingWrites;
-        this.pendingWrites = [];
-        for (const chunk of buffered) {
-          this.stream.write(chunk);
-        }
+      if (rotationSucceeded) this.bytesWritten = 0;
+      for (const chunk of buffered) {
+        this.stream.write(chunk);
+        if (rotationSucceeded) this.bytesWritten += chunk.length;
+      }
+      if (this.bytesWritten >= this.maxBytes && !this.rotating) {
+        this.rotate().catch((err) =>
+          console.error("[RotatingWriteStream] Rotation error:", err),
+        );
       }
     }
   }

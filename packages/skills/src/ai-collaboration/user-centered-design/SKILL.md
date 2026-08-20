@@ -2,11 +2,11 @@
 name: user-centered-design
 description: "Apply UCD methodologies to evaluate and improve software from the user's perspective."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [ux, user-research, usability, design-thinking]
     related_skills: [wireframing, visual-design, accessibility]
 ---

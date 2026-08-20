@@ -17,10 +17,14 @@
     "./safety": {
       "import": "./dist/safety/index.js",
       "types": "./dist/safety/index.d.ts"
+    },
+    "./llm/provider": {
+      "import": "./dist/llm/provider/index.js",
+      "types": "./dist/llm/provider/index.d.ts"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json || exit 0",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/api/index.js",

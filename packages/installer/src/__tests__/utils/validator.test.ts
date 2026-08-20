@@ -237,13 +237,13 @@ describe("validatePluginManifest", () => {
   });
 
   it("validates entrypoint existence", async () => {
-    fs.writeFileSync(path.join(tmpDir, "index.py"), "# test");
+    fs.writeFileSync(path.join(tmpDir, "index.js"), "export const test = true;");
     const result = await validatePluginManifest(
       {
         name: "my_plugin",
         version: "1.0.0",
         description: "test",
-        main: "index.py",
+        main: "index.js",
       },
       tmpDir,
     );
@@ -256,7 +256,7 @@ describe("validatePluginManifest", () => {
         name: "my_plugin",
         version: "1.0.0",
         description: "test",
-        main: "nonexistent.py",
+        main: "nonexistent.js",
       },
       tmpDir,
     );
@@ -265,14 +265,14 @@ describe("validatePluginManifest", () => {
   });
 
   it("rejects entrypoints outside plugin files directory", async () => {
-    const outsidePath = path.join(tmpDir, "..", "outside.py");
-    fs.writeFileSync(outsidePath, "# test");
+    const outsidePath = path.join(tmpDir, "..", "outside.js");
+    fs.writeFileSync(outsidePath, "export const test = true;");
     const result = await validatePluginManifest(
       {
         name: "my_plugin",
         version: "1.0.0",
         description: "test",
-        main: "../outside.py",
+        main: "../outside.js",
       },
       tmpDir,
     );
@@ -285,8 +285,8 @@ describe("validatePluginManifest", () => {
   });
 
   it("rejects absolute entrypoints", async () => {
-    const entryPath = path.join(tmpDir, "index.py");
-    fs.writeFileSync(entryPath, "# test");
+    const entryPath = path.join(tmpDir, "index.js");
+    fs.writeFileSync(entryPath, "export const test = true;");
     const result = await validatePluginManifest(
       {
         name: "my_plugin",
@@ -339,10 +339,10 @@ describe("validatePluginManifest", () => {
 
   it("rejects symlinked entrypoints that resolve outside plugin files", async () => {
     const outsideDir = path.join(tmpDir, "..", `outside-${Date.now()}`);
-    const outsidePath = path.join(outsideDir, "entry.py");
-    const linkPath = path.join(tmpDir, "entry.py");
+    const outsidePath = path.join(outsideDir, "entry.js");
+    const linkPath = path.join(tmpDir, "entry.js");
     fs.mkdirSync(outsideDir, { recursive: true });
-    fs.writeFileSync(outsidePath, "# outside");
+    fs.writeFileSync(outsidePath, "export const outside = true;");
 
     try {
       fs.symlinkSync(outsidePath, linkPath);
@@ -355,7 +355,7 @@ describe("validatePluginManifest", () => {
         name: "my_plugin",
         version: "1.0.0",
         description: "test",
-        main: "entry.py",
+        main: "entry.js",
       },
       tmpDir,
     );

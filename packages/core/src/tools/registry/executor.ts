@@ -17,6 +17,11 @@ import {
   handleBrowserScreenshot,
   handleBrowserScroll,
   handleBrowserClose,
+  handlePlatformConnectionStart,
+  handlePlatformConnectionStatus,
+  handlePlatformConnectionComplete,
+  handlePlatformConnectionValidate,
+  handlePlatformConnectionRevoke,
   handleComputerObserve,
   handleComputerFocus,
   handleComputerInvoke,
@@ -60,6 +65,7 @@ import type { AgentOrchestrator } from "../../agent.js";
 import { getErrorMessage } from "../../errors.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "../../paths.js";
 import { RuntimeFetcher } from "../../runtime-fetch/index.js";
+import type { SqlitePlatformConnectionStore } from "../../platform-connections.js";
 
 export interface ToolResult {
   success: boolean;
@@ -145,6 +151,7 @@ export class ToolRegistry {
   public profileManager: ProfileManager | null = null;
   public orchestrator: AgentOrchestrator | null = null;
   public runtimeFetcher: RuntimeFetcher | null = null;
+  public platformConnectionStore: SqlitePlatformConnectionStore | null = null;
   private handlers: Map<string, ToolHandler> = new Map();
   private skillToolDefs: Map<string, ToolDefinition> = new Map();
   private pluginToolDefs: Map<string, ToolDefinition> = new Map();
@@ -207,6 +214,10 @@ export class ToolRegistry {
 
   setOrchestrator(orchestrator: AgentOrchestrator): void {
     this.orchestrator = orchestrator;
+  }
+
+  setPlatformConnectionStore(store: SqlitePlatformConnectionStore): void {
+    this.platformConnectionStore = store;
   }
 
   registerHandler(name: string, handler: ToolHandler): void {
@@ -335,6 +346,11 @@ export class ToolRegistry {
     );
     this.registerHandler("browser_scroll", handleBrowserScroll.bind(this));
     this.registerHandler("browser_close", handleBrowserClose.bind(this));
+    this.registerHandler("platform_connection_start", handlePlatformConnectionStart.bind(this));
+    this.registerHandler("platform_connection_status", handlePlatformConnectionStatus.bind(this));
+    this.registerHandler("platform_connection_complete", handlePlatformConnectionComplete.bind(this));
+    this.registerHandler("platform_connection_validate", handlePlatformConnectionValidate.bind(this));
+    this.registerHandler("platform_connection_revoke", handlePlatformConnectionRevoke.bind(this));
     this.registerHandler("computer_observe", handleComputerObserve.bind(this));
     this.registerHandler("computer_focus", handleComputerFocus.bind(this));
     this.registerHandler("computer_invoke", handleComputerInvoke.bind(this));
@@ -410,6 +426,7 @@ export class ToolRegistry {
       ...ToolRegistrySchemas.shellSchema(),
       ...ToolRegistrySchemas.fileSchemas(),
       ...ToolRegistrySchemas.browserSchemas(),
+      ...ToolRegistrySchemas.platformConnectionSchemas(),
       ...ToolRegistrySchemas.computerSchemas(),
       ...ToolRegistrySchemas.scraperSchemas(),
       ...ToolRegistrySchemas.modelSchemas(),

@@ -20,6 +20,24 @@ function positiveIntFromEnv(key: string, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readWorkspaceEnvValue(paths: RuntimePaths, key: string): string | undefined {
+  try {
+    const envPath = path.join(paths.configDir, ".env");
+    const line = fs
+      .readFileSync(envPath, "utf-8")
+      .split(/\r?\n/)
+      .find((entry) => entry.trimStart().startsWith(`${key}=`));
+    if (!line) return undefined;
+    const raw = line.slice(line.indexOf("=") + 1).trim();
+    if (raw.length >= 2 && ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'")))) {
+      return raw.slice(1, -1);
+    }
+    return raw || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 import {
   createWorkspaceSecretVault,
   inspectEnvSecretStatus,
@@ -30,7 +48,6 @@ import {
   readMikiEnv,
   redactSecrets,
   resolveConfiguredSecret,
-  setConfiguredSecret,
   setEnvSecret,
   settings,
   validateRuntimeConfig,
@@ -2195,6 +2212,17 @@ function modelBodyName(modelName: string, provider: string): string {
   return slash > 0 ? modelName.slice(slash + 1) : modelName;
 }
 
+/**
+ * A saved model has two identifiers: `model_name` is the user-facing label,
+ * while `model` is the provider-facing model id. Keep those concerns separate
+ * so a friendly alias such as `gemini-live-test` never gets sent to the LLM
+ * provider as if it were the actual model id.
+ */
+function runtimeModelName(stored: StoredModel): string {
+  const provider = normalizeProvider(stored.provider, stored.model_name);
+  return stored.model?.trim() || modelBodyName(stored.model_name, provider);
+}
+
 function validateModelIdentifier(modelName: string): void {
   if (!modelName.trim()) {
     throw new Error("model_name is required");
@@ -2302,7 +2330,9 @@ function modelInfoFromStored(
     enabled: stored.enabled !== false,
     available,
     status: available ? "available" : "unconfigured",
-    is_default: modelName === settings.defaultModel,
+    is_default:
+      modelName === settings.defaultModel ||
+      runtimeModelName(stored) === settings.defaultModel,
     is_virtual: false,
     default_model_allowed: option.default_model_allowed,
   };
@@ -2321,7 +2351,8 @@ function normalizeStoredModel(stored: StoredModel): StoredModel {
   return {
     ...stored,
     provider: normalizedProvider,
-    model: modelBodyName(stored.model_name, normalizedProvider),
+    model:
+      stored.model?.trim() || modelBodyName(stored.model_name, normalizedProvider),
     api_base: providerMismatch
       ? option.default_api_base
       : (stored.api_base ?? option.default_api_base),
@@ -2791,10 +2822,16 @@ async function fetchModelsFromProvider(
   if (!base) {
     return (option.common_models || []).map((id) => ({ id }));
   }
-  const url = `${base.replace(/\/+$/, "")}/models`;
+  const isGoogleProvider =
+    option.id === "google" || provider === "google" || provider === "gemini";
+  const normalizedBase = base.replace(/\/+$/, "");
+  // Gemini exposes chat completions through its OpenAI-compatible endpoint,
+  // but model discovery remains on the native /v1beta/models endpoint.
+  const googleModelsBase = normalizedBase.replace(/\/v1beta\/openai$/i, "/v1beta");
+  const url = `${isGoogleProvider ? googleModelsBase : normalizedBase}/models`;
   const headers: Record<string, string> = {};
   if (apiKey) {
-    if (option.id === "google" || provider === "google" || provider === "gemini") {
+    if (isGoogleProvider) {
       headers["x-goog-api-key"] = apiKey;
     } else {
       headers.Authorization = `Bearer ${apiKey}`;
@@ -2825,7 +2862,7 @@ async function fetchModelsFromProvider(
                 (item as { id?: unknown; name?: unknown }).id ||
                   (item as { id?: unknown; name?: unknown }).name ||
                   "",
-              ),
+              ).replace(/^models\//, ""),
               owned_by:
                 typeof (item as { owned_by?: unknown }).owned_by === "string"
                   ? (item as { owned_by: string }).owned_by
@@ -2886,8 +2923,21 @@ export function createLauncherCompatRouter({
   const secretMigration = migrateEnvSecretsToVault({
     workspaceDir: paths.configDir,
   });
-  loadVaultSecretsIntoEnv({ workspaceDir: paths.configDir });
+  loadVaultSecretsIntoEnv(undefined, paths.configDir);
   loadConfiguredSecretsIntoEnv(undefined, paths.configDir);
+  const persistedModel =
+    readWorkspaceEnvValue(paths, "MIKI_MODEL") ||
+    readWorkspaceEnvValue(paths, "DEFAULT_MODEL");
+  if (persistedModel) {
+    settings.setModel(persistedModel);
+    // Keep the provider in lockstep with the persisted model. Without this,
+    // a Gemini model restored after restart can inherit the legacy
+    // OpenRouter provider default and fail the agent credential gate even
+    // though GEMINI_API_KEY is present and the launcher catalog is healthy.
+    const persistedProvider = normalizeProvider(undefined, persistedModel);
+    settings.provider = persistedProvider;
+    process.env.MIKI_PROVIDER = persistedProvider;
+  }
   const sanitizeRuntimeConfig = (config: JsonRecord): JsonRecord =>
     extractRuntimeSecretsToVault(config, secretVault, paths);
   const validateWorkspaceConfig = (config: JsonRecord) =>
@@ -4464,10 +4514,15 @@ export function createLauncherCompatRouter({
     const models = state.models.map((model, index) =>
       modelInfoFromStored(model, index, paths.configDir),
     );
+    const activeStoredModel = state.models.find(
+      (model) => runtimeModelName(model) === settings.defaultModel,
+    );
     res.json({
       models,
       total: models.length,
-      default_model: settings.defaultModel,
+      // The UI selects cards by their friendly model_name label, while the
+      // runtime keeps the canonical provider model in settings.defaultModel.
+      default_model: activeStoredModel?.model_name || settings.defaultModel,
       provider_options: await launcherProviderOptions(paths),
     });
   });
@@ -4593,16 +4648,35 @@ export function createLauncherCompatRouter({
         .status(400)
         .json({ error: err instanceof Error ? err.message : String(err) });
     }
-    updateEnvVar(paths, "DEFAULT_MODEL", modelName);
-    settings.setModel(modelName);
-    orchestrator.modelName = modelName;
-    orchestrator.provider = normalizeProvider(undefined, modelName);
+    const selectedModel = state.models.find(
+      (model) =>
+        model.model_name === modelName || runtimeModelName(model) === modelName,
+    );
+    // The runtime settings object reads MIKI_MODEL on process startup,
+    // while the legacy config layer reads DEFAULT_MODEL. Persist the
+    // provider-facing model id, not a friendly saved-model alias, so a
+    // selected model survives restart and can be used by achatCompletion().
+    const activeModelName = selectedModel
+      ? runtimeModelName(selectedModel)
+      : modelName;
+    const provider = normalizeProvider(
+      selectedModel?.provider,
+      activeModelName,
+    );
+    updateEnvVar(paths, "MIKI_MODEL", activeModelName);
+    updateEnvVar(paths, "DEFAULT_MODEL", activeModelName);
+    updateEnvVar(paths, "MIKI_PROVIDER", provider);
+    settings.setModel(activeModelName);
+    settings.provider = provider;
+    process.env.MIKI_PROVIDER = provider;
+    orchestrator.modelName = activeModelName;
+    orchestrator.provider = provider;
     state.gateway_restart_required = true;
     saveState();
     const apply = await applyRuntimeChanges({ reason: "models.default" });
     res.json({
       status: "ok",
-      default_model: modelName,
+      default_model: selectedModel?.model_name || modelName,
       gateway_restart_required: apply.gateway_restart_required,
       runtime_apply_status: apply.status,
       runtime_apply_error: apply.error,

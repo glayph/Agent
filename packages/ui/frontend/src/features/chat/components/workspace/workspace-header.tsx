@@ -1,28 +1,27 @@
-import {
-  IconLayoutSidebarRightCollapse,
-  IconLayoutSidebarRightExpand,
-  IconMenu2,
-} from "@tabler/icons-react"
 import type { ReactNode } from "react"
 
 import { Badge } from "@/shared/ui/badge"
-import { Button } from "@/shared/ui/button"
+import { SidebarTrigger } from "@/shared/ui/sidebar"
 import { cn } from "@/lib/utils"
 
 import type { WorkspaceStatusPill, WorkspaceStatusTone } from "./types"
 
 const statusToneClass: Record<WorkspaceStatusTone, string> = {
-  neutral: "border-border bg-muted/35 text-muted-foreground",
-  success: "border-success/25 bg-success/10 text-success",
-  warning: "border-warning/25 bg-warning/10 text-warning",
-  info: "border-ring/25 bg-secondary/50 text-secondary-foreground",
+  neutral:
+    "border-border/80 bg-background/75 text-muted-foreground",
+  success:
+    "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  warning:
+    "border-primary/25 bg-primary/10 text-primary",
+  info:
+    "border-primary/30 bg-primary/10 text-primary",
 }
 
 const statusDotClass: Record<WorkspaceStatusTone, string> = {
   neutral: "bg-muted-foreground",
-  success: "bg-success",
-  warning: "bg-warning",
-  info: "bg-ring",
+  success: "bg-emerald-500",
+  warning: "bg-amber-500",
+  info: "bg-primary",
 }
 
 interface WorkspaceHeaderProps {
@@ -30,9 +29,6 @@ interface WorkspaceHeaderProps {
   subtitle?: string
   statuses: WorkspaceStatusPill[]
   controls?: ReactNode
-  rightPanelOpen: boolean
-  onOpenSidebar: () => void
-  onToggleRightPanel: () => void
 }
 
 export function WorkspaceHeader({
@@ -40,31 +36,19 @@ export function WorkspaceHeader({
   subtitle,
   statuses,
   controls,
-  rightPanelOpen,
-  onOpenSidebar,
-  onToggleRightPanel,
 }: WorkspaceHeaderProps) {
-  const InspectorIcon = rightPanelOpen
-    ? IconLayoutSidebarRightCollapse
-    : IconLayoutSidebarRightExpand
   const statusSummary = statuses.map((status) => status.label).join(", ")
 
   return (
-    <header className="flex h-14 min-h-14 shrink-0 items-center gap-2 border-b border-transparent bg-transparent px-3">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="text-muted-foreground hover:text-foreground md:hidden"
-        onClick={onOpenSidebar}
-        aria-label="Open workspaces"
-        title="Open workspaces"
-      >
-        <IconMenu2 className="size-4" />
-      </Button>
+    <header data-chat-header="true" className="bg-background/88 border-border/75 relative z-10 flex h-16 min-h-16 shrink-0 items-center gap-2 border-b px-3 backdrop-blur-xl sm:px-6">
+      <SidebarTrigger
+        className="text-muted-foreground hover:bg-primary/10 hover:text-primary md:hidden"
+        aria-label="Open navigation"
+        title="Open navigation"
+      />
 
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-        <h1 className="min-w-0 shrink truncate text-[13px] leading-none font-semibold sm:text-[15px]">
+        <h1 className="text-foreground min-w-0 shrink truncate text-[14px] font-semibold tracking-[-0.01em] sm:text-[15px]">
           {title}
         </h1>
 
@@ -73,53 +57,71 @@ export function WorkspaceHeader({
           aria-label={statusSummary}
           title={statusSummary}
         >
-          {statuses.map((status) => (
-            <span
-              key={status.label}
-              className={cn(
-                "size-1.5 rounded-full",
-                statusDotClass[status.tone ?? "neutral"],
-              )}
-            />
-          ))}
+          {statuses.map((status) => {
+            const dot = (
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  statusDotClass[status.tone ?? "neutral"],
+                )}
+              />
+            )
+            return status.onClick ? (
+              <button
+                key={status.label}
+                type="button"
+                className="rounded-full p-1"
+                onClick={status.onClick}
+                aria-label={status.label}
+                title={status.label}
+              >
+                {dot}
+              </button>
+            ) : (
+              <span key={status.label}>{dot}</span>
+            )
+          })}
         </div>
 
-        <div className="hidden min-w-0 items-center gap-1 sm:flex">
-          {statuses.map((status) => (
-            <Badge
-              key={status.label}
-              variant="outline"
-              className={cn(
-                "h-4 border px-1.5 text-[10px] leading-none font-medium",
-                statusToneClass[status.tone ?? "neutral"],
-              )}
-            >
-              {status.label}
-            </Badge>
-          ))}
+        <div className="hidden min-w-0 items-center gap-1.5 sm:flex">
+          {statuses.map((status) => {
+            const badge = (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "h-5 border px-2 text-[10px] leading-none font-medium",
+                  statusToneClass[status.tone ?? "neutral"],
+                  status.onClick && "cursor-pointer transition-colors hover:bg-primary/15",
+                )}
+              >
+                {status.label}
+              </Badge>
+            )
+            return status.onClick ? (
+              <button
+                key={status.label}
+                type="button"
+                className="rounded-md"
+                onClick={status.onClick}
+                aria-label={status.label}
+                title={status.label}
+              >
+                {badge}
+              </button>
+            ) : (
+              <span key={status.label}>{badge}</span>
+            )
+          })}
         </div>
 
         {subtitle && (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] leading-none sm:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-xs sm:inline">
             {subtitle}
           </span>
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5">
-        {controls}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground hover:text-foreground"
-          onClick={onToggleRightPanel}
-          aria-label={rightPanelOpen ? "Hide inspector" : "Show inspector"}
-          title={rightPanelOpen ? "Hide inspector" : "Show inspector"}
-        >
-          <InspectorIcon className="size-4" />
-        </Button>
-      </div>
+      <div className="flex shrink-0 items-center gap-1">{controls}</div>
     </header>
   )
 }

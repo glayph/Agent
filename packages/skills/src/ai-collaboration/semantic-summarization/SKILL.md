@@ -2,11 +2,11 @@
 name: semantic-summarization
 description: "Summarize text while preserving semantic meaning, entities, relationships, and actionable details."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [summarization, compression, context-management]
     related_skills: [concise-prompt, rag-context]
 ---

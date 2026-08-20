@@ -4,6 +4,7 @@ import {
   type MonitorNode,
   type MonitorNodeStatus,
   type MonitorNodeType,
+  clearMonitorRun,
   getMonitorState,
   updateMonitorStore,
 } from "@/features/monitor/store"
@@ -27,14 +28,32 @@ function bool(value: unknown, fallback = false): boolean {
 /**
  * Infers a node's monitoring category from its tool name. The backend only
  * knows about "tools" today (see api/index.ts node.spawn payloads), but
- * skills/plugins/system patterns route through the same tool-call mechanism
- * with recognizable name prefixes (e.g. "skill:", "plugin:"), so the graph
- * can still differentiate them visually without a backend contract change.
+ * skills/plugins/files/commands route through the same tool-call mechanism
+ * with recognizable name prefixes, so the graph can differentiate them
+ * without requiring a second websocket transport.
  */
 function inferNodeType(label: string): MonitorNodeType {
   const lower = label.toLowerCase()
   if (lower.startsWith("skill:") || lower.includes("skill_")) return "skill"
   if (lower.startsWith("plugin:") || lower.includes("plugin_")) return "plugin"
+  if (
+    lower.startsWith("file:") ||
+    lower.includes("file_") ||
+    /(^|[._-])(read|write|create|edit|move|copy|delete)[._-]?file/.test(lower)
+  ) {
+    return "file"
+  }
+  if (
+    lower.startsWith("command:") ||
+    lower.startsWith("shell:") ||
+    lower.startsWith("exec:") ||
+    lower.includes("terminal") ||
+    lower.includes("shell_") ||
+    lower.includes("command_") ||
+    lower.includes("execute_")
+  ) {
+    return "command"
+  }
   if (
     lower.startsWith("pattern:") ||
     lower.includes("workflow") ||
@@ -132,6 +151,7 @@ export function handleMonitorMessage(message: mikiMessage) {
           level,
           parallel: bool(payload.parallel, false),
           input: payload.input,
+          action: str(payload.action) || undefined,
           createdAt: timestamp,
           updatedAt: timestamp,
           uiState: "minimized",
@@ -185,12 +205,14 @@ export function handleMonitorMessage(message: mikiMessage) {
         const node = prev.nodes[nodeId]
         if (!node) return {}
 
-        // Mark all incoming/outgoing edges touching this node as settled
-        // (stop the flow animation) once the node itself is done.
+        // Stop the flow into this activity once it settles. If the activity
+        // failed, also stop any downstream flow that may already exist. A
+        // successful predecessor may keep an outgoing edge animated while a
+        // dependent activity is still running.
         const nextEdges = { ...prev.edges }
         for (const [edgeId, edge] of Object.entries(nextEdges)) {
-          if (edge.source === nodeId) {
-            nextEdges[edgeId] = { ...edge, animated: ok }
+          if (edge.target === nodeId || (!ok && edge.source === nodeId)) {
+            nextEdges[edgeId] = { ...edge, animated: false }
           }
         }
 
@@ -201,8 +223,14 @@ export function handleMonitorMessage(message: mikiMessage) {
               ...node,
               status: ok ? "completed" : "failed",
               durationMs: numOrUndefined(payload.duration_ms),
+              action: str(payload.action) || node.action,
+              resultMessage: str(payload.result_message) || node.resultMessage,
               outputPreview: str(payload.output_preview) || undefined,
-              error: !ok ? str(payload.output_preview) || "Tool failed" : undefined,
+              error: !ok
+                ? str(payload.result_message) ||
+                  str(payload.output_preview) ||
+                  "Tool failed"
+                : undefined,
               updatedAt: timestamp,
             },
           },
@@ -238,6 +266,10 @@ export function handleMonitorMessage(message: mikiMessage) {
           },
         }
       })
+
+      // Keep the terminal state visible for a short moment so the inspector
+      // can be read, then return the Monitor to its silent default canvas.
+      window.setTimeout(() => clearMonitorRun(runId), 1600)
       break
     }
 

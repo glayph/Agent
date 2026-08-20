@@ -17,6 +17,7 @@ interface ChatMessageProps {
   onDelete: (messageId: string) => void
   onFork: (messageId: string) => void
   onRetry: (messageId: string) => void
+  onInspect?: (messageId: string) => void
 }
 
 export function ChatMessage({
@@ -26,6 +27,7 @@ export function ChatMessage({
   onDelete,
   onFork,
   onRetry,
+  onInspect,
 }: ChatMessageProps) {
   return (
     <article
@@ -38,9 +40,10 @@ export function ChatMessage({
       {message.role === "assistant" ? (
         <Suspense
           fallback={
-            <div className="text-muted-foreground px-0 py-1 text-[14px]">
-              {message.content || "Loading"}
-            </div>
+            <div
+              className="text-muted-foreground px-0 py-1 text-[0px]"
+              aria-label="Assistant response loading"
+            />
           }
         >
           <AssistantMessage
@@ -56,6 +59,7 @@ export function ChatMessage({
             onDelete={() => onDelete(message.id)}
             onFork={() => onFork(message.id)}
             onRetry={() => onRetry(message.id)}
+            onInspect={() => onInspect?.(message.id)}
           />
         </Suspense>
       ) : (

@@ -2,11 +2,11 @@
 name: writing-plans
 description: "Write implementation plans: bite-sized tasks, paths, code."
 version: 1.1.0
-author: Hiro (adapted from obra/superpowers)
+author: Miki (adapted from obra/superpowers)
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [planning, design, implementation, workflow, documentation]
     related_skills: [test-driven-development, requesting-code-review]
 ---
@@ -71,7 +71,7 @@ Every plan MUST start with:
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For Hiro:** Execute this plan task-by-task with verification after each step.
+> **For Miki:** Execute this plan task-by-task with verification after each step.
 
 **Goal:** [One sentence describing what this builds]
 
@@ -141,7 +141,7 @@ Read and understand:
 
 ### Step 2: Explore the Codebase
 
-Use Hiro tools to understand the project:
+Use Miki tools to understand the project:
 
 ```python
 # Understand project structure

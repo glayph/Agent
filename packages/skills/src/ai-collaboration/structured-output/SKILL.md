@@ -2,11 +2,11 @@
 name: structured-output
 description: "Produce validated, schema-compliant structured data for direct consumption by tools, APIs, or pipelines."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [structured-output, json, schema, tool-integration]
     related_skills: [testing-debugging]
 ---

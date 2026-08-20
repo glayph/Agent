@@ -91,7 +91,7 @@ function ComposerActionsMenu({
           variant="ghost"
           size="icon"
           className={cn(
-            "text-muted-foreground hover:bg-accent/70 hover:text-foreground rounded-md",
+            "text-muted-foreground hover:bg-primary/10 hover:text-primary rounded-full transition-colors",
             buttonClassName,
           )}
           aria-label={menuLabel}
@@ -176,13 +176,13 @@ export function ChatComposer({
   }
 
   return (
-    <div className="pointer-events-none relative z-10 shrink-0 bg-transparent px-[var(--chat-inline-padding)] pt-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+    <div className="pointer-events-none relative z-10 shrink-0 bg-transparent px-[var(--chat-inline-padding)] pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
       <div
         className={cn(
-          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col border transition-[border-color,box-shadow,background-color] [background:var(--chat-composer-bg)] [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] focus-within:[border-color:var(--chat-composer-focus-border)] focus-within:[box-shadow:var(--chat-composer-focus-shadow)]",
+          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col rounded-[1.5rem] border transition-[border-color,box-shadow,background-color] [background:var(--chat-composer-bg)] [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] focus-within:[border-color:var(--chat-composer-focus-border)] focus-within:[box-shadow:var(--chat-composer-focus-shadow)]",
           canInput
-            ? "min-h-[var(--chat-composer-min-height)] rounded-[1.75rem] p-1.5"
-            : "min-h-12 rounded-[1.75rem] p-1.5",
+            ? "min-h-[var(--chat-composer-min-height)] rounded-[1.5rem] p-2"
+            : "min-h-12 rounded-[1.5rem] p-2",
         )}
       >
         {attachments.length > 0 && (
@@ -190,7 +190,7 @@ export function ChatComposer({
             {attachments.map((attachment, index) => (
               <div
                 key={`${attachment.url}-${index}`}
-                className="bg-background relative size-[clamp(3.5rem,15vw,4.75rem)] overflow-hidden rounded-md"
+                className="bg-muted/40 relative size-[clamp(3.5rem,15vw,4.75rem)] overflow-hidden rounded-xl border border-border/70"
               >
                 <img
                   src={attachment.url}
@@ -204,7 +204,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(index)}
-                  className="bg-background/85 text-foreground hover:bg-card absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-md transition"
+                  className="bg-background/90 text-foreground hover:bg-primary hover:text-primary-foreground absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border border-border/70 shadow-sm transition-colors"
                   aria-label={t("chat.removeImage")}
                   title={t("chat.removeImage")}
                 >
@@ -247,7 +247,7 @@ export function ChatComposer({
               aria-label={t("chat.messageInput", { defaultValue: "Message" })}
               aria-describedby={textareaDescription}
               autoComplete="off"
-              className="placeholder:text-muted-foreground/70 max-h-[var(--chat-composer-text-max-height)] min-h-9 min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-2 text-[15px] leading-6 shadow-none transition-colors focus-visible:ring-0 focus-visible:outline-none dark:bg-transparent"
+              className="text-foreground placeholder:text-muted-foreground/70 max-h-[var(--chat-composer-text-max-height)] min-h-9 min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-2 text-[15px] leading-6 shadow-none transition-colors focus-visible:ring-0 focus-visible:outline-none dark:bg-transparent"
               minRows={1}
               maxRows={6}
             />
@@ -267,7 +267,7 @@ export function ChatComposer({
                     <Button
                       type="button"
                       size="icon"
-                      className="bg-primary text-primary-foreground hover:bg-primary/90 size-8 rounded-full"
+                      className="bg-primary text-primary-foreground hover:bg-primary/90 size-8 rounded-full shadow-[0_4px_14px_color-mix(in_srgb,var(--primary)_32%,transparent)] transition-transform hover:scale-105 active:scale-95"
                       onClick={onSend}
                       disabled={!canSend}
                       aria-label={t("chat.sendMessage")}
@@ -323,7 +323,7 @@ export function ChatComposer({
               <Button
                 type="button"
                 size="icon"
-                className="bg-muted text-muted-foreground/70 size-8 rounded-full"
+                className="bg-muted text-muted-foreground/50 size-8 rounded-full shadow-none"
                 disabled
                 aria-label={t("chat.sendMessage")}
               >

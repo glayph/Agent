@@ -15,6 +15,14 @@ import {
   type VerificationEvidence,
 } from "../agent-run.js";
 import { PersistentJobQueue } from "../persistent-job-queue.js";
+import { PersistentJobRunner } from "../persistent-job-runner.js";
+import { DeliveryQueue } from "../delivery-queue.js";
+import {
+  createDefaultChannelRegistry,
+  type ChannelName,
+} from "../event-envelope.js";
+import { WatcherRegistry } from "../watcher-registry.js";
+import { PersistentTimerScheduler } from "../timer-scheduler.js";
 import { globalStartupTimer } from "../performance-budgets.js";
 import { createBackupManager } from "../safety/backup.js";
 import { runDoctor } from "../safety/doctor.js";
@@ -31,6 +39,10 @@ import { parseCronToNextRun } from "../scheduler.js";
 
 interface EnhancementRouterOptions {
   runtimePaths: RuntimePaths;
+  /** Shared queue used by both HTTP enqueue routes and the persistent worker. */
+  jobQueue?: PersistentJobQueue;
+  /** Optional worker status source for the runtime dashboard. */
+  jobRunner?: PersistentJobRunner;
   /** @deprecated */
   workspaceDir?: string;
 }
@@ -135,15 +147,31 @@ function parseEvidence(value: unknown): VerificationEvidence | null {
 
 export function createEnhancementRouter({
   runtimePaths,
+  jobQueue,
+  jobRunner,
 }: EnhancementRouterOptions): Router {
   const router = Router();
   const audit = new SqliteAuditLog(path.join(runtimePaths.dataDir, "audit.db"));
   const runRecorder = new AgentRunRecorder(
     new SqliteAgentRunStore(path.join(runtimePaths.dataDir, "agent-runs.db")),
   );
-  const jobs = new PersistentJobQueue(
-    path.join(runtimePaths.dataDir, "runtime-jobs.json"),
+  const jobs =
+    jobQueue ??
+    new PersistentJobQueue(
+      path.join(runtimePaths.dataDir, "runtime-jobs.json"),
+    );
+  const channels = createDefaultChannelRegistry();
+  const deliveries = new DeliveryQueue(
+    path.join(runtimePaths.dataDir, "delivery-receipts.json"),
   );
+  const watchers = new WatcherRegistry(
+    path.join(runtimePaths.dataDir, "watcher-state.json"),
+  );
+  const timers = new PersistentTimerScheduler(
+    path.join(runtimePaths.dataDir, "timers.json"),
+    jobs,
+  );
+  timers.start();
   const backups = createBackupManager(runtimePaths);
   const migrations = createMigrationManager(runtimePaths);
   const safeMode = createSafeModeManager(runtimePaths);
@@ -354,8 +382,159 @@ export function createEnhancementRouter({
     res.json({ timings: globalStartupTimer.report() });
   });
 
+  router.get("/runtime/channels", (_req: Request, res: Response) => {
+    res.json({ channels: channels.list() });
+  });
+
+  router.post("/events/inbound", (req: Request, res: Response) => {
+    if (!isRecord(req.body) || typeof req.body.channel !== "string") {
+      res.status(400).json({ error: "channel is required" });
+      return;
+    }
+    try {
+      const idempotencyHeader = req.headers["idempotency-key"];
+      const idempotencyKey = Array.isArray(idempotencyHeader)
+        ? idempotencyHeader[0]
+        : idempotencyHeader;
+      const normalizedInput = idempotencyKey
+        ? { ...req.body, idempotencyKey }
+        : req.body;
+      const event = channels.normalize(req.body.channel, normalizedInput, {
+        senderId: typeof req.body.senderId === "string" ? req.body.senderId : undefined,
+      });
+      const payload = event.payload;
+      const message =
+        (typeof payload.message === "string" && payload.message) ||
+        (typeof payload.text === "string" && payload.text) ||
+        JSON.stringify(payload);
+      const job = jobs.enqueue(
+        "agent.message",
+        { message, sessionId: event.sessionId, event },
+        { idempotencyKey: event.idempotencyKey },
+      );
+      recordJobLifecycle(audit, "event.inbound", {
+        eventId: event.eventId,
+        channel: event.channel,
+        jobId: job.id,
+        idempotencyKey: event.idempotencyKey,
+      });
+      res.status(202).json({ event, job });
+    } catch (error: unknown) {
+      res.status(400).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.get("/runtime/channels/:channel", (req: Request, res: Response) => {
+    const channel = req.params.channel as ChannelName;
+    if (!channels.has(channel)) {
+      res.status(404).json({ error: "Unsupported channel" });
+      return;
+    }
+    res.json({ channel, enabled: true, mode: "normalized-event-adapter" });
+  });
+
+  router.get("/runtime/deliveries", (req: Request, res: Response) => {
+    const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+    res.json({
+      receipts: deliveries.list(status as Parameters<DeliveryQueue["list"]>[0]),
+      stats: deliveries.stats(),
+    });
+  });
+
+  router.post("/runtime/deliveries", (req: Request, res: Response) => {
+    if (
+      !isRecord(req.body) ||
+      typeof req.body.channel !== "string" ||
+      typeof req.body.destination !== "string" ||
+      typeof req.body.body !== "string" ||
+      typeof req.body.idempotencyKey !== "string"
+    ) {
+      res.status(400).json({
+        error: "channel, destination, body and idempotencyKey are required",
+      });
+      return;
+    }
+    try {
+      const channel = req.body.channel as ChannelName;
+      if (!channels.has(channel)) throw new Error(`Unsupported channel: ${channel}`);
+      const receipt = deliveries.enqueue({
+        channel,
+        destination: req.body.destination,
+        body: req.body.body,
+        idempotencyKey: req.body.idempotencyKey,
+        runId: typeof req.body.runId === "string" ? req.body.runId : undefined,
+        eventId: typeof req.body.eventId === "string" ? req.body.eventId : undefined,
+        maxAttempts: typeof req.body.maxAttempts === "number" ? req.body.maxAttempts : undefined,
+      });
+      recordJobLifecycle(audit, "delivery.enqueue", {
+        deliveryId: receipt.id,
+        channel: receipt.channel,
+        status: receipt.status,
+        idempotencyKey: receipt.idempotencyKey,
+      });
+      res.status(202).json({ receipt });
+    } catch (error: unknown) {
+      res.status(400).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.get("/runtime/watchers", (_req: Request, res: Response) => {
+    res.json({ watchers: watchers.list(), health: watchers.health() });
+  });
+
+  router.get("/runtime/timers", (_req: Request, res: Response) => {
+    res.json({ timers: timers.list() });
+  });
+
+  router.post("/runtime/timers", (req: Request, res: Response) => {
+    if (
+      !isRecord(req.body) ||
+      typeof req.body.sessionId !== "string" ||
+      typeof req.body.message !== "string" ||
+      typeof req.body.schedule !== "string"
+    ) {
+      res.status(400).json({ error: "sessionId, message and schedule are required" });
+      return;
+    }
+    try {
+      const timer = timers.create({
+        sessionId: req.body.sessionId,
+        message: req.body.message,
+        schedule: req.body.schedule,
+      });
+      recordJobLifecycle(audit, "timer.create", {
+        timerId: timer.id,
+        schedule: timer.schedule,
+        sessionId: timer.sessionId,
+      });
+      res.status(201).json({ timer });
+    } catch (error: unknown) {
+      res.status(400).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.delete("/runtime/timers/:id", (req: Request, res: Response) => {
+    const cancelled = timers.cancel(req.params.id);
+    if (!cancelled) {
+      res.status(404).json({ error: "Timer not found" });
+      return;
+    }
+    recordJobLifecycle(audit, "timer.cancel", { timerId: req.params.id });
+    res.json({ ok: true, timerId: req.params.id });
+  });
+
   router.get("/runtime/jobs", (_req: Request, res: Response) => {
-    res.json({ jobs: jobs.list(), stats: jobs.stats() });
+    res.json({
+      jobs: jobs.list(),
+      stats: jobs.stats(),
+      worker: jobRunner?.getStatus() ?? null,
+    });
+  });
+
+  router.get("/runtime/worker", (_req: Request, res: Response) => {
+    res.json({
+      worker: jobRunner?.getStatus() ?? { running: false, activeJobs: 0 },
+    });
   });
 
   router.get("/runtime/jobs/dead-letter", (_req: Request, res: Response) => {
@@ -378,8 +557,14 @@ export function createEnhancementRouter({
           typeof req.body.maxAttempts === "number"
             ? req.body.maxAttempts
             : undefined,
-        delayMs:
-          typeof req.body.delayMs === "number" ? req.body.delayMs : undefined,
+                delayMs:
+          typeof req.body.delayMs === "number"
+            ? req.body.delayMs
+            : undefined,
+        idempotencyKey:
+          typeof req.body.idempotencyKey === "string"
+            ? req.body.idempotencyKey
+            : undefined,
       },
     );
     recordJobLifecycle(audit, "job.enqueue", {
@@ -416,6 +601,38 @@ export function createEnhancementRouter({
     },
   );
 
+  router.patch(
+    "/runtime/jobs/:jobId/checkpoint",
+    (req: Request, res: Response) => {
+      if (
+        !isRecord(req.body) ||
+        typeof req.body.id !== "string" ||
+        typeof req.body.step !== "string" ||
+        !["started", "completed", "failed"].includes(String(req.body.status))
+      ) {
+        res.status(400).json({
+          error: "id, step and status (started|completed|failed) are required",
+        });
+        return;
+      }
+      const job = jobs.checkpoint(req.params.jobId, {
+        id: req.body.id,
+        step: req.body.step,
+        status: req.body.status as "started" | "completed" | "failed",
+        data: isRecord(req.body.data) ? req.body.data : undefined,
+      });
+      if (!job) {
+        res.status(404).json({ error: "Job not found or not owned" });
+        return;
+      }
+      recordJobLifecycle(audit, "job.checkpoint", {
+        jobId: job.id,
+        type: job.type,
+        checkpoint: job.checkpoint,
+      });
+      res.json({ job });
+    },
+  );
   router.post("/runtime/jobs/:jobId/retry", (req: Request, res: Response) => {
     const body = isRecord(req.body) ? req.body : {};
     const job = jobs.retry(

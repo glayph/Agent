@@ -2,16 +2,16 @@
 name: xurl
 description: "X/Twitter via xurl CLI: post, search, DM, media, v2 API."
 version: 1.1.1
-author: xdevplatform + Hiro + Hiro
+author: xdevplatform + Miki + Miki
 license: MIT
 platforms: [linux, macos]
 prerequisites:
   commands: [xurl]
 metadata:
-  Hiro:
+  Miki:
     tags: [twitter, x, social-media, xurl, official-api]
     homepage: https://github.com/xdevplatform/xurl
-    upstream_skill: https://github.com/Hiro/Hiro/blob/main/skills/xurl/SKILL.md
+    upstream_skill: https://github.com/Miki/Miki/blob/main/skills/xurl/SKILL.md
 ---
 
 # xurl — X (Twitter) API via the Official CLI
@@ -410,5 +410,5 @@ xurl --app staging /2/users/me             # one-off against staging
 ## Attribution
 
 - Upstream CLI: https://github.com/xdevplatform/xurl (X developer platform team, Chris Park et al.)
-- Upstream agent skill: https://github.com/Hiro/Hiro/blob/main/skills/xurl/SKILL.md
-- Hiro adaptation: reformatted for Hiro skill conventions; safety guardrails preserved verbatim.
+- Upstream agent skill: https://github.com/Miki/Miki/blob/main/skills/xurl/SKILL.md
+- Miki adaptation: reformatted for Miki skill conventions; safety guardrails preserved verbatim.

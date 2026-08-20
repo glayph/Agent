@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRuntimeStartRejectsOccupiedPort(t *testing.T) {
@@ -40,5 +41,68 @@ func TestRuntimeStartRejectsOccupiedPort(t *testing.T) {
 	}
 	if rt.PID() != 0 {
 		t.Fatalf("PID() = %d, want 0", rt.PID())
+	}
+}
+
+func TestRuntimeStopTerminatesManagedProcess(t *testing.T) {
+	workspace := t.TempDir()
+	gatewayEntry := filepath.Join(workspace, "gateway.mjs")
+	gateway := `import http from "node:http";
+const port = Number(process.env.GATEWAY_PORT);
+http.createServer((req, res) => {
+  if (req.url === "/gateway/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}\\n");
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+}).listen(port, process.env.GATEWAY_HOST);
+`
+	if err := os.WriteFile(gatewayEntry, []byte(gateway), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+
+	rt := NewRuntime(Config{
+		WorkspaceDir: workspace,
+		GatewayEntry: gatewayEntry,
+		NodePath:     "node",
+		Host:         "127.0.0.1",
+		Port:         port,
+	})
+	if err := rt.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for rt.State() != stateRunning && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if rt.State() != stateRunning {
+		t.Fatalf("State() = %q, want %q; error=%q", rt.State(), stateRunning, rt.Error())
+	}
+	if rt.PID() == 0 {
+		t.Fatal("PID() = 0 while runtime is running")
+	}
+
+	if err := rt.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for rt.State() != stateStopped && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if rt.State() != stateStopped {
+		t.Fatalf("State() = %q, want %q", rt.State(), stateStopped)
+	}
+	if rt.PID() != 0 {
+		t.Fatalf("PID() = %d after Stop(), want 0", rt.PID())
 	}
 }

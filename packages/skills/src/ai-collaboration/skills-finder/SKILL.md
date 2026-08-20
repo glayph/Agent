@@ -2,11 +2,11 @@
 name: skills-finder
 description: "Search and recommend relevant skills from the installed skill set by keyword, category, or capability."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [skills, discovery, search, find]
     related_skills: [skills-creator, skills-use]
 ---

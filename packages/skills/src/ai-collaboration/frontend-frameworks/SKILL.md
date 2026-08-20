@@ -2,11 +2,11 @@
 name: frontend-frameworks
 description: "Provide framework-specific guidance for React, Vue, Svelte, Solid, Astro, and SSR architecture."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [react, vue, svelte, nextjs, ssr, spa]
     related_skills: [javascript, css-styling, responsive-design]
 ---

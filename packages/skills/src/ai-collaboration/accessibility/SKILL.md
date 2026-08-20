@@ -2,11 +2,11 @@
 name: accessibility
 description: "Ensure web interfaces are usable by people of all abilities following WCAG 2.2 standards."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [accessibility, a11y, inclusive-design, wcag]
     related_skills: [html-semantic, user-centered-design]
 ---

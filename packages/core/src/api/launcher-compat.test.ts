@@ -1188,6 +1188,52 @@ describe("launcher compatibility runtime apply", () => {
     }
   });
 
+  it("activates the provider model behind a friendly saved-model alias", async () => {
+    const reloadRequests: RuntimeReloadRequest[] = [];
+    await withLauncherCompatServer(
+      async (request) => {
+        const addResponse = await request("/models", {
+          method: "POST",
+          body: JSON.stringify({
+            model_name: "gemini-live-test",
+            provider: "google",
+            model: "gemini-2.5-flash",
+          }),
+        });
+        expect(addResponse.status).toBe(200);
+
+        const defaultResponse = await request("/models/default", {
+          method: "POST",
+          body: JSON.stringify({ model_name: "gemini-live-test" }),
+        });
+        const defaultBody = await defaultResponse.json();
+        expect(defaultResponse.status).toBe(200);
+        expect(defaultBody.default_model).toBe("gemini-live-test");
+
+        const modelsResponse = await request("/models");
+        const modelsBody = await modelsResponse.json();
+        expect(modelsBody.default_model).toBe("gemini-live-test");
+        expect(
+          modelsBody.models.find(
+            (model: { model_name: string }) =>
+              model.model_name === "gemini-live-test",
+          ),
+        ).toEqual(expect.objectContaining({ is_default: true }));
+        expect(reloadRequests).toEqual(
+          expect.arrayContaining([
+            { channelsChanged: [], reason: "models.add" },
+            { channelsChanged: [], reason: "models.default" },
+          ]),
+        );
+      },
+      {
+        reloadRuntime: (request) => {
+          reloadRequests.push(request || {});
+        },
+      },
+    );
+  });
+
   it("passes changed channel names to the runtime reloader", async () => {
     const reloadRequests: RuntimeReloadRequest[] = [];
     await withLauncherCompatServer(
@@ -2548,5 +2594,54 @@ describe("gateway log clear (#123)", () => {
       expect(body.status).toBe("partial_failure");
       expect(body.files["core_backend.log"].ok).toBe(false);
     });
+  });
+});
+
+describe("Google provider model discovery", () => {
+  it("uses the native models endpoint for the OpenAI-compatible Gemini base", async () => {
+    const originalFetch = global.fetch;
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    global.fetch = (async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url.startsWith("http://127.0.0.1:")) {
+        return originalFetch(input, init);
+      }
+      calls.push({ url: request.url, headers: request.headers });
+      return new Response(
+        JSON.stringify({
+          models: [{ name: "models/gemini-2.5-flash" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    try {
+      await withLauncherCompatServer(async (request) => {
+        const response = await request("/models/test-inline", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: "google",
+            model: "gemini-2.5-flash",
+            api_key: "google-test-key",
+          }),
+        });
+        const body = (await response.json()) as {
+          success: boolean;
+          status: string;
+        };
+
+        expect(response.status).toBe(200);
+        expect(body).toEqual(
+          expect.objectContaining({ success: true, status: "available" }),
+        );
+        expect(calls).toHaveLength(1);
+        expect(calls[0]?.url).toBe(
+          "https://generativelanguage.googleapis.com/v1beta/models",
+        );
+        expect(calls[0]?.headers.get("x-goog-api-key")).toBe("google-test-key");
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });

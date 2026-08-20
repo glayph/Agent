@@ -2,11 +2,11 @@
 name: testing-debugging
 description: "Write tests, debug failures, and implement quality strategies across unit, integration, and E2E layers."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [testing, debugging, qa, tdd, quality]
     related_skills: [javascript, frontend-frameworks]
 ---

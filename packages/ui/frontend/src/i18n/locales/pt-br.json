@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "drive": "System",
+    "drive": "Drive",
     "chat": "Chat",
     "model_group": "Modelos",
     "models": "Modelos",
@@ -10,6 +10,7 @@
     "skills": "Skills",
     "tools": "Ferramentas",
     "runs": "Runs",
+    "automations": "Automacoes",
     "monitor": "Monitor",
     "services": "Serviços",
     "channels_group": "Canais",
@@ -385,7 +386,8 @@
         "unsupportedProvider": "Este provedor não pode ser usado como modelo de chat padrão."
       },
       "deleteDisabled": {
-        "isDefault": "Não é possível excluir o modelo padrão"
+        "isDefault": "Não é possível excluir o modelo padrão",
+        "isVirtual": "Não é possível excluir um modelo virtual"
       }
     },
     "defaultOnSave": {

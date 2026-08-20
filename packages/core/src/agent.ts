@@ -7,6 +7,7 @@ import {
   ToolDefinition,
   LLMResponse,
   validateRuntimeConfig,
+  createWorkspaceSecretVault,
 } from "@miki/config";
 import { ToolRegistry } from "./tools/index.js";
 import { HeartbeatEngine, type IOrchestrator } from "./heartbeat.js";
@@ -22,17 +23,34 @@ import {
   achatCompletion,
   LiteLLMMissingCredentialError,
   LiteLLMRateLimitError,
+  LLMMissingCredentialError,
+  LLMRateLimitError,
 } from "./llm.js";
 import Database from "better-sqlite3";
 import { TaskQueue, AgentTask } from "./task-queue.js";
 import { ConcurrentTaskManager } from "./concurrent-manager.js";
 import { TaskScheduler, type ScheduledTask } from "./scheduler.js";
 import { SqliteScheduledTaskStore } from "./scheduled-task-store.js";
-import { CostCalibrator } from "./cost-calibrator.js";
+import {
+  createAutomationRuntime,
+  parseAutomationMessage,
+  type AutomationManager,
+} from "./automation.js";
+import { SqlitePlatformConnectionStore } from "./platform-connections.js";
 import { buildAgentTokenBudget } from "./agent-token-budget.js";
 import { initSkillLoader, SkillLoader } from "./skill-loader.js";
 import { globalToolWarmer } from "./tools/tool-warmer.js";
-import { globalContextualToolPruner } from "./contextual-tool-pruner.js";
+import {
+  adaptiveToolNames,
+  formatAdaptiveCapabilitySelection,
+  selectAdaptiveCapabilities,
+  type AdaptiveCapabilitySelection,
+} from "./adaptive-capability-selector.js";
+import {
+  analyzePlanCapabilities,
+  formatPlanCapabilityReport,
+  type PlanCapabilityReport,
+} from "./plan-capability-analyzer.js";
 import { globalQualityEvaluator } from "./quality-evaluator.js";
 import { globalRequestDeduplicator } from "./request-deduplicator.js";
 import { globalConfidenceScorer } from "./agent-confidence.js";
@@ -65,11 +83,7 @@ import {
 import type { ContextUsageSnapshot } from "./token-budget-manager.js";
 import { registerRuntimePluginTools } from "./plugins/plugin-tool-registration.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
-import {
-  initMemory,
-  getMemory,
-  closeMemory,
-} from "./memory/memory-bridge.js";
+import { initMemory, getMemory } from "./memory/memory-bridge.js";
 import {
   AgentRegistry,
   globalAgentRegistry,
@@ -254,6 +268,7 @@ export class AgentOrchestrator {
   public modelName: string;
   public temperature: number;
   public tools: ToolRegistry;
+  public platformConnectionStore: SqlitePlatformConnectionStore;
   public heartbeat: HeartbeatEngine | null;
   public selfImprovement: SelfImprovementEngine;
   public skillGovernance: SkillGovernanceEngine;
@@ -414,9 +429,22 @@ export class AgentOrchestrator {
       },
     );
     this.tools.setOrchestrator(this);
+    fs.mkdirSync(runtimePaths.dataDir, { recursive: true });
+    this.platformConnectionStore = new SqlitePlatformConnectionStore(
+      path.join(runtimePaths.dataDir, "platform-connections.db"),
+      createWorkspaceSecretVault(runtimePaths.dataDir),
+    );
+    this.tools.setPlatformConnectionStore(this.platformConnectionStore);
 
     const siConfig = asAgentConfig(this.config).self_improvement || {};
     const siDb = new Database(":memory:");
+    // Keep scheduler state separate from self-improvement state and persist it
+    // under the runtime data directory so Automation Center schedules survive
+    // gateway/core restarts and can be recovered by TaskScheduler.start().
+    fs.mkdirSync(runtimePaths.dataDir, { recursive: true });
+    const schedulerDb = new Database(
+      path.join(runtimePaths.dataDir, "scheduled-tasks.db"),
+    );
     siDb.exec(`
       CREATE TABLE IF NOT EXISTS agent_runs (
         id TEXT PRIMARY KEY,
@@ -478,7 +506,9 @@ export class AgentOrchestrator {
 
     // Initialize the temporal memory system. The DB lives alongside other
     // agent runtime files. initMemory() is idempotent - safe across restarts.
-    const dataDir = path.resolve(path.join(runtimePaths.configDir, "..", "data"));
+    const dataDir = path.resolve(
+      path.join(runtimePaths.configDir, "..", "data"),
+    );
     try {
       initMemory(dataDir);
     } catch (memErr) {
@@ -517,7 +547,12 @@ export class AgentOrchestrator {
       this.concurrentManager,
       (sessionId, message, task) =>
         this.runAgentLoopWithTask(sessionId, message, task),
-      new SqliteScheduledTaskStore(siDb),
+      new SqliteScheduledTaskStore(schedulerDb),
+    );
+    this.automationManager = createAutomationRuntime(
+      path.join(runtimePaths.dataDir, "automations.db"),
+      path.join(runtimePaths.dataDir, "agent-runs.db"),
+      this,
     );
 
     this._bgStarted = false;
@@ -548,6 +583,7 @@ export class AgentOrchestrator {
   private _messageHistory = new Map<string, ChatMessage[]>();
   private _taskDb: Database.Database;
   private skillLoader: SkillLoader;
+  private automationManager: AutomationManager;
 
   startBackgroundTasks(): Promise<void> {
     if (this._bgStarted) return Promise.resolve();
@@ -566,10 +602,11 @@ export class AgentOrchestrator {
       console.error("Failed to load skills:", err);
     });
 
-    // Start background task scheduler to process queued tasks
-    if (this._isCronExecutionEnabled()) {
-      this._startTaskScheduler();
-    }
+    // Start the background scheduler for all persisted scheduled work.
+    // Automation Center schedules are explicit, authenticated application
+    // tasks and must not depend on the command-cron permission gate, which is
+    // reserved for the cron tool's command execution capability.
+    this._startTaskScheduler();
 
     return Promise.all(tasks).then(() => {});
   }
@@ -655,11 +692,10 @@ export class AgentOrchestrator {
       if (this.heartbeat) {
         await this.heartbeat.start();
       }
-      if (this._isCronExecutionEnabled()) {
-        this.taskScheduler.start();
-      } else {
-        this.taskScheduler.stop();
-      }
+      // Keep persisted Automation Center schedules alive across config reloads.
+      // The command-cron permission gate does not control these application
+      // schedules.
+      this.taskScheduler.start();
     }
   }
 
@@ -734,9 +770,7 @@ export class AgentOrchestrator {
             .map((item) => `${item.path}: ${item.message}`)
             .join("; "),
         );
-        return (
-          validateRuntimeConfig(defaultConfig).value ?? defaultConfig
-        );
+        return validateRuntimeConfig(defaultConfig).value ?? defaultConfig;
       }
       if (validation.warnings.length > 0) {
         console.warn(
@@ -765,7 +799,33 @@ export class AgentOrchestrator {
     };
     const options: Record<string, unknown> = {};
     if (toolsSchema && toolsSchema.length > 0) {
-      options.tools = toolsSchema;
+      // ToolDefinition carries local-only metadata (for example `risk`) that
+      // must not be sent to OpenAI-compatible providers. Google Gemini's
+      // OpenAI-compatible endpoint rejects unknown fields on tool objects with
+      // a generic 400, which previously surfaced as a misleading credential
+      // error in the UI. Project only the provider-facing fields here while
+      // retaining the original definitions for local tool execution.
+      options.tools = toolsSchema.map((tool) => {
+        const candidate = tool as unknown as {
+          name?: string;
+          description?: string;
+          parameters?: Record<string, unknown>;
+          function?: {
+            name?: string;
+            description?: string;
+            parameters?: Record<string, unknown>;
+          };
+        };
+        const fn = candidate.function ?? candidate;
+        return {
+          type: "function",
+          function: {
+            name: fn.name ?? "",
+            description: fn.description,
+            parameters: fn.parameters ?? { type: "object", properties: {} },
+          },
+        };
+      });
       options.tool_choice = "auto";
     }
     if (
@@ -801,17 +861,17 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Check if we have budget remaining before LLM call
+   * Return generated-token consumption for the current agent cycle.
+   *
+   * `max_tokens_per_cycle` limits output work across the tool loop. Prompt
+   * tokens are intentionally excluded here: they are re-estimated on every
+   * request by buildAgentTokenBudget() for context-window safety. Counting the
+   * ever-growing prompt again as cycle spend caused a tool call to consume the
+   * whole budget before the model received its final-report turn.
    */
   private _checkBudget(usage: LLMResponse | null): number {
     if (!usage?.usage) return 0;
-    const model = this.modelName;
-    const budgetTokens = CostCalibrator.costInBudgetTokens(
-      model,
-      usage.usage.prompt_tokens || 0,
-      usage.usage.completion_tokens || 0,
-    );
-    return budgetTokens;
+    return Math.max(0, Math.floor(Number(usage.usage.completion_tokens || 0)));
   }
 
   private _saveAssistantHistoryMessage(
@@ -846,10 +906,7 @@ export class AgentOrchestrator {
     try {
       memory.logInteraction(userMessage, agentResponse, { sessionId });
     } catch (memErr) {
-      console.error(
-        "[Agent] Memory write failed:",
-        (memErr as Error).message,
-      );
+      console.error("[Agent] Memory write failed:", (memErr as Error).message);
     }
   }
 
@@ -868,6 +925,42 @@ export class AgentOrchestrator {
    * initialized, and a failure here must never surface to or break the
    * user-facing tool call, which has already resolved by the time this runs.
    */
+  private _logMemoryCapabilityPlan(
+    sessionId: string,
+    report: PlanCapabilityReport,
+  ): void {
+    const memory = getMemory();
+    if (!memory) return;
+    try {
+      const compactRecord = {
+        type: "capability_plan",
+        schemaVersion: report.schemaVersion,
+        taskClass: report.taskClass,
+        onlineResearchRecommended: report.onlineResearchRecommended,
+        requirements: report.requirements.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          status: item.status,
+          matchedIds: item.matchedIds,
+          approvalRequired: item.approvalRequired,
+        })),
+      };
+      memory.tkg.writeEvent({
+        content: JSON.stringify(compactRecord),
+        source: "system",
+        event_type: "capability_plan",
+        importance: 0.25,
+        metadata: { sessionId, capabilityPlan: true },
+        skipNoiseFilter: true,
+      });
+    } catch (memErr) {
+      console.error(
+        "[Agent] Capability plan memory write failed:",
+        (memErr as Error).message,
+      );
+    }
+  }
+
   private _logMemoryToolCall(
     sessionId: string,
     toolName: string,
@@ -913,23 +1006,32 @@ export class AgentOrchestrator {
     const history = this._messageHistory.get(sessionId) || [];
     const pastMessages = history.slice(-resource.messageHistoryLimit);
 
+    // Decide the specialist and per-turn capability budget before prompting.
+    // The selected catalog is also used as an execution allowlist below.
+    const taskProfile = classifyAgentTask(userMessage);
+    const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
+    const allTools = this.tools.getToolDefinitions();
+    const adaptiveSelection = selectAdaptiveCapabilities(
+      userMessage,
+      allTools,
+      routeDecision,
+      taskProfile,
+    );
     const systemContent = await this._buildSystemContent(
       userMessage,
       screenshotImagePath,
       resource,
+      adaptiveSelection,
+      sessionId,
     );
 
-    // Warm up tools and prune toolset for faster/more accurate selection
-    const allTools = this.tools.getToolDefinitions();
-    const prunedTools = globalContextualToolPruner.getPrunedToolset(
-      userMessage,
-      allTools,
-    );
+    // Warm up only the selected tools for faster and more accurate selection.
+    const prunedTools = adaptiveSelection.selectedTools;
 
-    // Ensure we only use ToolDefinition[] for toolsSchema
-    const toolsSchema = (
-      prunedTools.length > 0 ? prunedTools : allTools
-    ) as ToolDefinition[];
+    // Ensure we only use ToolDefinition[] for toolsSchema.
+    const toolsSchema = (prunedTools.length > 0
+      ? prunedTools
+      : allTools) as unknown as ToolDefinition[];
 
     // Pre-warm the most likely tools
     if (resource.toolWarmupEnabled) {
@@ -1048,7 +1150,9 @@ export class AgentOrchestrator {
         const rawMessage = err instanceof Error ? err.message : String(err);
         const errMsg =
           err instanceof LiteLLMMissingCredentialError ||
-          err instanceof LiteLLMRateLimitError
+          err instanceof LiteLLMRateLimitError ||
+          err instanceof LLMMissingCredentialError ||
+          err instanceof LLMRateLimitError
             ? rawMessage
             : `Error calling LLM: ${rawMessage}. Please check credentials.`;
         const errorMessage = `\n\n${errMsg}`;
@@ -1134,6 +1238,7 @@ export class AgentOrchestrator {
           llmMessages,
           turn,
           options.signal,
+          adaptiveToolNames(adaptiveSelection),
         )) {
           yield event;
         }
@@ -1155,6 +1260,7 @@ export class AgentOrchestrator {
     llmMessages: ChatMessage[],
     turn: number,
     signal?: AbortSignal,
+    allowedToolNames: Set<string> = new Set(),
   ): AsyncGenerator<string, void, unknown> {
     const invocations = toolCalls.map((tc) => this._parseToolInvocation(tc));
     const plan = createToolExecutionPlan(invocations);
@@ -1216,7 +1322,12 @@ export class AgentOrchestrator {
           userMessage,
           turn,
         );
-        return this._executePlannedToolInvocation(sessionId, planned, signal);
+        return this._executePlannedToolInvocation(
+          sessionId,
+          planned,
+          signal,
+          allowedToolNames,
+        );
       };
 
       const levelResults =
@@ -1285,6 +1396,11 @@ export class AgentOrchestrator {
     userMessage: string,
     taskOrPriority?: AgentTask | number,
   ): AsyncGenerator<string, void, unknown> {
+    const automationMessage = parseAutomationMessage(userMessage);
+    const automationExecutionId = automationMessage
+      ? this.automationManager.prepareExecution(automationMessage.executionId)
+      : undefined;
+    const effectiveUserMessage = automationMessage?.prompt ?? userMessage;
     const priority =
       typeof taskOrPriority === "number"
         ? taskOrPriority
@@ -1299,7 +1415,10 @@ export class AgentOrchestrator {
         return;
       }
     }
-    this._annotateTaskRoute(task, userMessage);
+    this._annotateTaskRoute(task, effectiveUserMessage);
+    if (automationExecutionId) {
+      this.automationManager.onExecutionStarted(automationExecutionId);
+    }
 
     // Bug #4 fix: Mark task as running (move from pending to running)
     this.taskQueue.markRunning(task.id);
@@ -1397,7 +1516,7 @@ export class AgentOrchestrator {
       } else {
         for await (const chunk of this.runAgentLoop(
           sessionId,
-          userMessage,
+          effectiveUserMessage,
           undefined,
           { signal: task.abortController.signal },
         )) {
@@ -1441,6 +1560,9 @@ export class AgentOrchestrator {
       } // End else block
 
       this.taskQueue.complete(task.id);
+      if (automationExecutionId) {
+        this.automationManager.onExecutionCompleted(automationExecutionId);
+      }
 
       // Update database
       try {
@@ -1457,7 +1579,14 @@ export class AgentOrchestrator {
       }
     } catch (err: unknown) {
       const errorMessage = getErrorMessage(err);
+      console.error(
+        `[Agent] Task ${task.id} failed:`,
+        err instanceof Error ? err.stack || err.message : err,
+      );
       this.taskQueue.fail(task.id, errorMessage);
+      if (automationExecutionId) {
+        this.automationManager.onExecutionFailed(automationExecutionId, errorMessage);
+      }
 
       // Update database
       try {
@@ -1543,6 +1672,10 @@ export class AgentOrchestrator {
     return this.taskScheduler.getStats();
   }
 
+  getAutomationManager(): AutomationManager {
+    return this.automationManager;
+  }
+
   getTaskQueueStats() {
     const schedulerStats = this.taskScheduler.getStats();
     return {
@@ -1578,6 +1711,8 @@ export class AgentOrchestrator {
     userMessage: string,
     screenshotImagePath?: string,
     _resource: ResolvedAgentResourceConfig = this._resourceConfig(),
+    adaptiveSelection?: AdaptiveCapabilitySelection,
+    sessionId?: string,
   ): Promise<string> {
     const taskProfile = classifyAgentTask(userMessage);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
@@ -1595,6 +1730,21 @@ export class AgentOrchestrator {
     const agentRouteBlock = `\n${formatAgentRouteDecision(routeDecision)}\n`;
     const accelerationBlock = `\n${formatWorkflowAccelerationPlan(accelerationPlan)}\n`;
     const decisionPatternBlock = `\n${formatWorkflowDecisionPattern(decisionPattern)}\n`;
+    const adaptiveBlock = adaptiveSelection
+      ? `\n${formatAdaptiveCapabilitySelection(adaptiveSelection)}\n`
+      : "";
+    const capabilityReport = analyzePlanCapabilities(
+      userMessage,
+      {
+        skills: await this.skillLoader.getAllSkillsMetadata(),
+        tools: this.tools.getToolDefinitions(),
+      },
+      `${taskProfile.complexity}/${taskProfile.executionStyle}`,
+    );
+    const capabilityBlock = `\n${formatPlanCapabilityReport(capabilityReport)}\n`;
+    if (sessionId) {
+      this._logMemoryCapabilityPlan(sessionId, capabilityReport);
+    }
 
     const systemIndexBlock = "";
     let screenshotBlock = "";
@@ -1677,6 +1827,8 @@ export class AgentOrchestrator {
       `${agentRouteBlock}` +
       `${accelerationBlock}` +
       `${decisionPatternBlock}` +
+      `${adaptiveBlock}` +
+      `${capabilityBlock}` +
       `${systemIndexBlock}` +
       `${dynamicStateBlock}` +
       `You operate as a computer-based agent with full system access. Use absolute paths for any file operation outside the project workspace. You can launch applications, control windows, send keyboard shortcuts, read/write the clipboard, and execute shell commands anywhere on the system. Keep tool use purposeful, auditable, and verification-driven.\n\n` +
@@ -1710,11 +1862,31 @@ export class AgentOrchestrator {
     sessionId: string,
     planned: PlannedToolInvocation<ParsedToolInvocation>,
     signal?: AbortSignal,
+    allowedToolNames: Set<string> = new Set(),
   ): Promise<BufferedToolExecution> {
     let release: (() => void) | null = null;
     let ok = false;
 
     try {
+      const requestedTool = planned.invocation.toolName;
+      if (allowedToolNames.size > 0 && !allowedToolNames.has(requestedTool)) {
+        const failureOutput =
+          `Tool '${requestedTool}' was not selected for this turn. ` +
+          "Miki must re-route the request before using it.";
+        this._logMemoryToolCall(
+          sessionId,
+          requestedTool,
+          planned.invocation.toolArgs,
+          failureOutput,
+          false,
+        );
+        return this._buildToolFailureResult(
+          planned.index,
+          planned.invocation,
+          failureOutput,
+        );
+      }
+
       const acquired = await this.toolLockManager.acquireMany(
         planned.policy.locks,
         signal,

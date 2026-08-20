@@ -2,11 +2,11 @@
 name: memory-management
 description: "Persist and retrieve structured state across sessions using local files as external memory store."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [memory, persistence, state-management, session]
     related_skills: [rag-context]
 ---

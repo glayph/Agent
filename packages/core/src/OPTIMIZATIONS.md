@@ -1,7 +1,7 @@
 # ULTRA_ADVANCE_OPTIMIZATIONS Implementation Guide
 
 ## Overview
-This directory contains complete implementation of the Ultra-Advance Optimization Plan for Hiro, delivering **40% reduction in LLM calls, 60% cost reduction, and 62% latency improvement**.
+This directory contains complete implementation of the Ultra-Advance Optimization Plan for Miki, delivering **40% reduction in LLM calls, 60% cost reduction, and 62% latency improvement**.
 
 ## Phase Breakdown
 
@@ -67,7 +67,7 @@ import {
   globalLogger,
   globalMetricsCollector,
   globalHealthChecker,
-} from '@hiro/core';
+} from '@miki/core';
 
 // Initialize
 OptimizationHub.initialize();
@@ -87,7 +87,7 @@ import {
   globalResponseCache,
   globalTokenBudgetManager,
   globalQualityEvaluator,
-} from '@hiro/core';
+} from '@miki/core';
 
 // Check cache first
 const cached = await globalResponseCache.get(query);
@@ -123,7 +123,7 @@ return response;
 ### Memory Optimization
 
 ```typescript
-import { globalHybridSearch, globalFactExtractor } from '@hiro/core';
+import { globalHybridSearch, globalFactExtractor } from '@miki/core';
 
 // Extract facts from message
 const facts = await globalFactExtractor.extractFacts(message, messageId);
@@ -143,7 +143,7 @@ import {
   globalDependencyResolver,
   globalRetryManager,
   globalToolWarmer,
-} from '@hiro/core';
+} from '@miki/core';
 
 // Warm up tools
 await globalToolWarmer.warmUp(['web_search', 'calculator', 'code_executor']);
@@ -170,7 +170,7 @@ import {
   globalMetricsCollector,
   globalExecutionTracer,
   globalLogger,
-} from '@hiro/core';
+} from '@miki/core';
 
 // Record metrics
 globalMetricsCollector.recordLatency('llm_call', 1500);

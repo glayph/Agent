@@ -1,6 +1,6 @@
 {
   "name": "miki",
-  "version": "1.0.0",
+  "version": "1.3.3",
   "private": true,
   "description": "Miki — local-first autonomous AI agent",
   "workspaces": [
@@ -11,11 +11,23 @@
     "build:all": "npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway",
     "dev": "node scripts/dev.js",
     "start": "node scripts/dev.js",
+    "runtime:24-7": "node scripts/miki-24-7.mjs",
+    "runtime:24-7:check": "node scripts/miki-24-7.mjs --check",
     "test": "npm run test --workspaces --if-present",
+    "verify": "node scripts/run-verify.mjs",
     "clean": "npm run clean --workspaces --if-present"
   },
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "globals": "^17.11.0"
+  }
 }

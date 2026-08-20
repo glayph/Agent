@@ -345,10 +345,13 @@ export function setEnvSecret(
   const vault = createWorkspaceSecretVault(workspaceDir);
   if (value) {
     vault.set(secretName, value);
-    process.env[key] = value;
+    // Workspace-scoped credentials must remain in that workspace's vault.
+    // Mutating process.env here leaks one workspace's secret into unrelated
+    // requests and makes capability probes report false configuration.
+    if (!workspaceDir) process.env[key] = value;
   } else {
     vault.delete(secretName);
-    delete process.env[key];
+    if (!workspaceDir) delete process.env[key];
   }
 }
 

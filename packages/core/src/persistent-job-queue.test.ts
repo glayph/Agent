@@ -99,4 +99,53 @@ describe("persistent job queue", () => {
     expect(queue.retry(job.id, 25)?.status).toBe("queued");
     expect(queue.dequeue(Date.now() + 25)?.id).toBe(job.id);
   });
+
+  it("deduplicates active jobs by idempotency key", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
+    const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
+    const first = queue.enqueue(
+      "channel.send",
+      { body: "once" },
+      { idempotencyKey: "event-123" },
+    );
+    const duplicate = queue.enqueue(
+      "channel.send",
+      { body: "duplicate" },
+      { idempotencyKey: "event-123" },
+    );
+
+    expect(duplicate.id).toBe(first.id);
+    expect(queue.list()).toHaveLength(1);
+  });
+
+  it("requires the current worker lease to complete and persists checkpoints", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
+    const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
+    const job = queue.enqueue("agent.run", {});
+    const claimed = queue.dequeue(Date.now(), "worker-a", 1_000);
+
+    expect(claimed?.id).toBe(job.id);
+    expect(queue.checkpoint(job.id, {
+      id: "cp-1",
+      step: "plan",
+      status: "completed",
+      data: { planVersion: 1 },
+    }, "worker-a")?.checkpoint?.id).toBe("cp-1");
+    expect(queue.complete(job.id, { ok: true }, "worker-b")).toBeNull();
+    expect(queue.complete(job.id, { ok: true }, "worker-a")?.status).toBe(
+      "completed",
+    );
+  });
+
+  it("reclaims an expired worker lease", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
+    const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
+    const job = queue.enqueue("agent.run", {});
+    expect(queue.dequeue(Date.now(), "worker-a", 1)?.id).toBe(job.id);
+    const recovered = queue.dequeue(Date.now() + 10, "worker-b", 1);
+
+    expect(recovered?.id).toBe(job.id);
+    expect(recovered?.leaseOwner).toBe("worker-b");
+    expect(recovered?.attempts).toBe(2);
+  });
 });

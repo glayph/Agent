@@ -1,4 +1,5 @@
 const LAST_SESSION_STORAGE_KEY = "Miki:last-session-id"
+export const SINGLE_CHAT_SESSION_ID = "miki-main-chat"
 const UNIX_MS_THRESHOLD = 1e12
 
 function readStorageValue() {
@@ -73,7 +74,9 @@ export function clearSessionIdFromHash() {
 }
 
 export function getInitialActiveSessionId(): string {
-  return readSessionIdFromHash() || readStorageValue() || generateSessionId()
+  // Miki is intentionally a single-chat console. Ignore legacy hash/storage
+  // session IDs so the UI cannot create or switch to a second conversation.
+  return SINGLE_CHAT_SESSION_ID
 }
 
 export function normalizeUnixTimestamp(timestamp: number): number {

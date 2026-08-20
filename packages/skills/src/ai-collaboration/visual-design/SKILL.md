@@ -2,11 +2,11 @@
 name: visual-design
 description: "Provide design system specs, color palettes, typography scales, and design tool guidance."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [ui-design, visual-design, design-systems, color, typography]
     related_skills: [css-styling, responsive-design, wireframing]
 ---

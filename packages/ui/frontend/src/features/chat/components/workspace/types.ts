@@ -5,6 +5,7 @@ export type WorkspaceStatusTone = "neutral" | "success" | "warning" | "info"
 export interface WorkspaceStatusPill {
   label: string
   tone?: WorkspaceStatusTone
+  onClick?: () => void
 }
 
 export type WorkspaceAssetKind =

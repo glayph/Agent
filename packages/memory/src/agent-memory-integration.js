@@ -1,12 +1,26 @@
 'use strict';
 
 class AgentMemoryIntegration {
-  constructor(tkg) {
+  constructor(tkg, options = {}) {
     this.tkg = tkg;
+    this.graphMemory = options.graphMemory || tkg?.graphMemory || null;
+    this.defaultScope = options.scope || {
+      agentId: process.env.MIKI_AGENT_ID || 'miki',
+      ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
+      workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
+    };
+  }
+
+  _scope(systemState = {}, metadata = {}) {
+    return systemState.memoryScope || metadata.memoryScope || metadata.scope || this.defaultScope;
   }
 
   preExecutionHook(userMessage, systemState = {}) {
     const anchor = this.tkg.getWorkingAnchor();
+    const query = typeof userMessage === 'string' ? userMessage : (userMessage?.content || '');
+    const graphContext = this.graphMemory
+      ? this.graphMemory.getContext(query, { scope: this._scope(systemState), limit: 12, maxTokens: 1200, taskReference: systemState.taskId || systemState.runId || null })
+      : { items: [], text: '' };
     const specialEvents = this.tkg.getSpecialEvents(5, true);
 
     const context = this.tkg.getContextWindow(
@@ -18,6 +32,8 @@ class AgentMemoryIntegration {
       anchor,
       specialEvents,
       contextWindow: context,
+      graphContext,
+      formattedGraphContext: graphContext.text || '',
       formattedAnchor: this._formatAnchor(anchor),
       formattedSpecialEvents: this._formatSpecialEvents(specialEvents)
     };
@@ -36,13 +52,25 @@ class AgentMemoryIntegration {
 
     const result = this.tkg.writeEvent(eventData);
     const memoryCategory = result && result.memoryCategory ? result.memoryCategory : undefined;
+    const graphMemory = this.graphMemory
+      ? this.graphMemory.ingest({
+        scope: this._scope(metadata),
+        content: typeof agentOutput === 'string' ? agentOutput : JSON.stringify(agentOutput || ''),
+        category: metadata.category || 'conversation',
+        memoryType: metadata.memoryType || 'assistant_response',
+        sourceType: 'agent',
+        sourceReference: metadata.messageId || metadata.runId || null,
+        taskReference: metadata.taskId || metadata.runId || null,
+        metadata: { userInput: typeof userInput === 'string' ? userInput.substring(0, 1000) : '' },
+      })
+      : null;
 
     const entities = this.tkg._extractEntities({ content: agentOutput });
     for (const entity of entities) {
       this.tkg._ensureEntity(entity, memoryCategory);
     }
 
-    return result;
+    return { ...result, graphMemory };
   }
 
   logInteraction(userMessage, agentResponse, metadata = {}) {
@@ -60,16 +88,32 @@ class AgentMemoryIntegration {
       metadata: { ...metadata, role: 'assistant' }
     });
 
-    return { userEvent, agentEvent };
+    const graphEvents = this.graphMemory ? [
+      this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof userMessage === 'string' ? userMessage : (userMessage?.content || ''), category: metadata.category || 'conversation', memoryType: 'user_message', sourceType: 'user', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'user' } }),
+      this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof agentResponse === 'string' ? agentResponse : (agentResponse?.content || ''), category: metadata.category || 'conversation', memoryType: 'assistant_response', sourceType: 'agent', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'assistant' } }),
+    ] : [];
+    return { userEvent, agentEvent, graphEvents };
   }
 
   logToolCall(toolName, args, result, metadata = {}) {
-    return this.tkg.writeEvent({
+    const legacy = this.tkg.writeEvent({
       content: `Tool: ${toolName}\nArgs: ${JSON.stringify(args).substring(0, 500)}\nResult: ${String(result).substring(0, 1000)}`,
       source: 'tool',
       event_type: 'tool_call',
       metadata: { toolName, ...metadata }
     });
+    const graphMemory = this.graphMemory ? this.graphMemory.ingest({
+      scope: this._scope(metadata),
+      content: `Tool ${toolName} completed. Result: ${String(result).substring(0, 1000)}`,
+      category: 'procedural',
+      memoryType: 'tool_outcome',
+      sourceType: 'tool',
+      sourceReference: metadata.toolCallId || toolName,
+      taskReference: metadata.taskId || metadata.runId || null,
+      metadata: { toolName },
+      explicit: true,
+    }) : null;
+    return { ...legacy, graphMemory };
   }
 
   logSystemEvent(eventType, content, metadata = {}) {
@@ -92,6 +136,12 @@ class AgentMemoryIntegration {
 
     if (hook.formattedSpecialEvents) {
       parts.push(hook.formattedSpecialEvents);
+      parts.push('');
+    }
+
+    if (hook.formattedGraphContext) {
+      parts.push('=== GRAPH COGNITIVE MEMORY ===');
+      parts.push(hook.formattedGraphContext);
       parts.push('');
     }
 

@@ -10,7 +10,7 @@
 
 /* =============================================================================
    THEME TOKENS
-   Dark dev-tool aesthetic — black surfaces, light text, vivid orange accent
+   Minimal light workspace — quiet surfaces, high-contrast text, warm accent
    ============================================================================= */
 
 @theme inline {
@@ -137,30 +137,30 @@
 
   /* Chat layout */
   --chat-inline-padding: clamp(0.75rem, 2vw, 4rem);
-  --chat-content-width: clamp(20rem, 72vw, 53rem);
+  --chat-content-width: min(100%, 56rem);
   --chat-message-max: min(100%, 46rem);
-  --chat-user-message-max: min(72%, 28rem);
+  --chat-user-message-max: min(82%, 38rem);
   --chat-composer-min-height: clamp(3rem, 5svh, 3.75rem);
   --chat-composer-text-max-height: clamp(4rem, 18svh, 9rem);
-  --chat-surface:           #ffffff;
-  --chat-assistant-text:    #09090b;
+  --chat-surface:           #fffaf7;
+  --chat-assistant-text:    #2a211d;
   --chat-agent-bubble:      transparent;
   --chat-agent-border:      transparent;
-  --chat-user-bubble:       #09090b;
-  --chat-user-border:       #27272a;
-  --chat-user-text:         #fafafa;
-  --chat-user-shadow:       0 2px 12px rgba(0,0,0,0.08);
-  --chat-composer-bg:       rgba(249,250,251,0.6);
-  --chat-composer-border:   rgba(15,23,42,0.06);
-  --chat-composer-focus-border: rgba(255, 107, 53, 0.9);
-  --chat-composer-shadow:   0 1px 2px rgba(16,24,40,0.04);
-  --chat-composer-focus-shadow: 0 6px 20px rgba(255, 107, 53, 0.14);
-  --chat-bubble-label:      #f4f4f5;
-  --chat-bubble-meta:       #a1a1aa;
-  --chat-alert-bg:          #fef9c3;
-  --chat-alert-border:      #fde047;
-  --chat-alert-text:        #713f12;
-  --chat-alert-icon:        #ca8a04;
+  --chat-user-bubble:       #fff4ee;
+  --chat-user-border:       #f3d8ca;
+  --chat-user-text:         #3b2116;
+  --chat-user-shadow:       0 1px 4px rgba(194, 79, 24, 0.045);
+  --chat-composer-bg:       #fffdfb;
+  --chat-composer-border:   #efcdbb;
+  --chat-composer-focus-border: rgba(255, 107, 53, 0.92);
+  --chat-composer-shadow:   0 6px 24px rgba(194, 79, 24, 0.08);
+  --chat-composer-focus-shadow: 0 10px 34px rgba(194, 79, 24, 0.16);
+  --chat-bubble-label:      #686864;
+  --chat-bubble-meta:       #777771;
+  --chat-alert-bg:          #fff8df;
+  --chat-alert-border:      #f1d78a;
+  --chat-alert-text:        #6b4f12;
+  --chat-alert-icon:        #a87508;
 
   /* Motion — fast, precise, GPU-composited */
   --motion-duration-instant: 80ms;
@@ -215,20 +215,19 @@
   --sidebar-accent-foreground:  var(--md-sys-color-on-surface-variant);
   --sidebar-border:             var(--md-sys-color-outline);
   --sidebar-ring:               var(--md-sys-color-primary);
-  --chat-surface:           #09090b;
-  --chat-assistant-text:    #fafafa;
+  --chat-surface:           #090706;
+  --chat-assistant-text:    #fff7f2;
   --chat-agent-bubble:      transparent;
   --chat-agent-border:      transparent;
-  --chat-user-bubble:       #fafafa;
-  --chat-user-border:       #e4e4e7;
-  --chat-user-text:         #09090b;
-  --chat-user-shadow:       0 2px 16px rgba(0,0,0,0.4);
-  --chat-composer-bg:       transparent;
-  --chat-composer-bg:       rgba(255,255,255,0.03);
-  --chat-composer-border:   rgba(255,255,255,0.04);
-  --chat-composer-focus-border: rgba(255, 107, 53, 0.9);
-  --chat-composer-shadow:   0 1px 4px rgba(0,0,0,0.36);
-  --chat-composer-focus-shadow: 0 8px 30px rgba(255, 107, 53, 0.12);
+  --chat-user-bubble:       #21130d;
+  --chat-user-border:       rgba(255, 140, 92, 0.2);
+  --chat-user-text:         #fff1e9;
+  --chat-user-shadow:       0 1px 5px rgba(0,0,0,0.22);
+  --chat-composer-bg:       #100b09;
+  --chat-composer-border:   rgba(255, 140, 92, 0.22);
+  --chat-composer-focus-border: rgba(255, 138, 92, 0.96);
+  --chat-composer-shadow:   0 8px 28px rgba(0,0,0,0.36);
+  --chat-composer-focus-shadow: 0 12px 36px rgba(255, 107, 53, 0.18);
   --chat-bubble-label:      #27272a;
   --chat-bubble-meta:       #71717a;
   --chat-alert-bg:          #1c1402;
@@ -1048,4 +1047,29 @@ select:focus-visible {
   .motion-shimmer::after {
     animation: none !important;
   }
+}
+
+/* =============================================================================
+   THEME APPLICATION
+   The active palette is controlled by the `dark` class from useTheme().
+   Keep surfaces tokenized so every route follows the same Dark / Light Orange
+   design system instead of falling back to a hard-coded light canvas.
+   ============================================================================= */
+:root {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+[data-workspace-shell="true"] {
+  background: var(--background);
 }

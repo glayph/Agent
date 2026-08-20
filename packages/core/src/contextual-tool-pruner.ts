@@ -23,6 +23,13 @@ export interface Tool {
   };
 }
 
+export interface ToolSelectionOptions {
+  preferredTools?: string[];
+  preferredSkills?: string[];
+  maxTools?: number;
+  minScore?: number;
+}
+
 export class ContextualToolPruner {
   private toolRelevance: Map<string, ToolRelevance[]> = new Map();
   private contextInference: Map<string, string[]> = new Map();
@@ -49,9 +56,12 @@ export class ContextualToolPruner {
     vision: ["image", "screenshot", "vision", "browser", "screen"],
   };
 
-  /**
-   * Infer context from query
-   */
+  /** Return the normalized context label used by ranking and learning. */
+  inferTaskContext(query: string): string {
+    return this.inferContext(query);
+  }
+
+  /** Infer context from query. */
   private inferContext(query: string): string {
     const lower = query.toLowerCase();
 
@@ -82,26 +92,36 @@ export class ContextualToolPruner {
     return "general";
   }
 
-  /**
-   * Get pruned tool set for query
-   */
-  getPrunedToolset<T extends Tool>(query: string, allTools: T[]): T[] {
+  /** Get a relevance-ranked tool set for the current request. */
+  getPrunedToolset<T extends Tool>(
+    query: string,
+    allTools: T[],
+    options: ToolSelectionOptions = {},
+  ): T[] {
     const context = this.inferContext(query);
+    const preferredTools = new Set(
+      (options.preferredTools || []).map((item) => item.toLowerCase()),
+    );
+    const preferredSkills = (options.preferredSkills || [])
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+    const maxTools = Math.max(1, options.maxTools ?? this.TOP_K);
+    const minScore = options.minScore ?? this.RELEVANCE_THRESHOLD;
 
-    // Score tools by relevance to context
     const scored = allTools.map((tool) => ({
       tool,
-      score: this.scoreToolRelevance(tool, context),
+      score:
+        this.scoreToolRelevance(tool, context) +
+        this.scoreRoutePreference(tool, preferredTools, preferredSkills),
     }));
 
-    // Keep top K tools
     const topK = scored
       .sort((a, b) => b.score - a.score)
-      .slice(0, this.TOP_K)
-      .filter((s) => s.score >= this.RELEVANCE_THRESHOLD)
+      .slice(0, maxTools)
+      .filter((s) => s.score >= minScore)
       .map((s) => s.tool);
 
-    // Add fallback tools
+    // Keep read-only/recovery fallbacks available, but respect the turn budget.
     const pruned = Array.from(
       new Map(
         [
@@ -113,7 +133,28 @@ export class ContextualToolPruner {
       ).values(),
     );
 
-    return pruned;
+    return pruned.slice(0, maxTools);
+  }
+
+  private scoreRoutePreference(
+    tool: Tool,
+    preferredTools: Set<string>,
+    preferredSkills: string[],
+  ): number {
+    const name = this.getToolName(tool).toLowerCase();
+    const text = [
+      name,
+      tool.description || "",
+      tool.category || "",
+      tool.function?.description || "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    let score = preferredTools.has(name) ? 1.5 : 0;
+    for (const skill of preferredSkills) {
+      if (text.includes(skill)) score += 0.45;
+    }
+    return score;
   }
 
   private getToolName(tool: Tool): string {

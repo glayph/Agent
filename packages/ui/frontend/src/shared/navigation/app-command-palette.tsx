@@ -2,17 +2,13 @@ import {
   IconActivityHeartbeat,
   IconAtom,
   IconBolt,
-  IconDeviceDesktop,
   IconFolder,
   IconKey,
   IconListDetails,
   IconMessageCircle,
-  IconMoon,
-  IconPlus,
   IconSearch,
   IconSettings,
   IconSparkles,
-  IconSun,
   IconTimeline,
   IconTools,
 } from "@tabler/icons-react"
@@ -27,13 +23,10 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandShortcut,
 } from "@/shared/ui/command"
 import { useGateway } from "@/hooks/use-gateway"
 import { useMikiChat } from "@/hooks/use-miki-chat"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
-import { type ThemePreference, useTheme } from "@/hooks/use-theme"
-import { cn } from "@/lib/utils"
 
 interface CommandAction {
   id: string
@@ -169,27 +162,6 @@ function PaletteItemText({
   )
 }
 
-function PaletteBadge({
-  children,
-  muted = false,
-}: {
-  children: React.ReactNode
-  muted?: boolean
-}) {
-  return (
-    <CommandShortcut
-      className={cn(
-        "hidden rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-normal sm:inline-flex",
-        muted
-          ? "border-border/60 bg-muted/40 text-muted-foreground"
-          : "border-primary/20 bg-primary/10 text-primary",
-      )}
-    >
-      {children}
-    </CommandShortcut>
-  )
-}
-
 export function AppCommandPalette({
   initialOpen = false,
 }: AppCommandPaletteProps) {
@@ -197,8 +169,7 @@ export function AppCommandPalette({
   const [search, setSearch] = React.useState("")
   const navigate = useNavigate()
   const { i18n, t } = useTranslation()
-  const { newChat } = useMikiChat()
-  const { preference, setTheme } = useTheme()
+  useMikiChat()
   const {
     state: gatewayState,
     canStart,
@@ -254,24 +225,7 @@ export function AppCommandPalette({
     action()
   }, [])
 
-  const themeActions: Array<{
-    preference: ThemePreference
-    icon: React.ComponentType<{ className?: string }>
-  }> = [
-    { preference: "system", icon: IconDeviceDesktop },
-    { preference: "light", icon: IconSun },
-    { preference: "dark", icon: IconMoon },
-  ]
-
   const actions: CommandAction[] = [
-    {
-      id: "new-chat",
-      label: t("command.actions.new_chat"),
-      hint: t("navigation.chat"),
-      description: "Start a fresh agent workspace conversation.",
-      icon: IconPlus,
-      run: () => newChat(),
-    },
     {
       id: "gateway-start",
       label:
@@ -395,32 +349,6 @@ export function AppCommandPalette({
           })}
         </PaletteGroup>
 
-        <PaletteGroup
-          heading={t("command.groups.theme")}
-        >
-          {themeActions.map((item) => {
-            const Icon = item.icon
-            const active = preference === item.preference
-            const themeDescription =
-              item.preference === "system"
-                ? "Follow your operating system setting."
-                : item.preference === "light"
-                  ? "Use a bright interface for daytime work."
-                  : "Use a darker interface for low-light work."
-            return (
-              <CommandItem
-                key={item.preference}
-                value={`${t(`header.appearance.${item.preference}`)} ${themeDescription}`}
-                onSelect={() => runAction(() => setTheme(item.preference))}
-                className="group data-[selected=true]:bg-primary/10 mx-0 min-h-8 gap-2 rounded-md border border-transparent px-2 text-sm"
-              >
-                <PaletteItemIcon icon={Icon} />
-                <PaletteItemText title={t(`header.appearance.${item.preference}`)} />
-                {active && <PaletteBadge>{t("common.active")}</PaletteBadge>}
-              </CommandItem>
-            )
-          })}
-        </PaletteGroup>
       </CommandList>
     </CommandDialog>
   )

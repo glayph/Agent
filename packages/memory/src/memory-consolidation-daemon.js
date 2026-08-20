@@ -3,6 +3,7 @@
 class MemoryConsolidationDaemon {
   constructor(tkg, options = {}) {
     this.tkg = tkg;
+    this.graphMemory = options.graphMemory || tkg?.graphMemory || null;
     this.options = {
       checkIntervalMs: 60 * 60 * 1000,
       consolidationIntervalMs: 24 * 60 * 60 * 1000,
@@ -32,7 +33,16 @@ class MemoryConsolidationDaemon {
       }
     }, this.options.fillEmptyChunksIntervalMs));
 
+    this._timers.push(setInterval(() => {
+      this._runGraphMaintenance().catch(err => {
+        console.error('[ConsolidationDaemon] graph maintenance error:', err.message);
+      });
+    }, this.options.consolidationIntervalMs));
+
     this._runConsolidation().catch(() => {});
+    this._runGraphMaintenance().catch(err => {
+      console.error('[ConsolidationDaemon] graph maintenance error:', err.message);
+    });
     try {
       this._fillEmptyChunks();
     } catch (err) {
@@ -49,6 +59,13 @@ class MemoryConsolidationDaemon {
     this._timers = [];
     this._running = false;
     console.log('[ConsolidationDaemon] Stopped');
+  }
+
+  async _runGraphMaintenance() {
+    if (!this.graphMemory) return { dormantProjects: 0 };
+    const report = this.graphMemory.maintenance(this.options);
+    if (report.dormantProjects > 0) console.log('[ConsolidationDaemon] Graph maintenance report:', report);
+    return report;
   }
 
   async _runConsolidation() {
@@ -116,8 +133,9 @@ class MemoryConsolidationDaemon {
 
   async runOnce() {
     const consolidateResult = await this._runConsolidation();
+    const graphMaintenance = await this._runGraphMaintenance();
     const emptyChunksFilled = this._fillEmptyChunks();
-    return { consolidation: consolidateResult, emptyChunksFilled };
+    return { consolidation: consolidateResult, graphMaintenance, emptyChunksFilled };
   }
 
   _getHourKey(date) {

@@ -85,7 +85,11 @@ export class Settings {
   }
 
   get defaultModel(): string {
-    return process.env["DEFAULT_MODEL"] || "google/gemini-2.0-flash-001";
+    return (
+      process.env["DEFAULT_MODEL"] ||
+      process.env["MIKI_MODEL"] ||
+      "gemini/gemini-3.7-flash"
+    );
   }
 
   get defaultTemperature(): number {

@@ -2,11 +2,11 @@
 name: skills-creator
 description: "Guide skill creation from idea to working SKILL.md — define scope, write frontmatter, verify structure."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [skills, creation, authoring, development]
     related_skills: [skills-finder, skills-use]
 ---

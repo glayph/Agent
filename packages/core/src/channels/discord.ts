@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { HttpsProxyAgent } from "https-proxy-agent";
+import HttpsProxyAgent from "https-proxy-agent";
 import { ProxyAgent } from "undici";
 import type { AgentOrchestrator } from "../agent.js";
 import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
@@ -216,7 +216,7 @@ export class DiscordBot {
       const ws = new WebSocket(
         DISCORD_GATEWAY_URL,
         config.proxy
-          ? { agent: new HttpsProxyAgent(config.proxy) }
+          ? { agent: new (HttpsProxyAgent as any)(config.proxy) }
           : undefined,
       );
       this.ws = ws;

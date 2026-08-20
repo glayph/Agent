@@ -2,7 +2,7 @@
 /**
  * run-verify.mjs
  *
- * Standard verification: lint + test + doctor.
+ * Standard verification: lint + typecheck + build + test + doctor.
  * Used by `npm run verify`.
  */
 
@@ -19,7 +19,7 @@ const args = process.argv.slice(2);
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: node scripts/run-verify.mjs [options]
 
-Standard verification: lint + test + doctor.
+Standard verification: lint + typecheck + build + test + doctor.
 
 Options:
   -h, --help    Show this help message
@@ -60,7 +60,7 @@ function main() {
   log("Starting verification...");
 
   // Step 1: TypeScript lint
-  log("Step 1/3: Linting...");
+  log("Step 1/5: Linting backend packages...");
   run("npx", [
     "eslint",
     "packages/**/*.ts",
@@ -69,12 +69,22 @@ function main() {
     "--max-warnings=0",
   ], { cwd: root });
 
-  // Step 2: Tests
-  log("Step 2/3: Running tests...");
-  run("npx", ["jest", "--runInBand"], { cwd: root });
+  // Step 2: Strict typechecking
+  log("Step 2/5: Running strict typechecks...");
+  run("npm", ["run", "typecheck", "--workspaces", "--if-present"], { cwd: root });
+  run("npm", ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "build"], { cwd: root });
 
-  // Step 3: Doctor
-  log("Step 3/3: Running doctor checks...");
+  // Step 3: Production builds
+  log("Step 3/5: Running production builds...");
+  run("npm", ["run", "build:all"], { cwd: root });
+
+  // Step 4: Tests
+  log("Step 4/5: Running tests...");
+  run("npm", ["test", "--workspaces", "--if-present"], { cwd: root });
+  run("npm", ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "test"], { cwd: root });
+
+  // Step 5: Doctor
+  log("Step 5/5: Running doctor checks...");
   run("node", [path.join(root, "bin", "miki.js"), "doctor"], { cwd: root });
 
   log("");

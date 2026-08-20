@@ -15,6 +15,7 @@ import {
   normalizeCorsOrigin,
   resolveAllowedCidrsFromEnv,
   isIpAllowedByCidrs,
+  getRequiredEnvSecret,
 } from "@miki/config/security";
 import { rewriteMcpProxyPath } from "./runtime-utils.js";
 import {
@@ -49,9 +50,12 @@ function booleanEnv(key: string, fallback: boolean): boolean {
   return !["0", "false", "no", "off"].includes(raw.trim().toLowerCase());
 }
 
-const inferredRuntimeRoot = path.resolve(__dirname, "../../..");
+const inferredSourceRoot = path.resolve(__dirname, "../../..");
+const sourceRoot = path.resolve(
+  readMikiEnv("MIKI_SOURCE_ROOT") || inferredSourceRoot,
+);
 const runtimeRoot = path.resolve(
-  readMikiEnv("MIKI_RUNTIME_ROOT") || inferredRuntimeRoot,
+  readMikiEnv("MIKI_RUNTIME_ROOT") || sourceRoot,
 );
 const workspaceDir = path.resolve(
   readMikiEnv("MIKI_WORKSPACE_DIR") || runtimeRoot,
@@ -81,9 +85,11 @@ const currentAllowedCorsOrigins = () =>
 function runtimePath(...segments: string[]): string {
   return path.join(config.runtimeRoot, ...segments);
 }
-
+function sourcePath(...segments: string[]): string {
+  return path.join(sourceRoot, ...segments);
+}
 function runtimeLoaderArgs(): string[] {
-  const loaderPath = runtimePath("runtime-loader.mjs");
+  const loaderPath = sourcePath("runtime-loader.mjs");
   if (!fs.existsSync(loaderPath)) return [];
   const registerSource = [
     'import { register } from "node:module";',
@@ -142,6 +148,11 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function coreHealthHeaders(): Record<string, string> | undefined {
+  const apiKey = process.env.API_KEY_SECRET?.trim();
+  return apiKey ? { "x-api-key": apiKey } : undefined;
+}
+
 // ── Core process management ──────────────────────────────────────────────────
 
 const processStateStore = createProcessStateStore(config.workspaceDir);
@@ -180,7 +191,7 @@ function startCore(): child_process.ChildProcess {
     `\n--- Gateway spawning core at ${new Date().toISOString()} ---\n`,
   );
 
-  const coreEntry = runtimePath("packages", "core", "dist", "api", "index.js");
+  const coreEntry = sourcePath("packages", "core", "dist", "api", "index.js");
   const proc = child_process.spawn(
     "node",
     [...runtimeLoaderArgs(), coreEntry],
@@ -188,6 +199,7 @@ function startCore(): child_process.ChildProcess {
       cwd: config.workspaceDir,
       env: {
         ...process.env,
+        MIKI_SOURCE_ROOT: sourceRoot,
         MIKI_RUNTIME_ROOT: config.runtimeRoot,
         MIKI_WORKSPACE_DIR: config.workspaceDir,
         // Legacy mixed-case aliases: older installs / external tooling may
@@ -219,7 +231,10 @@ function startCore(): child_process.ChildProcess {
       `\n--- Core exited code ${code} at ${new Date().toISOString()} ---\n`,
     );
     logStream.end();
-    if (!shutdownInProgress && code !== null && code !== 0) {
+    // Any unexpected core exit, including SIGKILL (code === null) or an
+    // accidental zero exit, must recover in a 24/7 runtime. The gateway's
+    // deliberate shutdown path is guarded by shutdownInProgress.
+    if (!shutdownInProgress) {
       attemptCoreRestart();
     }
   });
@@ -279,6 +294,7 @@ async function waitForCore(timeout = config.coreStartupTimeout): Promise<void> {
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`http://127.0.0.1:${config.corePort}/health`, {
+        headers: coreHealthHeaders(),
         signal: AbortSignal.timeout(config.coreHealthTimeout),
       });
       if (res.ok) {
@@ -305,6 +321,7 @@ function startCoreHealthMonitor(): void {
   healthCheckTimer = setInterval(async () => {
     try {
       const res = await fetch(`http://127.0.0.1:${config.corePort}/health`, {
+        headers: coreHealthHeaders(),
         signal: AbortSignal.timeout(config.coreHealthTimeout),
       });
       if (res.ok) {
@@ -443,8 +460,12 @@ async function gatewayAuthMiddleware(
     req.headers.authorization?.replace(/^Bearer\s+/i, "") ||
     "";
   if (apiKey) {
-    const expected = process.env.API_KEY_SECRET;
-    if (!expected || expected.length < 8) {
+    let expected: string;
+    try {
+      expected = getRequiredEnvSecret("API_KEY_SECRET", {
+        weakValues: ["Miki-dev-key", "sk-anything"],
+      });
+    } catch {
       res.status(500).json({ error: "Gateway auth is misconfigured" });
       return;
     }

@@ -2,11 +2,11 @@
 name: goal-completion
 description: "Goal completion: Execute and track goal-based tasks with step-by-step progress"
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [goal, completion, execution, workflow, tracking]
     related_skills: [plan, writing-plans]
 ---

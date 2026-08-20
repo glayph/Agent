@@ -6,11 +6,14 @@ const path = require('path');
 const fs = require('fs').promises;
 const SpecialEventHighlighter = require('./special-event-highlighter');
 const { createEmbeddingProvider } = require('./embedding-provider');
+const NodeGraph = require('./node-graph');
+const GraphCognitiveMemory = require('./graph-cognitive-memory');
 
 class TemporalKnowledgeGraph {
   constructor(dbPath) {
     this.dbPath = dbPath;
     this.db = null;
+    this.nodeGraph = null;
     this.initialized = false;
     // Regex-pattern-based importance scoring, used by writeEvent() in place
     // of a cruder inline keyword-substring check. Constructed here (not
@@ -197,6 +200,22 @@ class TemporalKnowledgeGraph {
     // Temporary region tables
     const TemporaryMemory = require('./temporary-memory');
     TemporaryMemory.ensureSchema(this.db);
+
+    // NodeGraph shares this connection so event history and usage-ranked
+    // context stay transactionally consistent in the same durable database.
+    this.nodeGraph = new NodeGraph(this.db);
+    this.nodeGraph.initializeSync();
+
+    // The scoped cognitive graph shares this connection so the new memory
+    // model is durable and transactional without disturbing legacy tables.
+    this.graphMemory = new GraphCognitiveMemory(this.db, {
+      defaultScope: {
+        agentId: process.env.MIKI_AGENT_ID || 'miki',
+        ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
+        workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
+      },
+    });
+    this.graphMemory.initializeSync();
   }
 
   /**
@@ -473,9 +492,65 @@ class TemporalKnowledgeGraph {
     }
 
     const entities = this._extractEntities(eventData);
+    const graphEntityIds = [];
     for (const entity of entities) {
-      this._ensureEntity(entity, memoryCategory);
+      const entityId = this._ensureEntity(entity, memoryCategory);
+      graphEntityIds.push({ id: entityId, entity });
     }
+
+    // Keep the backend-only NodeGraph synchronized with durable events. Each
+    // node stores its own context, while event/entity edges provide the local
+    // neighborhood used by usage-ranked retrieval.
+    if (this.nodeGraph) {
+      try {
+        const eventNodeId = `event:${eventId}`;
+        this.nodeGraph.upsertNode({
+          id: eventNodeId,
+          key: eventNodeId,
+          kind: 'event',
+          label: eventData.event_type || 'general',
+          context: {
+            text: eventData.content || '',
+            source: eventData.source || 'system',
+            eventType: eventData.event_type || 'general',
+            memoryCategory,
+            importance,
+            createdAt: now,
+          },
+        });
+        for (const { id, entity } of graphEntityIds) {
+          const entityNodeId = `entity:${id}`;
+          this.nodeGraph.upsertNode({
+            id: entityNodeId,
+            key: entityNodeId,
+            kind: 'entity',
+            label: entity.name,
+            context: {
+              name: entity.name,
+              type: entity.type || 'entity',
+              memoryCategory,
+              attributes: entity.attributes || {},
+            },
+          });
+          this.nodeGraph.connect(eventNodeId, entityNodeId, 'mentions', { eventId, memoryCategory }, 0.35);
+        }
+        for (let index = 0; index < graphEntityIds.length; index += 1) {
+          for (let next = index + 1; next < graphEntityIds.length; next += 1) {
+            this.nodeGraph.connect(
+              `entity:${graphEntityIds[index].id}`,
+              `entity:${graphEntityIds[next].id}`,
+              'co_occurs',
+              { eventId },
+              0.18,
+            );
+          }
+        }
+      } catch (err) {
+        // Graph enrichment must never prevent the canonical event write.
+        console.warn('[TemporalKnowledgeGraph] NodeGraph sync warning:', err.message);
+      }
+    }
+
     this._updateWorkingAnchor(eventData);
 
     return { eventId, chunkId: chunk.id, isSpecial: !!isSpecial, specialEventName, memoryCategory };
@@ -1220,7 +1295,27 @@ class TemporalKnowledgeGraph {
       }
     }
 
-    // Priority 6 — Recent events (24h)
+    // Priority 6 — Backend NodeGraph context. Nodes are ranked by lexical
+    // relevance plus activation, recency, and repeated usage; traversal also
+    // strengthens their neighborhood for future turns.
+    if (queryStr && this.nodeGraph) {
+      try {
+        const graphContext = this.nodeGraph.getContext(queryStr, 8);
+        if (graphContext.length > 0) {
+          const lines = graphContext.map(node => {
+            const category = node.context.memoryCategory || node.kind;
+            const usage = node.accessCount != null ? node.accessCount : 0;
+            return `- [${category}] ${node.text.substring(0, 300)} (activation: ${Number(node.activation || 0).toFixed(2)}, uses: ${usage})`;
+          });
+          tryAddSection('=== NodeGraph Context (usage-ranked) ===', lines);
+        }
+      } catch (err) {
+        // Retrieval enrichment is best-effort; canonical memory remains usable.
+        console.warn('[TemporalKnowledgeGraph] NodeGraph retrieval warning:', err.message);
+      }
+    }
+
+    // Priority 7 — Recent events (24h)
     if (recent.length > 0) {
       const lines = [];
       for (const ev of recent.slice(0, maxEvents)) {
@@ -1231,7 +1326,7 @@ class TemporalKnowledgeGraph {
       tryAddSection('=== Recent Events (Last 24h) ===', lines);
     }
 
-    // Priority 7 — Inter-day neural connections
+    // Priority 8 — Inter-day neural connections
     try {
       const todayKey = this._getDateKey(new Date());
       const connected = this.getConnectedDailySummaries(todayKey, 3);
@@ -1248,7 +1343,7 @@ class TemporalKnowledgeGraph {
       // best-effort
     }
 
-    // Priority 8 — Current hour meta
+    // Priority 9 — Current hour meta
     if (currentChunk && currentChunk.status !== 'EMPTY') {
       tryAddSection(`=== Current Hourly Chunk: ${currentChunk.hour_key} ===`, [
         `Events in this hour: ${currentChunk.event_count}`
@@ -1490,6 +1585,25 @@ class TemporalKnowledgeGraph {
     })).filter(r => r.summary);
   }
 
+  /**
+   * Backend-only NodeGraph accessors. The graph is intentionally kept behind
+   * the memory package so frontend code cannot create sessions or mutate
+   * memory topology directly.
+   */
+  getNodeGraph() {
+    return this.nodeGraph;
+  }
+
+  getNodeGraphContext(queryStr, limit = 8) {
+    if (!this.nodeGraph) return [];
+    return this.nodeGraph.getContext(queryStr, limit);
+  }
+
+  getNodeGraphSnapshot(limit = 100) {
+    if (!this.nodeGraph) return { nodes: [], edges: [] };
+    return this.nodeGraph.snapshot(limit);
+  }
+
   getStats() {
     const chunkStats = this.db.prepare(`
       SELECT status, COUNT(*) as count, SUM(event_count) as total_events FROM hourly_chunks GROUP BY status
@@ -1536,6 +1650,7 @@ class TemporalKnowledgeGraph {
       eventsByCategory,
       specialEvents: { total: specialCount, unresolved: unresolvedSpecialCount },
       dailySummaries: dailyCount,
+      nodeGraph: this.nodeGraph ? this.nodeGraph.getStats() : { nodes: 0, edges: 0, activeNodes: 0 },
       workingAnchor: { situation: (anchor.current_situation || '').substring(0, 100), entityCount: anchor.key_entities ? JSON.parse(anchor.key_entities).length : 0 },
       timestamp: this._now()
     };

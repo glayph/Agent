@@ -7,6 +7,8 @@ const MemoryConsolidationDaemon = require('./memory-consolidation-daemon');
 const AgentMemoryIntegration = require('./agent-memory-integration');
 const TemporaryMemory = require('./temporary-memory');
 const MultiHopRetriever = require('./multi-hop-retriever');
+const NodeGraph = require('./node-graph');
+const GraphCognitiveMemory = require('./graph-cognitive-memory');
 const {
   REGIONS,
   ALL_REGIONS,
@@ -29,6 +31,8 @@ module.exports = {
   AgentMemoryIntegration,
   TemporaryMemory,
   MultiHopRetriever,
+  NodeGraph,
+  GraphCognitiveMemory,
   REGIONS,
   ALL_REGIONS,
   REGION_LABELS,

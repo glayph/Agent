@@ -9,8 +9,8 @@ export {
 } from "./utils/downloader.js";
 export { extractTarGz, findManifest } from "./utils/extractor.js";
 
-export {
-  SourceProtocol,
+export { SourceProtocol } from "./types.js";
+export type {
   ParsedSkillSpec,
   PluginManifest,
   PluginContracts,

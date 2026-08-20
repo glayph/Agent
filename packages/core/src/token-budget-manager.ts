@@ -6,6 +6,8 @@
  * - Implement token tier system for cost optimization
  */
 
+import { settings } from "@miki/config";
+
 export type TaskComplexity = "simple" | "standard" | "complex";
 
 export interface TokenBudget {
@@ -288,7 +290,7 @@ export class TokenBudgetManager {
    * Get optimal model for task type
    */
   getBestModel(taskType: string): string {
-    let bestModel = "gpt-4o-mini"; // Default
+    let bestModel = settings.defaultModel; // Centralized provider-aware default
     let bestScore = 0;
 
     for (const [modelName, profile] of this.modelProfiles) {

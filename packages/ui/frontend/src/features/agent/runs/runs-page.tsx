@@ -18,8 +18,8 @@ import {
   getAgentRun,
   listAgentRuns,
 } from "@/api/agent-runs"
-import { EmptyState } from "@/shared/ui/minimal-primitives"
 import { PageHeader } from "@/app/layout/page-header"
+import { EmptyState } from "@/shared/ui/minimal-primitives"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Skeleton } from "@/shared/ui/skeleton"
@@ -61,9 +61,11 @@ function SummaryTile({
   value: string | number
 }) {
   return (
-    <div className="border-border bg-card rounded-lg border p-4">
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
+    <div className="bg-muted/45 rounded-lg px-3 py-2.5">
+      <div className="text-muted-foreground text-[11px] font-medium uppercase tracking-wide">
+        {label}
+      </div>
+      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   )
 }
@@ -83,19 +85,19 @@ function TraceSummaryPanel({ run }: { run: AgentRun }) {
   }
 
   return (
-    <section className="border-border bg-card rounded-lg border p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">{t("agentRuns.trace.title")}</h3>
+    <details className="border-border bg-card rounded-xl border p-4">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+        <span>{t("agentRuns.trace.title")}</span>
         <Badge variant="outline">
           {t("agentRuns.trace.events", { count: timeline.length })}
         </Badge>
-      </div>
+      </summary>
       {timeline.length > 0 && (
         <div className="mt-3 flex flex-col gap-2">
           {timeline.map((event) => (
             <div
               key={event.id}
-              className="border-border flex items-start justify-between gap-3 rounded-md border p-2"
+              className="border-border flex items-start justify-between gap-3 rounded-lg border p-3"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -119,11 +121,11 @@ function TraceSummaryPanel({ run }: { run: AgentRun }) {
         </div>
       )}
       {Object.keys(contextDetails).length > 0 && (
-        <pre className="bg-muted text-muted-foreground mt-3 max-h-48 overflow-auto rounded-md p-3 text-xs leading-5">
+        <pre className="bg-muted text-muted-foreground mt-3 max-h-48 overflow-auto rounded-lg p-3 text-xs leading-5">
           {JSON.stringify(contextDetails, null, 2)}
         </pre>
       )}
-    </section>
+    </details>
   )
 }
 
@@ -308,62 +310,61 @@ export function RunsPage({
     <div className="bg-background flex h-full flex-col">
       <PageHeader
         title={t("navigation.runs", "Runs")}
-        titleExtra={
-          selectedRun && <RunStatusBadge status={selectedRun.status} />
-        }
+        titleExtra={selectedRun && <RunStatusBadge status={selectedRun.status} />}
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void runsQuery.refetch()}
-          disabled={runsQuery.isFetching}
-          className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
-          aria-label={t("agentRuns.actions.refresh")}
-          title={t("agentRuns.actions.refresh")}
-        >
-          <IconRefresh data-icon="inline-start" />
-          <span className="max-sm:hidden">{t("common.refresh")}</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            selectedRunId && exportRunMutation.mutate(selectedRunId)
-          }
-          disabled={!selectedRunId || exportRunMutation.isPending}
-          className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
-          aria-label={t("agentRuns.actions.export")}
-          title={t("agentRuns.actions.export")}
-        >
-          <IconDatabaseExport data-icon="inline-start" />
-          <span className="max-sm:hidden">{t("common.export")}</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => selectedRun && replayRunMutation.mutate(selectedRun)}
-          disabled={!selectedRun || replayRunMutation.isPending}
-          className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
-          aria-label={t("agentRuns.actions.replay")}
-          title={t("agentRuns.actions.replay")}
-        >
-          <IconRepeat data-icon="inline-start" />
-          <span className="max-sm:hidden">
-            {t("agentRuns.actions.replayShort")}
-          </span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setCreateDialogOpen(true)}
-          disabled={createRunMutation.isPending}
-          className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
-          aria-label={t("agentRuns.actions.create")}
-          title={t("agentRuns.actions.create")}
-        >
-          <IconPlus data-icon="inline-start" />
-          <span className="max-sm:hidden">{t("agentRuns.actions.newRun")}</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void runsQuery.refetch()}
+            disabled={runsQuery.isFetching}
+            className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
+            aria-label={t("agentRuns.actions.refresh")}
+            title={t("agentRuns.actions.refresh")}
+          >
+            <IconRefresh data-icon="inline-start" />
+            <span className="max-sm:hidden">{t("common.refresh")}</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              selectedRunId && exportRunMutation.mutate(selectedRunId)
+            }
+            disabled={!selectedRunId || exportRunMutation.isPending}
+            className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
+            aria-label={t("agentRuns.actions.export")}
+            title={t("agentRuns.actions.export")}
+          >
+            <IconDatabaseExport data-icon="inline-start" />
+            <span className="max-sm:hidden">{t("common.export")}</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => selectedRun && replayRunMutation.mutate(selectedRun)}
+            disabled={!selectedRun || replayRunMutation.isPending}
+            className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
+            aria-label={t("agentRuns.actions.replay")}
+            title={t("agentRuns.actions.replay")}
+          >
+            <IconRepeat data-icon="inline-start" />
+            <span className="max-sm:hidden">
+              {t("agentRuns.actions.replayShort")}
+            </span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setCreateDialogOpen(true)}
+            disabled={createRunMutation.isPending}
+            className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
+            aria-label={t("agentRuns.actions.create")}
+            title={t("agentRuns.actions.create")}
+          >
+            <IconPlus data-icon="inline-start" />
+            <span className="max-sm:hidden">{t("agentRuns.actions.newRun")}</span>
+          </Button>
+        </div>
       </PageHeader>
 
       <CreateRunDialog
@@ -373,163 +374,160 @@ export function RunsPage({
         onCreate={(payload) => createRunMutation.mutate(payload)}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 xl:overflow-hidden">
-        {statusMessage && (
-          <div
-            className={
-              statusMessage.kind === "error"
-                ? "border-border bg-destructive/10 text-destructive mb-4 rounded-lg border px-3 py-2 text-sm"
-                : "border-border bg-muted/60 text-foreground mb-4 rounded-lg border px-3 py-2 text-sm"
-            }
-            role={statusMessage.kind === "error" ? "alert" : "status"}
-            aria-live={statusMessage.kind === "error" ? "assertive" : "polite"}
-          >
-            {statusMessage.text}
-          </div>
-        )}
-
-        {isLoading ? (
-          <div className="grid h-full gap-4 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_380px]">
-            <Skeleton className="h-full min-h-[520px] rounded-lg" />
-            <Skeleton className="h-full min-h-[520px] rounded-lg" />
-            <Skeleton className="hidden h-full min-h-[520px] rounded-lg xl:block" />
-          </div>
-        ) : runsQuery.error ? (
-          <EmptyState
-            icon={<IconTimeline />}
-            title={t("agentRuns.empty.loadFailedTitle")}
-            description={
-              runsQuery.error instanceof Error
-                ? runsQuery.error.message
-                : t("agentRuns.empty.loadFailedDescription")
-            }
-            action={
-              <Button
-                variant="outline"
-                onClick={() => void runsQuery.refetch()}
-              >
-                <IconRefresh data-icon="inline-start" />
-                {t("models.retry")}
-              </Button>
-            }
-          />
-        ) : runs.length === 0 ? (
-          <EmptyState
-            icon={<IconTimeline />}
-            title={t("agentRuns.empty.noneTitle")}
-            description={t("agentRuns.empty.noneDescription")}
-            action={
-              <Button
-                variant="outline"
-                onClick={() => setCreateDialogOpen(true)}
-                disabled={createRunMutation.isPending}
-              >
-                <IconPlus data-icon="inline-start" />
-                {t("agentRuns.actions.createManual")}
-              </Button>
-            }
-          />
-        ) : (
-          <div className="flex min-h-full flex-col gap-4 xl:grid xl:h-full xl:min-h-0 xl:grid-cols-[340px_minmax(0,1fr)_380px]">
-            <RunList
-              runs={runs}
-              query={query}
-              statusFilter={statusFilter}
-              selectedRunId={selectedRunId}
-              page={search.page}
-              onQueryChange={(value) =>
-                onSearchChange({
-                  q: value,
-                  run: "",
-                  step: "",
-                  page: 1,
-                })
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 xl:overflow-hidden">
+        <div className="mx-auto flex h-full w-full max-w-[1500px] flex-col">
+          {statusMessage && (
+            <div
+              className={
+                statusMessage.kind === "error"
+                  ? "border-border bg-destructive/10 text-destructive mb-3 rounded-lg border px-3 py-2 text-sm"
+                  : "border-border bg-muted/60 text-foreground mb-3 rounded-lg border px-3 py-2 text-sm"
               }
-              onStatusFilterChange={(value) =>
-                onSearchChange({
-                  status: value,
-                  run: "",
-                  step: "",
-                  page: 1,
-                })
-              }
-              onSelectRun={(runId) => {
-                onSearchChange({
-                  run: runId,
-                  step: "",
-                })
-              }}
-              onPageChange={(page) => onSearchChange({ page })}
-              className="max-h-[32rem] xl:h-full xl:max-h-none"
-            />
-
-            <main className="min-h-0 xl:overflow-y-auto">
-              {selectedRun && selectedSummary ? (
-                <div className="flex min-h-full flex-col gap-4">
-                  <section className="border-border bg-card rounded-lg border p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div className="min-w-0">
-                        <h2 className="truncate text-base font-semibold">
-                          {selectedRun.objective}
-                        </h2>
-                        <p className="text-muted-foreground mt-1 text-xs">
-                          {t("agentRuns.meta.createdUpdated", {
-                            created: formatRunDate(selectedRun.createdAt),
-                            updated: formatRunDate(selectedRun.updatedAt),
-                          })}
-                        </p>
-                      </div>
-                      <RunStatusBadge status={selectedRun.status} />
-                    </div>
-                  </section>
-
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <SummaryTile
-                      label={t("agentRuns.summary.completed")}
-                      value={`${selectedSummary.completedSteps}/${selectedSummary.totalSteps}`}
-                    />
-                    <SummaryTile
-                      label={t("agentRuns.summary.running")}
-                      value={selectedSummary.runningSteps}
-                    />
-                    <SummaryTile
-                      label={t("agentRuns.summary.failed")}
-                      value={selectedSummary.failedSteps}
-                    />
-                    <SummaryTile
-                      label={t("agentRuns.summary.evidence")}
-                      value={selectedSummary.evidenceCount}
-                    />
-                  </div>
-
-                  <TaskGraph
-                    run={selectedRun}
-                    selectedStepId={selectedStep?.id ?? null}
-                    onSelectStep={(step) => onSearchChange({ step })}
-                    className="xl:flex-1"
-                  />
-
-                  <TraceSummaryPanel run={selectedRun} />
-                </div>
-              ) : (
-                <EmptyState
-                  title={t("agentRuns.empty.noSelectionTitle")}
-                  description={t("agentRuns.empty.noSelectionDescription")}
-                />
-              )}
-            </main>
-
-            <div className="hidden min-h-0 xl:block">
-              <StepEvidencePanel step={selectedStep} className="h-full" />
+              role={statusMessage.kind === "error" ? "alert" : "status"}
+              aria-live={statusMessage.kind === "error" ? "assertive" : "polite"}
+            >
+              {statusMessage.text}
             </div>
-            <div className="xl:hidden">
-              <StepEvidencePanel
-                step={selectedStep}
-                className="min-h-[22rem]"
+          )}
+
+          {isLoading ? (
+            <div className="grid h-full gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <Skeleton className="h-full min-h-[520px] rounded-xl" />
+              <Skeleton className="h-full min-h-[520px] rounded-xl" />
+            </div>
+          ) : runsQuery.error ? (
+            <EmptyState
+              icon={<IconTimeline />}
+              title={t("agentRuns.empty.loadFailedTitle")}
+              description={
+                runsQuery.error instanceof Error
+                  ? runsQuery.error.message
+                  : t("agentRuns.empty.loadFailedDescription")
+              }
+              action={
+                <Button
+                  variant="outline"
+                  onClick={() => void runsQuery.refetch()}
+                >
+                  <IconRefresh data-icon="inline-start" />
+                  {t("models.retry")}
+                </Button>
+              }
+            />
+          ) : runs.length === 0 ? (
+            <div className="flex min-h-full items-center justify-center">
+              <EmptyState
+                icon={<IconTimeline />}
+                title={t("agentRuns.empty.noneTitle")}
+                description={t("agentRuns.empty.noneDescription")}
+                action={
+                  <Button
+                    onClick={() => setCreateDialogOpen(true)}
+                    disabled={createRunMutation.isPending}
+                  >
+                    <IconPlus data-icon="inline-start" />
+                    {t("agentRuns.actions.createManual")}
+                  </Button>
+                }
               />
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <RunList
+                runs={runs}
+                query={query}
+                statusFilter={statusFilter}
+                selectedRunId={selectedRunId}
+                page={search.page}
+                onQueryChange={(value) =>
+                  onSearchChange({
+                    q: value,
+                    run: "",
+                    step: "",
+                    page: 1,
+                  })
+                }
+                onStatusFilterChange={(value) =>
+                  onSearchChange({
+                    status: value,
+                    run: "",
+                    step: "",
+                    page: 1,
+                  })
+                }
+                onSelectRun={(runId) => {
+                  onSearchChange({
+                    run: runId,
+                    step: "",
+                  })
+                }}
+                onPageChange={(page) => onSearchChange({ page })}
+                className="max-h-[34rem] xl:h-full xl:max-h-none"
+              />
+
+              <main className="min-h-0 min-w-0 xl:overflow-y-auto">
+                {selectedRun && selectedSummary ? (
+                  <div className="flex flex-col gap-4 pb-1">
+                    <section className="border-border bg-card rounded-xl border p-4 sm:p-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="text-muted-foreground mb-1 text-xs font-medium uppercase tracking-wide">
+                            {t("navigation.runs", "Run")}
+                          </div>
+                          <h2 className="break-words text-lg font-semibold leading-7">
+                            {selectedRun.objective}
+                          </h2>
+                          <p className="text-muted-foreground mt-1 text-xs">
+                            {t("agentRuns.meta.createdUpdated", {
+                              created: formatRunDate(selectedRun.createdAt),
+                              updated: formatRunDate(selectedRun.updatedAt),
+                            })}
+                          </p>
+                        </div>
+                        <RunStatusBadge status={selectedRun.status} />
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <SummaryTile
+                          label={t("agentRuns.summary.completed")}
+                          value={`${selectedSummary.completedSteps}/${selectedSummary.totalSteps}`}
+                        />
+                        <SummaryTile
+                          label={t("agentRuns.summary.running")}
+                          value={selectedSummary.runningSteps}
+                        />
+                        <SummaryTile
+                          label={t("agentRuns.summary.failed")}
+                          value={selectedSummary.failedSteps}
+                        />
+                        <SummaryTile
+                          label={t("agentRuns.summary.evidence")}
+                          value={selectedSummary.evidenceCount}
+                        />
+                      </div>
+                    </section>
+
+                    <TaskGraph
+                      run={selectedRun}
+                      selectedStepId={selectedStep?.id ?? null}
+                      onSelectStep={(step) => onSearchChange({ step })}
+                    />
+
+                    <StepEvidencePanel step={selectedStep} />
+                    <TraceSummaryPanel run={selectedRun} />
+                  </div>
+                ) : (
+                  <div className="flex min-h-[28rem] items-center justify-center">
+                    <EmptyState
+                      title={t("agentRuns.empty.noSelectionTitle")}
+                      description={t("agentRuns.empty.noSelectionDescription")}
+                    />
+                  </div>
+                )}
+              </main>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

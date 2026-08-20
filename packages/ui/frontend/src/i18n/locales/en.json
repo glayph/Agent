@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "drive": "System",
+    "drive": "Drive",
     "chat": "Chat",
     "model_group": "Models",
     "models": "Models",
@@ -10,6 +10,7 @@
     "skills": "Skills",
     "tools": "Tools",
     "runs": "Runs",
+    "automations": "Automations",
     "monitor": "Monitor",
     "services": "Services",
     "channels_group": "Channels",

@@ -60,6 +60,24 @@ export interface AddRelationResult {
   reinforced: boolean;
 }
 
+export interface NodeGraphContext {
+  id: string;
+  key: string;
+  kind: string;
+  label: string;
+  context: Record<string, unknown>;
+  accessCount: number;
+  activation: number;
+  lastUsedAt: string | null;
+  score: number;
+  text: string;
+}
+
+export interface NodeGraphSnapshot {
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+}
+
 export interface TemporalKnowledgeGraph {
   initialize(): Promise<void>;
   initializeSync(): void;
@@ -73,6 +91,8 @@ export interface TemporalKnowledgeGraph {
     skipNoiseFilter?: boolean;
   }): WriteEventResult;
   getContextWindow(queryStr: string, maxEvents?: number): string;
+  getNodeGraphContext(queryStr: string, limit?: number): NodeGraphContext[];
+  getNodeGraphSnapshot(limit?: number): NodeGraphSnapshot;
   getWorkingAnchor(): WorkingAnchor;
   getSpecialEvents(limit?: number, activeOnly?: boolean): unknown[];
   getEventsByCategory(category: MemoryCategory, limit?: number): MemoryEvent[];
@@ -84,6 +104,7 @@ export interface TemporalKnowledgeGraph {
     eventsByCategory: Record<MemoryCategory, number>;
     specialEvents: { total: number; unresolved: number };
     dailySummaries: number;
+    nodeGraph: { nodes: number; edges: number; activeNodes: number };
     workingAnchor: { situation: string; entityCount: number };
     timestamp: string;
   };

@@ -2,11 +2,11 @@
 name: javascript
 description: "Write modern, idiomatic JavaScript with ES2022+ features and async patterns."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [javascript, es6, async, es2022]
     related_skills: [frontend-frameworks, testing-debugging]
 ---

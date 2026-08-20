@@ -1,5 +1,10 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react"
 import { memo } from "react"
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  type EdgeProps,
+} from "@xyflow/react"
 
 function FlowEdgeInner({
   id,
@@ -22,7 +27,9 @@ function FlowEdgeInner({
     targetPosition,
   })
 
-  const color = animated ? "#38bdf8" : "rgba(255,255,255,0.14)"
+  const color = animated
+    ? "var(--primary)"
+    : "color-mix(in srgb, var(--foreground) 18%, transparent)"
 
   return (
     <>
@@ -31,8 +38,10 @@ function FlowEdgeInner({
         path={edgePath}
         style={{
           stroke: color,
-          strokeWidth: animated ? 1.75 : 1.25,
-          filter: animated ? "drop-shadow(0 0 3px #38bdf8aa)" : undefined,
+          strokeWidth: animated ? 2.25 : 1.5,
+          filter: animated
+            ? "drop-shadow(0 0 4px color-mix(in srgb, var(--primary) 65%, transparent))"
+            : undefined,
         }}
       />
       {animated && (
@@ -45,7 +54,7 @@ function FlowEdgeInner({
               <path id={`${id}-path`} d={edgePath} />
             </defs>
             {[0, 0.33, 0.66].map((offset) => (
-              <circle key={offset} r={2.6} fill="#8be9ff">
+              <circle key={offset} r={2.8} fill="var(--primary)">
                 <animateMotion
                   dur="1.4s"
                   repeatCount="indefinite"

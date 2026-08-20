@@ -20,6 +20,10 @@ export function closeHttpServer(
     let resolved = false;
     const timer = setTimeout(() => {
       resolved = true;
+      // `server.close()` stops accepting new connections but, on a busy
+      // gateway, can otherwise wait indefinitely on keep-alive/request
+      // sockets. Node 18+ exposes this explicit force-close operation.
+      server.closeAllConnections?.();
       options.onForceClose?.();
       resolve();
     }, timeoutMs);
@@ -52,6 +56,39 @@ export function waitForProcessExit(
   });
 }
 
+function descendantPids(rootPid: number): number[] {
+  const descendants: number[] = [];
+  const pending = [rootPid];
+  while (pending.length > 0) {
+    const parentPid = pending.shift()!;
+    try {
+      const output = child_process.execFileSync(
+        "pgrep",
+        ["-P", String(parentPid)],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const children = String(output)
+        .split(/\s+/)
+        .map((value) => Number.parseInt(value, 10))
+        .filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+      descendants.push(...children);
+      pending.push(...children);
+    } catch {
+      // `pgrep` returns status 1 when there are no children and may be absent
+      // on minimal systems; the direct child is still terminated below.
+    }
+  }
+  return descendants.reverse();
+}
+
+function signalPid(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
 export async function terminateProcessTree(
   proc: child_process.ChildProcess,
   timeoutMs: number,
@@ -75,8 +112,11 @@ export async function terminateProcessTree(
     return;
   }
 
+  const descendants = proc.pid ? descendantPids(proc.pid) : [];
+  for (const pid of descendants) signalPid(pid, "SIGTERM");
   proc.kill("SIGTERM");
   await waitForProcessExit(proc, timeoutMs);
+  for (const pid of descendants) signalPid(pid, "SIGKILL");
   if (!hasExited(proc)) {
     proc.kill("SIGKILL");
     await waitForProcessExit(proc, 2000);

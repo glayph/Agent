@@ -1,15 +1,11 @@
 import {
-  IconDeviceDesktop,
   IconLanguage,
-  IconMoon,
-  IconSun,
 } from "@tabler/icons-react"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
 import { postLauncherDashboardSetup } from "@/api/launcher-auth"
 import { LauncherAuthShell } from "@/features/auth/launcher-auth-shell"
-import { useTheme } from "@/hooks/use-theme"
 import { Button } from "@/shared/ui/button"
 import {
   Card,
@@ -22,8 +18,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu"
 import { Input } from "@/shared/ui/input"
@@ -31,7 +25,6 @@ import { Label } from "@/shared/ui/label"
 
 export function LauncherSetupPage() {
   const { t, i18n } = useTranslation()
-  const { theme, preference, setTheme } = useTheme()
   const [password, setPassword] = React.useState("")
   const [confirm, setConfirm] = React.useState("")
   const [submitting, setSubmitting] = React.useState(false)
@@ -58,13 +51,6 @@ export function LauncherSetupPage() {
       setSubmitting(false)
     }
   }
-  const ThemeIcon =
-    preference === "system"
-      ? IconDeviceDesktop
-      : theme === "dark"
-        ? IconMoon
-        : IconSun
-
   return (
     <LauncherAuthShell
       actions={
@@ -87,53 +73,6 @@ export function LauncherSetupPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => i18n.changeLanguage("zh")}>
                 简体中文
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                type="button"
-                className="border-white/15 bg-black/40 text-white hover:border-white/30 hover:bg-black/60 hover:text-white focus-visible:ring-primary/70"
-                aria-label={t("header.appearance.label")}
-                title={t("header.appearance.label")}
-              >
-                <ThemeIcon className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel>
-                {t("header.appearance.label")}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setTheme("system")}>
-                <IconDeviceDesktop className="size-4" />
-                {t("header.appearance.system")}
-                {preference === "system" && (
-                  <span className="text-muted-foreground ml-auto text-xs">
-                    {t("common.active")}
-                  </span>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("light")}>
-                <IconSun className="size-4" />
-                {t("header.appearance.light")}
-                {preference === "light" && (
-                  <span className="text-muted-foreground ml-auto text-xs">
-                    {t("common.active")}
-                  </span>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("dark")}>
-                <IconMoon className="size-4" />
-                {t("header.appearance.dark")}
-                {preference === "dark" && (
-                  <span className="text-muted-foreground ml-auto text-xs">
-                    {t("common.active")}
-                  </span>
-                )}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

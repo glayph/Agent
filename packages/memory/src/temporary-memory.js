@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { REGIONS } = require('./regions');
+const { REGIONS, ALL_REGIONS, isDurableRegion } = require('./regions');
 
 /**
  * TemporaryMemory – project-scoped scratch space.
@@ -60,6 +60,10 @@ class TemporaryMemory {
    * @returns {{sessionId: string, isNew: boolean}}
    */
   openSession(projectKey, opts = {}) {
+    if (typeof projectKey !== 'string' || projectKey.trim().length === 0) {
+      throw new Error('Temporary session requires a non-empty project key');
+    }
+    const durableRegion = this._resolveDurableRegion(opts.durableRegion);
     const existing = this.tkg.db.prepare(
       `SELECT id FROM temporary_sessions WHERE project_key = ? AND status = 'open' LIMIT 1`
     ).get(projectKey);
@@ -77,7 +81,7 @@ class TemporaryMemory {
       id,
       projectKey,
       opts.title || projectKey,
-      opts.durableRegion || REGIONS.LONG_TERM,
+      durableRegion,
       now,
       JSON.stringify(opts.metadata || {})
     );
@@ -128,6 +132,9 @@ class TemporaryMemory {
     ).all(sessionId);
 
     const summaryText = opts.summary || this._buildSummary(session, nodes);
+    const durableRegion = this._resolveDurableRegion(
+      opts.durableRegion || session.durable_region,
+    );
     const now = new Date().toISOString();
 
     this.tkg.db.prepare(`
@@ -138,8 +145,7 @@ class TemporaryMemory {
 
     // Roll summary into durable region so the agent never forgets what it built.
     if (summaryText && summaryText.trim().length > 0) {
-      const durableRegion = opts.durableRegion || session.durable_region || REGIONS.LONG_TERM;
-      const eventId = this.tkg.writeEvent({
+      const eventResult = this.tkg.writeEvent({
         event_type: 'temp_summary',
         content: summaryText,
         source: 'temporary_memory',
@@ -151,7 +157,7 @@ class TemporaryMemory {
           node_count: nodes.length,
         },
       });
-      return eventId;
+      return eventResult.eventId || null;
     }
     return null;
   }
@@ -199,6 +205,14 @@ class TemporaryMemory {
       }
     }
     return closed;
+  }
+
+  _resolveDurableRegion(region) {
+    const resolved = region || REGIONS.LONG_TERM;
+    if (!ALL_REGIONS.includes(resolved) || !isDurableRegion(resolved)) {
+      throw new Error(`Temporary summary region must be durable: ${resolved}`);
+    }
+    return resolved;
   }
 
   _buildSummary(session, nodes) {

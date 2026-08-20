@@ -1,10 +1,4 @@
-import {
-  IconBrain,
-  IconEyeOff,
-  IconSparkles,
-  IconTool,
-} from "@tabler/icons-react"
-import { useAtom } from "jotai"
+import { useAtomValue, useSetAtom } from "jotai"
 import {
   type ChangeEvent,
   type UIEvent,
@@ -20,33 +14,25 @@ import { toast } from "sonner"
 import type { SessionSummary } from "@/api/sessions"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
 import { ModelSelector } from "@/features/chat/components/model-selector"
-import { AssetPanel } from "@/features/chat/components/workspace/asset-panel"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
+import { ChatInspector } from "@/features/chat/components/chat-inspector"
+import { openChatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
 import { Composer } from "@/features/chat/components/workspace/composer"
-import { ContextPanel } from "@/features/chat/components/workspace/context-panel"
-import { Sidebar as WorkspaceSidebar } from "@/features/chat/components/workspace/sidebar"
-import type {
-  ContextSummaryItem,
-  WorkspaceAsset,
-  WorkspaceStatusPill,
-} from "@/features/chat/components/workspace/types"
+import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
 import { WorkspaceHeader } from "@/features/chat/components/workspace/workspace-header"
 import { WorkspaceShell } from "@/features/chat/components/workspace/workspace-shell"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/shared/ui/select"
+  monitorAtom,
+  selectMonitorNode,
+  type MonitorNode,
+} from "@/features/monitor/store"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { useMikiChat } from "@/hooks/use-miki-chat"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useSessionHistory } from "@/hooks/use-session-history"
-import type { AssistantDetailVisibility } from "@/store/chat"
 import type { ConnectionState } from "@/store/chat"
 import type { ChatAttachment, ChatMessage } from "@/store/chat"
-import { assistantDetailVisibilityAtom } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
 
 const MAX_IMAGE_SIZE_BYTES = 7 * 1024 * 1024
@@ -248,85 +234,6 @@ function buildStatusPills({
   ]
 }
 
-function extensionForAttachment(attachment: ChatAttachment): string {
-  const filename = attachment.filename?.toLowerCase() ?? ""
-  const dotIndex = filename.lastIndexOf(".")
-  return dotIndex >= 0 ? filename.slice(dotIndex) : ""
-}
-
-function inferAssetKind(attachment: ChatAttachment): WorkspaceAsset["kind"] {
-  const extension = extensionForAttachment(attachment)
-  if (attachment.type === "image") return "chart"
-  if (extension === ".csv" || extension === ".tsv") return "csv"
-  if (
-    extension === ".doc" ||
-    extension === ".docx" ||
-    extension === ".pdf" ||
-    extension === ".rtf"
-  ) {
-    return "document"
-  }
-  if (
-    extension === ".md" ||
-    extension === ".markdown" ||
-    extension === ".txt"
-  ) {
-    return "report"
-  }
-  return "file"
-}
-
-function buildWorkspaceAssets({
-  messages,
-  sourceLabels,
-}: {
-  messages: ChatMessage[]
-  sourceLabels: {
-    agent: string
-    tool: string
-  }
-}): WorkspaceAsset[] {
-  const assets: WorkspaceAsset[] = []
-
-  messages.forEach((message) => {
-    if (message.role !== "assistant") return
-
-    message.attachments?.forEach((attachment, index) => {
-      if (!attachment.url) return
-
-      const filename =
-        attachment.filename ||
-        `${attachment.type || "asset"}-${assets.length + index + 1}`
-
-      assets.push({
-        id: `${message.id}-${index}-${filename}`,
-        filename,
-        kind: inferAssetKind(attachment),
-        url: attachment.url,
-        sourceLabel:
-          message.kind === "tool_calls"
-            ? sourceLabels.tool
-            : sourceLabels.agent,
-      })
-    })
-  })
-
-  return assets
-}
-
-function collectActiveTools(messages: ChatMessage[]): string[] {
-  const toolNames = new Set<string>()
-
-  messages.forEach((message) => {
-    message.toolCalls?.forEach((toolCall) => {
-      const toolName = toolCall.function?.name?.trim()
-      if (toolName) toolNames.add(toolName)
-    })
-  })
-
-  return Array.from(toolNames).slice(0, 12)
-}
-
 function buildActiveSessionProjection({
   activeSessionId,
   fallbackSummary,
@@ -410,34 +317,9 @@ export function ChatPage() {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
-  const [assistantDetailVisibility, setAssistantDetailVisibility] = useAtom(
-    assistantDetailVisibilityAtom,
-  )
   const hasLoadedSessionsRef = useRef(false)
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false)
-  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const isMobile = useIsMobile()
-
-  const assistantDetailVisibilityOptions = useMemo<
-    Array<{
-      value: AssistantDetailVisibility
-      label: string
-    }>
-  >(
-    () => [
-      { value: "none", label: t("chat.assistantDetailVisibility.none") },
-      {
-        value: "thought",
-        label: t("chat.assistantDetailVisibility.thought"),
-      },
-      {
-        value: "tool_calls",
-        label: t("chat.assistantDetailVisibility.toolCalls"),
-      },
-      { value: "all", label: t("chat.assistantDetailVisibility.all") },
-    ],
-    [t],
-  )
+  const openInspector = useSetAtom(openChatInspectorAtom)
 
   const {
     messages,
@@ -450,36 +332,56 @@ export function ChatPage() {
     editMessage,
     forkFromMessage,
     retryMessage,
-    switchSession,
     newChat,
   } = useMikiChat()
+  const monitorState = useAtomValue(monitorAtom)
+  const liveActivityNodes = useMemo(() => {
+    const latestRun = Object.values(monitorState.runs).sort(
+      (a, b) => b.startedAt - a.startedAt,
+    )[0]
+    if (!latestRun) return []
+    return Object.values(monitorState.nodes)
+      .filter((node) => node.runId === latestRun.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 3)
+      .reverse()
+  }, [monitorState.nodes, monitorState.runs])
+  const handleInspectMessage = useCallback(
+    (messageId: string) => {
+      openInspector({ chatId: activeSessionId, messageId, page: "overview" })
+    },
+    [activeSessionId, openInspector],
+  )
+  const handleWorkingClick = useCallback(() => {
+    openInspector({ chatId: activeSessionId, page: "overview" })
+  }, [activeSessionId, openInspector])
+  const handleActivitySelect = useCallback(
+    (node: MonitorNode) => {
+      selectMonitorNode(node.id)
+      openInspector({
+        chatId: activeSessionId,
+        runId: node.runId,
+        nodeId: node.id,
+        page: "work",
+      })
+    },
+    [activeSessionId, openInspector],
+  )
   const retryableMessageIds = useMemo(
     () => getRetryableMessageIds(messages),
     [messages],
   )
-  const hasAssistantDetailMessages = useMemo(
-    () =>
-      messages.some(
-        (message) =>
-          message.role === "assistant" &&
-          (message.kind === "thought" || message.kind === "tool_calls"),
-      ),
-    [messages],
-  )
-  const assistantDetailControlLabel = hasAssistantDetailMessages
-    ? t("chat.showAssistantDetails")
-    : t("chat.noAssistantDetailsAvailable", {
-        defaultValue: "No reasoning or tool calls available",
-      })
 
+  useEffect(() => {
+    if (!monitorState.selectedNodeId) return
+    const timeoutId = window.setTimeout(() => {
+      selectMonitorNode(undefined)
+    }, 2600)
+    return () => window.clearTimeout(timeoutId)
+  }, [monitorState.selectedNodeId])
   const {
     sessions,
-    hasMore,
-    loadError,
-    loadErrorMessage,
-    observerRef,
     loadSessions,
-    handleDeleteSession,
   } = useSessionHistory({
     activeSessionId,
     onDeletedActiveSession: () => {
@@ -610,7 +512,7 @@ export function ChatPage() {
     }
   }, [messages, isTyping, syncScrollState])
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (
       (!input.trim() && attachments.length === 0) ||
       (!isEditingMessage && !canInput)
@@ -641,7 +543,7 @@ export function ChatPage() {
     }
 
     if (
-      sendMessage({
+      await sendMessage({
         content: input,
         attachments,
       })
@@ -678,10 +580,9 @@ export function ChatPage() {
       setEditingMessageId(message.id)
       setInput(message.content)
       setAttachments(
-        message.attachments
-          ?.filter(
-            (attachment) => attachment.type === "image" && attachment.url,
-          ) ?? [],
+        message.attachments?.filter(
+          (attachment) => attachment.type === "image" && attachment.url,
+        ) ?? [],
       )
       focusComposer()
     },
@@ -697,7 +598,10 @@ export function ChatPage() {
       } catch (error) {
         toast.error(
           t("chat.actions.retryError", {
-            defaultValue: error instanceof Error ? error.message : "Connect chat before retrying",
+            defaultValue:
+              error instanceof Error
+                ? error.message
+                : "Connect chat before retrying",
           }),
         )
         return
@@ -809,63 +713,11 @@ export function ChatPage() {
           paused: t("chat.workspace.paused"),
           running: t("chat.workspace.running"),
         },
-      }),
-    [connectionState, gwState, isTyping, t],
+      }).map((status, index) =>
+        index === 0 ? { ...status, onClick: handleWorkingClick } : status,
+      ),
+    [connectionState, gwState, handleWorkingClick, isTyping, t],
   )
-  const workspaceAssets = useMemo(
-    () =>
-      buildWorkspaceAssets({
-        messages,
-        sourceLabels: {
-          agent: t("chat.assets.source.agent"),
-          tool: t("chat.assets.source.tool"),
-        },
-      }),
-    [messages, t],
-  )
-  const activeTools = useMemo(() => collectActiveTools(messages), [messages])
-  const assistantDetailLabel =
-    assistantDetailVisibilityOptions.find(
-      (option) => option.value === assistantDetailVisibility,
-    )?.label ?? assistantDetailVisibility
-  const contextSummaries = useMemo<ContextSummaryItem[]>(
-    () => [
-      { label: t("chat.workspace.messages"), value: messages.length },
-      { label: t("chat.workspace.assets"), value: workspaceAssets.length },
-      { label: t("chat.workspace.detailView"), value: assistantDetailLabel },
-    ],
-    [assistantDetailLabel, messages.length, t, workspaceAssets.length],
-  )
-  const metadata = useMemo<ContextSummaryItem[]>(
-    () => [
-      {
-        label: t("chat.workspace.model"),
-        value: defaultModelName || t("chat.workspace.notSelected"),
-      },
-      { label: t("chat.workspace.gateway"), value: gwState },
-      { label: t("chat.workspace.connection"), value: connectionState },
-      {
-        label: t("chat.workspace.session"),
-        value: activeSessionId
-          ? activeSessionId.slice(0, 8)
-          : t("chat.workspace.draft"),
-      },
-    ],
-    [activeSessionId, connectionState, defaultModelName, gwState, t],
-  )
-
-  const handleNewSession = useCallback(() => {
-    void newChat()
-    setLeftSidebarOpen(false)
-  }, [newChat])
-
-  const handleSwitchSession = useCallback(
-    (sessionId: string) => {
-      void switchSession(sessionId)
-    },
-    [switchSession],
-  )
-
   const handleForkMessage = useCallback(
     (messageId: string) => {
       void forkFromMessage(messageId)
@@ -876,37 +728,6 @@ export function ChatPage() {
   const handleModeClick = useCallback(() => {
     window.dispatchEvent(new Event("Miki:command"))
   }, [])
-
-  const handleDeleteAsset = useCallback(
-    (asset: WorkspaceAsset) => {
-      toast.info(t("chat.assets.removed", { name: asset.filename }))
-    },
-    [t],
-  )
-
-  const [rightPanelTab, setRightPanelTab] = useState<
-    "assets" | "context"
-  >("assets")
-
-  const handleContextDetail = useCallback(() => {
-    setRightPanelTab("context")
-    setRightPanelOpen(true)
-  }, [])
-
-  const renderSidebar = (onClose?: () => void) => (
-    <WorkspaceSidebar
-      sessions={displaySessions}
-      activeSessionId={activeSessionId}
-      hasMore={hasMore}
-      loadError={loadError}
-      loadErrorMessage={loadErrorMessage}
-      observerRef={observerRef}
-      onNewSession={handleNewSession}
-      onSwitchSession={handleSwitchSession}
-      onDeleteSession={handleDeleteSession}
-      onClose={onClose}
-    />
-  )
 
   const headerControls = (
     <>
@@ -921,89 +742,41 @@ export function ChatPage() {
         />
       )}
 
-      <Select
-        value={assistantDetailVisibility}
-        disabled={!hasAssistantDetailMessages}
-        onValueChange={(value) =>
-          setAssistantDetailVisibility(value as AssistantDetailVisibility)
-        }
-      >
-        <SelectTrigger
-          size="sm"
-          aria-label={assistantDetailControlLabel}
-          title={assistantDetailControlLabel}
-          className="text-muted-foreground hover:text-foreground hover:bg-accent/25 size-8 min-w-8 shrink-0 justify-center border-transparent bg-transparent p-0 text-[13px] shadow-none focus-visible:border-transparent focus-visible:ring-0 [&>svg:last-child]:hidden"
-        >
-          {hasAssistantDetailMessages &&
-          assistantDetailVisibility === "none" ? (
-            <IconEyeOff className="size-4" />
-          ) : hasAssistantDetailMessages &&
-            assistantDetailVisibility === "thought" ? (
-            <IconBrain className="size-4" />
-          ) : hasAssistantDetailMessages &&
-            assistantDetailVisibility === "tool_calls" ? (
-            <IconTool className="size-4" />
-          ) : (
-            <IconSparkles className="size-4" />
-          )}
-        </SelectTrigger>
-        <SelectContent align="end">
-          {assistantDetailVisibilityOptions.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </>
-  )
-
-  const contextPanel = (
-    <ContextPanel
-      activeTools={activeTools}
-      summaries={contextSummaries}
-      memoryUsage={contextUsage}
-      metadata={metadata}
-    />
   )
 
   return (
     <div className="bg-background h-full min-h-0">
-      <WorkspaceShell
-        sidebar={renderSidebar()}
-        mobileSidebar={renderSidebar(() => setLeftSidebarOpen(false))}
-        leftSidebarOpen={leftSidebarOpen}
-        rightPanelOpen={rightPanelOpen}
-        isMobile={isMobile}
-        onLeftSidebarOpenChange={setLeftSidebarOpen}
-        onRightPanelOpenChange={setRightPanelOpen}
+            <WorkspaceShell
         header={
           <WorkspaceHeader
             title={title}
             subtitle={subtitle}
             statuses={statusPills}
             controls={headerControls}
-            rightPanelOpen={rightPanelOpen}
-            onOpenSidebar={() => setLeftSidebarOpen(true)}
-            onToggleRightPanel={() => setRightPanelOpen((open) => !open)}
           />
         }
+
         activityStream={
           <ChatMessageList
             messages={messages}
-            assistantDetailVisibility={assistantDetailVisibility}
+            assistantDetailVisibility="none"
             isTyping={isTyping}
             isGatewayRunning={isGatewayRunning}
             hasAvailableModels={hasAvailableModels}
             defaultModelName={defaultModelName}
             connectionState={connectionState}
             retryableMessageIds={retryableMessageIds}
+            liveActivityNodes={liveActivityNodes}
+            selectedActivityNodeId={monitorState.selectedNodeId}
+            onActivitySelect={handleActivitySelect}
             scrollRef={scrollRef}
             onScroll={handleScroll}
             onEditMessage={handleEditMessage}
             onDeleteMessage={deleteMessage}
             onForkMessage={handleForkMessage}
             onRetryMessage={handleRetryMessage}
+            onInspectMessage={handleInspectMessage}
           />
         }
         composer={
@@ -1015,25 +788,19 @@ export function ChatPage() {
             onModeClick={handleModeClick}
             onRemoveAttachment={handleRemoveAttachment}
             onSend={handleSend}
-            onContextDetail={handleContextDetail}
             modeLabel={t("chat.workspace.mode")}
-            inputDisabledReason={
-              isEditingMessage ? null : inputDisabledReason
-            }
+            inputDisabledReason={isEditingMessage ? null : inputDisabledReason}
             canSend={canSubmit}
             contextUsage={contextUsage}
           />
         }
-        rightPanel={
-          <AssetPanel
-            assets={workspaceAssets}
-            contextPanel={contextPanel}
-            activeTab={rightPanelTab}
-            onActiveTabChange={setRightPanelTab}
-            onClose={() => setRightPanelOpen(false)}
-            onDeleteAsset={handleDeleteAsset}
-          />
-        }
+      />
+
+      <ChatInspector
+        chatId={activeSessionId}
+        messages={messages}
+        isWorking={isTyping}
+        liveActivityNodes={liveActivityNodes}
       />
 
       <input

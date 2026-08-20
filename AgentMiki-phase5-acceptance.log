@@ -1,0 +1,63 @@
+nohup: ignoring input
+[2026-08-20T10:02:53.042Z] [INFO] Core target: 127.0.0.1:18009
+[2026-08-20T10:02:53.567Z] [INFO] Core backend is healthy
+[2026-08-20T10:02:53.570Z] [INFO] Gateway listening on http://127.0.0.1:18809
+[2026-08-20T10:02:53.570Z] [INFO] API proxy: /api/* → 127.0.0.1:18009/*
+[2026-08-20T10:02:53.570Z] [INFO] WebSocket paths: /miki/ws, /ws/chat, /ws, /chat/ws
+[2026-08-20T10:02:53.570Z] [INFO] MCP: http://127.0.0.1:18809/mcp (ENABLE_MCP=false to disable)
+[2026-08-20T10:02:53.570Z] [INFO] Gateway health: http://127.0.0.1:18809/gateway/health
+[2026-08-20T10:03:01.880Z] [INFO] GET /gateway/health → 200 (4ms)
+(node:10482) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[2026-08-20T10:03:01.891Z] [INFO] GET /api/enhancements/runtime/worker → 200 (7ms)
+[2026-08-20T10:03:01.905Z] [INFO] POST /api/enhancements/events/inbound → 202 (8ms)
+[2026-08-20T10:03:01.912Z] [INFO] POST /api/enhancements/events/inbound → 202 (3ms)
+[2026-08-20T10:03:01.923Z] [INFO] GET /api/enhancements/runtime/jobs → 200 (3ms)
+[2026-08-20T10:03:01.929Z] [INFO] GET /api/enhancements/runtime/channels → 200 (2ms)
+[2026-08-20T10:03:01.937Z] [INFO] POST /api/enhancements/runtime/timers → 201 (4ms)
+[2026-08-20T10:03:01.943Z] [INFO] POST /api/enhancements/runtime/deliveries → 202 (3ms)
+[2026-08-20T10:03:01.948Z] [INFO] GET /api/enhancements/runtime/watchers → 200 (2ms)
+[2026-08-20T10:03:01.964Z] [INFO] Received SIGTERM, shutting down...
+[2026-08-20T10:03:01.965Z] [INFO] HTTP server closed
+[2026-08-20T10:03:01.976Z] [WARN] Core exited with code 0
+[2026-08-20T10:03:01.976Z] [INFO] Shutdown complete
+[miki-24-7] gateway exited (code=0, signal=null); restarting in 1000ms.
+[2026-08-20T10:03:03.112Z] [INFO] Core target: 127.0.0.1:18009
+[2026-08-20T10:03:03.634Z] [INFO] Core backend is healthy
+[2026-08-20T10:03:03.638Z] [INFO] Gateway listening on http://127.0.0.1:18809
+[2026-08-20T10:03:03.638Z] [INFO] API proxy: /api/* → 127.0.0.1:18009/*
+[2026-08-20T10:03:03.638Z] [INFO] WebSocket paths: /miki/ws, /ws/chat, /ws, /chat/ws
+[2026-08-20T10:03:03.638Z] [INFO] MCP: http://127.0.0.1:18809/mcp (ENABLE_MCP=false to disable)
+[2026-08-20T10:03:03.638Z] [INFO] Gateway health: http://127.0.0.1:18809/gateway/health
+(node:10555) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[2026-08-20T10:03:12.986Z] [INFO] GET /api/enhancements/runtime/jobs → 200 (7ms)
+[2026-08-20T10:03:12.992Z] [INFO] GET /api/enhancements/runtime/timers → 200 (2ms)
+[2026-08-20T10:03:25.961Z] [WARN] Core exited with code null
+[2026-08-20T10:03:27.973Z] [INFO] GET /gateway/health → 200 (3ms)
+[2026-08-20T10:03:29.987Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:32.000Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:34.013Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:36.028Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:38.041Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:40.055Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:42.067Z] [INFO] GET /gateway/health → 200 (0ms)
+[2026-08-20T10:03:44.081Z] [INFO] GET /gateway/health → 200 (0ms)
+[2026-08-20T10:03:46.096Z] [INFO] GET /gateway/health → 200 (1ms)
+[2026-08-20T10:03:46.104Z] [INFO] GET /api/enhancements/runtime/worker → 504 (1ms)
+[2026-08-20T10:04:03.644Z] [WARN] Core unhealthy (3 failures): fetch failed
+[2026-08-20T10:04:03.644Z] [WARN] Core process is still running but unresponsive - terminating before restart.
+[2026-08-20T10:04:03.645Z] [INFO] Restarting core in 2000ms (attempt 1)
+[2026-08-20T10:04:06.159Z] [INFO] Core backend is healthy
+[2026-08-20T10:04:23.562Z] [INFO] Received SIGTERM, shutting down...
+[2026-08-20T10:04:23.563Z] [INFO] HTTP server closed
+[2026-08-20T10:04:23.573Z] [WARN] Core exited with code 0
+[2026-08-20T10:04:23.573Z] [INFO] Shutdown complete
+[miki-24-7] gateway exited (code=0, signal=null); restarting in 2000ms.
+[2026-08-20T10:04:25.713Z] [INFO] Core target: 127.0.0.1:18009
+[2026-08-20T10:04:26.234Z] [INFO] Core backend is healthy
+[2026-08-20T10:04:26.238Z] [INFO] Gateway listening on http://127.0.0.1:18809
+[2026-08-20T10:04:26.238Z] [INFO] API proxy: /api/* → 127.0.0.1:18009/*
+[2026-08-20T10:04:26.238Z] [INFO] WebSocket paths: /miki/ws, /ws/chat, /ws, /chat/ws
+[2026-08-20T10:04:26.238Z] [INFO] MCP: http://127.0.0.1:18809/mcp (ENABLE_MCP=false to disable)
+[2026-08-20T10:04:26.238Z] [INFO] Gateway health: http://127.0.0.1:18809/gateway/health

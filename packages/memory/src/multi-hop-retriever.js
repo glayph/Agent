@@ -36,9 +36,18 @@ class MultiHopRetriever {
    * }}
    */
   retrieve(opts = {}) {
-    const maxHops = Math.max(1, Math.min(opts.maxHops || 2, 5));
-    const maxNodes = opts.maxNodes || 30;
-    const minWeight = opts.minWeight != null ? opts.minWeight : 0.15;
+    const requestedHops = Number(opts.maxHops);
+    const maxHops = Number.isFinite(requestedHops)
+      ? Math.max(0, Math.min(Math.floor(requestedHops), 5))
+      : 2;
+    const requestedNodes = Number(opts.maxNodes);
+    const maxNodes = Number.isFinite(requestedNodes)
+      ? Math.max(1, Math.min(Math.floor(requestedNodes), 100))
+      : 30;
+    const requestedWeight = Number(opts.minWeight);
+    const minWeight = Number.isFinite(requestedWeight)
+      ? Math.max(0, Math.min(requestedWeight, 2))
+      : 0.15;
     const allowedRegions = new Set(
       (opts.regions && opts.regions.length > 0)
         ? opts.regions
@@ -93,7 +102,7 @@ class MultiHopRetriever {
           FROM entity_edges e
           WHERE (e.source_id = ? OR e.target_id = ?)
             AND e.weight >= ?
-            AND (e.valid_until IS NULL OR e.valid_until > datetime('now'))
+            AND (e.valid_until IS NULL OR datetime(e.valid_until) > datetime('now'))
           ORDER BY e.weight DESC
           LIMIT 8
         `).all(node.id, node.id, node.id, minWeight);

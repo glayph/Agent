@@ -2,11 +2,11 @@
 name: rag-context
 description: "Dynamically fetch and inject relevant context from files, codebases, docs, or external sources."
 version: 1.0.0
-author: Hiro
+author: Miki
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
-  Hiro:
+  Miki:
     tags: [rag, retrieval, context-injection, knowledge-base]
     related_skills: [semantic-summarization, memory-management]
 ---

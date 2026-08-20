@@ -136,11 +136,11 @@ func (r *Runtime) failStart(err error) error {
 func (r *Runtime) Stop() error {
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
-	return r.stop()
+	return r.forceStop()
 }
 
-// StopDaemon sends a shutdown request to the running gateway backend.
-// Used by 'miki stop' command.
+// StopDaemon sends a shutdown request to a gateway backend started outside
+// this Runtime instance. It is used by the external stop command.
 func (r *Runtime) StopDaemon() error {
 	// Try reading PID file
 	pidFile := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway.pid")
@@ -169,7 +169,8 @@ func (r *Runtime) StopDaemon() error {
 	return fmt.Errorf("shutdown request failed with status %d", resp.StatusCode)
 }
 
-// ForceStop terminates the backend process tree. Used for restart operations.
+// ForceStop terminates the backend process tree. It is used for Stop,
+// Shutdown, and Restart actions initiated by this process.
 func (r *Runtime) ForceStop() error {
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
