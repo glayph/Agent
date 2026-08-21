@@ -18,13 +18,14 @@ import type {
   Memory as SelfImprovementMemory,
 } from "./self-improvement/engine.js";
 import { SkillGovernanceEngine } from "./skill-governance/engine.js";
-import OpenAI from "openai";
 import {
   achatCompletion,
   LiteLLMMissingCredentialError,
   LiteLLMRateLimitError,
   LLMMissingCredentialError,
   LLMRateLimitError,
+  LLMTimeoutError,
+  LLMProviderError,
 } from "./llm.js";
 import Database from "better-sqlite3";
 import { TaskQueue, AgentTask } from "./task-queue.js";
@@ -83,6 +84,7 @@ import {
 import type { ContextUsageSnapshot } from "./token-budget-manager.js";
 import { registerRuntimePluginTools } from "./plugins/plugin-tool-registration.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
+import { SqliteSessionHistoryStore, type SessionMetadata } from "./session-history-store.js";
 import { initMemory, getMemory } from "./memory/memory-bridge.js";
 import {
   AgentRegistry,
@@ -96,6 +98,10 @@ import { AgentDelegator } from "./agent-delegator.js";
 import { createRunStrategy } from "./agent-run.js";
 import { globalAgentAggregator } from "./agent-aggregator.js";
 import { globalAgentPlanner } from "./agent-planner.js";
+import {
+  detectTextToolCall,
+  parseToolArguments,
+} from "./tool-protocol.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 12;
@@ -103,6 +109,28 @@ const DEFAULT_MESSAGE_HISTORY_LIMIT = 15;
 
 // Bug #9 fix: Add approximate token/character cap to message history
 const DEFAULT_MAX_TOTAL_CONTEXT_CHARS = 80000; // ~20K tokens
+const LOCAL_LLM_CALL_TIMEOUT_MS = Math.max(
+  90_000,
+  Number.parseInt(process.env.MIKI_LOCAL_LLM_TIMEOUT_MS || "300000", 10) || 300_000,
+);
+const REMOTE_LLM_CALL_TIMEOUT_MS = 120_000;
+const LOCAL_AGENT_RUN_TIMEOUT_MS = 300_000;
+const REMOTE_AGENT_RUN_TIMEOUT_MS = 240_000;
+
+function isLocalModelName(model: string): boolean {
+  return (
+    /^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i.test(model) ||
+    /(?:^|[-_/])local(?:$|[-_/])/i.test(model)
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise.then(resolve, reject).finally(() => timer && clearTimeout(timer));
+  });
+}
 
 type AgentResourceMode = "eco" | "balanced" | "performance";
 
@@ -120,6 +148,9 @@ interface ResolvedAgentResourceConfig {
   mode: AgentResourceMode;
   messageHistoryLimit: number;
   maxContextChars: number;
+  contextWindowTokens?: number;
+  summarizeMessageThreshold: number;
+  summarizeTokenPercent: number;
   toolWarmupEnabled: boolean;
   qualityRetryLimit: number;
 }
@@ -132,6 +163,8 @@ const RESOURCE_PROFILES: Record<
     mode: "eco",
     messageHistoryLimit: 8,
     maxContextChars: 40000,
+    summarizeMessageThreshold: 20,
+    summarizeTokenPercent: 75,
     toolWarmupEnabled: false,
     qualityRetryLimit: 0,
   },
@@ -139,6 +172,8 @@ const RESOURCE_PROFILES: Record<
     mode: "balanced",
     messageHistoryLimit: DEFAULT_MESSAGE_HISTORY_LIMIT,
     maxContextChars: DEFAULT_MAX_TOTAL_CONTEXT_CHARS,
+    summarizeMessageThreshold: 20,
+    summarizeTokenPercent: 75,
     toolWarmupEnabled: true,
     qualityRetryLimit: 1,
   },
@@ -146,6 +181,8 @@ const RESOURCE_PROFILES: Record<
     mode: "performance",
     messageHistoryLimit: 25,
     maxContextChars: 120000,
+    summarizeMessageThreshold: 20,
+    summarizeTokenPercent: 75,
     toolWarmupEnabled: true,
     qualityRetryLimit: 2,
   },
@@ -161,6 +198,10 @@ interface AgentRuntimeConfig {
   max_tokens_per_cycle?: number;
   browser?: AgentBrowserConfig;
   resource?: AgentResourceConfig;
+}
+
+interface AgentMemoryConfig {
+  max_context_chars?: number;
 }
 
 interface AgentConfigShape {
@@ -188,17 +229,23 @@ interface AgentConfigShape {
       min_score?: number;
     };
     defaults?: {
+      workspace?: string;
       max_tokens?: number;
+      context_window?: number;
+      max_tool_iterations?: number;
+      summarize_message_threshold?: number;
+      summarize_token_percent?: number;
       turn_profile?: {
         enabled?: boolean;
-        history?: { mode?: string };
+        history?: { mode?: string; allow?: string[] };
         system_prompt?: { mode?: string };
-        skills?: { mode?: string };
-        tools?: { mode?: string };
+        skills?: { mode?: string; allow?: string[] };
+        tools?: { mode?: string; allow?: string[] };
       };
     };
     specialists?: unknown;
   };
+  memory?: AgentMemoryConfig;
   tools?: { cron?: { allow_command?: boolean; exec_timeout_minutes?: number } };
   self_improvement?: SelfImprovementConfig;
   skill_governance?: Record<string, unknown>;
@@ -207,12 +254,15 @@ interface AgentConfigShape {
 type RawAgentToolCall = {
   id?: string;
   function?: { name?: string; arguments?: string };
+  extra_content?: Record<string, unknown>;
 };
 
 interface ParsedToolInvocation extends ToolInvocationLike {
   tcId: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
+  /** Present when the provider emitted malformed tool arguments. */
+  parseError?: string;
 }
 
 interface BufferedToolExecution {
@@ -228,6 +278,54 @@ function asAgentConfig(config: Record<string, unknown>): AgentConfigShape {
 
 export class AgentOrchestrator {
   private _loopCounter = 0;
+
+  // Helper to truncate messages if they exceed context limit (used in runAgentLoop)
+  private static _compactMessagesIfNeeded(
+    messages: ChatMessage[],
+    resource: ResolvedAgentResourceConfig,
+  ): ChatMessage[] {
+    const totalChars = messages.reduce(
+      (sum, message) => sum + (message.content?.length || 0),
+      0,
+    );
+    const thresholdChars = Math.floor(
+      resource.maxContextChars * (resource.summarizeTokenPercent / 100),
+    );
+    if (
+      messages.length < resource.summarizeMessageThreshold ||
+      totalChars <= thresholdChars
+    ) {
+      return messages;
+    }
+
+    const systemMessages = messages.filter((message) => message.role === "system");
+    const conversational = messages.filter((message) => message.role !== "system");
+    const keepCount = Math.max(
+      4,
+      Math.ceil(resource.summarizeMessageThreshold / 2),
+    );
+    if (conversational.length <= keepCount) return messages;
+
+    const older = conversational.slice(0, -keepCount);
+    const summaryLines = older
+      .map((message) => {
+        const content = String(message.content || "").replace(/\s+/g, " ").trim();
+        if (!content) return "";
+        return `${message.role}: ${content.slice(0, 320)}`;
+      })
+      .filter(Boolean)
+      .slice(-40);
+    if (summaryLines.length === 0) return messages;
+
+    const summary: ChatMessage = {
+      role: "system",
+      content:
+        "Earlier conversation context was compacted to stay within the configured context window. " +
+        "Use these preserved facts when relevant:\n" +
+        summaryLines.join("\n"),
+    };
+    return [...systemMessages, summary, ...conversational.slice(-keepCount)];
+  }
 
   // Helper to truncate messages if they exceed context limit (used in runAgentLoop)
   private static _truncateMessagesToFit(
@@ -314,10 +412,10 @@ export class AgentOrchestrator {
 
   private get turnProfileConfig(): {
     enabled?: boolean;
-    history?: { mode?: string };
+    history?: { mode?: string; allow?: string[] };
     system_prompt?: { mode?: string };
-    skills?: { mode?: string };
-    tools?: { mode?: string };
+    skills?: { mode?: string; allow?: string[] };
+    tools?: { mode?: string; allow?: string[] };
   } {
     return asAgentConfig(this.config).agents?.defaults?.turn_profile || {};
   }
@@ -326,8 +424,58 @@ export class AgentOrchestrator {
     return this.turnProfileConfig.enabled === true;
   }
 
+  private _turnProfilePolicy(): {
+    enabled: boolean;
+    historyMode: "default" | "off";
+    systemPromptMode: "default" | "off";
+    skillsMode: "default" | "off" | "custom";
+    skillsAllow: Set<string>;
+    toolsMode: "default" | "off" | "custom";
+    toolsAllow: Set<string>;
+  } {
+    const profile = this.turnProfileConfig;
+    const normalizeMode = <T extends "default" | "off" | "custom">(
+      value: unknown,
+      fallback: T,
+    ): T =>
+      value === "off" || value === "custom" || value === "default"
+        ? (value as T)
+        : fallback;
+    const normalizeAllow = (value: unknown): Set<string> =>
+      new Set(
+        Array.isArray(value)
+          ? value
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : [],
+      );
+    return {
+      enabled: profile.enabled === true,
+      historyMode: normalizeMode(profile.history?.mode, "default") as "default" | "off",
+      systemPromptMode: normalizeMode(profile.system_prompt?.mode, "default") as "default" | "off",
+      skillsMode: normalizeMode(profile.skills?.mode, "default"),
+      skillsAllow: normalizeAllow(profile.skills?.allow),
+      toolsMode: normalizeMode(profile.tools?.mode, "default"),
+      toolsAllow: normalizeAllow(profile.tools?.allow),
+    };
+  }
+
   private _isCronExecutionEnabled(): boolean {
     return asAgentConfig(this.config).tools?.cron?.allow_command === true;
+  }
+
+  private _configuredWorkspaceDir(): string {
+    const configured = asAgentConfig(this.config).agents?.defaults?.workspace;
+    if (typeof configured === "string" && configured.trim()) {
+      return path.resolve(configured.trim());
+    }
+    return this.runtimePaths.sourceDir ?? this.configDir;
+  }
+
+  private _syncWorkspaceDir(): void {
+    this.tools.setWorkspaceDir(this._configuredWorkspaceDir());
+    this._legacyWorkspaceDir = this.tools.workspaceDir;
   }
 
   private _maxParallelToolCalls(): number {
@@ -337,12 +485,33 @@ export class AgentOrchestrator {
     );
   }
 
+  private _memoryContextMaxChars(): number {
+    const configured = asAgentConfig(this.config).memory?.max_context_chars;
+    return this._boundedInt(configured, 4_000, 1_000, 20_000);
+  }
+
   private _resourceConfig(): ResolvedAgentResourceConfig {
     const raw: AgentResourceConfig =
       asAgentConfig(this.config).agent?.resource || {};
     const mode =
       raw.mode === "eco" || raw.mode === "performance" ? raw.mode : "balanced";
     const profile = RESOURCE_PROFILES[mode];
+    const defaults = asAgentConfig(this.config).agents?.defaults || {};
+    const configuredContextWindow = defaults.context_window;
+    const contextWindow =
+      typeof configuredContextWindow === "number" &&
+      Number.isFinite(configuredContextWindow) &&
+      configuredContextWindow > 0
+        ? this._boundedInt(configuredContextWindow, 0, 1_024, 1_000_000)
+        : undefined;
+    const maxContextChars = contextWindow
+      ? this._boundedInt(contextWindow * 4, profile.maxContextChars, 8_000, 200_000)
+      : this._boundedInt(
+          raw.max_context_chars,
+          profile.maxContextChars,
+          8_000,
+          200_000,
+        );
 
     return {
       mode,
@@ -352,11 +521,19 @@ export class AgentOrchestrator {
         1,
         50,
       ),
-      maxContextChars: this._boundedInt(
-        raw.max_context_chars,
-        profile.maxContextChars,
-        8_000,
-        200_000,
+      maxContextChars,
+      contextWindowTokens: contextWindow,
+      summarizeMessageThreshold: this._boundedInt(
+        defaults.summarize_message_threshold,
+        20,
+        4,
+        200,
+      ),
+      summarizeTokenPercent: this._boundedInt(
+        defaults.summarize_token_percent,
+        75,
+        50,
+        95,
       ),
       toolWarmupEnabled:
         typeof raw.tool_warmup_enabled === "boolean"
@@ -429,6 +606,7 @@ export class AgentOrchestrator {
       },
     );
     this.tools.setOrchestrator(this);
+    this._syncWorkspaceDir();
     fs.mkdirSync(runtimePaths.dataDir, { recursive: true });
     this.platformConnectionStore = new SqlitePlatformConnectionStore(
       path.join(runtimePaths.dataDir, "platform-connections.db"),
@@ -557,6 +735,13 @@ export class AgentOrchestrator {
 
     this._bgStarted = false;
     this._messageHistory = new Map<string, ChatMessage[]>();
+    this._sessionHistoryStore = new SqliteSessionHistoryStore(
+      path.join(runtimePaths.dataDir, "session-history.db"),
+    );
+    for (const [sessionId, persisted] of this._sessionHistoryStore.load()) {
+      this._messageHistory.set(sessionId, persisted.messages);
+      this._sessionMetadata.set(sessionId, persisted.metadata);
+    }
     this._taskDb = new Database(":memory:");
     this._taskDb.exec(`
       CREATE TABLE IF NOT EXISTS agent_tasks (
@@ -580,8 +765,13 @@ export class AgentOrchestrator {
   }
 
   private _bgStarted = false;
-  private _messageHistory = new Map<string, ChatMessage[]>();
-  private _taskDb: Database.Database;
+	private _messageHistory = new Map<string, ChatMessage[]>();
+	private _sessionHistoryStore: SqliteSessionHistoryStore;
+	private _sessionMetadata = new Map<
+		string,
+		{ created: string; updated: string; title?: string; pinned?: boolean }
+	>();
+	private _taskDb: Database.Database;
   private skillLoader: SkillLoader;
   private automationManager: AutomationManager;
 
@@ -668,11 +858,11 @@ export class AgentOrchestrator {
       : null;
   }
 
-  async reloadConfig(): Promise<void> {
+    async reloadConfig(): Promise<void> {
     const wasBackgroundStarted = this._bgStarted;
     const previousHeartbeat = this.heartbeat;
-
     this.config = this._loadConfig();
+    this._syncWorkspaceDir();
     this.provider = settings.provider;
     this.modelName = settings.defaultModel;
     this.temperature = settings.defaultTemperature;
@@ -835,14 +1025,14 @@ export class AgentOrchestrator {
     ) {
       options.max_tokens = Math.floor(runtimeOptions.maxTokens);
     }
-    const processedMessages = [...messages];
+    const processedMessages = messages.map(({ id: _id, created_at: _createdAt, ...message }) => message);
 
     try {
       const response = await globalExecutionTracer.spanAsync(
         "agent.llm_call",
         () =>
           achatCompletion(
-            processedMessages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+            processedMessages as never,
             options,
           ),
         metricTags,
@@ -874,15 +1064,200 @@ export class AgentOrchestrator {
     return Math.max(0, Math.floor(Number(usage.usage.completion_tokens || 0)));
   }
 
-  private _saveAssistantHistoryMessage(
-    sessionId: string,
-    content: string,
-  ): void {
-    if (!content.trim()) return;
-    const history = this._messageHistory.get(sessionId) || [];
-    history.push({ role: "assistant", content });
-    this._messageHistory.set(sessionId, history);
-  }
+	public listSessionIds(): string[] {
+		return [...new Set([...this._messageHistory.keys(), ...this._sessionMetadata.keys()])];
+	}
+
+	private _ensureSessionMessageIds(sessionId: string): ChatMessage[] | null {
+		const history = this._messageHistory.get(sessionId);
+		if (!history) return null;
+		let changed = false;
+		for (const message of history) {
+			if (!message.id) {
+				message.id = crypto.randomUUID();
+				changed = true;
+			}
+			if (!message.created_at) {
+				message.created_at = new Date().toISOString();
+				changed = true;
+			}
+		}
+		if (changed) this._messageHistory.set(sessionId, history);
+		return history;
+	}
+
+	public getSessionMessages(sessionId: string): ChatMessage[] | null {
+		const history = this._ensureSessionMessageIds(sessionId);
+		return history ? history.map((message) => ({ ...message })) : null;
+	}
+
+	public updateSessionMessage(
+		sessionId: string,
+		messageId: string,
+		patch: { content?: string; image_urls?: string[] },
+	): ChatMessage | null {
+		const history = this._ensureSessionMessageIds(sessionId);
+		const message = history?.find((item) => item.id === messageId);
+		if (!message) return null;
+		if (patch.content !== undefined) message.content = patch.content;
+		if (patch.image_urls !== undefined) message.image_urls = [...patch.image_urls];
+		this._touchSession(sessionId);
+		return { ...message };
+	}
+
+	public deleteSessionMessage(sessionId: string, messageId: string): boolean {
+		const history = this._ensureSessionMessageIds(sessionId);
+		if (!history) return false;
+		const index = history.findIndex((item) => item.id === messageId);
+		if (index < 0) return false;
+		history.splice(index, 1);
+		this._messageHistory.set(sessionId, history);
+		this._touchSession(sessionId);
+		return true;
+	}
+
+	public forkSessionAtMessage(
+		sessionId: string,
+		messageId: string,
+	): { sessionId: string; messages: ChatMessage[] } | null {
+		const history = this._ensureSessionMessageIds(sessionId);
+		if (!history) return null;
+		const index = history.findIndex((item) => item.id === messageId);
+		if (index < 0) return null;
+		const newSessionId = crypto.randomUUID();
+		const now = new Date().toISOString();
+		const messages = history.slice(0, index + 1).map((message) => ({
+			...message,
+			id: crypto.randomUUID(),
+			created_at: message.created_at || now,
+		}));
+		this._messageHistory.set(newSessionId, messages);
+		this._sessionMetadata.set(newSessionId, {
+			created: now,
+			updated: now,
+			title: `Fork of ${sessionId}`,
+		});
+		this._persistSession(newSessionId);
+		return { sessionId: newSessionId, messages: messages.map((message) => ({ ...message })) };
+	}
+
+	public retrySessionFromMessage(
+		sessionId: string,
+		messageId: string,
+	): { sessionId: string; message: ChatMessage } | null {
+		const history = this._ensureSessionMessageIds(sessionId);
+		if (!history) return null;
+		const targetIndex = history.findIndex((item) => item.id === messageId);
+		if (targetIndex < 0) return null;
+		let userIndex = targetIndex;
+		while (userIndex >= 0 && history[userIndex]?.role !== "user") userIndex -= 1;
+		if (userIndex < 0) return null;
+		const original = history[userIndex];
+		if (!original) return null;
+		const now = new Date().toISOString();
+		const newSessionId = crypto.randomUUID();
+		const prefix = history.slice(0, userIndex).map((message) => ({
+			...message,
+			id: crypto.randomUUID(),
+			created_at: message.created_at || now,
+		}));
+		this._messageHistory.set(newSessionId, prefix);
+		this._sessionMetadata.set(newSessionId, {
+			created: now,
+			updated: now,
+			title: `Retry of ${sessionId}`,
+		});
+		this._persistSession(newSessionId);
+		return {
+			sessionId: newSessionId,
+			message: { ...original, id: crypto.randomUUID() },
+		};
+	}
+
+	public getSessionMetadata(
+		sessionId: string,
+	): { created: string; updated: string; title?: string; pinned?: boolean } | null {
+		const metadata = this._sessionMetadata.get(sessionId);
+		return metadata ? { ...metadata } : null;
+	}
+
+	public updateSessionMetadata(
+		sessionId: string,
+		patch: { title?: string; pinned?: boolean },
+	): { created: string; updated: string; title?: string; pinned?: boolean } | null {
+		if (!this._messageHistory.has(sessionId) && !this._sessionMetadata.has(sessionId)) {
+			return null;
+		}
+		const now = new Date().toISOString();
+		const existing = this._sessionMetadata.get(sessionId) ?? {
+			created: now,
+			updated: now,
+		};
+		const next = {
+			...existing,
+			...(patch.title !== undefined ? { title: patch.title } : {}),
+			...(patch.pinned !== undefined ? { pinned: patch.pinned } : {}),
+			updated: now,
+		};
+		this._sessionMetadata.set(sessionId, next);
+		this._persistSession(sessionId);
+		return { ...next };
+	}
+
+	public deleteSession(sessionId: string): boolean {
+		const hadSession = this._messageHistory.has(sessionId) || this._sessionMetadata.has(sessionId);
+		this._messageHistory.delete(sessionId);
+		this._sessionMetadata.delete(sessionId);
+		this._sessionHistoryStore.delete(sessionId);
+		return hadSession;
+	}
+
+	private _persistSession(sessionId: string): void {
+		const history = this._ensureSessionMessageIds(sessionId);
+		if (!history) return;
+		const now = new Date().toISOString();
+		const existing = this._sessionMetadata.get(sessionId);
+		const metadata: SessionMetadata = {
+			created: existing?.created || history[0]?.created_at || now,
+			updated: existing?.updated || now,
+			...(existing?.title ? { title: existing.title } : {}),
+			...(existing?.pinned === true ? { pinned: true } : {}),
+		};
+		this._sessionMetadata.set(sessionId, metadata);
+		this._sessionHistoryStore.save(sessionId, history, metadata);
+	}
+
+	public close(): void {
+		this._sessionHistoryStore.close();
+	}
+
+	private _touchSession(sessionId: string): void {
+		const now = new Date().toISOString();
+		const existing = this._sessionMetadata.get(sessionId);
+		this._sessionMetadata.set(sessionId, {
+			...existing,
+			created: existing?.created || now,
+			updated: now,
+		});
+		this._persistSession(sessionId);
+	}
+
+	private _saveAssistantHistoryMessage(
+		sessionId: string,
+		content: string,
+		messageId?: string,
+	): void {
+		if (!content.trim()) return;
+		const history = this._messageHistory.get(sessionId) || [];
+		history.push({
+			id: messageId || crypto.randomUUID(),
+			created_at: new Date().toISOString(),
+			role: "assistant",
+			content,
+		});
+		this._messageHistory.set(sessionId, history);
+		this._touchSession(sessionId);
+	}
 
   /**
    * Write the completed turn (user message + final agent response) into
@@ -984,15 +1359,36 @@ export class AgentOrchestrator {
     sessionId: string,
     userMessage: string,
     screenshotImagePath?: string,
-    options: { signal?: AbortSignal } = {},
+    options: {
+      signal?: AbortSignal;
+      feedbackProvider?: () => string[];
+      /** Provider-accessible image URLs or data URLs attached to this turn. */
+      imageUrls?: string[];
+      /** Stable ID of the user message supplied by the WebSocket client. */
+      messageId?: string;
+      /** Stable ID used for the completed assistant response. */
+      responseMessageId?: string;
+      completionGuard?: () => {
+        ok: boolean;
+        missing?: string[];
+        invalid?: string[];
+      };
+      maxCompletionRepairs?: number;
+    } = {},
   ): AsyncGenerator<string, void, unknown> {
     if (this.heartbeat) this.heartbeat.markUserInteraction();
 
-    {
-      const history = this._messageHistory.get(sessionId) || [];
-      history.push({ role: "user", content: userMessage });
-      this._messageHistory.set(sessionId, history);
-    }
+		{
+			const history = this._messageHistory.get(sessionId) || [];
+			history.push({
+				id: options.messageId || crypto.randomUUID(),
+				created_at: new Date().toISOString(),
+				role: "user",
+				content: userMessage,
+			});
+			this._messageHistory.set(sessionId, history);
+			this._touchSession(sessionId);
+		}
     this._loopCounter = (this._loopCounter + 1) >>> 0;
     const loopId = this._loopCounter;
 
@@ -1002,9 +1398,23 @@ export class AgentOrchestrator {
       asAgentConfig(this.config).agent?.max_tokens_per_cycle ||
       settings.defaultMaxTokens;
     const resource = this._resourceConfig();
+    const configuredMaxToolIterations =
+      asAgentConfig(this.config).agents?.defaults?.max_tool_iterations;
+    const maxAgentTurns = this._boundedInt(
+      configuredMaxToolIterations,
+      MAX_AGENT_TURNS,
+      1,
+      200,
+    );
+    const localModel = isLocalModelName(this.modelName);
+    const runDeadline = Date.now() + (localModel ? LOCAL_AGENT_RUN_TIMEOUT_MS : REMOTE_AGENT_RUN_TIMEOUT_MS);
 
     const history = this._messageHistory.get(sessionId) || [];
-    const pastMessages = history.slice(-resource.messageHistoryLimit);
+    const turnProfile = this._turnProfilePolicy();
+    const pastMessages =
+      turnProfile.historyMode === "off"
+        ? []
+        : history.slice(-resource.messageHistoryLimit);
 
     // Decide the specialist and per-turn capability budget before prompting.
     // The selected catalog is also used as an execution allowlist below.
@@ -1023,15 +1433,25 @@ export class AgentOrchestrator {
       resource,
       adaptiveSelection,
       sessionId,
+      turnProfile,
     );
 
     // Warm up only the selected tools for faster and more accurate selection.
-    const prunedTools = adaptiveSelection.selectedTools;
+    const adaptiveTools = adaptiveSelection.selectedTools;
+    const prunedTools =
+      turnProfile.toolsMode === "off"
+        ? []
+        : turnProfile.toolsMode === "custom"
+          ? adaptiveTools.filter((tool) =>
+              turnProfile.toolsAllow.has(String(tool.function?.name || "").trim()),
+            )
+          : adaptiveTools;
 
-    // Ensure we only use ToolDefinition[] for toolsSchema.
-    const toolsSchema = (prunedTools.length > 0
-      ? prunedTools
-      : allTools) as unknown as ToolDefinition[];
+    // Keep the per-turn tool surface bounded. The adaptive selector always
+    // supplies a small read-only recovery set when heuristics are uncertain;
+    // falling back to all registered tools here would add the full catalog to
+    // every ordinary prompt and defeat adaptive pruning.
+    const toolsSchema = prunedTools as unknown as ToolDefinition[];
 
     // Pre-warm the most likely tools
     if (resource.toolWarmupEnabled) {
@@ -1041,17 +1461,32 @@ export class AgentOrchestrator {
       );
     }
 
-    let llmMessages: ChatMessage[] = [
-      { role: "system", content: systemContent },
-    ];
+    let llmMessages: ChatMessage[] =
+      turnProfile.systemPromptMode === "off"
+        ? []
+        : [{ role: "system", content: systemContent }];
 
     for (const msg of pastMessages) {
       llmMessages.push({
         role: msg.role as "system" | "user" | "assistant" | "tool",
         content: msg.content,
+        ...(msg.image_urls ? { image_urls: msg.image_urls } : {}),
       });
     }
+    const imageUrls = (options.imageUrls ?? [])
+      .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+      .slice(0, 4);
+    if (imageUrls.length > 0) {
+      const lastUserMessage = [...llmMessages]
+        .reverse()
+        .find((message) => message.role === "user");
+      if (lastUserMessage) lastUserMessage.image_urls = imageUrls;
+    }
 
+    llmMessages = AgentOrchestrator._compactMessagesIfNeeded(
+      llmMessages,
+      resource,
+    );
     llmMessages = AgentOrchestrator._truncateMessagesToFit(
       llmMessages,
       resource.maxContextChars,
@@ -1059,6 +1494,7 @@ export class AgentOrchestrator {
 
     let consecutiveToolOnly = 0;
     let turn = 0;
+    let completionRepairAttempts = 0;
     let response: LLMResponse | null = null;
     let latestContextUsage: ContextUsageSnapshot | undefined;
     const streamDoneEvent = (tokens: number) =>
@@ -1070,7 +1506,7 @@ export class AgentOrchestrator {
         ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
       });
 
-    while (turn < MAX_AGENT_TURNS) {
+    while (turn < maxAgentTurns) {
       if (options.signal?.aborted) {
         yield JSON.stringify({
           type: "error",
@@ -1080,11 +1516,51 @@ export class AgentOrchestrator {
       }
 
       turn++;
+      if (Date.now() >= runDeadline) {
+        const timeoutMessage = "\n\nThe run reached its safe time limit before it could finish.";
+        await this._saveAssistantHistoryMessage(sessionId, timeoutMessage, options.responseMessageId);
+        yield JSON.stringify({ type: "execution_timeout", model_name: this.modelName, turn });
+        yield JSON.stringify({ type: "stream_chunk", content: timeoutMessage, model_name: this.modelName });
+        yield streamDoneEvent(spentBudgetTokens);
+        return;
+      }
+      const liveFeedback = options.feedbackProvider?.() ?? [];
+      if (liveFeedback.length > 0) {
+        const feedbackText = liveFeedback
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .join("\n");
+        if (feedbackText) {
+          llmMessages.push({
+            role: "user",
+            content: `Live feedback from the user at a safe checkpoint:\n${feedbackText}\nApply it to the current task if it is relevant. Do not restart completed work.`,
+          });
+          yield JSON.stringify({
+            type: "feedback_applied",
+            content: "Live feedback was added at a safe checkpoint.",
+            count: liveFeedback.length,
+          });
+        }
+      }
       try {
+        llmMessages = AgentOrchestrator._compactMessagesIfNeeded(
+          llmMessages,
+          resource,
+        );
         llmMessages = AgentOrchestrator._truncateMessagesToFit(
           llmMessages,
           resource.maxContextChars,
         );
+
+        yield JSON.stringify({
+          type: "execution_progress",
+          phase: "model_request",
+          turn,
+          max_turns: maxAgentTurns,
+          model_name: this.modelName,
+          local_model: localModel,
+          context_usage: latestContextUsage,
+        });
 
         const requestBudget = buildAgentTokenBudget({
           modelName: this.modelName,
@@ -1094,13 +1570,15 @@ export class AgentOrchestrator {
           configuredCycleBudget: configuredMaxTokensPerCycle,
           spentBudgetTokens,
           defaultMaxTokens: settings.defaultMaxTokens,
+          contextWindowTokens: resource.contextWindowTokens,
+          summarizeTokenPercent: resource.summarizeTokenPercent,
         });
         latestContextUsage = requestBudget.contextUsage;
 
         if (!requestBudget.shouldCall) {
           const exhaustedMessage =
             "\n\n[Token or context budget exhausted. Stopping.]";
-          await this._saveAssistantHistoryMessage(sessionId, exhaustedMessage);
+          await this._saveAssistantHistoryMessage(sessionId, exhaustedMessage, options.responseMessageId);
           this._logMemoryInteraction(sessionId, userMessage, exhaustedMessage);
           yield JSON.stringify({
             type: "stream_chunk",
@@ -1118,10 +1596,14 @@ export class AgentOrchestrator {
           tools: toolsSchema,
           maxTokens: requestBudget.maxTokens,
         };
-        response = await globalRequestDeduplicator.execute(requestKey, () =>
-          this._callLlmApi(llmMessages, toolsSchema, {
-            maxTokens: requestBudget.maxTokens,
-          }),
+        response = await withTimeout(
+          globalRequestDeduplicator.execute(requestKey, () =>
+            this._callLlmApi(llmMessages, toolsSchema, {
+              maxTokens: requestBudget.maxTokens,
+            }),
+          ),
+          localModel ? LOCAL_LLM_CALL_TIMEOUT_MS : REMOTE_LLM_CALL_TIMEOUT_MS,
+          localModel ? "Local llama.cpp request" : "Remote provider request",
         );
 
         // BUG FIX: Track budget after each call
@@ -1148,15 +1630,34 @@ export class AgentOrchestrator {
         }
       } catch (err: unknown) {
         const rawMessage = err instanceof Error ? err.message : String(err);
-        const errMsg =
+        const isCredentialOrRateLimitError =
           err instanceof LiteLLMMissingCredentialError ||
           err instanceof LiteLLMRateLimitError ||
           err instanceof LLMMissingCredentialError ||
-          err instanceof LLMRateLimitError
-            ? rawMessage
-            : `Error calling LLM: ${rawMessage}. Please check credentials.`;
-        const errorMessage = `\n\n${errMsg}`;
-        await this._saveAssistantHistoryMessage(sessionId, errorMessage);
+          err instanceof LLMRateLimitError;
+        const providerError = err instanceof LLMProviderError ? err : null;
+        const providerLabel = providerError?.providerId || "selected AI";
+        const errorMessage = providerError
+          ? providerError.status === 429 || providerError instanceof LLMRateLimitError || providerError instanceof LiteLLMRateLimitError
+            ? "\n\nThe service is temporarily busy or rate-limited. Please try again shortly."
+            : providerError.status === 401 || providerError.status === 403 || providerError instanceof LLMMissingCredentialError || providerError instanceof LiteLLMMissingCredentialError
+              ? `\n\nThe ${providerLabel} credential was missing or rejected. Add a valid API key in Models/Credentials, then retry.`
+              : providerError instanceof LLMTimeoutError || providerError.message.toLowerCase().includes("timed out")
+                ? `\n\nThe ${providerLabel} request timed out. Check the provider connection and try again.`
+                : providerError.status && providerError.status >= 500
+                  ? `\n\nThe ${providerLabel} service is temporarily unavailable. Please try again shortly.`
+                  : `\n\n${providerError.message || "The selected AI service returned an error."} The run was stopped safely.`
+          : `\n\n${isCredentialOrRateLimitError ? rawMessage : `Error calling LLM: ${rawMessage}`}`;
+        await this._saveAssistantHistoryMessage(sessionId, errorMessage, options.responseMessageId);
+        if (providerError?.diagnostic) {
+          yield JSON.stringify({
+            type: "provider_error",
+            provider: providerError.providerId,
+            status: providerError.status,
+            retryable: providerError.retryable,
+            diagnostic: providerError.diagnostic,
+          });
+        }
         yield JSON.stringify({
           type: "stream_chunk",
           content: errorMessage,
@@ -1176,6 +1677,22 @@ export class AgentOrchestrator {
       const msg = choice.message;
       const content: string | null = msg?.content || null;
 
+      const textToolCall = content ? detectTextToolCall(content) : null;
+      if (textToolCall) {
+        const rejection =
+          "The model emitted a tool call as plain text instead of using the native tool protocol. " +
+          "The text was not executed. Re-issue the action through the available tools and wait for a tool result.";
+        llmMessages.push({ role: "assistant", content });
+        llmMessages.push({ role: "user", content: rejection });
+        yield JSON.stringify({
+          type: "tool_call_rejected",
+          reason: "text_tool_call_not_executed",
+          tool: textToolCall.toolName,
+          executed: false,
+        });
+        continue;
+      }
+
       if (content) {
         yield JSON.stringify({
           type: "stream_chunk",
@@ -1185,12 +1702,45 @@ export class AgentOrchestrator {
         });
         {
           const history = this._messageHistory.get(sessionId) || [];
-          history.push({ role: "assistant", content });
+          history.push({
+            id: options.responseMessageId || crypto.randomUUID(),
+            created_at: new Date().toISOString(),
+            role: "assistant",
+            content,
+          });
           this._messageHistory.set(sessionId, history);
+          this._touchSession(sessionId);
         }
         consecutiveToolOnly = 0;
 
         if (this._isTaskComplete(content)) {
+          const completionGuard = options.completionGuard?.();
+          const maxCompletionRepairs = Math.max(
+            0,
+            Math.floor(options.maxCompletionRepairs ?? 2),
+          );
+          if (
+            completionGuard &&
+            !completionGuard.ok &&
+            completionRepairAttempts < maxCompletionRepairs
+          ) {
+            completionRepairAttempts += 1;
+            const missing = [
+              ...(completionGuard.missing ?? []),
+              ...(completionGuard.invalid ?? []),
+            ].filter(Boolean);
+            const repairInstruction =
+              `Completion verification found missing or empty required artifacts: ${missing.join(", ") || "the required files"}. ` +
+              "Continue the same task now. Use the available file tools to create or repair every required artifact, then verify each one exists and is non-empty. Do not provide a final completion reply until the verification passes.";
+            llmMessages.push({ role: "user", content: repairInstruction });
+            yield JSON.stringify({
+              type: "completion_guard_failed",
+              content: repairInstruction,
+              missing,
+              attempt: completionRepairAttempts,
+            });
+            continue;
+          }
           this._logMemoryInteraction(sessionId, userMessage, content);
           yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
           return;
@@ -1201,6 +1751,7 @@ export class AgentOrchestrator {
         | Array<{
             id?: string;
             function?: { name?: string; arguments?: string };
+            extra_content?: Record<string, unknown>;
           }>
         | undefined;
 
@@ -1211,7 +1762,7 @@ export class AgentOrchestrator {
           const warnMsg =
             "Agent exceeded max consecutive tool-call turns without a text response.";
           const warningMessage = `\n\n${warnMsg}`;
-          await this._saveAssistantHistoryMessage(sessionId, warningMessage);
+          await this._saveAssistantHistoryMessage(sessionId, warningMessage, options.responseMessageId);
           this._logMemoryInteraction(sessionId, userMessage, warningMessage);
           yield JSON.stringify({
             type: "stream_chunk",
@@ -1225,9 +1776,14 @@ export class AgentOrchestrator {
           return;
         }
 
+        const assistantExtraContent =
+          msg && typeof msg === "object" && "extra_content" in msg
+            ? (msg as unknown as { extra_content?: unknown }).extra_content
+            : undefined;
         const assistantMsg = AgentOrchestrator._buildAssistantMessage(
           content || "",
           toolCalls,
+          assistantExtraContent,
         );
         llmMessages.push(assistantMsg);
 
@@ -1238,10 +1794,38 @@ export class AgentOrchestrator {
           llmMessages,
           turn,
           options.signal,
-          adaptiveToolNames(adaptiveSelection),
+          new Set(toolsSchema.map((tool) => tool.function.name)),
         )) {
           yield event;
         }
+        continue;
+      }
+
+      const completionGuard = options.completionGuard?.();
+      const maxCompletionRepairs = Math.max(
+        0,
+        Math.floor(options.maxCompletionRepairs ?? 2),
+      );
+      if (
+        completionGuard &&
+        !completionGuard.ok &&
+        completionRepairAttempts < maxCompletionRepairs
+      ) {
+        completionRepairAttempts += 1;
+        const missing = [
+          ...(completionGuard.missing ?? []),
+          ...(completionGuard.invalid ?? []),
+        ].filter(Boolean);
+        const repairInstruction =
+          `The task is not complete yet: required artifacts are missing or empty (${missing.join(", ") || "the required files"}). ` +
+          "Continue the same task now. Use the available file tools to create or repair every required artifact, then verify each one exists and is non-empty. Do not stop with a status message; perform the repair before replying.";
+        llmMessages.push({ role: "user", content: repairInstruction });
+        yield JSON.stringify({
+          type: "completion_guard_failed",
+          content: repairInstruction,
+          missing,
+          attempt: completionRepairAttempts,
+        });
         continue;
       }
 
@@ -1260,7 +1844,7 @@ export class AgentOrchestrator {
     llmMessages: ChatMessage[],
     turn: number,
     signal?: AbortSignal,
-    allowedToolNames: Set<string> = new Set(),
+    allowedToolNames: Set<string> | null = null,
   ): AsyncGenerator<string, void, unknown> {
     const invocations = toolCalls.map((tc) => this._parseToolInvocation(tc));
     const plan = createToolExecutionPlan(invocations);
@@ -1304,10 +1888,12 @@ export class AgentOrchestrator {
       yield JSON.stringify({
         type: "tool_call",
         tool: invocation.toolName,
+        tool_call_id: invocation.tcId,
         input: invocation.toolArgs,
         invocation_index: index,
         level,
         parallel: (plan.levels[level]?.items.length ?? 1) > 1,
+        executed: false,
       });
     }
 
@@ -1713,6 +2299,7 @@ export class AgentOrchestrator {
     _resource: ResolvedAgentResourceConfig = this._resourceConfig(),
     adaptiveSelection?: AdaptiveCapabilitySelection,
     sessionId?: string,
+    turnProfile = this._turnProfilePolicy(),
   ): Promise<string> {
     const taskProfile = classifyAgentTask(userMessage);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
@@ -1736,8 +2323,22 @@ export class AgentOrchestrator {
     const capabilityReport = analyzePlanCapabilities(
       userMessage,
       {
-        skills: await this.skillLoader.getAllSkillsMetadata(),
-        tools: this.tools.getToolDefinitions(),
+        skills:
+          turnProfile.skillsMode === "off"
+            ? []
+            : (await this.skillLoader.getAllSkillsMetadata()).filter((skill) => {
+                if (turnProfile.skillsMode !== "custom") return true;
+                const id = String(skill.id || skill.name || "").trim();
+                return turnProfile.skillsAllow.has(id);
+              }),
+        tools:
+          turnProfile.toolsMode === "off"
+            ? []
+            : turnProfile.toolsMode === "custom"
+              ? this.tools.getToolDefinitions().filter((tool) =>
+                  turnProfile.toolsAllow.has(String(tool.function?.name || "").trim()),
+                )
+              : this.tools.getToolDefinitions(),
       },
       `${taskProfile.complexity}/${taskProfile.executionStyle}`,
     );
@@ -1755,7 +2356,7 @@ export class AgentOrchestrator {
     }
 
     const systemPersona: string = this.agentConfig.persona || "";
-    const explicitTurnProfile = this._isTurnProfileEnabled();
+    const explicitTurnProfile = turnProfile.enabled;
     let dynamicStateBlock = "";
     if (explicitTurnProfile) {
       const siTunings: string[] = this.selfImprovement.getAccumulatedTunings();
@@ -1808,7 +2409,12 @@ export class AgentOrchestrator {
           typeof userMessage === "string" ? userMessage : "",
         );
         if (memCtx && memCtx.trim()) {
-          memoryContextBlock = `${memCtx}\n\n`;
+          const memoryText = memCtx.trim();
+          const memoryLimit = this._memoryContextMaxChars();
+          const boundedMemory = memoryText.length > memoryLimit
+            ? `${memoryText.slice(0, memoryLimit)}\n[Memory context truncated for token efficiency.]`
+            : memoryText;
+          memoryContextBlock = `${boundedMemory}\n\n`;
         }
       } catch (memErr) {
         // Never let a memory read error break the agent turn.
@@ -1822,7 +2428,7 @@ export class AgentOrchestrator {
 
     return (
       `${memoryContextBlock}` +
-      `${screenshotBlock}${systemPersona}` +
+      `${screenshotBlock}${turnProfile.systemPromptMode === "off" ? "" : systemPersona}` +
       `${taskProfileBlock}` +
       `${agentRouteBlock}` +
       `${accelerationBlock}` +
@@ -1831,6 +2437,8 @@ export class AgentOrchestrator {
       `${capabilityBlock}` +
       `${systemIndexBlock}` +
       `${dynamicStateBlock}` +
+      `CONVERSATION STYLE:\n` +
+      `The main chat is a live human conversation, not an execution log. Reply only with the user-facing answer: usually one or two short sentences, or at most one brief paragraph when the question truly needs context. Use the user’s language when practical. Do not repeat the same status in multiple forms, do not restate the user’s request, and do not narrate plans, routing, tools, files, checks, timestamps, or completion evidence in the visible reply. Never include headings such as Plan, Status, Work, Verification, or Summary unless the user explicitly asks for a detailed report. For a completed task, say it simply (for example, “হ্যাঁ, কাজটি সম্পন্ন হয়েছে।”); put the detailed how/what/verification record into Inspector-only summaries emitted by the runtime. Never claim a task is complete without checking the result.\n\n` +
       `You operate as a computer-based agent with full system access. Use absolute paths for any file operation outside the project workspace. You can launch applications, control windows, send keyboard shortcuts, read/write the clipboard, and execute shell commands anywhere on the system. Keep tool use purposeful, auditable, and verification-driven.\n\n` +
       `${screenshotNote}`
     );
@@ -1840,36 +2448,45 @@ export class AgentOrchestrator {
     const [tcId, toolName, toolArgsStr] =
       AgentOrchestrator._extractToolCall(tc);
 
-    let toolArgs: Record<string, unknown>;
-    try {
-      const parsed =
-        typeof toolArgsStr === "string" && toolArgsStr.trim()
-          ? (JSON.parse(toolArgsStr) as unknown)
-          : {};
-      toolArgs =
-        parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : { value: parsed };
-    } catch (err) {
-      console.warn(`[Agent] Failed to parse tool args for ${toolName}:`, err);
-      toolArgs = { raw: toolArgsStr };
+    const parsed = parseToolArguments(toolName, toolArgsStr);
+    if (parsed.parseError) {
+      console.warn(`[Agent] Failed to parse tool args for ${toolName}: ${parsed.parseError}`);
     }
-
-    return { tcId, toolName, toolArgs };
+    return {
+      tcId,
+      toolName,
+      toolArgs: parsed.toolArgs,
+      ...(parsed.parseError ? { parseError: parsed.parseError } : {}),
+    };
   }
 
   private async _executePlannedToolInvocation(
     sessionId: string,
     planned: PlannedToolInvocation<ParsedToolInvocation>,
     signal?: AbortSignal,
-    allowedToolNames: Set<string> = new Set(),
+    allowedToolNames: Set<string> | null = null,
   ): Promise<BufferedToolExecution> {
     let release: (() => void) | null = null;
     let ok = false;
 
     try {
       const requestedTool = planned.invocation.toolName;
-      if (allowedToolNames.size > 0 && !allowedToolNames.has(requestedTool)) {
+      if (planned.invocation.parseError) {
+        const failureOutput = `Tool '${requestedTool}' was rejected before execution: ${planned.invocation.parseError}`;
+        this._logMemoryToolCall(
+          sessionId,
+          requestedTool,
+          planned.invocation.toolArgs,
+          failureOutput,
+          false,
+        );
+        return this._buildToolFailureResult(
+          planned.index,
+          planned.invocation,
+          failureOutput,
+        );
+      }
+      if (allowedToolNames && !allowedToolNames.has(requestedTool)) {
         const failureOutput =
           `Tool '${requestedTool}' was not selected for this turn. ` +
           "Miki must re-route the request before using it.";
@@ -2007,8 +2624,10 @@ export class AgentOrchestrator {
       JSON.stringify({
         type: "tool_result",
         tool: toolName,
+        tool_call_id: tcId,
         output: toolOutput,
         ok,
+        executed: true,
         duration_ms: Date.now() - startedAt,
         invocation_index: index,
       }),
@@ -2041,7 +2660,10 @@ export class AgentOrchestrator {
         JSON.stringify({
           type: "tool_result",
           tool: invocation.toolName,
+          tool_call_id: invocation.tcId,
           output,
+          ok: false,
+          executed: false,
         }),
       ],
       toolMessage: {
@@ -2086,14 +2708,21 @@ export class AgentOrchestrator {
   private static _buildAssistantMessage(
     content: string,
     toolCalls: RawAgentToolCall[],
+    extraContent?: unknown,
   ): ChatMessage {
     const msg: ChatMessage = { role: "assistant", content: content || "" };
+    if (extraContent && typeof extraContent === "object" && !Array.isArray(extraContent)) {
+      msg.extra_content = extraContent as Record<string, unknown>;
+    }
     msg.tool_calls = toolCalls.map((tc) => {
       const [id, name, args] = AgentOrchestrator._extractToolCall(tc);
       return {
         id,
         type: "function" as const,
         function: { name, arguments: args },
+        ...(tc.extra_content && typeof tc.extra_content === "object"
+          ? { extra_content: tc.extra_content }
+          : {}),
       };
     });
     return msg;

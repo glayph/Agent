@@ -11,7 +11,9 @@ import {
   exportAgentRunBundle,
   isTaskGraphStepStatus,
   isVerificationEvidenceKind,
+  type AgentRun,
   type AgentRunStepPatch,
+  type TaskGraphStepStatus,
   type VerificationEvidence,
 } from "../agent-run.js";
 import { PersistentJobQueue } from "../persistent-job-queue.js";
@@ -36,9 +38,22 @@ import { type RuntimePaths } from "../paths.js";
 import { scanSecrets } from "../safety/secret-scan.js";
 import { Watchdog } from "../safety/watchdog.js";
 import { parseCronToNextRun } from "../scheduler.js";
+import {
+  PursueGoalStore,
+  type PursueGoalStatus,
+} from "./pursue-goal-store.js";
 
 interface EnhancementRouterOptions {
   runtimePaths: RuntimePaths;
+  /** Optional execution bridge used by the live runtime for created/replayed runs. */
+  executeAgentRun?: (
+    run: AgentRun,
+    hooks: {
+      startStep: (stepId: string) => AgentRun;
+      completeStep: (stepId: string, evidence: VerificationEvidence) => AgentRun;
+      failStep: (stepId: string, error: unknown) => AgentRun;
+    },
+  ) => Promise<void>;
   /** Shared queue used by both HTTP enqueue routes and the persistent worker. */
   jobQueue?: PersistentJobQueue;
   /** Optional worker status source for the runtime dashboard. */
@@ -149,6 +164,7 @@ export function createEnhancementRouter({
   runtimePaths,
   jobQueue,
   jobRunner,
+  executeAgentRun,
 }: EnhancementRouterOptions): Router {
   const router = Router();
   const audit = new SqliteAuditLog(path.join(runtimePaths.dataDir, "audit.db"));
@@ -176,6 +192,88 @@ export function createEnhancementRouter({
   const migrations = createMigrationManager(runtimePaths);
   const safeMode = createSafeModeManager(runtimePaths);
   const watchdog = new Watchdog(safeMode, audit);
+  const pursueGoals = new PursueGoalStore(runtimePaths.dataDir);
+
+  // Compatibility surface for the chat-level Pursue Goal panel. The state is
+  // persisted separately from agent-run evidence because a goal can outlive a
+  // single run and must survive gateway/core restarts.
+  router.get("/goals", (_req: Request, res: Response) => {
+    res.json(pursueGoals.snapshot());
+  });
+
+  router.post("/goals", (req: Request, res: Response) => {
+    if (!isRecord(req.body) || typeof req.body.objective !== "string" || !req.body.objective.trim()) {
+      res.status(400).json({ error: "objective is required" });
+      return;
+    }
+    const rawSteps = req.body.steps;
+    const steps = Array.isArray(rawSteps)
+      ? rawSteps.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+      : undefined;
+    if (Array.isArray(rawSteps) && steps?.length === 0) {
+      res.status(400).json({ error: "at least one step is required" });
+      return;
+    }
+    try {
+      const snapshot = pursueGoals.create({
+        objective: req.body.objective,
+        description: typeof req.body.description === "string" ? req.body.description : undefined,
+        steps,
+        replaceExisting: req.body.replaceExisting === true,
+      });
+      audit.record({
+        type: "agent.run",
+        actor: "dashboard",
+        subject: req.body.objective,
+        details: { action: "pursue_goal.created", goalId: snapshot.summary.activeGoalId },
+      });
+      res.status(201).json(snapshot);
+    } catch (error) {
+      sendJsonError(res, error, 400);
+    }
+  });
+
+  router.patch("/goals/:goalId", (req: Request, res: Response) => {
+    const goalId = Number(req.params.goalId);
+    if (!Number.isInteger(goalId) || goalId < 1 || !isRecord(req.body)) {
+      res.status(400).json({ error: "valid goal id and JSON object are required" });
+      return;
+    }
+    const allowedStatuses = new Set<PursueGoalStatus>([
+      "pending",
+      "active",
+      "completed",
+      "blocked",
+      "cancelled",
+    ]);
+    const status = req.body.status === undefined
+      ? undefined
+      : typeof req.body.status === "string" && allowedStatuses.has(req.body.status as PursueGoalStatus)
+        ? (req.body.status as PursueGoalStatus)
+        : null;
+    if (status === null) {
+      res.status(400).json({ error: "invalid goal status" });
+      return;
+    }
+    try {
+      const snapshot = pursueGoals.update(goalId, {
+        status,
+        statusReason: typeof req.body.statusReason === "string" ? req.body.statusReason : undefined,
+        completedSteps: typeof req.body.completedSteps === "number" ? req.body.completedSteps : undefined,
+        totalSteps: typeof req.body.totalSteps === "number" ? req.body.totalSteps : undefined,
+        progress: typeof req.body.progress === "number" ? req.body.progress : undefined,
+      });
+      audit.record({
+        type: "agent.run",
+        actor: "dashboard",
+        subject: `goal:${goalId}`,
+        details: { action: "pursue_goal.updated", status: status || "progress", goalId },
+      });
+      res.json(snapshot);
+    } catch (error) {
+      sendJsonError(res, error, 404);
+    }
+  });
 
   router.post("/config/validate", (req: Request, res: Response) => {
     if (!isRecord(req.body)) {
@@ -227,7 +325,34 @@ export function createEnhancementRouter({
   });
 
   router.get("/agent/runs", (req: Request, res: Response) => {
-    res.json({ runs: runRecorder.list(getLimit(req, 50)) });
+    const limit = getLimit(req, 50);
+    const rawOffset = Number(req.query["offset"]);
+    const offset = Number.isFinite(rawOffset)
+      ? Math.max(0, Math.min(1_000_000, Math.floor(rawOffset)))
+      : 0;
+    const queryValue = req.query["query"] ?? req.query["q"];
+    const query = typeof queryValue === "string" ? queryValue.trim() : undefined;
+    const rawStatus = req.query["status"];
+    const status: TaskGraphStepStatus | undefined =
+      typeof rawStatus === "string" && rawStatus !== "all"
+        ? (rawStatus as TaskGraphStepStatus)
+        : undefined;
+    if (status && !isTaskGraphStepStatus(status)) {
+      res.status(400).json({ error: "invalid agent run status" });
+      return;
+    }
+    const filters = { query, status };
+    const total = runRecorder.count(filters);
+    const runs = runRecorder.list({ limit, offset, ...filters });
+    res.json({
+      runs,
+      total,
+      offset,
+      limit,
+      hasMore: offset + runs.length < total,
+      query: query || "",
+      status: status || "all",
+    });
   });
 
   router.post("/agent/runs", (req: Request, res: Response) => {
@@ -257,9 +382,37 @@ export function createEnhancementRouter({
       actor: "dashboard",
       subject: run.objective,
       runId: run.id,
-      details: { step_count: run.steps.length },
+      details: { step_count: run.steps.length, action: "created" },
     });
-    res.status(201).json({ run });
+    if (executeAgentRun) {
+      void executeAgentRun(run, {
+        startStep: (stepId) => runRecorder.startStep(run.id, stepId),
+        completeStep: (stepId, evidence) =>
+          runRecorder.completeStep(run.id, stepId, evidence),
+        failStep: (stepId, error) => runRecorder.failStep(run.id, stepId, error),
+      }).catch((err) => {
+        const current = runRecorder.get(run.id);
+        const activeStep = current?.steps.find((step) => step.status === "running");
+        if (activeStep) {
+          try {
+            runRecorder.failStep(run.id, activeStep.id, err);
+          } catch {
+            // The execution bridge owns the primary error; persistence is best effort.
+          }
+        }
+        audit.record({
+          type: "agent.run",
+          actor: "runtime",
+          subject: run.objective,
+          runId: run.id,
+          details: { action: "execution_failed", error: errorMessage(err) },
+        });
+      });
+    }
+    res.status(201).json({
+      run: runRecorder.get(run.id) || run,
+      execution: executeAgentRun ? "started" : "recorded",
+    });
   });
 
   router.get("/agent/runs/:runId", (req: Request, res: Response) => {
@@ -380,6 +533,45 @@ export function createEnhancementRouter({
 
   router.get("/runtime/performance", (_req: Request, res: Response) => {
     res.json({ timings: globalStartupTimer.report() });
+  });
+
+  router.get("/runtime/summary", async (_req: Request, res: Response) => {
+    try {
+      const doctor = await runDoctor(runtimePaths, {
+        includeExternalChecks: false,
+        includeMigrations: false,
+        includeSecretScan: false,
+      });
+      watchdog.recordProbe({
+        name: "core-api",
+        healthy: true,
+        message: "Core API is serving runtime summaries.",
+        restartable: false,
+      });
+      const secretScan = scanSecrets(runtimePaths);
+      const partialReport = {
+        doctor,
+        safeMode: safeMode.getState(),
+        jobs: { items: jobs.list(), stats: jobs.stats() },
+        secretScan,
+        watchdog: watchdog.status(),
+      };
+      const components = buildHealthComponents(runtimePaths, partialReport);
+      res.json({
+        generatedAt: new Date().toISOString(),
+        health: summarizeFullHealth(components),
+        components,
+        jobs: partialReport.jobs,
+        deliveries: deliveries.stats(),
+        channels: channels.list(),
+        recentAudit: audit.list({ limit: 20 }),
+        performance: globalStartupTimer.report(),
+        safeMode: partialReport.safeMode,
+        watchdog: partialReport.watchdog,
+      });
+    } catch (error: unknown) {
+      sendJsonError(res, error);
+    }
   });
 
   router.get("/runtime/channels", (_req: Request, res: Response) => {
@@ -732,7 +924,7 @@ export function createEnhancementRouter({
         checkedAt: new Date().toISOString(),
         doctor,
         safeMode: partialReport.safeMode,
-        backups: backups.listBackups().slice(0, 10),
+        backups: backups.listBackups(),
         migrations: migrations.run({ dryRun: true }),
         watchdog: partialReport.watchdog,
         jobs: partialReport.jobs,

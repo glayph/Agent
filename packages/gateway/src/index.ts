@@ -82,6 +82,26 @@ const config = {
 const currentAllowedCorsOrigins = () =>
   allowedCorsOriginsFromEnv({ workspaceDir });
 
+function allowedOriginsForRequest(
+  request: { headers: http.IncomingHttpHeaders },
+  origin: string | undefined,
+): { origins: string[]; explicit: boolean } {
+  const explicit = hasExplicitAllowedOrigins({ workspaceDir });
+  const origins = currentAllowedCorsOrigins();
+  if (!explicit && origin && config.gatewayHost === "0.0.0.0") {
+    try {
+      const parsed = new URL(origin);
+      const requestHost = String(request.headers.host || "").toLowerCase();
+      if (requestHost && parsed.host.toLowerCase() === requestHost) {
+        origins.push(normalizeCorsOrigin(origin));
+      }
+    } catch {
+      // Malformed browser origins are rejected by isAllowedCorsOrigin.
+    }
+  }
+  return { origins, explicit };
+}
+
 function runtimePath(...segments: string[]): string {
   return path.join(config.runtimeRoot, ...segments);
 }
@@ -520,13 +540,8 @@ app.use((req, res, next) => {
   const origin = Array.isArray(req.headers.origin)
     ? req.headers.origin[0]
     : req.headers.origin;
-  if (
-    !isAllowedCorsOrigin(
-      origin,
-      currentAllowedCorsOrigins(),
-      hasExplicitAllowedOrigins(),
-    )
-  ) {
+  const corsPolicy = allowedOriginsForRequest(req, origin);
+  if (!isAllowedCorsOrigin(origin, corsPolicy.origins, corsPolicy.explicit)) {
     res.status(403).json({ error: "Origin not allowed" });
     return;
   }
@@ -668,6 +683,25 @@ app.post("/gateway/shutdown", (_req, res) => {
 // ── API proxy to core ────────────────────────────────────────────────────────
 
 const coreProxyTarget = `http://127.0.0.1:${config.corePort}`;
+
+function rewriteApiProxyPath(proxyPath: string): string {
+  // Most core routes are mounted below /api. Health is intentionally public
+  // at /health, while run orchestration is mounted below /api/enhancements.
+  // Keep both the current frontend path and the legacy /api/runs path working
+  // through the gateway contract.
+  if (proxyPath === "/health") return "/health";
+  if (proxyPath === "/runs" || proxyPath.startsWith("/runs/")) {
+    return `/api/enhancements/agent${proxyPath}`;
+  }
+  if (proxyPath === "/agent/runs" || proxyPath.startsWith("/agent/runs/")) {
+    return `/api/enhancements${proxyPath}`;
+  }
+  if (proxyPath === "/goals" || proxyPath.startsWith("/goals/")) {
+    return `/api/enhancements${proxyPath}`;
+  }
+  return `/api${proxyPath}`;
+}
+
 const apiProxy = createProxyMiddleware({
   target: coreProxyTarget,
   changeOrigin: false,
@@ -683,7 +717,7 @@ const apiProxy = createProxyMiddleware({
   xfwd: true,
   proxyTimeout: 120000,
   timeout: 120000,
-  pathRewrite: (proxyPath) => `/api${proxyPath}`,
+  pathRewrite: (proxyPath) => rewriteApiProxyPath(proxyPath),
   on: {
     proxyReq: fixRequestBody,
   },
@@ -772,13 +806,8 @@ server.on("upgrade", (request, socket, head) => {
   const origin = Array.isArray(request.headers.origin)
     ? request.headers.origin[0]
     : request.headers.origin;
-  if (
-    !isAllowedCorsOrigin(
-      origin,
-      currentAllowedCorsOrigins(),
-      hasExplicitAllowedOrigins(),
-    )
-  ) {
+  const corsPolicy = allowedOriginsForRequest(request, origin);
+  if (!isAllowedCorsOrigin(origin, corsPolicy.origins, corsPolicy.explicit)) {
     rejectWsUpgrade(socket, 403, "Forbidden");
     return;
   }

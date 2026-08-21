@@ -1,0 +1,22 @@
+{
+  "runtime": "miki-local-native",
+  "display_name": "Miki Local Runtime",
+  "format": "GGUF",
+  "server_executable": "llama-server",
+  "source_directory": "packages/core/src/llm/local/miki-native-runtime",
+  "build_policy": {
+    "headless": true,
+    "web_interface": false,
+    "tests": false,
+    "examples": false,
+    "docker_required": false,
+    "python_required": false
+  },
+  "supported_host_targets": [
+    "Linux x64",
+    "Windows x64"
+  ],
+  "source_commit": "521a64cd01979bb5b1a466152c576a9d809b068d",
+  "license": "MIT",
+  "project_owner": "Agent Miki"
+}

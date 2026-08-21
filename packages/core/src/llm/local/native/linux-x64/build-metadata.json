@@ -1,0 +1,21 @@
+{
+  "provider": "miki-local",
+  "artifact": "llama-server",
+  "platform": "linux",
+  "architecture": "x64",
+  "mode": "bundled",
+  "source_commit": "521a64cd01979bb5b1a466152c576a9d809b068d",
+  "web_ui": "disabled",
+  "build_flags": [
+    "LLAMA_BUILD_SERVER=ON",
+    "LLAMA_BUILD_UI=OFF",
+    "LLAMA_USE_PREBUILT_UI=OFF",
+    "LLAMA_BUILD_TESTS=OFF",
+    "LLAMA_BUILD_EXAMPLES=OFF",
+    "LLAMA_BUILD_TOOLS=ON",
+    "LLAMA_BUILD_APP=OFF",
+    "LLAMA_OPENSSL=OFF",
+    "GGML_NATIVE=OFF"
+  ],
+  "generated_at": "2026-08-21T19:50:52.649Z"
+}

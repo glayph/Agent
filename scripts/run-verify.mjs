@@ -66,6 +66,12 @@ function main() {
     "packages/**/*.ts",
     "--ignore-pattern",
     "packages/ui/frontend/**",
+    "--ignore-pattern",
+    "packages/core/src/llm/local/miki-native-runtime/**",
+    "--ignore-pattern",
+    "packages/**/.trash/**",
+    "--ignore-pattern",
+    "**/.trash/**",
     "--max-warnings=0",
   ], { cwd: root });
 

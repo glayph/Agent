@@ -58,7 +58,15 @@ import { globalStartupTimer } from "../performance-budgets.js";
 import { globalMetricsCollector } from "../metrics-collector.js";
 import { initializeSafetyAtStartup } from "../safety/startup.js";
 import { getErrorMessage } from "../errors.js";
+import {
+  detectArtifactContract as _detectArtifactContract,
+  verifyArtifactContract as _verifyArtifactContract,
+  writeArtifactManifest as _writeArtifactManifest,
+  type ArtifactContract,
+} from "./artifact-contract.js";
 import { SqliteAuditLog } from "../audit-log.js";
+import { ApprovalInbox } from "../security/approval-inbox.js";
+import { createApprovalRouter } from "./approval-router.js";
 import { PersistentJobQueue } from "../persistent-job-queue.js";
 import { PersistentJobRunner } from "../persistent-job-runner.js";
 import { resolveRuntimePaths } from "../paths.js";
@@ -86,6 +94,12 @@ import {
   type CompleteConnectionInput,
   type BeginConnectionInput,
 } from "../platform-connections.js";
+import {
+  createDefaultSearchRouter,
+  type SearchFilters,
+  type SearchMode,
+} from "../search/local-first-search.js";
+import { createMemoryRouter } from "./memory-router.js";
 
 globalStartupTimer.start("core.process_start");
 
@@ -147,6 +161,8 @@ if (process.env.MIKI_MODEL || process.env.DEFAULT_MODEL) {
 
 const SINGLE_CHAT_SESSION_ID = "miki-main-chat";
 const chatRunQueues = new Map<string, Promise<void>>();
+const activeRunIds = new Map<string, string>();
+const pendingFeedback = new Map<string, string[]>();
 
 // Helper function for model switching
 function getProviderForModel(model: string): string {
@@ -286,6 +302,10 @@ const workspaceDir = runtimePaths.sourceDir ?? process.cwd();
 initializeSafetyAtStartup(runtimePaths);
 const permissionAuditLog = new SqliteAuditLog(
   path.join(runtimePaths.dataDir, "audit.db"),
+);
+const approvalInbox = new ApprovalInbox(
+  path.join(runtimePaths.dataDir, "approvals.json"),
+  { audit: permissionAuditLog },
 );
 const orchestrator = new AgentOrchestrator(runtimePaths);
 const persistentJobQueue = new PersistentJobQueue(
@@ -446,7 +466,48 @@ const enhancementRouter = createEnhancementRouter({
   runtimePaths,
   jobQueue: persistentJobQueue,
   jobRunner: persistentJobRunner,
+  executeAgentRun: async (run, hooks) => {
+    for (const step of run.steps) {
+      hooks.startStep(step.id);
+      try {
+        let response = "";
+        for await (const chunk of orchestrator.runAgentLoop(
+          `agent-run:${run.id}`,
+          `${run.objective}\n\nCurrent run step: ${step.title}`,
+        )) {
+          try {
+            const event = JSON.parse(chunk) as Record<string, unknown>;
+            if (
+              event.type === "stream_chunk" &&
+              typeof event.content === "string"
+            ) {
+              response += event.content;
+            }
+          } catch {
+            // Agent protocol is JSONL; non-JSON chunks are not persisted as evidence.
+          }
+        }
+        hooks.completeStep(step.id, {
+          kind: "manual",
+          summary: response.trim()
+            ? `Completed: ${step.title}`
+            : `Completed step: ${step.title}`,
+          ok: true,
+          source: "executor",
+          phase: "executor",
+          data: response.trim()
+            ? { response: response.trim().slice(0, 2000) }
+            : undefined,
+        });
+      } catch (error) {
+        hooks.failStep(step.id, error);
+        throw error;
+      }
+    }
+  },
 });
+const searchRouter = createDefaultSearchRouter();
+const memoryRouter = createMemoryRouter();
 
 function persistAgentTask(_task: AgentTask): void {
   // Task persistence is handled in-memory by TaskQueue
@@ -634,6 +695,70 @@ app.use("/api/skills", skillsRouter);
 // mounting enhancements after it would shadow these routes and reject valid
 // API-key requests before `requireHttpAuth` can run.
 app.use("/api/enhancements", requireHttpAuth, enhancementRouter);
+
+function parseSearchFilters(value: unknown): SearchFilters | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Record<string, unknown>;
+  const domains = Array.isArray(input.domains)
+    ? input.domains.filter((item): item is string => typeof item === "string").slice(0, 20)
+    : undefined;
+  const freshness =
+    input.freshness === "day" ||
+    input.freshness === "week" ||
+    input.freshness === "month" ||
+    input.freshness === "year" ||
+    input.freshness === "any"
+      ? input.freshness
+      : undefined;
+  const locale = typeof input.locale === "string" ? input.locale.slice(0, 20) : undefined;
+  const maxResults = typeof input.maxResults === "number" ? input.maxResults : undefined;
+  return { domains, freshness, locale, maxResults };
+}
+
+function parseSearchMode(value: unknown): SearchMode | undefined {
+  return value === "local" || value === "cloud" || value === "auto" ? value : undefined;
+}
+
+async function handleSearchRequest(req: Request, res: Response): Promise<void> {
+  const input = (req.method === "GET" ? req.query : req.body) as Record<string, unknown>;
+  const query = typeof input.query === "string" ? input.query.trim().slice(0, 2_000) : "";
+  if (!query) {
+    res.status(400).json({ error: "query is required" });
+    return;
+  }
+  try {
+    const result = await searchRouter.search({
+      query,
+      mode: parseSearchMode(input.mode),
+      filters: parseSearchFilters(input.filters),
+      allowSensitiveCloud: input.allowSensitiveCloud === true,
+    });
+    res.json(result);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = /blocked|not configured|cannot be empty|sensitive/i.test(message) ? 400 : 502;
+    res.status(status).json({ error: message });
+  }
+}
+
+app.get("/api/search", requireHttpAuth, handleSearchRequest);
+app.post("/api/search", requireHttpAuth, handleSearchRequest);
+app.use("/api/memory", requireHttpAuth, memoryRouter);
+
+app.post("/api/search/fetch", requireHttpAuth, async (req, res) => {
+  const url = typeof req.body?.url === "string" ? req.body.url : "";
+  const mode = parseSearchMode(req.body?.mode);
+  if (!url) {
+    res.status(400).json({ error: "url is required" });
+    return;
+  }
+  try {
+    res.json(await searchRouter.fetch(url, mode));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(502).json({ error: message });
+  }
+});
 
 // Mount /api/chat before the compat router so it is not shadowed by the
 // compat router's unconditional `router.use(requireDashboardAuth)`. The
@@ -1101,6 +1226,11 @@ app.use(
   validateRequiredApiKey,
   createSessionRouter({ audit: permissionAuditLog }),
 );
+app.use(
+  "/approvals",
+  validateRequiredApiKey,
+  createApprovalRouter(approvalInbox),
+);
 
 // Mount runtime-installer approval router — lets the CLI TUI / web dashboard
 // list and approve/deny pending external-runtime install requests created by
@@ -1235,6 +1365,12 @@ interface ToolFeedbackConfig {
   separateMessages: boolean;
 }
 
+interface MikiStreamingConfig {
+  enabled: boolean;
+  throttleMs: number;
+  minGrowthChars: number;
+}
+
 /**
  * Reads agents.defaults.tool_feedback from live config (see the
  * tool_feedback block in launcher-compat.ts defaultAppConfig for the
@@ -1265,6 +1401,28 @@ function _getToolFeedbackConfig(): ToolFeedbackConfig {
 }
 
 /** Truncates a JSON-stringified tool-argument preview to maxArgsLength. */
+function _getmikiStreamingConfig(): MikiStreamingConfig {
+  const channels = _asRecord(orchestrator.config.channels);
+  const miki = _asRecord(channels.miki);
+  const settings = _asRecord(miki.settings);
+  const streaming = _asRecord(settings.streaming ?? miki.streaming);
+  const enabled =
+    typeof streaming.enabled === "boolean" ? streaming.enabled : true;
+  const throttleSeconds = Number(streaming.throttle_seconds);
+  const minGrowthChars = Number(streaming.min_growth_chars);
+  return {
+    enabled,
+    throttleMs:
+      Number.isFinite(throttleSeconds) && throttleSeconds > 0
+        ? Math.min(10_000, Math.floor(throttleSeconds * 1000))
+        : 350,
+    minGrowthChars:
+      Number.isFinite(minGrowthChars) && minGrowthChars > 0
+        ? Math.min(10_000, Math.floor(minGrowthChars))
+        : 1,
+  };
+}
+
 function _previewToolArgs(input: unknown, maxArgsLength: number): string {
   const full = JSON.stringify(input || {});
   if (full.length <= maxArgsLength) return full;
@@ -1322,6 +1480,37 @@ function _toolResultDescription(
   }
   const detail = _previewToolOutput(output, maxLength).trim();
   return `${action} failed${detail ? `: ${detail}` : ""}${timing}`;
+}
+
+/**
+ * Sends a compact, non-sensitive execution summary to the Inspector only.
+ * These messages use kind="thought", which the main transcript intentionally
+ * hides while the Inspector renders them as expandable categorized cards.
+ */
+function _sendInspectorThought(
+  ws: WebSocket,
+  sessionId: string,
+  runId: string,
+  content: string,
+  category: "Plan" | "Action" | "Verification" | "Progress" | "Decision",
+): void {
+  const trimmed = content.trim();
+  if (!trimmed) return;
+  _sendmiki(ws, {
+    type: "message.create",
+    id: crypto.randomUUID(),
+    session_id: sessionId,
+    timestamp: Date.now(),
+    payload: {
+      message_id: `${runId}-thought-${crypto.randomUUID()}`,
+      run_id: runId,
+      content: trimmed,
+      kind: "thought",
+      thought_category: category,
+      inspector_only: true,
+      model_name: orchestrator.modelName,
+    },
+  });
 }
 
 interface mikiContextUsage {
@@ -1435,31 +1624,80 @@ mikiWss.on("connection", (ws, _req) => {
       return;
     }
 
+    const activeRunId = activeRunIds.get(sessionId);
+    if (activeRunId) {
+      const queue = pendingFeedback.get(sessionId) ?? [];
+      queue.push(content || "Please continue the current task.");
+      pendingFeedback.set(sessionId, queue);
+      _sendInspectorThought(
+        ws,
+        sessionId,
+        activeRunId,
+        "Live feedback received and stored for the next safe checkpoint.",
+        "Progress",
+      );
+      const feedbackReplyId = `feedback-ack-${requestId}`;
+      _sendmiki(ws, {
+        type: "message.update",
+        id: crypto.randomUUID(),
+        session_id: sessionId,
+        timestamp: Date.now(),
+        payload: {
+          message_id: feedbackReplyId,
+          content: content?.trim()
+            ? "I’ve noted your feedback and queued it for this task. I’ll apply it at the next safe checkpoint."
+            : "I’m continuing the current task and will share the next update at a safe checkpoint.",
+          kind: "normal",
+          model_name: orchestrator.modelName,
+        },
+      });
+      return;
+    }
+
     const previousRun = chatRunQueues.get(sessionId) ?? Promise.resolve();
+    const queuedBehindActiveRun = activeRunIds.get(sessionId);
+    if (queuedBehindActiveRun) {
+      _sendInspectorThought(
+        ws,
+        sessionId,
+        queuedBehindActiveRun,
+        "Feedback received and queued for the next safe checkpoint; the active step will not be interrupted.",
+        "Progress",
+      );
+    }
     const currentRun = previousRun
       .catch(() => undefined)
       .then(async () => {
         const assistantMessageId = `assistant-${requestId}`;
+        activeRunIds.set(sessionId, assistantMessageId);
         let fullResponse = "";
+        let artifactContract: ArtifactContract | null = null;
         let lastContextUsage: mikiContextUsage | null = null;
+        let providerFailureDetected = false;
+        const failedToolCallIds = new Set<string>();
         const toolFeedback = _getToolFeedbackConfig();
+        const streaming = _getmikiStreamingConfig();
+        let lastStreamSentAt = 0;
+        let lastStreamSentLength = 0;
         let toolFeedbackCounter = 0;
         const toolInputs = new Map<number, unknown>();
         const toolFeedbackMessageIds = new Map<number, string>();
 
-        _sendmiki(ws, { type: "typing.start", session_id: sessionId });
-        _sendmiki(ws, {
-          type: "message.create",
-          id: crypto.randomUUID(),
-          session_id: sessionId,
-          timestamp: Date.now(),
-          payload: {
-            message_id: assistantMessageId,
-            content: "",
-            placeholder: true,
-            model_name: orchestrator.modelName,
-          },
-        });
+        if (streaming.enabled) {
+          _sendmiki(ws, { type: "typing.start", session_id: sessionId });
+          _sendmiki(ws, {
+            type: "message.create",
+            id: crypto.randomUUID(),
+            session_id: sessionId,
+            timestamp: Date.now(),
+            payload: {
+              message_id: assistantMessageId,
+              content: "",
+              placeholder: true,
+              model_name: orchestrator.modelName,
+            },
+          });
+        }
         _sendmiki(ws, {
           type: "node.run_start",
           id: crypto.randomUUID(),
@@ -1472,11 +1710,28 @@ mikiWss.on("connection", (ws, _req) => {
           media.length > 0
             ? `${content}\n\nAttached media:\n${media.join("\n")}`.trim()
             : content;
+        artifactContract = _detectArtifactContract(messageForAgent, workspaceDir);
 
         try {
           for await (const chunk of orchestrator.runAgentLoop(
             sessionId,
             messageForAgent,
+            undefined,
+            {
+              feedbackProvider: () => {
+                const queued = pendingFeedback.get(sessionId) ?? [];
+                pendingFeedback.delete(sessionId);
+                return queued;
+              },
+              imageUrls: media,
+              messageId: requestId,
+              responseMessageId: assistantMessageId,
+              completionGuard: () =>
+                artifactContract
+                  ? _verifyArtifactContract(artifactContract)
+                  : { ok: true },
+              maxCompletionRepairs: 2,
+            },
           )) {
             let event: Record<string, unknown>;
             try {
@@ -1495,21 +1750,101 @@ mikiWss.on("connection", (ws, _req) => {
             if (event.type === "stream_chunk") {
               fullResponse +=
                 typeof event.content === "string" ? event.content : "";
+              const now = Date.now();
+              const grewEnough =
+                fullResponse.length - lastStreamSentLength >=
+                streaming.minGrowthChars;
+              const throttleElapsed = now - lastStreamSentAt >= streaming.throttleMs;
+              if (
+                streaming.enabled &&
+                fullResponse.length > 0 &&
+                (grewEnough || throttleElapsed)
+              ) {
+                lastStreamSentAt = now;
+                lastStreamSentLength = fullResponse.length;
+                _sendmiki(ws, {
+                  type: "message.update",
+                  id: crypto.randomUUID(),
+                  session_id: sessionId,
+                  timestamp: now,
+                  payload: {
+                    message_id: assistantMessageId,
+                    content: fullResponse,
+                    kind: "normal",
+                    model_name: orchestrator.modelName,
+                    context_usage: _mikiContextUsage(
+                      fullResponse,
+                      lastContextUsage,
+                    ),
+                  },
+                });
+              }
+              continue;
+            }
+
+            if (event.type === "execution_progress") {
+              const phase = String(event.phase || "execution");
+              const turn = Number(event.turn || 0);
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `Execution progress: ${phase}${turn > 0 ? ` · turn ${turn}/${Number(event.max_turns || 0) || "?"}` : ""}.`,
+                "Progress",
+              );
               _sendmiki(ws, {
-                type: "message.update",
+                type: "node.progress",
                 id: crypto.randomUUID(),
                 session_id: sessionId,
                 timestamp: Date.now(),
                 payload: {
-                  message_id: assistantMessageId,
-                  content: fullResponse,
-                  model_name: orchestrator.modelName,
-                  context_usage: _mikiContextUsage(
-                    fullResponse,
-                    lastContextUsage,
-                  ),
+                  run_id: assistantMessageId,
+                  phase,
+                  turn: event.turn,
+                  max_turns: event.max_turns,
+                  local_model: event.local_model,
+                  context_usage: event.context_usage,
                 },
               });
+              continue;
+            }
+
+            if (event.type === "tool_call_rejected") {
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `A model-proposed ${String(event.tool || "tool action")} was not executed because it was emitted as plain text instead of a native tool call.`,
+                "Verification",
+              );
+              providerFailureDetected = true;
+              continue;
+            }
+
+            if (event.type === "completion_guard_failed") {
+              const missing = Array.isArray(event.missing)
+                ? event.missing.filter((item): item is string => typeof item === "string")
+                : [];
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `Completion verification found missing artifacts (${missing.join(", ") || "required files"}). Starting repair attempt ${String(event.attempt || "1")} before allowing completion.`,
+                "Verification",
+              );
+              continue;
+            }
+
+            if (event.type === "provider_error") {
+              providerFailureDetected = true;
+              const diagnostic = _asRecord(event.diagnostic);
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `The ${String(event.provider || "selected")} provider rejected a request (HTTP ${String(event.status || "unknown")}). Correlation ${String(diagnostic.correlationId || "unavailable")}; the visible reply was kept concise.`,
+                "Verification",
+              );
               continue;
             }
 
@@ -1532,6 +1867,13 @@ mikiWss.on("connection", (ws, _req) => {
                   verification_depth: event.verification_depth,
                 },
               });
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `Prepared ${Number(event.total) || 1} execution step${Number(event.total) === 1 ? "" : "s"} before replying.`,
+                "Plan",
+              );
               continue;
             }
 
@@ -1558,6 +1900,13 @@ mikiWss.on("connection", (ws, _req) => {
                   action: _toolActionDescription(event.tool, toolInput),
                 },
               });
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                _toolActionDescription(event.tool, toolInput),
+                "Action",
+              );
 
               if (!toolFeedback.enabled) {
                 // Tool Feedback is disabled: skip emitting a chat execution
@@ -1624,6 +1973,13 @@ mikiWss.on("connection", (ws, _req) => {
 
             if (event.type === "tool_retry") {
               const nodeId = `${assistantMessageId}-node-${event.invocation_index ?? 0}`;
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `Retrying ${String(event.tool || "the action")} (attempt ${Number(event.attempt) || 2}) before continuing.`,
+                "Verification",
+              );
               _sendmiki(ws, {
                 type: "node.update",
                 id: crypto.randomUUID(),
@@ -1641,9 +1997,22 @@ mikiWss.on("connection", (ws, _req) => {
             }
 
             if (event.type === "tool_result") {
+              const toolCallId = typeof event.tool_call_id === "string" ? event.tool_call_id : "";
+              if (toolCallId) {
+                if (event.ok === true) failedToolCallIds.delete(toolCallId);
+                else failedToolCallIds.add(toolCallId);
+              }
               const invocationIndex = Number(event.invocation_index ?? 0);
               const toolInput = toolInputs.get(invocationIndex);
               const nodeId = `${assistantMessageId}-node-${invocationIndex}`;
+              const resultDescription = _toolResultDescription(
+                event.tool,
+                toolInput,
+                event.ok === true,
+                event.output,
+                event.duration_ms,
+                toolFeedback.maxArgsLength,
+              );
               _sendmiki(ws, {
                 type: "node.complete",
                 id: crypto.randomUUID(),
@@ -1656,20 +2025,20 @@ mikiWss.on("connection", (ws, _req) => {
                   ok: event.ok,
                   duration_ms: event.duration_ms,
                   action: _toolActionDescription(event.tool, toolInput),
-                  result_message: _toolResultDescription(
-                    event.tool,
-                    toolInput,
-                    event.ok === true,
-                    event.output,
-                    event.duration_ms,
-                    toolFeedback.maxArgsLength,
-                  ),
+                  result_message: resultDescription,
                   output_preview: _previewToolOutput(
                     event.output,
                     toolFeedback.maxArgsLength,
                   ),
                 },
               });
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                resultDescription,
+                event.ok === true ? "Verification" : "Progress",
+              );
 
               if (toolFeedback.enabled) {
                 const messageId = toolFeedback.separateMessages
@@ -1746,6 +2115,85 @@ mikiWss.on("connection", (ws, _req) => {
             }
           }
 
+          let finalRunStatus: "completed" | "failed" =
+            providerFailureDetected || failedToolCallIds.size > 0
+              ? "failed"
+              : "completed";
+          if ((providerFailureDetected || failedToolCallIds.size > 0) && !fullResponse.trim()) {
+            fullResponse = "I couldn’t complete that request because an execution check failed.";
+          }
+          if (artifactContract) {
+            const verification = _verifyArtifactContract(artifactContract);
+            _sendInspectorThought(
+              ws,
+              sessionId,
+              assistantMessageId,
+              verification.ok
+                ? `Verified required ${artifactContract.label} files: ${artifactContract.required.join(", ")}.`
+                : `Required ${artifactContract.label} files are still missing or empty: ${[...verification.missing, ...verification.invalid].join(", ")}.`,
+              "Verification",
+            );
+            if (!verification.ok) {
+              finalRunStatus = "failed";
+              fullResponse = `I started the ${artifactContract.label}, but it is not complete yet. ${[...verification.missing, ...verification.invalid].join(", ")} still needs attention.`;
+            } else {
+              try {
+                const manifestPath = _writeArtifactManifest(artifactContract);
+                _sendInspectorThought(
+                  ws,
+                  sessionId,
+                  assistantMessageId,
+                  `Artifact manifest written for the verified ${artifactContract.label}: ${manifestPath}`,
+                  "Verification",
+                );
+              } catch (manifestError) {
+                finalRunStatus = "failed";
+                fullResponse = `The ${artifactContract.label} passed file checks, but its handoff manifest could not be written: ${getErrorMessage(manifestError)}`;
+              }
+            }
+          }
+
+          _sendmiki(ws, {
+            type: streaming.enabled ? "message.update" : "message.create",
+            id: crypto.randomUUID(),
+            session_id: sessionId,
+            timestamp: Date.now(),
+            payload: {
+              message_id: assistantMessageId,
+              content: fullResponse,
+              kind: "normal",
+              model_name: orchestrator.modelName,
+              context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
+            },
+          });
+          if (fullResponse.trim()) {
+            _sendInspectorThought(
+              ws,
+              sessionId,
+              assistantMessageId,
+              "The final user-facing reply was prepared after the execution checks.",
+              "Progress",
+            );
+          }
+          if (streaming.enabled) {
+            _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+          }
+          _sendmiki(ws, {
+            type: "node.run_end",
+            id: crypto.randomUUID(),
+            session_id: sessionId,
+            timestamp: Date.now(),
+            payload: {               run_id: assistantMessageId, status: finalRunStatus },
+          });
+        } catch (err: unknown) {
+          const safeError = getErrorMessage(err);
+          _sendInspectorThought(
+            ws,
+            sessionId,
+            assistantMessageId,
+            `The run stopped before completion: ${safeError}`,
+            "Verification",
+          );
           _sendmiki(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
@@ -1753,27 +2201,20 @@ mikiWss.on("connection", (ws, _req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
-              content: fullResponse,
+              content: fullResponse.trim() || "I couldn’t complete that request this time.",
+              kind: "normal",
               model_name: orchestrator.modelName,
-              context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
             },
           });
-          _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
-          _sendmiki(ws, {
-            type: "node.run_end",
-            id: crypto.randomUUID(),
-            session_id: sessionId,
-            timestamp: Date.now(),
-            payload: { run_id: assistantMessageId, status: "completed" },
-          });
-        } catch (err: unknown) {
-          _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+          if (streaming.enabled) {
+            _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+          }
           _sendmiki(ws, {
             type: "error",
             session_id: sessionId,
             payload: {
               request_id: requestId,
-              message: getErrorMessage(err),
+              message: safeError,
             },
           });
           _sendmiki(ws, {
@@ -1787,6 +2228,11 @@ mikiWss.on("connection", (ws, _req) => {
               error: getErrorMessage(err),
             },
           });
+        } finally {
+          if (activeRunIds.get(sessionId) === assistantMessageId) {
+            activeRunIds.delete(sessionId);
+          }
+          if (!activeRunIds.has(sessionId)) pendingFeedback.delete(sessionId);
         }
       });
     chatRunQueues.set(sessionId, currentRun);
@@ -1861,6 +2307,15 @@ wss.on("connection", (ws) => {
 
       isResuming = true;
       try {
+        ws.send(
+          JSON.stringify({
+            type: "resume",
+            session_id: sessionId,
+            checkpoint_id: checkpointId,
+            last_sequence: lastSeq,
+            replaying: true,
+          }),
+        );
         const chunks = _getStreamChunks(sessionId, checkpointId, lastSeq);
         for (const c of chunks) {
           ws.send(c.chunk);
@@ -1939,7 +2394,14 @@ wss.on("connection", (ws) => {
     checkpointId = crypto.randomUUID();
     lastSeq = 0;
     let seq = 0;
-
+    ws.send(
+      JSON.stringify({
+        type: "stream_checkpoint",
+        session_id: sessionId,
+        checkpoint_id: checkpointId,
+        sequence: -1,
+      }),
+    );
     try {
       // Pass the already-enqueued task to agent loop (it will use it directly)
       for await (const chunk of orchestrator.runAgentLoopWithTask(
@@ -1947,33 +2409,58 @@ wss.on("connection", (ws) => {
         message,
         task,
       )) {
-        const envelopeObj =
-          typeof chunk === "string" && !chunk.startsWith("{")
-            ? { type: "stream_chunk", content: chunk }
-            : chunk;
-
-        const envelopeStr =
-          typeof envelopeObj === "string"
-            ? envelopeObj
-            : JSON.stringify(envelopeObj);
-
+        const currentSequence = seq++;
+        let envelopeObj: Record<string, unknown>;
+        if (typeof chunk === "string") {
+          try {
+            const parsed = JSON.parse(chunk) as unknown;
+            envelopeObj =
+              parsed && typeof parsed === "object"
+                ? { ...(parsed as Record<string, unknown>) }
+                : { type: "stream_chunk", content: chunk };
+          } catch {
+            envelopeObj = { type: "stream_chunk", content: chunk };
+          }
+        } else if (chunk && typeof chunk === "object") {
+          envelopeObj = { ...(chunk as Record<string, unknown>) };
+        } else {
+          envelopeObj = { type: "stream_chunk", content: String(chunk) };
+        }
+        envelopeObj.checkpoint_id = checkpointId;
+        envelopeObj.sequence = currentSequence;
+        const envelopeStr = JSON.stringify(envelopeObj);
         ws.send(envelopeStr);
-        _saveStreamChunk(sessionId!, checkpointId!, seq++, envelopeStr);
+        lastSeq = currentSequence;
+        _saveStreamChunk(sessionId!, checkpointId!, currentSequence, envelopeStr);
       }
-
+      const doneEnvelope = {
+        type: "stream_done",
+        session_id: sessionId,
+        checkpoint_id: checkpointId,
+        sequence: seq,
+      };
       _saveStreamChunk(
         sessionId!,
         checkpointId!,
         seq,
-        JSON.stringify({ type: "stream_done" }),
+        JSON.stringify(doneEnvelope),
       );
-      ws.send(JSON.stringify({ type: "stream_done" }));
+      ws.send(JSON.stringify(doneEnvelope));
       streamDone = true;
     } catch (err: unknown) {
-      const errEnvelope = JSON.stringify({
+      let errEnvelope = JSON.stringify({
         type: "error",
         content: getErrorMessage(err),
       } as WSMessage);
+      try {
+        const parsed = JSON.parse(errEnvelope) as Record<string, unknown>;
+        parsed.session_id = sessionId;
+        parsed.checkpoint_id = checkpointId;
+        parsed.sequence = seq;
+        errEnvelope = JSON.stringify(parsed);
+      } catch {
+        // Keep the original error envelope if defensive annotation fails.
+      }
       _saveStreamChunk(sessionId!, checkpointId!, seq, errEnvelope);
       ws.send(errEnvelope);
       streamDone = true;
@@ -2754,6 +3241,26 @@ if (enableMcp) {
   try {
     getRequiredApiKeySecret();
     app.use("/mcp", validateRequiredApiKey);
+    app.use("/mcp", (_req, res, next) => {
+      const runtimeConfig = orchestrator.config as Record<string, unknown>;
+      const tools = runtimeConfig.tools;
+      const mcp =
+        tools && typeof tools === "object" && !Array.isArray(tools)
+          ? (tools as Record<string, unknown>).mcp
+          : undefined;
+      const enabled =
+        !mcp || typeof mcp !== "object" || Array.isArray(mcp)
+          ? true
+          : (mcp as Record<string, unknown>).enabled !== false;
+      if (!enabled) {
+        res.status(503).json({
+          error: "MCP is disabled in the runtime configuration.",
+          code: "mcp_disabled",
+        });
+        return;
+      }
+      next();
+    });
     mcpClose = mountMcpSessionManager(app, {
       executeTool: (name: string, args: Record<string, unknown>) =>
         orchestrator.tools.executeToolStructured(name, args),
@@ -2762,7 +3269,7 @@ if (enableMcp) {
     console.log(`MCP in-process ready at /mcp with API key auth`);
   } catch (err: unknown) {
     console.warn(
-      `MCP in-process skipped: ${getErrorMessage(err)}. Set a strong API_KEY_SECRET before enabling ENABLE_MCP=true.`,
+      `MCP is unavailable until API_KEY_SECRET is configured: ${getErrorMessage(err)}. MCP endpoints remain unmounted.`,
     );
   }
 }
@@ -2833,6 +3340,11 @@ async function shutdown() {
     await orchestrator.stopBackgroundTasks();
   } catch (e: unknown) {
     console.warn(`Background tasks shutdown: ${getErrorMessage(e) || e}`);
+  }
+  try {
+    orchestrator.close();
+  } catch (e: unknown) {
+    console.warn(`Session history shutdown: ${getErrorMessage(e) || e}`);
   }
   await persistentJobRunner.stop();
   channelRuntimeManager.stopAll();
