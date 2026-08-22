@@ -1,9 +1,0 @@
-PASS packages/core/src/api/launcher-compat.test.ts
-PASS packages/core/src/providers/claude-native.test.ts
-PASS packages/core/src/llm/provider/provider-boundary.test.ts
-
-Test Suites: 3 passed, 3 total
-Tests:       92 passed, 92 total
-Snapshots:   0 total
-Time:        3.616 s
-Ran all test suites matching /packages\/core\/src\/llm\/provider\/provider-boundary.test.ts|packages\/core\/src\/providers\/claude-native.test.ts|packages\/core\/src\/api\/launcher-compat.test.ts/i.
