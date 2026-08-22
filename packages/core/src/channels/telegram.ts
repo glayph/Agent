@@ -8,6 +8,7 @@ import {
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
 import { resolveChannelSessionId } from "./session-scope.js";
+import { runWithCallContext } from "../tools/executor/call-context.js";
 
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 
@@ -19,6 +20,7 @@ export interface TelegramRuntimeConfig {
   apiRoot: string;
   proxy: string;
   allowedIds: string[];
+  adminIds: string[];
   typing: boolean;
   streaming: { enabled: boolean; throttleMs: number; minGrowthChars: number };
   placeholder: { enabled: boolean; text: string };
@@ -102,6 +104,7 @@ export function resolveTelegramRuntimeConfig(
     ),
     proxy: stringOrEmpty(env.TELEGRAM_PROXY ?? settings.proxy ?? raw.proxy),
     allowedIds: stringArray(settings.allow_from ?? raw.allow_from),
+    adminIds: stringArray(settings.admin_allow_from ?? raw.admin_allow_from),
     typing: booleanOrDefault(
       typeof settings.typing === "object"
         ? recordOrEmpty(settings.typing).enabled
@@ -160,6 +163,42 @@ export function shouldHandleTelegramMessage(
   }
 
   return true;
+}
+
+export function isTelegramAdmin(
+  ctx: TelegramContext,
+  config: TelegramRuntimeConfig,
+): boolean {
+  if (
+    !ctx.chat ||
+    !ctx.from ||
+    ctx.from.is_bot === true ||
+    config.adminIds.length === 0
+  ) {
+    return false;
+  }
+  const allowed = new Set(config.adminIds);
+  return (
+    allowed.has(toStringId(ctx.from.id)) ||
+    allowed.has(toStringId(ctx.chat.id)) ||
+    (ctx.from.username ? allowed.has(ctx.from.username) : false)
+  );
+}
+
+export function parseTelegramAdminCommand(
+  message: string,
+): { action: "approvals" | "approve" | "deny"; requestId?: string } | null {
+  const match = message
+    .trim()
+    .match(
+      /^\/(?:miki\s+)?(approvals?|approve|deny)(?:\s+([A-Fa-f0-9-]{16,128}))?\s*$/i,
+    );
+  if (!match) return null;
+  const action = match[1].toLowerCase();
+  if (action === "approval" || action === "approvals")
+    return { action: "approvals" };
+  if (!match[2]) return null;
+  return { action: action as "approve" | "deny", requestId: match[2] };
 }
 
 export class TelegramBot {
@@ -247,10 +286,12 @@ export class TelegramBot {
 
     this.bot.on("text", async (ctx) => {
       const config = this.runtimeConfig;
-      if (!config || !shouldHandleTelegramMessage(ctx, config)) return;
+      if (!config) return;
 
       const message = extractTelegramText(ctx.message);
       if (!message) return;
+      if (await this.handleAdminCommand(ctx, config, message)) return;
+      if (!shouldHandleTelegramMessage(ctx, config)) return;
 
       try {
         if (config.typing) {
@@ -259,103 +300,181 @@ export class TelegramBot {
         const placeholder = config.placeholder.enabled
           ? await ctx.reply(config.placeholder.text)
           : null;
-        let response = "";
-        if (config.streaming.enabled && placeholder) {
-          let lastEdit = 0;
-          let lastLength = 0;
-          await streamAgentResponse(
-            this.orchestrator,
-            resolveChannelSessionId(
-              this.orchestrator.config,
-              "telegram",
-              toStringId(ctx.from?.id),
-              toStringId(ctx.chat.id),
-            ),
-            message,
-            async (delta) => {
-              response += delta;
-              const now = Date.now();
-              if (
-                response.length - lastLength <
-                  config.streaming.minGrowthChars &&
-                now - lastEdit < config.streaming.throttleMs
-              ) {
-                return;
+        await runWithCallContext(
+          {
+            origin: "remote",
+            source: "telegram",
+            actor: `telegram:${toStringId(ctx.from?.id) || "unknown"}`,
+          },
+          async () => {
+            let response = "";
+            if (config.streaming.enabled && placeholder) {
+              let lastEdit = 0;
+              let lastLength = 0;
+              await streamAgentResponse(
+                this.orchestrator,
+                resolveChannelSessionId(
+                  this.orchestrator.config,
+                  "telegram",
+                  toStringId(ctx.from?.id),
+                  toStringId(ctx.chat.id),
+                ),
+                message,
+                async (delta) => {
+                  response += delta;
+                  const now = Date.now();
+                  if (
+                    response.length - lastLength <
+                      config.streaming.minGrowthChars &&
+                    now - lastEdit < config.streaming.throttleMs
+                  ) {
+                    return;
+                  }
+                  lastEdit = now;
+                  lastLength = response.length;
+                  try {
+                    await ctx.telegram.editMessageText(
+                      ctx.chat.id,
+                      placeholder.message_id,
+                      undefined,
+                      response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+                    );
+                  } catch {
+                    // Telegram may reject an edit when the text is unchanged.
+                  }
+                },
+              ).then((full) => {
+                response = full;
+              });
+              if (response) {
+                try {
+                  await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    placeholder.message_id,
+                    undefined,
+                    response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+                  );
+                } catch {
+                  await ctx.reply(response);
+                }
+                for (const part of splitOutboundMessageForOrchestrator(
+                  this.orchestrator,
+                  response.slice(TELEGRAM_MESSAGE_LIMIT),
+                  TELEGRAM_MESSAGE_LIMIT,
+                )) {
+                  if (part) await ctx.reply(part);
+                }
               }
-              lastEdit = now;
-              lastLength = response.length;
-              try {
-                await ctx.telegram.editMessageText(
-                  ctx.chat.id,
-                  placeholder.message_id,
-                  undefined,
-                  response.slice(0, TELEGRAM_MESSAGE_LIMIT),
-                );
-              } catch {
-                // Telegram may reject an edit when the text is unchanged.
+            } else {
+              response = await collectAgentResponse(
+                this.orchestrator,
+                resolveChannelSessionId(
+                  this.orchestrator.config,
+                  "telegram",
+                  toStringId(ctx.from?.id),
+                  toStringId(ctx.chat.id),
+                ),
+                message,
+              );
+              if (placeholder) {
+                try {
+                  await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    placeholder.message_id,
+                    undefined,
+                    response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+                  );
+                  response = response.slice(TELEGRAM_MESSAGE_LIMIT);
+                } catch {
+                  // Fall through to normal replies if the placeholder cannot be edited.
+                }
               }
-            },
-          ).then((full) => {
-            response = full;
-          });
-          if (response) {
-            try {
-              await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                placeholder.message_id,
-                undefined,
-                response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+              const parts = splitOutboundMessageForOrchestrator(
+                this.orchestrator,
+                response,
+                TELEGRAM_MESSAGE_LIMIT,
               );
-            } catch {
-              await ctx.reply(response);
+              for (const part of parts) {
+                if (part) await ctx.reply(part);
+              }
             }
-            for (const part of splitOutboundMessageForOrchestrator(
-              this.orchestrator,
-              response.slice(TELEGRAM_MESSAGE_LIMIT),
-              TELEGRAM_MESSAGE_LIMIT,
-            )) {
-              if (part) await ctx.reply(part);
-            }
-          }
-        } else {
-          response = await collectAgentResponse(
-            this.orchestrator,
-            resolveChannelSessionId(
-              this.orchestrator.config,
-              "telegram",
-              toStringId(ctx.from?.id),
-              toStringId(ctx.chat.id),
-            ),
-            message,
-          );
-          if (placeholder) {
-            try {
-              await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                placeholder.message_id,
-                undefined,
-                response.slice(0, TELEGRAM_MESSAGE_LIMIT),
-              );
-              response = response.slice(TELEGRAM_MESSAGE_LIMIT);
-            } catch {
-              // Fall through to normal replies if the placeholder cannot be edited.
-            }
-          }
-          const parts = splitOutboundMessageForOrchestrator(
-            this.orchestrator,
-            response,
-            TELEGRAM_MESSAGE_LIMIT,
-          );
-          for (const part of parts) {
-            if (part) await ctx.reply(part);
-          }
-        }
+          },
+        );
       } catch (err: unknown) {
         await ctx.reply(
           `Error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     });
+  }
+
+  private async handleAdminCommand(
+    ctx: TelegramContext,
+    config: TelegramRuntimeConfig,
+    message: string,
+  ): Promise<boolean> {
+    const command = parseTelegramAdminCommand(message);
+    if (!command) return false;
+    if (!isTelegramAdmin(ctx, config)) {
+      await ctx.reply(
+        "This Telegram identity is not authorized for Agent administration.",
+      );
+      return true;
+    }
+    const inbox = this.orchestrator.tools.approvalInbox;
+    if (!inbox) {
+      await ctx.reply("The Agent approval service is not initialized.");
+      return true;
+    }
+    const actor = `telegram:${toStringId(ctx.from?.id) || "unknown"}`;
+    try {
+      await runWithCallContext(
+        { origin: "remote", source: "telegram", actor },
+        async () => {
+          if (command.action === "approvals") {
+            const pending = inbox.list({ status: "pending" });
+            if (pending.length === 0) {
+              await ctx.reply("No pending Agent approval requests.");
+              return;
+            }
+            const lines = pending
+              .slice(0, 20)
+              .map(
+                (request) =>
+                  `${request.id}\n${request.action} | ${request.resource} | ${request.risk}\n${request.reason}\nExpires: ${request.expiresAt}`,
+              );
+            await ctx.reply(
+              `Pending approvals (max 20):\n\n${lines.join("\n\n")}`.slice(
+                0,
+                TELEGRAM_MESSAGE_LIMIT,
+              ),
+            );
+            return;
+          }
+          const requestId = command.requestId!;
+          const decided =
+            command.action === "approve"
+              ? inbox.approveByOperator(
+                  requestId,
+                  actor,
+                  "approved by Telegram allow-listed owner",
+                )
+              : inbox.denyByOperator(
+                  requestId,
+                  actor,
+                  "denied by Telegram allow-listed owner",
+                );
+          await ctx.reply(
+            `${command.action === "approve" ? "Approved" : "Denied"}: ${decided.id}`,
+          );
+        },
+      );
+    } catch (err: unknown) {
+      await ctx.reply(
+        `Approval command failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return true;
   }
 
   private connect(): void {

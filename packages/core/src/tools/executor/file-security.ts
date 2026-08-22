@@ -3,6 +3,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { getErrorMessage } from "../../errors.js";
 import { getMemory } from "../../memory/memory-bridge.js";
+import { getCallOrigin } from "./call-context.js";
 
 // Log a file tool event to long-term memory — fully defensive, never throws.
 function logFileEvent(
@@ -28,6 +29,7 @@ interface PermissionConfig {
   level?: string;
   workspace_only?: boolean;
   allow_absolute_paths?: boolean;
+  allow_remote?: boolean;
   max_file_size_mb?: number;
   allow_system_paths?: boolean;
 }
@@ -133,8 +135,16 @@ export class FileSecurityExecutor {
     if (config.disabled_tools?.includes(toolName)) {
       return `${toolName} is disabled by config/tools.yaml.`;
     }
-    if (this.isDisabled(config.permissions?.[toolName]?.level)) {
+    const permission = config.permissions?.[toolName] || {};
+    if (this.isDisabled(permission.level)) {
       return `${toolName} is disabled by config/tools.yaml.`;
+    }
+    if (
+      getCallOrigin() === "remote" &&
+      toolName !== "file_read" &&
+      permission.allow_remote !== true
+    ) {
+      return `${toolName} is blocked for remote callers; set permissions.${toolName}.allow_remote=true to allow it.`;
     }
     return true;
   }

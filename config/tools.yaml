@@ -1,6 +1,7 @@
 permissions:
   shell_execute:
     level: TRUSTED_FULL_ACCESS
+    allow_remote: false
     workspace_only: false
     allow_system_paths: true
     max_timeout_seconds: 300
@@ -12,10 +13,12 @@ permissions:
     max_file_size_mb: 100
   file_write:
     level: TRUSTED_FULL_ACCESS
+    allow_remote: false
     workspace_only: false
     allow_absolute_paths: true
   file_delete:
     level: TRUSTED_FULL_ACCESS
+    allow_remote: false
     workspace_only: false
     allow_absolute_paths: true
   computer_use:
@@ -46,7 +49,7 @@ runtime:
     exec_timeout_minutes: 5
   exec:
     enabled: true
-    allow_remote: true
+    allow_remote: false
     enable_deny_patterns: false
     custom_allow_patterns: []
     custom_deny_patterns: []

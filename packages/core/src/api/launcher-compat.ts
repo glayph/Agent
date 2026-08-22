@@ -295,6 +295,20 @@ type LauncherSkillMetadata = SkillMetadata & {
   installed_at?: string;
 };
 
+export interface LauncherAdminController {
+  getConfig(): Record<string, unknown>;
+  validateConfig(candidate: Record<string, unknown>): Record<string, unknown>;
+  validatePatch(patch: Record<string, unknown>): Record<string, unknown>;
+  applyPatch(
+    patch: Record<string, unknown>,
+    reason?: string,
+  ): Promise<Record<string, unknown>>;
+  setToolState(
+    name: string,
+    enabled: boolean,
+  ): Promise<Record<string, unknown>>;
+}
+
 interface LauncherCompatOptions {
   orchestrator: AgentOrchestrator;
   skillLoader: SkillLoader;
@@ -303,6 +317,7 @@ interface LauncherCompatOptions {
   runtimePaths: RuntimePaths;
   reloadRuntime?: (request?: RuntimeReloadRequest) => Promise<void> | void;
   registerRuntimeAuth?: (runtimeAuth: LauncherRuntimeAuthBridge) => void;
+  registerAdminController?: (controller: LauncherAdminController) => void;
 }
 
 export interface LauncherRuntimeAuthBridge {
@@ -3353,6 +3368,7 @@ export function createLauncherCompatRouter({
   runtimePaths,
   reloadRuntime,
   registerRuntimeAuth,
+  registerAdminController,
 }: LauncherCompatOptions): Router {
   const paths = runtimePaths;
   const workspaceDir = _workspaceDir ?? paths.sourceDir ?? paths.configDir;
@@ -4303,6 +4319,65 @@ export function createLauncherCompatRouter({
     };
   };
 
+  const adminController: LauncherAdminController = {
+    getConfig: () =>
+      stripChannelAliases(clone(state.config || defaultAppConfig(paths))),
+    validateConfig: (candidate) => {
+      const { validation } = validateWorkspaceConfig(
+        stripChannelAliases(candidate),
+      );
+      return configValidationSummary(validation);
+    },
+    validatePatch: (patch) => {
+      const candidate = mergePatch(
+        state.config || defaultAppConfig(paths),
+        patch,
+      );
+      const { validation } = validateWorkspaceConfig(
+        stripChannelAliases(candidate),
+      );
+      return configValidationSummary(validation);
+    },
+    applyPatch: async (patch, reason = "agent.admin.config") => {
+      const candidate = mergePatch(
+        state.config || defaultAppConfig(paths),
+        patch,
+      );
+      const { validation } = validateWorkspaceConfig(
+        stripChannelAliases(candidate),
+      );
+      if (!validation.valid) {
+        throw new ConfigValidationError(validation);
+      }
+      const committed = commitConfig(candidate);
+      const apply = await applyRuntimeChanges({
+        channelsChanged: committed.channelsChanged,
+        reason,
+      });
+      return {
+        status: "ok",
+        validation: configValidationSummary(committed.validation),
+        gateway_restart_required: apply.gateway_restart_required,
+        runtime_apply_status: apply.status,
+        runtime_apply_error: apply.error,
+      };
+    },
+    setToolState: async (name, enabled) => {
+      const currentConfig = state.config || defaultAppConfig(paths);
+      const currentTools = recordOrEmpty(currentConfig.tools);
+      const currentToolState = recordOrEmpty(currentTools.tool_state);
+      return adminController.applyPatch(
+        {
+          tools: {
+            ...currentTools,
+            tool_state: { ...currentToolState, [name]: enabled },
+          },
+        },
+        "agent.admin.tool_state",
+      );
+    },
+  };
+  registerAdminController?.(adminController);
   saveState();
 
   const router = Router();

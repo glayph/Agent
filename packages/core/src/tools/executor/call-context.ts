@@ -18,35 +18,43 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * automatically, agent.ts included, with zero changes to any function
  * signature in between.
  *
- * Coverage: currently set by the direct tool-call route
- * (POST /tools/:name/call) and the chat routes (POST /chat, POST
- * /api/chat) in packages/core/src/api/index.ts, using the request's real
- * client IP (see isLoopbackAddress in @miki/config/security) to decide
- * local vs. remote. NOT yet set for MCP-driven tool calls (the MCP session
- * manager's executeTool callback has no per-call request context available
- * without deeper changes to that subsystem) or for channel-driven calls
- * (Discord/Telegram/etc. invoke the orchestrator in-process, not through
- * an HTTP route). getCallOrigin() returns undefined in those cases;
- * callers should treat that as "local" (fail-open, preserving existing
- * behavior for paths this fix does not yet cover) rather than silently
- * blocking execution for code paths that were never audited for this.
+ * Coverage: HTTP tool/chat routes, Telegram turns, and MCP tool execution now
+ * establish a caller context. HTTP routes classify local vs. remote using the
+ * request's real client IP (see isLoopbackAddress in @miki/config/security),
+ * while Telegram and MCP are explicitly remote because they arrive through an
+ * external channel/session. Other in-process channels still have no caller
+ * context and therefore retain the legacy undefined-origin behavior until they
+ * are audited and wrapped.
  */
 
 export type CallOrigin = "local" | "remote";
+export type CallSource = "web_ui" | "telegram" | "mcp" | "local_cli" | "system";
 
-interface CallContext {
+export interface CallContext {
   origin: CallOrigin;
+  source?: CallSource;
+  actor?: string;
+  requestId?: string;
 }
 
 const callContextStorage = new AsyncLocalStorage<CallContext>();
 
 export function runWithCallOrigin<T>(origin: CallOrigin, fn: () => T): T {
-  return callContextStorage.run({ origin }, fn);
+  return runWithCallContext({ origin }, fn);
 }
 
-/** Returns the origin set by the nearest enclosing runWithCallOrigin call,
+export function runWithCallContext<T>(context: CallContext, fn: () => T): T {
+  return callContextStorage.run(context, fn);
+}
+
+/** Returns the full caller context, if one was established by the enclosing request. */
+export function getCallContext(): CallContext | undefined {
+  return callContextStorage.getStore();
+}
+
+/** Returns the origin set by the nearest enclosing call context,
  * or undefined if no request handler in the current call chain has set one
  * (see "Coverage" above). */
 export function getCallOrigin(): CallOrigin | undefined {
-  return callContextStorage.getStore()?.origin;
+  return getCallContext()?.origin;
 }

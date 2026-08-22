@@ -10,6 +10,9 @@ import type { CrawlerAgent } from "../crawler.js";
 import type { ShellExecutor } from "../executor/shell.js";
 import type { FileSecurityExecutor } from "../executor/file-security.js";
 import type { RuntimeFetcher } from "../../runtime-fetch/index.js";
+import type { RuntimePaths } from "../../paths.js";
+import type { ApprovalInbox } from "../../security/approval-inbox.js";
+import type { LauncherAdminController } from "../../api/launcher-compat.js";
 import type {
   CompleteConnectionInput,
   PlatformProvider,
@@ -20,8 +23,11 @@ export type ToolHandler = (
   args: Record<string, unknown>,
 ) => string | Promise<string>;
 
-interface ToolHandlerContext {
+export interface ToolHandlerContext {
   workspaceDir: string;
+  runtimePaths: RuntimePaths;
+  approvalInbox?: ApprovalInbox;
+  adminController?: LauncherAdminController;
   executor: ShellExecutor;
   fileOps: FileSecurityExecutor;
   browser: BrowserTool;

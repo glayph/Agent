@@ -25,6 +25,7 @@ import {
   isLoopbackAddress,
 } from "@miki/config/security";
 import {
+  runWithCallContext,
   runWithCallOrigin,
   type CallOrigin,
 } from "../tools/executor/call-context.js";
@@ -312,6 +313,8 @@ const approvalInbox = new ApprovalInbox(
   { audit: permissionAuditLog },
 );
 const orchestrator = new AgentOrchestrator(runtimePaths);
+// Agent-callable side effects use the same persisted approval inbox as the dashboard.
+orchestrator.tools.setApprovalInbox(approvalInbox);
 const persistentJobQueue = new PersistentJobQueue(
   path.join(runtimePaths.dataDir, "runtime-jobs.json"),
 );
@@ -463,6 +466,9 @@ const launcherCompatRouter = createLauncherCompatRouter({
   workspaceDir,
   registerRuntimeAuth: (runtimeAuth) => {
     launcherRuntimeAuth = runtimeAuth;
+  },
+  registerAdminController: (controller) => {
+    orchestrator.tools.setAdminController(controller);
   },
   reloadRuntime: async ({ channelsChanged = [] } = {}) => {
     await orchestrator.reloadConfig();
@@ -3273,7 +3279,14 @@ if (enableMcp) {
     });
     mcpClose = mountMcpSessionManager(app, {
       executeTool: (name: string, args: Record<string, unknown>) =>
-        orchestrator.tools.executeToolStructured(name, args),
+        runWithCallContext(
+          {
+            origin: "remote",
+            source: "mcp",
+            actor: "mcp-session",
+          },
+          () => orchestrator.tools.executeToolStructured(name, args),
+        ),
       workspaceDir,
     });
     console.log(`MCP in-process ready at /mcp with API key auth`);

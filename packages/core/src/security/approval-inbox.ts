@@ -323,6 +323,34 @@ export class ApprovalInbox {
     return publicRequest(record);
   }
 
+  /**
+   * Assert an operator-approved request using its immutable delivery context.
+   * This is intentionally tokenless: the request id is not sufficient by
+   * itself; the caller must reproduce the bound context and actor before the
+   * one-time consume operation can proceed.
+   */
+  assertApprovedByContext(
+    requestId: string,
+    context: ApprovalConsumeContext,
+    actor?: string,
+    nowMs = Date.now(),
+  ): ApprovalRequest {
+    const record = this.requests.get(requiredText(requestId, "requestId"));
+    if (!record) throw new Error("Approval request not found");
+    this.expireIfNeeded(record, nowMs);
+    if (record.status !== "approved") {
+      throw new Error("Approved request required before side effect");
+    }
+    if (record.consumedAt) {
+      throw new Error("Approval request has already been consumed");
+    }
+    if (actor && record.actor !== requiredText(actor, "actor")) {
+      throw new Error("Approval actor does not match caller");
+    }
+    assertContextMatches(record, context);
+    return publicRequest(record);
+  }
+
   close(): void {
     this.requests.clear();
   }

@@ -363,6 +363,54 @@ Start Agent Miki, open the local URL, and complete the dashboard setup. Then use
 
 A fresh installation may correctly show empty states for installed Skills, Agent Runs, Automations, and local workspace files. Empty state is not itself a failure unless an action that should create data fails.
 
+## Agent-driven skills, MCP, and remote administration
+
+Agent Miki exposes a dedicated tool layer for controlled self-extension and administration. These operations are not equivalent to unrestricted shell access: each operation is validated, recorded, and subject to the caller’s origin and permission policy.[6]
+
+| Tool | Function | Remote behavior |
+|---|---|---|
+| `skill_search` | Searches the online `skills.sh` registry and returns candidate metadata. | Read-only; it does not install anything. |
+| `skill_create` | Creates an Agent-authored skill package with `SKILL.md`, metadata, and an entrypoint under the isolated downloaded-skills area. | High-risk; an authenticated owner must approve the persistent request before the write. |
+| `skill_install` | Installs a manifest-validated skill/plugin from `npm:`, `git:`, `clawhub:`, or a local directory. | High-risk; third-party acquisition is never silently activated and requires owner approval for remote callers. |
+| `admin_config_get` | Reads sanitized runtime configuration. | Read-only; secrets are not returned as raw values. |
+| `admin_config_patch` | Applies a validated partial patch and reloads the runtime. | High-risk; remote patches are restricted to `tools.mcp` and `tools.tool_state`, then require owner approval. |
+| `admin_tool_state` | Enables or disables one named Agent tool. | High-risk; remote callers require owner approval and one-time consumption. |
+
+The safe approval sequence is deterministic. A remote Agent or MCP/Telegram turn first returns an `approval_required` response containing a request id and a human-readable preview. The owner reviews and approves the request in the authenticated Web UI approval surface, or uses the allow-listed Telegram command described below. The original operation is then retried with the same arguments and the approved request id. The implementation does not return or accept a raw approval token in chat, binds the request to the original actor and preview hash, and consumes it once.[7]
+
+### Telegram administration configuration
+
+Ordinary Telegram chat and administration are separate. Configure the channel token and normal message allow-list as usual, then add an explicit `admin_allow_from` list for the people permitted to view or decide approval requests. Do not rely on the ordinary `allow_from` list for administration when it includes general chat users.
+
+A minimal configuration shape is:
+
+```yaml
+channels:
+  telegram:
+    enabled: true
+    settings:
+      allow_from:
+        - "<approved-chat-or-user-id>"
+      admin_allow_from:
+        - "<owner-user-id>"
+```
+
+With a valid bot token and an allow-listed owner identity, the supported deterministic commands are:
+
+```text
+/miki approvals
+/miki approve <request-id>
+/miki deny <request-id>
+```
+
+Only these commands perform approval-inbox administration. Ordinary text continues through the Agent orchestrator, while unsupported slash commands and unauthorized admin commands do not become privileged actions. A live bot test still requires a real token and a deliberately approved test identity.[8]
+
+### MCP administration boundary
+
+Enable MCP and its discovery methods through the configuration or Web UI. MCP sessions are authenticated with the configured API key, and MCP tool calls are classified as remote for permission decisions.[9] Agent-driven remote configuration may only change `tools.mcp` and `tools.tool_state`. For MCP server definitions, the remote administration path permits HTTP/SSE-style transports with HTTPS URLs, or loopback HTTP for local development; it rejects stdio command fields, unsafe URLs, raw credentials, prototype-pollution keys, and unsupported fields. Configure sensitive header values through the credential vault’s `secret_ref` mechanism rather than by pasting a key into chat.[10]
+
+External MCP servers and third-party skills are untrusted inputs. Search and inspect first, approve only the exact request you intend to execute, keep permissions minimal, and use the Web UI or local configuration for credential entry. The repository’s baseline verification does not execute an external MCP server or install an untrusted online package.
+
 ## 9. Node.js commands and runtime operations
 
 | Command | Purpose |
@@ -592,3 +640,13 @@ A clean installation is ready when all of the following are true:
 [4]: https://git-scm.com/downloads "Git official downloads"
 
 [5]: https://github.com/ggml-org/llama.cpp "llama.cpp official repository"
+
+[6]: packages/core/src/tools/registry/executor.ts "Agent tool registration and execution surface"
+
+[7]: packages/core/src/security/approval-inbox.ts "Persistent owner approval and one-time context-bound consumption"
+
+[8]: packages/core/src/channels/telegram.ts "Telegram configuration, allow-lists, and deterministic admin commands"
+
+[9]: packages/core/src/mcp/server.ts "Authenticated MCP session and tool execution"
+
+[10]: packages/core/src/tools/registry/admin-control-handlers.ts "Restricted remote administration patch policy"

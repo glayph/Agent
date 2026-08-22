@@ -1168,6 +1168,187 @@ export class ToolRegistrySchemas {
     ];
   }
 
+  static skillSchemas(): ToolDefinition[] {
+    return [
+      {
+        type: "function",
+        function: {
+          name: "skill_search",
+          description:
+            "Search the online skills registry and return available skill/plugin candidates. This is read-only and does not install anything.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Registry search query." },
+            },
+            required: ["query"],
+          },
+        },
+      },
+      {
+        type: "function",
+        risk: {
+          level: "high",
+          label: "Create Agent skill",
+          reason:
+            "Writes a validated Agent-authored skill package into the isolated downloaded-skills registry. Remote callers require one-time owner approval.",
+        },
+        function: {
+          name: "skill_create",
+          description:
+            "Create and register an Agent-authored skill package from a name, description, tags, and Markdown instructions. Remote calls return a short-lived approval request before writing; the authenticated owner must approve it, then the same call can be retried with the approved request ID.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Safe skill name." },
+              description: { type: "string", description: "Skill summary." },
+              instructions: {
+                type: "string",
+                description: "Markdown instructions for the new skill.",
+              },
+              tags: {
+                type: "array",
+                items: { type: "string" },
+                description: "Optional searchable tags.",
+              },
+              approval_request_id: {
+                type: "string",
+                description:
+                  "Owner-approved request ID returned by a prior call.",
+              },
+            },
+            required: ["name", "description", "instructions"],
+          },
+        },
+      },
+      {
+        type: "function",
+        risk: {
+          level: "high",
+          label: "Install third-party skill",
+          reason:
+            "Downloads and registers third-party code/assets. Remote callers require one-time owner approval.",
+        },
+        function: {
+          name: "skill_install",
+          description:
+            "Install a skill/plugin from a validated source spec such as npm:, git:, or clawhub:. Remote calls return an approval request first; the authenticated owner must approve it, then the same call can be retried with the approved request ID.",
+          parameters: {
+            type: "object",
+            properties: {
+              spec: {
+                type: "string",
+                description: "Skill source specification.",
+              },
+              force: {
+                type: "boolean",
+                description:
+                  "Update an existing version only when explicitly requested.",
+              },
+              approval_request_id: {
+                type: "string",
+                description:
+                  "Owner-approved request ID returned by a prior call.",
+              },
+            },
+            required: ["spec"],
+          },
+        },
+      },
+    ];
+  }
+
+  static adminSchemas(): ToolDefinition[] {
+    return [
+      {
+        type: "function",
+        function: {
+          name: "admin_config_get",
+          description:
+            "Read the sanitized current Agent configuration. Secrets are replaced by vault references or redacted values.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "admin_config_validate",
+          description:
+            "Validate a restricted tools.mcp or tools.tool_state patch without applying it. Raw credentials are rejected.",
+          parameters: {
+            type: "object",
+            properties: {
+              patch: {
+                type: "object",
+                description: "Restricted configuration patch to validate.",
+              },
+            },
+            required: ["patch"],
+          },
+        },
+      },
+      {
+        type: "function",
+        risk: {
+          level: "high",
+          label: "Apply Agent configuration",
+          reason:
+            "Changes validated runtime settings. Remote callers require one-time owner approval.",
+        },
+        function: {
+          name: "admin_config_patch",
+          description:
+            "Apply a validated partial configuration patch and reload the Agent runtime. Remote calls return an approval request before applying; the authenticated owner must approve it, then the same call can be retried with the approved request ID.",
+          parameters: {
+            type: "object",
+            properties: {
+              patch: {
+                type: "object",
+                description: "Validated configuration patch.",
+              },
+              approval_request_id: {
+                type: "string",
+                description:
+                  "Owner-approved request ID returned by a prior call.",
+              },
+            },
+            required: ["patch"],
+          },
+        },
+      },
+      {
+        type: "function",
+        risk: {
+          level: "high",
+          label: "Change tool state",
+          reason:
+            "Enables or disables an Agent tool. Remote callers require one-time owner approval.",
+        },
+        function: {
+          name: "admin_tool_state",
+          description:
+            "Enable or disable one named Agent tool through the validated runtime configuration. Remote calls require owner approval.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Tool name." },
+              enabled: {
+                type: "boolean",
+                description: "Whether the tool should be enabled.",
+              },
+              approval_request_id: {
+                type: "string",
+                description:
+                  "Owner-approved request ID returned by a prior call.",
+              },
+            },
+            required: ["name", "enabled"],
+          },
+        },
+      },
+    ];
+  }
+
   static goalSchemas(): ToolDefinition[] {
     return [
       {

@@ -67,6 +67,19 @@ import { getErrorMessage } from "../../errors.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "../../paths.js";
 import { RuntimeFetcher } from "../../runtime-fetch/index.js";
 import type { SqlitePlatformConnectionStore } from "../../platform-connections.js";
+import type { ApprovalInbox } from "../../security/approval-inbox.js";
+import type { LauncherAdminController } from "../../api/launcher-compat.js";
+import {
+  handleSkillSearch,
+  handleSkillCreate,
+  handleSkillInstall,
+} from "./admin-skill-handlers.js";
+import {
+  handleAdminConfigGet,
+  handleAdminConfigValidate,
+  handleAdminConfigPatch,
+  handleAdminToolState,
+} from "./admin-control-handlers.js";
 
 export interface ToolResult {
   success: boolean;
@@ -153,6 +166,8 @@ export class ToolRegistry {
   public orchestrator: AgentOrchestrator | null = null;
   public runtimeFetcher: RuntimeFetcher | null = null;
   public platformConnectionStore: SqlitePlatformConnectionStore | null = null;
+  public approvalInbox: ApprovalInbox | undefined;
+  public adminController: LauncherAdminController | undefined;
   private handlers: Map<string, ToolHandler> = new Map();
   private skillToolDefs: Map<string, ToolDefinition> = new Map();
   private pluginToolDefs: Map<string, ToolDefinition> = new Map();
@@ -238,6 +253,14 @@ export class ToolRegistry {
 
   setPlatformConnectionStore(store: SqlitePlatformConnectionStore): void {
     this.platformConnectionStore = store;
+  }
+
+  setApprovalInbox(inbox: ApprovalInbox): void {
+    this.approvalInbox = inbox;
+  }
+
+  setAdminController(controller: LauncherAdminController): void {
+    this.adminController = controller;
   }
 
   registerHandler(name: string, handler: ToolHandler): void {
@@ -455,6 +478,19 @@ export class ToolRegistry {
       "runtime_ensure_status",
       handleRuntimeEnsureStatus.bind(this),
     );
+    this.registerHandler("skill_search", handleSkillSearch.bind(this));
+    this.registerHandler("skill_create", handleSkillCreate.bind(this));
+    this.registerHandler("skill_install", handleSkillInstall.bind(this));
+    this.registerHandler("admin_config_get", handleAdminConfigGet.bind(this));
+    this.registerHandler(
+      "admin_config_validate",
+      handleAdminConfigValidate.bind(this),
+    );
+    this.registerHandler(
+      "admin_config_patch",
+      handleAdminConfigPatch.bind(this),
+    );
+    this.registerHandler("admin_tool_state", handleAdminToolState.bind(this));
   }
 
   getToolDefinitions(): ToolDefinition[] {
@@ -470,6 +506,8 @@ export class ToolRegistry {
       ...ToolRegistrySchemas.webSearchSchema(),
       ...ToolRegistrySchemas.projectWorkflowSchemas(),
       ...ToolRegistrySchemas.runtimeSchema(),
+      ...ToolRegistrySchemas.skillSchemas(),
+      ...ToolRegistrySchemas.adminSchemas(),
     ];
     const skillTools = Array.from(this.skillToolDefs.values());
     const pluginTools = Array.from(this.pluginToolDefs.values());

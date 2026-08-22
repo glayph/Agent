@@ -37,36 +37,34 @@ After startup, open the local dashboard address printed by the launcher. The ver
 
 ### Online discovery and installation
 
-The implementation exposes skill search, marketplace installation, manual Markdown/ZIP import, installed-skill metadata, readiness reporting, and workspace-skill deletion routes.[3] A live authenticated search for `github` returned 5 `skills.sh` results, all marked `installed: false`. This verifies online discovery, not that an online skill was installed.
+The implementation exposes skill search, validated installation from `npm:`, `git:`, `clawhub:`, or local specifications, manual Markdown/ZIP import, installed-skill metadata, readiness reporting, and workspace-skill deletion routes.[3] A live authenticated search for `github` returned 5 `skills.sh` results, all marked `installed: false`. This verifies online discovery; an untrusted third-party package was deliberately not installed in the audit.
 
-Marketplace installation is implemented through an external skills CLI and then copies the result into the workspace while recording marketplace metadata.[3] Because this acquires third-party code, no online skill was installed during the audit. Manual import accepts a Markdown file or a ZIP containing `SKILL.md`, rejects oversized files and unsafe archive paths, and stores imported content in an isolated downloaded-skills area.[3]
+The Agent tool surface now includes `skill_search`, `skill_create`, and `skill_install`. `skill_create` was verified through the ToolRegistry in a disposable workspace: it created `SKILL.md`, metadata, an entrypoint, and a registry record. Remote skill creation and installation first create a persistent high-risk approval request and perform no write until an authenticated owner approves it. The retry uses only the approved request ID, is bound to the original caller and canonical preview hash, and is consumed once. The installer validates the downloaded manifest and refreshes runtime plugin tools; it does not silently activate arbitrary unvalidated code.[3]
 
-### Plugin creation boundary
-
-No dedicated plugin-authoring or plugin-generator route was found in the inspected core/launcher source. The existing implementation can **discover, install, import, load, and audit** skills/plugins, but a natural-language plugin creator is **not verified and is not advertised as a built-in feature**. Generic file-writing tools must not be confused with a supported plugin-authoring workflow.
+Manual import accepts a Markdown file or a ZIP containing `SKILL.md`, rejects oversized files and unsafe archive paths, and stores imported content in an isolated downloaded-skills area.[3] Online installation remains intentionally unverified in this repository test because it would execute the acquisition of third-party code; use an authenticated owner approval after inspecting the request and source.
 
 ## MCP
 
 MCP is implemented as an authenticated in-process server with tools, resources, prompts, discovery, session handling, and external connector configuration.[4] The MCP configuration schema supports stdio and HTTP/SSE servers, discovery TTL and result limits, BM25/regex search, and validation rules. Enabled stdio servers require a command; HTTP/SSE servers require a valid HTTP(S) URL without embedded credentials; discovery requires at least one search method; and unsafe environment keys such as `NODE_OPTIONS` are rejected.[5]
 
-An authenticated disposable MCP session was verified after the internal core-client authentication path was corrected. The session completed initialize with HTTP 200, `notifications/initialized` with HTTP 202, `tools/list` with HTTP 200 and 47 tools, `resources/list` with HTTP 200, and `prompts/list` with HTTP 200. A read-only `tool_search_tool_bm25` call returned a health-related tool match. No external MCP server was configured or executed in this audit.
+An authenticated disposable MCP session was verified after the internal core-client authentication path was corrected. The session completed initialize with HTTP 200, `notifications/initialized` with HTTP 202, `tools/list` with HTTP 200, `resources/list` with HTTP 200, and `prompts/list` with HTTP 200. A read-only `tool_search_tool_bm25` call returned a health-related tool match. MCP tool execution now establishes an explicit remote call context, so remote shell/file mutation guards and approval-gated admin/skill handlers do not treat MCP as local. The new admin tools can read sanitized configuration and request owner-approved changes to tool state or the restricted HTTP/SSE MCP configuration paths.
 
-MCP therefore **can expose and discover Agent tools when explicitly enabled and authenticated**. The audit did not prove that an arbitrary remote MCP server is safe or that every MCP-triggered operation inherits the same remote-origin restrictions as an HTTP chat request. External MCP servers must be treated as untrusted code and configured only with validated, least-privilege settings.
+No external MCP server was configured or executed in this audit. External MCP servers remain untrusted and must be configured only with validated, least-privilege settings. Remote administration rejects stdio command fields, unsafe URLs, raw credentials, prototype keys, and unsupported configuration paths; owner approval is still required before applying an allowed mutation.
 
 ## Telegram, Web UI, and Remote Settings Control
 
-The Telegram adapter is implemented and routes accepted text messages into the normal Agent orchestrator. It supports typing indicators, optional placeholder messages, collected or streamed replies, reconnect behavior, and sender/chat allow-lists.[6] It requires an enabled Telegram channel and a valid bot token; bot messages and slash commands are ignored. A live Telegram delivery was not performed because no approved bot token and test identity were available.
+The Telegram adapter routes accepted ordinary text messages into the normal Agent orchestrator and supports typing indicators, optional placeholders, collected or streamed replies, reconnect behavior, and sender/chat allow-lists.[6] A separate explicit `admin_allow_from` list authorizes only the deterministic `/miki approvals`, `/miki approve <request-id>`, and `/miki deny <request-id>` commands. These commands operate on the persistent approval inbox and never expose approval tokens. Ordinary slash commands and unauthorized administration commands are not sent to the Agent as privileged operations. A live Telegram delivery was not performed because no approved bot token and test identity were available.
 
-The Web UI exposes authenticated settings and control APIs for configuration read/validate/update/reset, tool enable/disable, channel configuration/probes, runtime reload/restart, skills, models, memory, runs, automations, health, and logs.[3] This proves that those control surfaces exist; it does **not** prove that a free-form chat sentence can safely perform every corresponding mutation.
+The Web UI exposes authenticated settings and control APIs for configuration read/validate/update/reset, tool enable/disable, channel configuration/probes, runtime reload/restart, skills, models, memory, runs, automations, health, and logs.[3] The Agent tool surface additionally exposes sanitized `admin_config_get`, validated `admin_config_patch`, and approval-gated `admin_tool_state` operations. The Web UI approval endpoints are mounted behind the required API-key middleware; the code-level approval lifecycle was verified with an owner approval followed by one-time context-bound consumption. Free-form chat is not an unrestricted dashboard macro.
 
 | Request source | Verified control boundary |
 |---|---|
-| **Authenticated Web UI/API** | Can reach the implemented configuration and control surfaces, subject to validation, authentication, runtime-apply behavior, and tool permissions. |
-| **Telegram** | Can deliver accepted text to the Agent orchestrator when configured. Direct natural-language control of every setting was not verified. |
-| **Authenticated MCP** | Can list/call exposed tools and read exposed resources/prompts when MCP is enabled. External-server execution was not tested. |
-| **Remote shell or destructive actions** | Not unrestricted. Shell execution can be disabled, blocked for remote callers, filtered by allow/deny patterns, limited by timeout/output, and restricted to the active workspace.[7] |
+| **Authenticated Web UI/API** | Can reach the implemented configuration and control surfaces, subject to validation, authentication, runtime-apply behavior, and tool permissions. Owner approval requests can be approved without exposing worker tokens. |
+| **Telegram** | Ordinary allow-listed text reaches the Agent orchestrator; only an explicit `admin_allow_from` identity can list/approve/deny pending requests through deterministic commands. Live delivery remains untested. |
+| **Authenticated MCP** | Can list/call exposed tools and read exposed resources/prompts when MCP is enabled. MCP calls are explicitly remote for policy decisions; external-server execution was not tested. |
+| **Remote shell or destructive actions** | Not unrestricted. Shell execution and generic file writes/deletes default-deny for remote callers. Restricted skill/admin mutations require owner approval, validation, context binding, and one-time consumption.[7] [9] |
 
-The current code establishes local/remote call origin for HTTP chat and direct HTTP tool-call routes. The source explicitly notes that Telegram and MCP in-process calls do not yet establish that per-request origin context. Consequently, Agent Miki should **not** be described as able to control every setting or run unrestricted commands from Telegram or MCP.
+The current code establishes local/remote call origin for HTTP chat/tool routes, Telegram turns, and MCP tool execution. This does not make free-form remote chat an unrestricted control plane: only the dedicated validated administration tools are exposed for Agent-driven settings changes, and the restricted patch policy intentionally excludes arbitrary commands, credentials, factory reset, and destructive filesystem access.
 
 ## Inspector
 
@@ -86,15 +84,16 @@ The Inspector opens from **Inspect agent** on an assistant message. Its verified
 
 | Check | Result |
 |---|---|
-| Workspace tests | Passed. The frontend reported **13 test files and 52 tests passed**; memory integration/selective-memory tests also passed. |
-| Workspace builds | Config, installer, skills, memory, core, gateway, and frontend builds passed during the audit. |
-| Backend lint | Passed with `--max-warnings=0` for the documented backend scope. |
+| Focused capability tests | Passed: ToolRegistry skill/admin approval flows (5 tests), approval inbox including tokenless context binding (7 tests), and Telegram admin parsing/allow-list tests (2 tests). |
+| Workspace tests | The prior workspace suite passed for the frontend (**13 test files and 52 tests**) and memory integration/selective-memory tests. The current legacy core scan is not a clean baseline: it contains pre-existing Jest/global-harness incompatibilities and a test file with a stray `EOF`; the focused changed-surface suite passed 97/98, with the remaining failure in an unrelated legacy Jest-based launcher test. |
+| Workspace builds | Config, installer, skills, memory, core, gateway, and frontend production builds passed after the implementation changes. |
+| Backend lint | Passed with `--max-warnings=0` for the backend scope after formatting the implementation. |
 | Launcher doctor | Exit 0 with `WARN`: Node/npm, configuration, data, SQLite, secret vault, provider audit, and migrations were available; Go and native runtime artifacts were incomplete in the sandbox. |
 | 24/7 readiness | Passed with `ok: true` and a valid gateway entrypoint.[8] |
 | Gateway | `/health` returned HTTP 200. |
-| Skill discovery | Passed: 5 online `skills.sh` results returned; no online installation was performed. |
-| MCP | Passed after the internal authentication fix: initialize, tools/list, resources/list, prompts/list, and read-only discovery call all returned successful protocol responses. |
-| Telegram | Adapter support verified from source; live delivery not tested because no approved bot token/test identity was available. |
+| Skill discovery | Passed: 5 online `skills.sh` results returned; no untrusted online installation was performed. Local Agent-authored creation and remote approval/one-time consumption passed. |
+| MCP | Passed after the internal authentication fix: initialize, tools/list, resources/list, prompts/list, and read-only discovery call all returned successful protocol responses; remote-origin propagation is covered by the ToolRegistry path. |
+| Telegram | Deterministic admin parser and explicit `admin_allow_from` boundary passed unit tests; live delivery was not tested because no approved bot token/test identity was available. |
 | Provider response | Not passed in the available provider setup: Gemini returned a credential rejection/HTTP 401 in the previous live test. |
 | Full `npm run verify` | Not completed within the bounded test window; it reached the test phase before timing out. |
 
@@ -121,3 +120,5 @@ Keep API keys, Telegram bot tokens, MCP secrets, local databases, runtime logs, 
 [7]: packages/core/src/tools/executor/shell.ts "Shell execution permissions and remote/workspace guardrails"
 
 [8]: scripts/miki-24-7.mjs "24/7 runtime readiness check"
+
+[9]: packages/core/src/security/approval-inbox.ts "Persistent owner-approval lifecycle and context-bound one-time consumption"

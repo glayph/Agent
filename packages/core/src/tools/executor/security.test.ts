@@ -181,8 +181,8 @@ describe("runtime.exec.allow_remote enforcement (#94)", () => {
     );
     const executor = new ShellExecutor(configPath);
 
-    // No runWithCallOrigin wrapper at all -- simulates a call path (MCP,
-    // channel-origin) this fix does not yet establish an origin for.
+    // No runWithCallOrigin wrapper at all -- simulates an internal/local
+    // path that has not established an explicit caller origin.
     const result = await executor.runShell(
       process.platform === "win32" ? "cd" : "pwd",
       dir,
@@ -190,6 +190,36 @@ describe("runtime.exec.allow_remote enforcement (#94)", () => {
     );
 
     expect(result.exitCode).toBe(0);
+  });
+
+  it("blocks remote file mutations when allow_remote is false", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-file-remote-"));
+    const configPath = writeConfig(
+      dir,
+      [
+        "permissions:",
+        "  file_write:",
+        "    level: TRUSTED_FULL_ACCESS",
+        "    allow_remote: false",
+        "  file_delete:",
+        "    level: TRUSTED_FULL_ACCESS",
+        "    allow_remote: false",
+      ].join("\\n"),
+    );
+    const executor = new FileSecurityExecutor(configPath);
+    executor.setWorkspaceRoot(dir);
+    const target = path.join(dir, "remote.txt");
+
+    expect(
+      runWithCallOrigin("remote", () => executor.writeFile(target, "blocked")),
+    ).toContain("allow_remote");
+    expect(fs.existsSync(target)).toBe(false);
+
+    fs.writeFileSync(target, "keep", "utf8");
+    expect(
+      runWithCallOrigin("remote", () => executor.deleteFile(target)),
+    ).toContain("allow_remote");
+    expect(fs.existsSync(target)).toBe(true);
   });
 
   it("allows remote execution when allow_remote is true (default)", async () => {

@@ -117,6 +117,54 @@ describe("ApprovalInbox", () => {
     ).toThrow(/already been consumed/i);
   });
 
+  it("asserts an owner-approved request by actor and immutable context without a token", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "miki-approval-"));
+    const inbox = new ApprovalInbox(path.join(directory, "approvals.json"));
+    const challenge = inbox.request({
+      runId: "run-tokenless",
+      actor: "telegram:123",
+      action: "external_write",
+      resource: "agent-config",
+      risk: "high",
+      reason: "approved admin patch",
+      context: {
+        runId: "run-tokenless",
+        stepId: "admin-config",
+        deliveryId: "telegram:123",
+        previewHash: "preview-1",
+      },
+    });
+    inbox.approveByOperator(challenge.request.id, "dashboard-user");
+    const context = {
+      runId: "run-tokenless",
+      stepId: "admin-config",
+      deliveryId: "telegram:123",
+      previewHash: "preview-1",
+    };
+    expect(
+      inbox.assertApprovedByContext(
+        challenge.request.id,
+        context,
+        "telegram:123",
+      ).status,
+    ).toBe("approved");
+    expect(() =>
+      inbox.assertApprovedByContext(
+        challenge.request.id,
+        context,
+        "telegram:999",
+      ),
+    ).toThrow(/actor does not match/i);
+    expect(() =>
+      inbox.assertApprovedByContext(
+        challenge.request.id,
+        { ...context, previewHash: "different" },
+        "telegram:123",
+      ),
+    ).toThrow(/context mismatch/i);
+    inbox.consumeByContext(challenge.request.id, context, "telegram:123");
+  });
+
   it("allows an authenticated operator to decide without exposing the worker token", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "miki-approval-"));
     const inbox = new ApprovalInbox(path.join(directory, "approvals.json"));
