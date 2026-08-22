@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+.pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/install-state.gz
 
 # Build and compiler output
 /dist/
@@ -67,4 +71,16 @@ Thumbs.db
 # Test and tool artifacts
 playwright-report/
 test-results/
+**/playwright-report/
+**/test-results/
+.nyc_output/
+**/.nyc_output/
 .eslintcache
+
+# Local visual QA captures and design evidence
+/gemini-default-evidence/
+/hover-interruption-evidence/
+/miki-thinking-evidence/
+/webui-chat-screenshots/
+/webui-sequential-chat-screenshots/
+/automation-center-multiview-redesign.png
