@@ -1,10 +1,13 @@
 import { Telegraf, type Context } from "telegraf";
+import type { Agent as HttpAgent } from "node:http";
+import HttpsProxyAgent from "https-proxy-agent";
 import type { AgentOrchestrator } from "../agent.js";
 import {
   collectAgentResponse,
+  streamAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 
@@ -14,8 +17,11 @@ export interface TelegramRuntimeConfig {
   enabled: boolean;
   token: string;
   apiRoot: string;
+  proxy: string;
   allowedIds: string[];
   typing: boolean;
+  streaming: { enabled: boolean; throttleMs: number; minGrowthChars: number };
+  placeholder: { enabled: boolean; text: string };
   reconnect: boolean;
 }
 
@@ -86,10 +92,52 @@ export function resolveTelegramRuntimeConfig(
       env.ENABLE_TELEGRAM !== "false",
     token,
     apiRoot: normalizeApiRoot(
-      stringOrEmpty(env.TELEGRAM_API_ROOT ?? settings.api_root ?? raw.api_root),
+      stringOrEmpty(
+        env.TELEGRAM_API_ROOT ??
+          settings.api_root ??
+          settings.base_url ??
+          raw.api_root ??
+          raw.base_url,
+      ),
     ),
+    proxy: stringOrEmpty(env.TELEGRAM_PROXY ?? settings.proxy ?? raw.proxy),
     allowedIds: stringArray(settings.allow_from ?? raw.allow_from),
-    typing: booleanOrDefault(settings.typing ?? raw.typing, true),
+    typing: booleanOrDefault(
+      typeof settings.typing === "object"
+        ? recordOrEmpty(settings.typing).enabled
+        : (settings.typing ?? raw.typing),
+      true,
+    ),
+    streaming: {
+      enabled: booleanOrDefault(
+        recordOrEmpty(settings.streaming ?? raw.streaming).enabled,
+        false,
+      ),
+      throttleMs: Math.max(
+        250,
+        Number(
+          recordOrEmpty(settings.streaming ?? raw.streaming).throttle_seconds ??
+            1,
+        ) * 1000,
+      ),
+      minGrowthChars: Math.max(
+        1,
+        Number(
+          recordOrEmpty(settings.streaming ?? raw.streaming).min_growth_chars ??
+            20,
+        ),
+      ),
+    },
+    placeholder: {
+      enabled: booleanOrDefault(
+        recordOrEmpty(settings.placeholder ?? raw.placeholder).enabled,
+        false,
+      ),
+      text:
+        stringOrEmpty(
+          recordOrEmpty(settings.placeholder ?? raw.placeholder).text,
+        ) || "Miki is thinking…",
+    },
     reconnect: raw.reconnect !== false,
   };
 }
@@ -148,7 +196,14 @@ export class TelegramBot {
     }
 
     this.bot = new Telegraf<TelegramContext>(config.token, {
-      telegram: { apiRoot: config.apiRoot },
+      telegram: {
+        apiRoot: config.apiRoot,
+        ...(config.proxy
+          ? {
+              agent: HttpsProxyAgent(config.proxy) as unknown as HttpAgent,
+            }
+          : {}),
+      },
     });
     this.setupHandlers();
 
@@ -201,18 +256,99 @@ export class TelegramBot {
         if (config.typing) {
           await ctx.sendChatAction("typing");
         }
-        const response = await collectAgentResponse(
-          this.orchestrator,
-          UNIVERSAL_SESSION_ID,
-          message,
-        );
-        const parts = splitOutboundMessageForOrchestrator(
-          this.orchestrator,
-          response,
-          TELEGRAM_MESSAGE_LIMIT,
-        );
-        for (const part of parts) {
-          await ctx.reply(part);
+        const placeholder = config.placeholder.enabled
+          ? await ctx.reply(config.placeholder.text)
+          : null;
+        let response = "";
+        if (config.streaming.enabled && placeholder) {
+          let lastEdit = 0;
+          let lastLength = 0;
+          await streamAgentResponse(
+            this.orchestrator,
+            resolveChannelSessionId(
+              this.orchestrator.config,
+              "telegram",
+              toStringId(ctx.from?.id),
+              toStringId(ctx.chat.id),
+            ),
+            message,
+            async (delta) => {
+              response += delta;
+              const now = Date.now();
+              if (
+                response.length - lastLength <
+                  config.streaming.minGrowthChars &&
+                now - lastEdit < config.streaming.throttleMs
+              ) {
+                return;
+              }
+              lastEdit = now;
+              lastLength = response.length;
+              try {
+                await ctx.telegram.editMessageText(
+                  ctx.chat.id,
+                  placeholder.message_id,
+                  undefined,
+                  response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+                );
+              } catch {
+                // Telegram may reject an edit when the text is unchanged.
+              }
+            },
+          ).then((full) => {
+            response = full;
+          });
+          if (response) {
+            try {
+              await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                placeholder.message_id,
+                undefined,
+                response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+              );
+            } catch {
+              await ctx.reply(response);
+            }
+            for (const part of splitOutboundMessageForOrchestrator(
+              this.orchestrator,
+              response.slice(TELEGRAM_MESSAGE_LIMIT),
+              TELEGRAM_MESSAGE_LIMIT,
+            )) {
+              if (part) await ctx.reply(part);
+            }
+          }
+        } else {
+          response = await collectAgentResponse(
+            this.orchestrator,
+            resolveChannelSessionId(
+              this.orchestrator.config,
+              "telegram",
+              toStringId(ctx.from?.id),
+              toStringId(ctx.chat.id),
+            ),
+            message,
+          );
+          if (placeholder) {
+            try {
+              await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                placeholder.message_id,
+                undefined,
+                response.slice(0, TELEGRAM_MESSAGE_LIMIT),
+              );
+              response = response.slice(TELEGRAM_MESSAGE_LIMIT);
+            } catch {
+              // Fall through to normal replies if the placeholder cannot be edited.
+            }
+          }
+          const parts = splitOutboundMessageForOrchestrator(
+            this.orchestrator,
+            response,
+            TELEGRAM_MESSAGE_LIMIT,
+          );
+          for (const part of parts) {
+            if (part) await ctx.reply(part);
+          }
         }
       } catch (err: unknown) {
         await ctx.reply(

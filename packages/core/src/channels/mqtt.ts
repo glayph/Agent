@@ -5,7 +5,7 @@ import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 
 const MQTT_PROTOCOL_LEVEL = 4; // MQTT 3.1.1
 const MQTT_MESSAGE_LIMIT = 3500;
@@ -153,8 +153,25 @@ export function buildMqttSubscribePacket(
   return mqttPacket(0x82, Buffer.concat([id, ...topics]));
 }
 
-export function buildMqttPublishPacket(topic: string, payload: Buffer): Buffer {
-  return mqttPacket(0x30, Buffer.concat([encodeUtf8(topic), payload]));
+export function buildMqttPublishPacket(
+  topic: string,
+  payload: Buffer,
+  qos: 0 | 1 = 0,
+  packetId?: number,
+): Buffer {
+  if (qos === 0) {
+    return mqttPacket(0x30, Buffer.concat([encodeUtf8(topic), payload]));
+  }
+  if (
+    packetId == null ||
+    !Number.isInteger(packetId) ||
+    packetId < 1 ||
+    packetId > 65_535
+  ) {
+    throw new Error("MQTT QoS 1 PUBLISH requires a valid packet id");
+  }
+  const id = Buffer.from([(packetId >> 8) & 0xff, packetId & 0xff]);
+  return mqttPacket(0x32, Buffer.concat([encodeUtf8(topic), id, payload]));
 }
 
 export function buildMqttPubackPacket(packetId: number): Buffer {
@@ -459,6 +476,9 @@ export class MqttBot {
 
     if (packet.type === 3) {
       const publish = parseMqttPublishPacket(packet);
+      if (publish.qos === 2) {
+        throw new Error("MQTT QoS 2 PUBLISH is not supported");
+      }
       if (publish.qos === 1 && publish.packetId != null) {
         this.write(buildMqttPubackPacket(publish.packetId));
       }
@@ -482,10 +502,19 @@ export class MqttBot {
 
     const response = await collectAgentResponse(
       this.orchestrator,
-      UNIVERSAL_SESSION_ID,
+      resolveChannelSessionId(
+        this.orchestrator.config,
+        "mqtt",
+        request.clientId,
+        publish.topic,
+      ),
       prompt,
     );
-    for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, MQTT_MESSAGE_LIMIT)) {
+    for (const part of splitOutboundMessageForOrchestrator(
+      this.orchestrator,
+      response,
+      MQTT_MESSAGE_LIMIT,
+    )) {
       const payload = Buffer.from(
         JSON.stringify({
           text: part,
@@ -494,7 +523,14 @@ export class MqttBot {
         }),
         "utf-8",
       );
-      this.write(buildMqttPublishPacket(request.responseTopic, payload));
+      this.write(
+        buildMqttPublishPacket(
+          request.responseTopic,
+          payload,
+          config.qos,
+          config.qos === 1 ? this.nextPacketId() : undefined,
+        ),
+      );
     }
   }
 
@@ -508,7 +544,7 @@ export class MqttBot {
 
   private startPing(keepAliveSeconds: number): void {
     this.clearPing();
-    const intervalMs = Math.max(5_000, Math.floor(keepAliveSeconds * 500));
+    const intervalMs = Math.max(5_000, Math.floor(keepAliveSeconds * 1_000));
     this.pingTimer = setInterval(() => {
       this.write(Buffer.from([0xc0, 0x00]));
     }, intervalMs);

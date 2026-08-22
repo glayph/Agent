@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ToolSupportItem } from "@/api/tools"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent } from "@/shared/ui/card"
@@ -16,7 +17,6 @@ import {
 } from "@/shared/ui/select"
 import { Skeleton } from "@/shared/ui/skeleton"
 import { Switch } from "@/shared/ui/switch"
-import { cn } from "@/lib/utils"
 
 import { ToolStatusBadge } from "./tool-status-badge"
 import type { GroupedTools, ToolStatusFilter } from "./types"

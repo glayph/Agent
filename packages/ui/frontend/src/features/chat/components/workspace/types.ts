@@ -9,11 +9,7 @@ export interface WorkspaceStatusPill {
 }
 
 export type WorkspaceAssetKind =
-  | "chart"
-  | "csv"
-  | "document"
-  | "file"
-  | "report"
+  "chart" | "csv" | "document" | "file" | "report"
 
 export interface WorkspaceAsset {
   id: string

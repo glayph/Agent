@@ -9,26 +9,26 @@ import {
   IconFile,
   IconListDetails,
   IconLockCheck,
+  IconMaximize,
+  IconMinimize,
   IconPlayerPlay,
   IconShieldCheck,
   IconTool,
-  IconMaximize,
-  IconMinimize,
   IconX,
 } from "@tabler/icons-react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { useEffect, useMemo, useState } from "react"
 
 import {
+  type ChatInspectorPage,
   chatInspectorAtom,
   closeChatInspectorAtom,
   setChatInspectorPageAtom,
-  type ChatInspectorPage,
 } from "@/features/chat/components/chat-inspector-store"
 import type { MonitorNode } from "@/features/monitor/store"
 import { monitorAtom } from "@/features/monitor/store"
-import { Button } from "@/shared/ui/button"
 import { cn } from "@/lib/utils"
+import { Button } from "@/shared/ui/button"
 import type { ChatMessage } from "@/store/chat"
 
 interface ChatInspectorProps {
@@ -79,9 +79,12 @@ function formatTime(timestamp: number): string {
 function thoughtCategory(content: string): string {
   const normalized = content.toLowerCase()
   if (/plan|first|next|approach|goal|route/.test(normalized)) return "Plan"
-  if (/check|verify|inspect|test|evidence|confirm/.test(normalized)) return "Verification"
-  if (/decid|choose|compare|reason|because|therefore/.test(normalized)) return "Decision"
-  if (/tool|run|execute|open|write|read|search/.test(normalized)) return "Action"
+  if (/check|verify|inspect|test|evidence|confirm/.test(normalized))
+    return "Verification"
+  if (/decid|choose|compare|reason|because|therefore/.test(normalized))
+    return "Decision"
+  if (/tool|run|execute|open|write|read|search/.test(normalized))
+    return "Action"
   return "Progress"
 }
 
@@ -120,7 +123,9 @@ export function ChatInspector({
   const [currentSelection, setSelection] = useAtom(chatInspectorAtom)
   const monitorState = useAtomValue(monitorAtom)
   const [isExpanded, setIsExpanded] = useState(false)
-  const [expandedThoughtIds, setExpandedThoughtIds] = useState<Set<string>>(new Set())
+  const [expandedThoughtIds, setExpandedThoughtIds] = useState<Set<string>>(
+    new Set(),
+  )
 
   const isOpen = selection?.chatId === chatId
   const page = isOpen ? selection.page : "overview"
@@ -155,7 +160,10 @@ export function ChatInspector({
   const responseMessages = useMemo(
     () =>
       messages.filter(
-        (message) => message.role === "assistant" && message.kind !== "thought" && message.kind !== "tool_calls",
+        (message) =>
+          message.role === "assistant" &&
+          message.kind !== "thought" &&
+          message.kind !== "tool_calls",
       ),
     [messages],
   )
@@ -199,7 +207,7 @@ export function ChatInspector({
       role="dialog"
       aria-label="Agent Inspector"
       className={cn(
-        "border-border/70 bg-background/96 fixed z-50 flex flex-col overflow-hidden rounded-2xl border shadow-2xl shadow-black/15 backdrop-blur-xl transition-[inset,width] duration-200 backdrop-blur-xl",
+        "border-border/70 bg-background/96 fixed z-50 flex flex-col overflow-hidden rounded-2xl border shadow-2xl shadow-black/15 backdrop-blur-xl transition-[inset,width] duration-200",
         isExpanded
           ? "top-8 right-[3vw] bottom-8 left-[3vw]"
           : "top-20 right-4 bottom-24 w-[min(680px,calc(100vw-2rem))]",
@@ -218,7 +226,9 @@ export function ChatInspector({
               <span
                 className={cn(
                   "size-1.5 rounded-full",
-                  isWorking ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/50",
+                  isWorking
+                    ? "animate-pulse bg-emerald-500"
+                    : "bg-muted-foreground/50",
                 )}
               />
               {isWorking ? "Working live" : "Session snapshot"}
@@ -235,7 +245,11 @@ export function ChatInspector({
             aria-label={isExpanded ? "Shrink Inspector" : "Expand Inspector"}
             title={isExpanded ? "Shrink Inspector" : "Expand Inspector"}
           >
-            {isExpanded ? <IconMinimize className="size-4" /> : <IconMaximize className="size-4" />}
+            {isExpanded ? (
+              <IconMinimize className="size-4" />
+            ) : (
+              <IconMaximize className="size-4" />
+            )}
           </Button>
           <Button
             type="button"
@@ -243,22 +257,24 @@ export function ChatInspector({
             size="icon"
             className="text-muted-foreground hover:text-foreground size-7 rounded-lg"
             onClick={() => close()}
-          aria-label="Close Inspector"
-          title="Close Inspector"
-        >
+            aria-label="Close Inspector"
+            title="Close Inspector"
+          >
             <IconX className="size-4" />
           </Button>
         </div>
       </div>
 
-      <nav data-testid="chat-inspector-pages" className="border-border/60 flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1.5" aria-label="Inspector pages">
+      <nav
+        className="border-border/60 flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1.5"
+        aria-label="Inspector pages"
+      >
         {pages.map((item) => {
           const PageIcon = item.icon
           const selected = item.id === page
           return (
             <button
               key={item.id}
-              data-testid={`inspector-tab-${item.id}`}
               type="button"
               className={cn(
                 "flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-medium transition-colors",
@@ -307,26 +323,32 @@ export function ChatInspector({
                 <IconArchive className="size-3.5" /> Response
               </div>
               <div className="text-foreground/80">
-                This is the short, human-facing answer. Detailed execution stays in Thoughts and Work.
+                This is the short, human-facing answer. Detailed execution stays
+                in Thoughts and Work.
               </div>
             </div>
             {responseMessages.length > 0 ? (
-              responseMessages.slice().reverse().map((message) => (
-                <button
-                  type="button"
-                  key={message.id}
-                  className="border-border/60 bg-muted/20 hover:bg-muted/45 rounded-xl border p-3 text-left transition-colors"
-                  onClick={() => selectMessage(message.id)}
-                >
-                  <div className="text-muted-foreground mb-1 flex items-center justify-between text-[10px]">
-                    <span>Agent Miki</span>
-                    <span>{formatTime(Number(message.timestamp) || Date.now())}</span>
-                  </div>
-                  <div className="text-foreground/90 whitespace-pre-wrap text-sm leading-6">
-                    {message.content || "No response text"}
-                  </div>
-                </button>
-              ))
+              responseMessages
+                .slice()
+                .reverse()
+                .map((message) => (
+                  <button
+                    type="button"
+                    key={message.id}
+                    className="border-border/60 bg-muted/20 hover:bg-muted/45 rounded-xl border p-3 text-left transition-colors"
+                    onClick={() => selectMessage(message.id)}
+                  >
+                    <div className="text-muted-foreground mb-1 flex items-center justify-between text-[10px]">
+                      <span>Agent Miki</span>
+                      <span>
+                        {formatTime(Number(message.timestamp) || Date.now())}
+                      </span>
+                    </div>
+                    <div className="text-foreground/90 text-sm leading-6 whitespace-pre-wrap">
+                      {message.content || "No response text"}
+                    </div>
+                  </button>
+                ))
             ) : (
               <EmptyState>No user-facing response yet.</EmptyState>
             )}
@@ -337,12 +359,20 @@ export function ChatInspector({
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-2">
               <div className="bg-muted/35 rounded-xl p-3">
-                <div className="text-muted-foreground mb-1 text-[10px]">Messages</div>
-                <div className="text-foreground text-lg font-semibold">{messages.length}</div>
+                <div className="text-muted-foreground mb-1 text-[10px]">
+                  Messages
+                </div>
+                <div className="text-foreground text-lg font-semibold">
+                  {messages.length}
+                </div>
               </div>
               <div className="bg-muted/35 rounded-xl p-3">
-                <div className="text-muted-foreground mb-1 text-[10px]">Live nodes</div>
-                <div className="text-foreground text-lg font-semibold">{nodes.length}</div>
+                <div className="text-muted-foreground mb-1 text-[10px]">
+                  Live nodes
+                </div>
+                <div className="text-foreground text-lg font-semibold">
+                  {nodes.length}
+                </div>
               </div>
             </div>
             <div>
@@ -354,7 +384,11 @@ export function ChatInspector({
                   onClick={() => setPage("thoughts")}
                 >
                   <div className="text-muted-foreground mb-1 flex items-center justify-between text-[10px]">
-                    <span>{selectedMessage.role === "assistant" ? "Assistant" : "You"}</span>
+                    <span>
+                      {selectedMessage.role === "assistant"
+                        ? "Assistant"
+                        : "You"}
+                    </span>
                     <span>{selectedMessage.kind ?? "message"}</span>
                   </div>
                   <div className="text-foreground text-xs leading-5">
@@ -369,18 +403,27 @@ export function ChatInspector({
               <SectionLabel>RECENT ACTIVITY</SectionLabel>
               {nodes.length > 0 ? (
                 <div className="flex flex-col gap-2">
-                  {nodes.slice(-4).reverse().map((node) => (
-                    <button
-                      type="button"
-                      key={node.id}
-                      className="hover:bg-muted/35 flex items-center gap-2 rounded-lg px-2 py-1.5 text-left"
-                      onClick={() => setPage("work")}
-                    >
-                      <IconTool className={cn("size-3.5", statusTone(node.status))} />
-                      <span className="text-foreground min-w-0 flex-1 truncate text-xs">{node.label}</span>
-                      <span className="text-muted-foreground text-[10px]">{node.status}</span>
-                    </button>
-                  ))}
+                  {nodes
+                    .slice(-4)
+                    .reverse()
+                    .map((node) => (
+                      <button
+                        type="button"
+                        key={node.id}
+                        className="hover:bg-muted/35 flex items-center gap-2 rounded-lg px-2 py-1.5 text-left"
+                        onClick={() => setPage("work")}
+                      >
+                        <IconTool
+                          className={cn("size-3.5", statusTone(node.status))}
+                        />
+                        <span className="text-foreground min-w-0 flex-1 truncate text-xs">
+                          {node.label}
+                        </span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {node.status}
+                        </span>
+                      </button>
+                    ))}
                 </div>
               ) : (
                 <EmptyState>No live activity recorded.</EmptyState>
@@ -396,7 +439,8 @@ export function ChatInspector({
                 <IconBrain className="size-3.5" /> Thought summary
               </div>
               <div className="text-foreground/80">
-                Inspector shows concise execution summaries, not private hidden chain-of-thought.
+                Inspector shows concise execution summaries, not private hidden
+                chain-of-thought.
               </div>
             </div>
             {thoughtMessages.length > 0 ? (
@@ -404,7 +448,10 @@ export function ChatInspector({
                 const category = thoughtCategory(message.content)
                 const expanded = expandedThoughtIds.has(message.id)
                 return (
-                  <div key={message.id} className="border-border/60 bg-muted/20 overflow-hidden rounded-xl border">
+                  <div
+                    key={message.id}
+                    className="border-border/60 bg-muted/20 overflow-hidden rounded-xl border"
+                  >
                     <button
                       type="button"
                       className="hover:bg-muted/45 flex w-full items-center gap-2 p-3 text-left transition-colors"
@@ -419,15 +466,32 @@ export function ChatInspector({
                       aria-expanded={expanded}
                     >
                       <IconBrain className="text-primary size-3.5 shrink-0" />
-                      <span className="text-foreground flex-1 text-xs font-semibold">Thought · {category}</span>
-                      <span className="text-muted-foreground text-[10px]">{formatTime(Number(message.timestamp) || Date.now())}</span>
-                      <IconChevronDown className={cn("text-muted-foreground size-3.5 transition-transform", expanded && "rotate-180")} />
+                      <span className="text-foreground flex-1 text-xs font-semibold">
+                        Thought · {category}
+                      </span>
+                      <span className="text-muted-foreground text-[10px]">
+                        {formatTime(Number(message.timestamp) || Date.now())}
+                      </span>
+                      <IconChevronDown
+                        className={cn(
+                          "text-muted-foreground size-3.5 transition-transform",
+                          expanded && "rotate-180",
+                        )}
+                      />
                     </button>
                     {expanded && (
                       <div className="border-border/50 border-t px-3 pt-2 pb-3">
-                        <div className="text-muted-foreground mb-1 text-[10px] font-medium tracking-wide uppercase">Summary</div>
-                        <div className="text-foreground/85 whitespace-pre-wrap text-xs leading-5">{message.content}</div>
-                        <button type="button" className="text-primary mt-2 text-[11px] font-medium" onClick={() => selectMessage(message.id)}>
+                        <div className="text-muted-foreground mb-1 text-[10px] font-medium tracking-wide uppercase">
+                          Summary
+                        </div>
+                        <div className="text-foreground/85 text-xs leading-5 whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                        <button
+                          type="button"
+                          className="text-primary mt-2 text-[11px] font-medium"
+                          onClick={() => selectMessage(message.id)}
+                        >
                           Open full detail
                         </button>
                       </div>
@@ -436,48 +500,77 @@ export function ChatInspector({
                 )
               })
             ) : (
-              <EmptyState>No thought summaries are available for this chat yet.</EmptyState>
+              <EmptyState>
+                No thought summaries are available for this chat yet.
+              </EmptyState>
             )}
           </div>
         )}
 
         {page === "work" && (
-          <div data-testid="inspector-work" className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
             <SectionLabel>EXECUTION NODES</SectionLabel>
             {toolMessages.length > 0 && (
               <div className="mb-2 flex flex-col gap-2">
                 {toolMessages.slice(-4).map((message) => (
-                  <div key={`tool-${message.id}`} className="border-border/60 bg-muted/20 rounded-xl border p-3">
+                  <div
+                    key={`tool-${message.id}`}
+                    className="border-border/60 bg-muted/20 rounded-xl border p-3"
+                  >
                     <div className="text-foreground mb-1 flex items-center gap-2 text-xs font-medium">
-                      <IconTool className="text-primary size-3.5" /> Tool call summary
+                      <IconTool className="text-primary size-3.5" /> Tool call
+                      summary
                     </div>
-                    <div className="text-muted-foreground text-[11px] leading-5">{preview(message.content, 260)}</div>
+                    <div className="text-muted-foreground text-[11px] leading-5">
+                      {preview(message.content, 260)}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
             {nodes.length > 0 ? (
               nodes.map((node) => (
-                <div data-testid={`inspector-node-${node.id}`} key={node.id} className="border-border/60 bg-muted/15 rounded-xl border p-3">
+                <div
+                  key={node.id}
+                  className="border-border/60 bg-muted/15 rounded-xl border p-3"
+                >
                   <div className="flex items-center gap-2">
-                    <IconTool className={cn("size-3.5", statusTone(node.status))} />
-                    <span className="text-foreground min-w-0 flex-1 truncate text-xs font-medium">{node.label}</span>
-                    <span className={cn("text-[10px] font-medium", statusTone(node.status))}>{node.status}</span>
+                    <IconTool
+                      className={cn("size-3.5", statusTone(node.status))}
+                    />
+                    <span className="text-foreground min-w-0 flex-1 truncate text-xs font-medium">
+                      {node.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-medium",
+                        statusTone(node.status),
+                      )}
+                    >
+                      {node.status}
+                    </span>
                   </div>
                   {(node.action || node.outputPreview || node.error) && (
                     <div className="text-muted-foreground mt-2 text-[11px] leading-5">
-                      {preview(node.error || node.outputPreview || node.action, 280)}
+                      {preview(
+                        node.error || node.outputPreview || node.action,
+                        280,
+                      )}
                     </div>
                   )}
                   <div className="text-muted-foreground/70 mt-2 flex items-center gap-3 text-[10px]">
                     <span>Level {node.level}</span>
-                    {node.durationMs !== undefined && <span>{node.durationMs}ms</span>}
-                    {node.attempt !== undefined && <span>Attempt {node.attempt}</span>}
+                    {node.durationMs !== undefined && (
+                      <span>{node.durationMs}ms</span>
+                    )}
+                    {node.attempt !== undefined && (
+                      <span>Attempt {node.attempt}</span>
+                    )}
                   </div>
                 </div>
               ))
             ) : (
-              <div data-testid="inspector-work-empty"><EmptyState>No work nodes are available yet.</EmptyState></div>
+              <EmptyState>No work nodes are available yet.</EmptyState>
             )}
           </div>
         )}
@@ -498,8 +591,12 @@ export function ChatInspector({
                     <IconFile className="size-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-foreground truncate text-xs font-medium">{artifact.name}</div>
-                    <div className="text-muted-foreground mt-1 text-[10px]">{artifact.type}</div>
+                    <div className="text-foreground truncate text-xs font-medium">
+                      {artifact.name}
+                    </div>
+                    <div className="text-muted-foreground mt-1 text-[10px]">
+                      {artifact.type}
+                    </div>
                   </div>
                   <IconChevronRight className="text-muted-foreground size-3.5" />
                 </a>
@@ -507,15 +604,24 @@ export function ChatInspector({
             ) : (
               <EmptyState>No artifacts or generated files yet.</EmptyState>
             )}
-            {nodes.filter((node) => node.type === "file").map((node) => (
-              <div key={`node-${node.id}`} className="border-border/60 bg-muted/20 rounded-xl border p-3">
-                <div className="flex items-center gap-2">
-                  <IconArchive className="text-primary size-3.5" />
-                  <span className="text-foreground text-xs font-medium">{node.label}</span>
+            {nodes
+              .filter((node) => node.type === "file")
+              .map((node) => (
+                <div
+                  key={`node-${node.id}`}
+                  className="border-border/60 bg-muted/20 rounded-xl border p-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <IconArchive className="text-primary size-3.5" />
+                    <span className="text-foreground text-xs font-medium">
+                      {node.label}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground mt-1 text-[11px]">
+                    {preview(node.outputPreview || node.resultMessage, 240)}
+                  </div>
                 </div>
-                <div className="text-muted-foreground mt-1 text-[11px]">{preview(node.outputPreview || node.resultMessage, 240)}</div>
-              </div>
-            ))}
+              ))}
           </div>
         )}
 
@@ -524,17 +630,33 @@ export function ChatInspector({
             <SectionLabel>CHECKPOINTS AND EVIDENCE</SectionLabel>
             {nodes.length > 0 ? (
               nodes.map((node) => (
-                <div key={`evidence-${node.id}`} className="border-border/60 bg-muted/20 rounded-xl border p-3">
+                <div
+                  key={`evidence-${node.id}`}
+                  className="border-border/60 bg-muted/20 rounded-xl border p-3"
+                >
                   <div className="flex items-center gap-2">
-                    <IconShieldCheck className={cn("size-3.5", statusTone(node.status))} />
-                    <span className="text-foreground min-w-0 flex-1 truncate text-xs font-medium">{node.label}</span>
-                    <span className="text-muted-foreground text-[10px]">Attempt {node.attempt ?? 1}</span>
+                    <IconShieldCheck
+                      className={cn("size-3.5", statusTone(node.status))}
+                    />
+                    <span className="text-foreground min-w-0 flex-1 truncate text-xs font-medium">
+                      {node.label}
+                    </span>
+                    <span className="text-muted-foreground text-[10px]">
+                      Attempt {node.attempt ?? 1}
+                    </span>
                   </div>
                   {node.input !== undefined && (
-                    <pre className="bg-background/55 text-muted-foreground mt-2 max-h-24 overflow-auto rounded-md p-2 text-[10px] leading-4">{preview(formatValue(node.input), 300)}</pre>
+                    <pre className="bg-background/55 text-muted-foreground mt-2 max-h-24 overflow-auto rounded-md p-2 text-[10px] leading-4">
+                      {preview(formatValue(node.input), 300)}
+                    </pre>
                   )}
                   {(node.outputPreview || node.resultMessage || node.error) && (
-                    <div className="text-muted-foreground mt-2 text-[11px] leading-5">{preview(node.error || node.outputPreview || node.resultMessage, 300)}</div>
+                    <div className="text-muted-foreground mt-2 text-[11px] leading-5">
+                      {preview(
+                        node.error || node.outputPreview || node.resultMessage,
+                        300,
+                      )}
+                    </div>
                   )}
                 </div>
               ))
@@ -547,19 +669,28 @@ export function ChatInspector({
         {page === "events" && (
           <div className="flex flex-col gap-3">
             <SectionLabel>REALTIME EVENT STREAM</SectionLabel>
-            {thoughtMessages.slice().reverse().map((message) => (
-              <div key={`thought-event-${message.id}`} className="flex gap-2">
-                <div className="flex flex-col items-center">
-                  <IconBrain className="text-primary mt-0.5 size-3.5" />
-                  <div className="bg-border/70 mt-1 h-full w-px" />
+            {thoughtMessages
+              .slice()
+              .reverse()
+              .map((message) => (
+                <div key={`thought-event-${message.id}`} className="flex gap-2">
+                  <div className="flex flex-col items-center">
+                    <IconBrain className="text-primary mt-0.5 size-3.5" />
+                    <div className="bg-border/70 mt-1 h-full w-px" />
+                  </div>
+                  <div className="min-w-0 pb-3">
+                    <div className="text-foreground text-xs font-medium">
+                      Inspector summary · {thoughtCategory(message.content)}
+                    </div>
+                    <div className="text-muted-foreground mt-0.5 text-[10px]">
+                      {formatTime(Number(message.timestamp) || Date.now())}
+                    </div>
+                    <div className="text-muted-foreground mt-1 text-[11px] leading-5">
+                      {preview(message.content, 220)}
+                    </div>
+                  </div>
                 </div>
-                <div className="min-w-0 pb-3">
-                  <div className="text-foreground text-xs font-medium">Inspector summary · {thoughtCategory(message.content)}</div>
-                  <div className="text-muted-foreground mt-0.5 text-[10px]">{formatTime(Number(message.timestamp) || Date.now())}</div>
-                  <div className="text-muted-foreground mt-1 text-[11px] leading-5">{preview(message.content, 220)}</div>
-                </div>
-              </div>
-            ))}
+              ))}
             {[...nodes].reverse().map((node) => (
               <div key={`event-${node.id}`} className="flex gap-2">
                 <div className="flex flex-col items-center">
@@ -567,15 +698,26 @@ export function ChatInspector({
                   <div className="bg-border/70 mt-1 h-full w-px" />
                 </div>
                 <div className="min-w-0 pb-3">
-                  <div className="text-foreground text-xs font-medium">{node.label}</div>
-                  <div className="text-muted-foreground mt-0.5 text-[10px]">{formatTime(node.updatedAt)} · {node.status}</div>
+                  <div className="text-foreground text-xs font-medium">
+                    {node.label}
+                  </div>
+                  <div className="text-muted-foreground mt-0.5 text-[10px]">
+                    {formatTime(node.updatedAt)} · {node.status}
+                  </div>
                   {(node.action || node.resultMessage || node.error) && (
-                    <div className="text-muted-foreground mt-1 text-[11px] leading-5">{preview(node.error || node.resultMessage || node.action, 220)}</div>
+                    <div className="text-muted-foreground mt-1 text-[11px] leading-5">
+                      {preview(
+                        node.error || node.resultMessage || node.action,
+                        220,
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
             ))}
-            {nodes.length === 0 && thoughtMessages.length === 0 && <EmptyState>No realtime events yet.</EmptyState>}
+            {nodes.length === 0 && thoughtMessages.length === 0 && (
+              <EmptyState>No realtime events yet.</EmptyState>
+            )}
           </div>
         )}
       </div>

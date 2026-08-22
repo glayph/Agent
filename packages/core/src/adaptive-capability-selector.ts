@@ -33,7 +33,10 @@ function asPrunerTool(tool: ToolDefinition): Tool {
 }
 
 function normalize(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, " ");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, " ");
 }
 
 function includesTerm(text: string, term: string): boolean {
@@ -50,7 +53,10 @@ function isSafeForAmbiguousTurn(name: string): boolean {
 }
 
 function maxToolsFor(profile: AgentTaskProfile): number {
-  if (profile.verificationDepth === "release" || profile.complexity === "complex") {
+  if (
+    profile.verificationDepth === "release" ||
+    profile.complexity === "complex"
+  ) {
     return 12;
   }
   if (profile.complexity === "standard") return 9;
@@ -136,7 +142,9 @@ export function selectAdaptiveCapabilities(
   const routeEvidence = routeDecision.reasons.length > 0 ? 0.3 : 0;
   const selectedEvidence = selected.length > 0 ? 0.2 : 0;
   const confidence = Number(
-    Math.min(1, topCandidateScore + routeEvidence + selectedEvidence).toFixed(2),
+    Math.min(1, topCandidateScore + routeEvidence + selectedEvidence).toFixed(
+      2,
+    ),
   );
   const rationale = [
     `context:${pruner.inferTaskContext(userMessage)}`,
@@ -146,7 +154,11 @@ export function selectAdaptiveCapabilities(
       ? `pruned:${allTools.length - selected.length}`
       : "catalog:full",
   ];
-  if (preferredTools.some((item) => selected.some((tool) => toolName(tool) === item))) {
+  if (
+    preferredTools.some((item) =>
+      selected.some((tool) => toolName(tool) === item),
+    )
+  ) {
     rationale.push("specialist_tools_prioritized");
   }
   if (preferredSkills.length > 0) {

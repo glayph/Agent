@@ -3,9 +3,9 @@ import { type ReactNode, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
 import { GlobalHeaderActions } from "@/app/layout/global-header-actions"
+import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import { SidebarTrigger } from "@/shared/ui/sidebar"
-import { cn } from "@/lib/utils"
 
 interface PageHeaderProps {
   title: string
@@ -71,10 +71,7 @@ export function PageHeader({
             title={t("navigation.toggle_sidebar")}
           />
           <TitleTag
-            className={cn(
-              "page-header-title min-w-0 truncate",
-              titleClassName,
-            )}
+            className={cn("page-header-title min-w-0 truncate", titleClassName)}
           >
             {title}
           </TitleTag>

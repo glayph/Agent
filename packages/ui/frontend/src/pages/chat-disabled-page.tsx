@@ -22,10 +22,9 @@ export function ChatDisabledPage() {
         Web UI chat is disabled
       </h2>
       <p className="text-muted-foreground text-sm">
-        Miki isn&apos;t chatted with from this dashboard. Talk to Miki
-        through one of your connected platforms instead - Telegram,
-        Discord, WhatsApp, Slack, and others all share the same
-        conversation with Miki.
+        Miki isn&apos;t chatted with from this dashboard. Talk to Miki through
+        one of your connected platforms instead - Telegram, Discord, WhatsApp,
+        Slack, and others all share the same conversation with Miki.
       </p>
       <Link
         to="/channels"

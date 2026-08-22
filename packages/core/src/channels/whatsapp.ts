@@ -426,7 +426,12 @@ export function createWhatsAppBridgeRouter(
         message_id: event.messageId || undefined,
         text: reply,
       });
-      void postOutboundToWhatsAppBridge(orchestrator, config, event, reply).catch((err) => {
+      void postOutboundToWhatsAppBridge(
+        orchestrator,
+        config,
+        event,
+        reply,
+      ).catch((err) => {
         console.warn(
           `WhatsApp bridge outbound failed: ${
             err instanceof Error ? err.message : String(err)

@@ -3,10 +3,11 @@ import { useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { AgentRun } from "@/api/agent-runs"
-import { EmptyState } from "@/shared/ui/minimal-primitives"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Input } from "@/shared/ui/input"
+import { EmptyState } from "@/shared/ui/minimal-primitives"
 import {
   Select,
   SelectContent,
@@ -15,7 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select"
-import { cn } from "@/lib/utils"
 
 import { formatRunDate } from "./date-format"
 import { RunStatusBadge } from "./run-status-badge"

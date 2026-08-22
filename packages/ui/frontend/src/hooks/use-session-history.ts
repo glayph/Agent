@@ -26,7 +26,7 @@ export function useSessionHistory({
     async (reset = true) => {
       try {
         const currentOffset = reset ? 0 : offset
-        const shouldFetch = (reset || currentOffset === offset)
+        const shouldFetch = reset || currentOffset === offset
         if (shouldFetch) {
           if (reset) {
             setLoadError(false)

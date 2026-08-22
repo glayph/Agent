@@ -1,0 +1,23 @@
+{
+  "id": "example-provider",
+  "displayName": "Example Provider",
+  "version": "1.0.0",
+  "pluginApiVersion": "1.0",
+  "entrypoint": "./provider.mjs",
+  "capabilities": {
+    "chat": true,
+    "tools": false,
+    "streaming": false,
+    "vision": false,
+    "local": true
+  },
+  "modelPrefixes": [
+    "example-provider"
+  ],
+  "modelIds": [
+    "example-provider/demo"
+  ],
+  "permissions": [
+    "network"
+  ]
+}

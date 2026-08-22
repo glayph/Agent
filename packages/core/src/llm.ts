@@ -1,8 +1,8 @@
-import type OpenAI from "openai";
 import type { LLMResponse } from "@miki/config";
 import { MODEL_COSTS } from "./cost-calibrator.js";
 import { providerRegistry } from "./llm/provider/registry.js";
 import { getDirectProviderById } from "./llm/provider/catalog.js";
+import type { MikiProviderMessage } from "./llm/provider/sdk/index.js";
 
 /**
  * Backward-compatible provider name used by existing agent configuration.
@@ -15,6 +15,7 @@ export {
   LLMRateLimitError,
   LLMTimeoutError,
   LLMAPIError,
+  LLMEntitlementError,
   LLMMissingCredentialError,
   LiteLLMError,
   LiteLLMRateLimitError,
@@ -31,7 +32,7 @@ export {
  * therefore does not change when a provider adapter is added or replaced.
  */
 export async function achatCompletion(
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  messages: MikiProviderMessage[],
   extra?: Record<string, unknown>,
 ): Promise<LLMResponse> {
   const model = (await import("@miki/config")).settings.defaultModel;

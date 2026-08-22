@@ -2,6 +2,7 @@ import { atom } from "jotai"
 
 export type ChatInspectorPage =
   | "overview"
+  | "response"
   | "thoughts"
   | "work"
   | "artifacts"
@@ -20,7 +21,13 @@ export const chatInspectorAtom = atom<ChatInspectorSelection | null>(null)
 
 export const openChatInspectorAtom = atom(
   null,
-  (_get, set, selection: Omit<ChatInspectorSelection, "page"> & { page?: ChatInspectorPage }) => {
+  (
+    _get,
+    set,
+    selection: Omit<ChatInspectorSelection, "page"> & {
+      page?: ChatInspectorPage
+    },
+  ) => {
     set(chatInspectorAtom, {
       chatId: selection.chatId,
       messageId: selection.messageId,

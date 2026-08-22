@@ -41,7 +41,7 @@ export function AgentsIndexPage() {
                   <IconRobot size={20} />
                 </div>
                 <div>
-                  <div className="font-semibold text-[15px]">
+                  <div className="text-[15px] font-semibold">
                     {agent.name || agent.specialist}
                   </div>
                   <div className="text-muted-foreground mt-0.5 font-mono text-xs">
@@ -52,7 +52,7 @@ export function AgentsIndexPage() {
             </div>
 
             <div className="border-border/40 flex items-center justify-between border-t pt-3">
-              <span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">
+              <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                 {agent.specialist || "Specialist"}
               </span>
               <div className="flex items-center gap-2">

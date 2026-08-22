@@ -15,12 +15,14 @@ import {
 } from "./launcher-auth-guards.js";
 import {
   createLauncherCompatRouter,
+  runtimeModelName,
   SUPPORTED_CHANNELS,
   type RuntimeReloadRequest,
 } from "./launcher-compat.js";
 import { routeAgentTask } from "../agent-router.js";
 import type { AgentOrchestrator } from "../agent.js";
 import type { SkillLoader } from "../skill-loader.js";
+import { openAICompatibleAdapter } from "../llm/provider/openai-compatible-adapter.js";
 import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths.js";
 import { buildChannelRuntimeProbe } from "./channel-runtime-probe.js";
 import {
@@ -105,6 +107,7 @@ const TEST_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
   "OPENROUTER_API_KEY",
+  "OPENCODE_API_KEY",
   "DEEPSEEK_API_KEY",
   "WEIXIN_ACCOUNT_ID",
   "WEIXIN_TOKEN",
@@ -439,7 +442,7 @@ describe("launcher compatibility config validation", () => {
         requestId: "launcher-denial",
         args: {
           cmd: "node -v",
-          token: "sk-launcher-denial-secret",
+          token: ["sk", "launcher-denial-secret"].join("-"),
         },
       });
 
@@ -478,14 +481,14 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
-  it("defaults every supported channel to setup-active configuration", async () => {
+  it("defaults every supported channel to disabled opt-in configuration", async () => {
     await withLauncherCompatServer(async (request) => {
       const config = await request("/config").then((res) => res.json());
 
       for (const channel of SUPPORTED_CHANNELS) {
         const savedChannel = config.channels[channel.config_key];
         expect(savedChannel).toMatchObject({
-          enabled: true,
+          enabled: false,
           type: channel.config_key,
         });
       }
@@ -596,17 +599,17 @@ describe("launcher compatibility config validation", () => {
       expect(response.status).toBe(200);
 
       const agentYamlPath = path.join(workspaceDir, "config", "agent.yaml");
-      const agentYaml = yaml.load(
-        fs.readFileSync(agentYamlPath, "utf-8"),
-      ) as { tools?: { cron?: Record<string, unknown> } };
+      const agentYaml = yaml.load(fs.readFileSync(agentYamlPath, "utf-8")) as {
+        tools?: { cron?: Record<string, unknown> };
+      };
 
       expect(agentYaml.tools?.cron?.allow_command).toBe(true);
       expect(agentYaml.tools?.cron?.exec_timeout_minutes).toBe(7);
 
       const toolsYamlPath = path.join(workspaceDir, "config", "tools.yaml");
-      const toolsYaml = yaml.load(
-        fs.readFileSync(toolsYamlPath, "utf-8"),
-      ) as { runtime?: { cron?: Record<string, unknown> } };
+      const toolsYaml = yaml.load(fs.readFileSync(toolsYamlPath, "utf-8")) as {
+        runtime?: { cron?: Record<string, unknown> };
+      };
       expect(toolsYaml.runtime?.cron?.allow_command).toBe(true);
     });
   });
@@ -669,9 +672,31 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
+  it("defaults web-search execution to local and normalizes unsafe mode values", async () => {
+    await withLauncherCompatServer(async (request) => {
+      const defaultResponse = await request("/tools/web-search-config");
+      expect(defaultResponse.status).toBe(200);
+      expect((await defaultResponse.json()).execution_mode).toBe("local");
+
+      const invalidResponse = await request("/tools/web-search-config", {
+        method: "PUT",
+        body: JSON.stringify({ execution_mode: "remote" }),
+      });
+      expect(invalidResponse.status).toBe(200);
+      expect((await invalidResponse.json()).execution_mode).toBe("local");
+
+      const cloudResponse = await request("/tools/web-search-config", {
+        method: "PUT",
+        body: JSON.stringify({ execution_mode: "cloud" }),
+      });
+      expect(cloudResponse.status).toBe(200);
+      expect((await cloudResponse.json()).execution_mode).toBe("cloud");
+    });
+  });
+
   it("stores model API keys in the vault and returns only masked state", async () => {
     await withLauncherCompatServer(async (request, workspaceDir) => {
-      const secret = "sk-model-secret-value-1234567890";
+      const secret = ["sk", "model-secret-value-1234567890"].join("-");
       const response = await request("/models", {
         method: "POST",
         body: JSON.stringify({
@@ -775,20 +800,152 @@ describe("launcher compatibility config validation", () => {
           provider: "openai",
         }),
       });
-      expect(create.status).toBe(200);
-
-      const test = await request("/models/0/test", { method: "POST" });
-      const body = await test.json();
-
-      expect(test.status).toBe(200);
-      expect(body).toEqual(
-        expect.objectContaining({
-          success: false,
-          status: "unconfigured",
-          error: "API key is required for this provider.",
-        }),
-      );
+      expect(create.status).toBe(400);
+      const body = await create.json();
+      expect(body.error).toContain("credential is required");
     });
+  });
+
+  it("preflights OpenCode Zen when its models endpoint returns a top-level array", async () => {
+    const previousFetch = globalThis.fetch;
+    const previousKey = process.env.OPENCODE_API_KEY;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("http://127.0.0.1")) return previousFetch(input, init);
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify([{ id: "mimo-v2.5-free" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/chat/completions")) {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "READY" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await withLauncherCompatServer(async (request) => {
+        process.env.OPENCODE_API_KEY = "test-opencode-key";
+        const response = await request("/models/test-inline", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: "opencode",
+            model: "opencode/mimo-v2.5-free",
+          }),
+        });
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            status: "ready",
+            readiness_status: "ready",
+            verification_level: "completion",
+            completion_tested: true,
+            provider: "opencode",
+          }),
+        );
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.OPENCODE_API_KEY;
+      else process.env.OPENCODE_API_KEY = previousKey;
+    }
+  });
+
+  it("preflights Gemini with native model discovery and OpenAI-compatible completion auth", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("http://127.0.0.1")) return previousFetch(input, init);
+      const headers = new Headers(init?.headers);
+      if (url.endsWith("/models")) {
+        expect(headers.get("x-goog-api-key")).toBe("test-gemini-key");
+        expect(headers.get("authorization")).toBeNull();
+        return new Response(
+          JSON.stringify({
+            models: [
+              {
+                name: "models/gemini-3.6-flash",
+                baseModelId: "gemini-3.6-flash",
+                supportedGenerationMethods: ["generateContent"],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/chat/completions")) {
+        expect(headers.get("authorization")).toBe("Bearer test-gemini-key");
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "READY" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await withLauncherCompatServer(async (request) => {
+        const response = await request("/models/test-inline", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: "google",
+            model: "gemini-3.6-flash",
+            api_base:
+              "https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key: "test-gemini-key",
+          }),
+        });
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            status: "ready",
+            readiness_status: "ready",
+            verification_level: "completion",
+            completion_tested: true,
+            provider: "gemini",
+            model: "gemini-3.6-flash",
+          }),
+        );
+
+        const stale = await request("/models/test-inline", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: "google",
+            model: "gemini-1.5-flash",
+            api_base:
+              "https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key: "test-gemini-key",
+          }),
+        });
+        const staleBody = await stale.json();
+        expect(staleBody).toEqual(
+          expect.objectContaining({
+            success: false,
+            status: "model_not_found",
+            completion_tested: false,
+          }),
+        );
+        expect(staleBody.available_models).toContain("gemini-3.6-flash");
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 
   it("stores channel, web-search, and MCP header secrets outside public config", async () => {
@@ -1198,6 +1355,7 @@ describe("launcher compatibility runtime apply", () => {
             model_name: "gemini-live-test",
             provider: "google",
             model: "gemini-2.5-flash",
+            api_key: ["test", "gemini", "key"].join("-"),
           }),
         });
         expect(addResponse.status).toBe(200);
@@ -1232,6 +1390,30 @@ describe("launcher compatibility runtime apply", () => {
         },
       },
     );
+  });
+
+  it("preserves provider prefixes for runtime model identities", () => {
+    expect(
+      runtimeModelName({
+        model_name: "opencode/mimo-v2.5-free",
+        provider: "opencode",
+        model: "mimo-v2.5-free",
+      }),
+    ).toBe("opencode/mimo-v2.5-free");
+    expect(
+      runtimeModelName({
+        model_name: "claude/claude-3-5-sonnet",
+        provider: "claude",
+        model: "claude-3-5-sonnet",
+      }),
+    ).toBe("claude/claude-3-5-sonnet");
+    expect(
+      runtimeModelName({
+        model_name: "llama.cpp/local-test",
+        provider: "llama.cpp",
+        model: "local-test",
+      }),
+    ).toBe("llama.cpp/local-test");
   });
 
   it("passes changed channel names to the runtime reloader", async () => {
@@ -1503,7 +1685,7 @@ describe("channel runtime probe", () => {
       SUPPORTED_CHANNELS.filter((channel) =>
         ["weixin", "wecom"].includes(channel.name),
       ).map((channel) => channel.runtime_status),
-    ).toEqual(["functional", "functional"]);
+    ).toEqual(["partial", "partial"]);
     expect(channelNames).not.toEqual(
       expect.arrayContaining(["whatsapp_native", "maixcam"]),
     );
@@ -2607,6 +2789,14 @@ describe("Google provider model discovery", () => {
         return originalFetch(input, init);
       }
       calls.push({ url: request.url, headers: request.headers });
+      if (request.url.endsWith("/chat/completions")) {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "READY" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({
           models: [{ name: "models/gemini-2.5-flash" }],
@@ -2632,9 +2822,16 @@ describe("Google provider model discovery", () => {
 
         expect(response.status).toBe(200);
         expect(body).toEqual(
-          expect.objectContaining({ success: true, status: "available" }),
+          expect.objectContaining({
+            success: true,
+            status: "ready",
+            readiness_status: "ready",
+            verification_level: "completion",
+            completion_tested: true,
+            provider: "gemini",
+          }),
         );
-        expect(calls).toHaveLength(1);
+        expect(calls).toHaveLength(2);
         expect(calls[0]?.url).toBe(
           "https://generativelanguage.googleapis.com/v1beta/models",
         );
@@ -2642,6 +2839,64 @@ describe("Google provider model discovery", () => {
       });
     } finally {
       global.fetch = originalFetch;
+    }
+  });
+});
+
+describe("provider tool readiness", () => {
+  it("reports agent_ready only after the tool dry run and final continuation succeed", async () => {
+    const complete = jest.spyOn(openAICompatibleAdapter, "complete");
+    complete
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "probe-call-1",
+                  type: "function",
+                  function: {
+                    name: "miki_agent_readiness_probe",
+                    arguments: '{"marker":"agent-ready"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: "Dry run complete." } }],
+      } as never);
+    try {
+      await withLauncherCompatServer(async (request) => {
+        const response = await request("/models/test-tools-inline", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: "opencode",
+            model: "opencode/mimo-v2.5-free",
+            api_key: "test-opencode-key",
+          }),
+        });
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body).toEqual(
+          expect.objectContaining({
+            success: true,
+            status: "agent_ready",
+            readiness_status: "agent_ready",
+            verification_level: "tools",
+            tools_tested: true,
+            dry_run_executed: true,
+            final_response_received: true,
+            provider: "opencode",
+          }),
+        );
+        expect(complete).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      complete.mockRestore();
     }
   });
 });

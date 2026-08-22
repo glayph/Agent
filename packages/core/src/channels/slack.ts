@@ -4,7 +4,7 @@ import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 
 const SLACK_API_BASE = "https://slack.com/api";
 const SLACK_MESSAGE_LIMIT = 3000;
@@ -261,7 +261,10 @@ export class SlackBot {
     await this.handleEvent(event, envelope.payload?.team_id);
   }
 
-  private async handleEvent(event: SlackEvent, _teamId?: string): Promise<void> {
+  private async handleEvent(
+    event: SlackEvent,
+    _teamId?: string,
+  ): Promise<void> {
     const config = this.runtimeConfig;
     if (!config || !shouldHandleSlackEvent(event, this.botUserId, config)) {
       return;
@@ -271,10 +274,19 @@ export class SlackBot {
 
     const response = await collectAgentResponse(
       this.orchestrator,
-      UNIVERSAL_SESSION_ID,
+      resolveChannelSessionId(
+        this.orchestrator.config,
+        "slack",
+        event.user || event.channel,
+        event.channel,
+      ),
       prompt,
     );
-    for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, SLACK_MESSAGE_LIMIT)) {
+    for (const part of splitOutboundMessageForOrchestrator(
+      this.orchestrator,
+      response,
+      SLACK_MESSAGE_LIMIT,
+    )) {
       await this.postMessage(event.channel, part, event.thread_ts || event.ts);
     }
   }

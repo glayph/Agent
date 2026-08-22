@@ -1,14 +1,17 @@
 import type { ModelInfo, ModelProviderOption } from "@/api/models"
 
 import {
+  type ProviderCatalogEntry,
   getCanonicalProviderKey,
   getProviderCatalogMap,
-  type ProviderCatalogEntry,
 } from "./provider-registry"
 
 export interface ProviderGroup {
   key: string
-  provider: Pick<ProviderCatalogEntry, "key" | "label" | "iconSlug" | "domain">
+  provider: Pick<
+    ProviderCatalogEntry,
+    "key" | "label" | "iconSlug" | "domain" | "plugin"
+  >
   models: ModelInfo[]
   hasDefault: boolean
   availableCount: number
@@ -24,7 +27,7 @@ export function buildProviderGroups(
     {
       provider: Pick<
         ProviderCatalogEntry,
-        "key" | "label" | "iconSlug" | "domain"
+        "key" | "label" | "iconSlug" | "domain" | "plugin"
       >
       models: ModelInfo[]
     }
@@ -40,6 +43,7 @@ export function buildProviderGroups(
           label: providerDef?.label || providerKey,
           iconSlug: providerDef?.iconSlug,
           domain: providerDef?.domain,
+          plugin: providerDef?.plugin,
         },
         models: [],
       }

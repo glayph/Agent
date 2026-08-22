@@ -13,18 +13,19 @@ import { toast } from "sonner"
 
 import type { SessionSummary } from "@/api/sessions"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
-import { ModelSelector } from "@/features/chat/components/model-selector"
-import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
 import { openChatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
+import { ModelSelector } from "@/features/chat/components/model-selector"
+import { PursueGoalPanel } from "@/features/chat/components/pursue-goal-panel"
+import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
 import { Composer } from "@/features/chat/components/workspace/composer"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
 import { WorkspaceHeader } from "@/features/chat/components/workspace/workspace-header"
 import { WorkspaceShell } from "@/features/chat/components/workspace/workspace-shell"
 import {
+  type MonitorNode,
   monitorAtom,
   selectMonitorNode,
-  type MonitorNode,
 } from "@/features/monitor/store"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
@@ -204,7 +205,7 @@ function workspaceTitle({
   return fallbackTitle
 }
 
-function buildStatusPills({
+export function buildStatusPills({
   connectionState,
   gatewayState,
   isTyping,
@@ -216,16 +217,24 @@ function buildStatusPills({
   labels: {
     activeAgents: (count: number) => string
     paused: string
+    ready: string
     running: string
   }
 }): WorkspaceStatusPill[] {
   const isOnline = gatewayState === "running" && connectionState === "connected"
-  const activeAgents = isOnline ? 1 : 0
+  // Connectivity is not equivalent to active work. The previous implementation
+  // reported one active agent whenever the socket was online, even while idle.
+  const activeAgents = isTyping ? 1 : 0
+  const statusLabel = isTyping
+    ? labels.running
+    : isOnline
+      ? labels.ready
+      : labels.paused
 
   return [
     {
-      label: isTyping ? labels.running : labels.paused,
-      tone: isTyping ? "success" : "warning",
+      label: statusLabel,
+      tone: isTyping ? "success" : isOnline ? "neutral" : "warning",
     },
     {
       label: labels.activeAgents(activeAgents),
@@ -317,6 +326,7 @@ export function ChatPage() {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [goalShortcutOpen, setGoalShortcutOpen] = useState(false)
   const hasLoadedSessionsRef = useRef(false)
   const isMobile = useIsMobile()
   const openInspector = useSetAtom(openChatInspectorAtom)
@@ -379,10 +389,7 @@ export function ChatPage() {
     }, 2600)
     return () => window.clearTimeout(timeoutId)
   }, [monitorState.selectedNodeId])
-  const {
-    sessions,
-    loadSessions,
-  } = useSessionHistory({
+  const { sessions, loadSessions } = useSessionHistory({
     activeSessionId,
     onDeletedActiveSession: () => {
       void newChat()
@@ -520,9 +527,15 @@ export function ChatPage() {
       return
     }
 
+    if (!editingMessageId && input.trim().toLowerCase() === "/goal") {
+      setInput("")
+      setAttachments([])
+      setGoalShortcutOpen(true)
+      return
+    }
     if (editingMessageId) {
       if (
-        editMessage({
+        await editMessage({
           messageId: editingMessageId,
           content: input,
           attachments,
@@ -590,9 +603,9 @@ export function ChatPage() {
   )
 
   const handleRetryMessage = useCallback(
-    (messageId: string) => {
+    async (messageId: string) => {
       try {
-        if (retryMessage(messageId)) {
+        if (await retryMessage(messageId)) {
           return
         }
       } catch (error) {
@@ -609,7 +622,7 @@ export function ChatPage() {
 
       toast.error(
         t("chat.actions.retryUnavailable", {
-          defaultValue: "Connect chat before retrying",
+          defaultValue: "Unable to retry this message",
         }),
       )
     },
@@ -711,6 +724,7 @@ export function ChatPage() {
         labels: {
           activeAgents: (count) => t("chat.workspace.activeAgents", { count }),
           paused: t("chat.workspace.paused"),
+          ready: t("chat.workspace.ready"),
           running: t("chat.workspace.running"),
         },
       }).map((status, index) =>
@@ -719,10 +733,16 @@ export function ChatPage() {
     [connectionState, gwState, handleWorkingClick, isTyping, t],
   )
   const handleForkMessage = useCallback(
-    (messageId: string) => {
-      void forkFromMessage(messageId)
+    async (messageId: string) => {
+      if (!(await forkFromMessage(messageId))) {
+        toast.error(
+          t("chat.actions.forkUnavailable", {
+            defaultValue: "Unable to fork this conversation",
+          }),
+        )
+      }
     },
-    [forkFromMessage],
+    [forkFromMessage, t],
   )
 
   const handleModeClick = useCallback(() => {
@@ -741,13 +761,12 @@ export function ChatPage() {
           compact={isMobile}
         />
       )}
-
     </>
   )
 
   return (
     <div className="bg-background h-full min-h-0">
-            <WorkspaceShell
+      <WorkspaceShell
         header={
           <WorkspaceHeader
             title={title}
@@ -780,19 +799,27 @@ export function ChatPage() {
           />
         }
         composer={
-          <Composer
-            input={input}
-            attachments={attachments}
-            onInputChange={setInput}
-            onAddImages={handleAddImages}
-            onModeClick={handleModeClick}
-            onRemoveAttachment={handleRemoveAttachment}
-            onSend={handleSend}
-            modeLabel={t("chat.workspace.mode")}
-            inputDisabledReason={isEditingMessage ? null : inputDisabledReason}
-            canSend={canSubmit}
-            contextUsage={contextUsage}
-          />
+          <>
+            <PursueGoalPanel
+              autoOpen={goalShortcutOpen}
+              onAutoOpenConsumed={() => setGoalShortcutOpen(false)}
+            />
+            <Composer
+              input={input}
+              attachments={attachments}
+              onInputChange={setInput}
+              onAddImages={handleAddImages}
+              onModeClick={handleModeClick}
+              onRemoveAttachment={handleRemoveAttachment}
+              onSend={handleSend}
+              modeLabel={t("chat.workspace.mode")}
+              inputDisabledReason={
+                isEditingMessage ? null : inputDisabledReason
+              }
+              canSend={canSubmit}
+              contextUsage={contextUsage}
+            />
+          </>
         }
       />
 

@@ -20,15 +20,25 @@ import {
 } from "./secret-vault.js";
 
 export interface ChatMessage {
+  /** Stable identifier used by persisted session history mutations. */
+  id?: string;
+  /** ISO creation timestamp for persisted session history. */
+  created_at?: string;
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /** Image URLs or data URLs to be serialized as provider image content parts. */
+  image_urls?: string[];
   name?: string;
   tool_call_id?: string;
   tool_calls?: Array<{
     id: string;
     type?: "function";
     function: { name: string; arguments: string };
+    /** Provider-native metadata returned on an individual tool call. */
+    extra_content?: Record<string, unknown>;
   }>;
+  /** Provider-native assistant metadata, such as Gemini thought signatures. */
+  extra_content?: Record<string, unknown>;
 }
 
 export interface ToolDefinition {
@@ -91,7 +101,9 @@ export interface SecretStatusItem {
   migrated?: boolean;
 }
 
-export const DEFAULT_GEMINI_MODEL = "gemini/gemini-3.7-flash";
+// Keep the provider-qualified identifier aligned with the low-cost Flash
+// fallback used by the Miki runtime and dashboard readiness contract.
+export const DEFAULT_GEMINI_MODEL = "gemini/gemini-3.5-flash-lite";
 export const DEFAULT_GEMINI_PROVIDER = "gemini";
 
 const SECRET_KEYS = [
@@ -226,7 +238,10 @@ function redactSecretLiterals(value: string): string {
       `$1$2${REDACTED_VALUE}`,
     )
     .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, `Bearer ${REDACTED_VALUE}`)
-    .replace(/\b(?:sk|pk|rk|ghp|xox[baprs]-|AIza)[A-Za-z0-9_\-]{12,}\b/g, REDACTED_VALUE);
+    .replace(
+      /\b(?:sk|pk|rk|ghp|xox[baprs]-|AIza)[A-Za-z0-9_\-]{12,}\b/g,
+      REDACTED_VALUE,
+    );
 }
 
 export function redactSecrets<T>(input: T, ..._rest: unknown[]): T;
@@ -236,7 +251,9 @@ export function redactSecrets(input: unknown, ..._rest: unknown[]): unknown {
   if (Array.isArray(input)) return input.map((value) => redactSecrets(value));
   if (typeof input === "object") {
     const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      input as Record<string, unknown>,
+    )) {
       out[key] = isSensitiveField(key) ? REDACTED_VALUE : redactSecrets(value);
     }
     return out;
@@ -253,23 +270,15 @@ export function isSecretEnvKey(key: string): boolean {
   );
 }
 
-export function isValidCidr(value: string): boolean {
-  if (!value || typeof value !== "string") return false;
-  if (value === "*") return true;
-  // IPv4 or IPv4/CIDR
-  return /^(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/.test(value.trim());
-}
-
 export function resolveConfiguredSecret(
   name: string,
   workspaceDir?: string,
   ..._rest: unknown[]
 ): string | undefined {
   if (workspaceDir) {
-    const workspaceValue =
-      name.startsWith("env/")
-        ? createPersistentWorkspaceSecretVault(workspaceDir).get(name)
-        : resolveWorkspaceEnvSecret(name, workspaceDir);
+    const workspaceValue = name.startsWith("env/")
+      ? createPersistentWorkspaceSecretVault(workspaceDir).get(name)
+      : resolveWorkspaceEnvSecret(name, workspaceDir);
     return (
       workspaceValue ||
       process.env[name] ||
@@ -346,7 +355,7 @@ export function reloadProviderSecretsIntoEnv(
 
 export function migrateEnvSecretsToVault(
   _a?: unknown,
-  _b?: unknown
+  _b?: unknown,
 ): Array<{ key: string; migrated: boolean }> {
   const result: Array<{ key: string; migrated: boolean }> = [];
   for (const key of SECRET_KEYS) {
@@ -373,7 +382,7 @@ export function createWorkspaceSecretVault(
     list: () =>
       Array.from(
         new Set([
-          ...vault.list().map((item) => item.name),
+          ...vault.list(),
           ...secretStore.keys(),
           ...SECRET_KEYS.filter((key) => resolveConfiguredSecret(key)),
         ]),
@@ -383,7 +392,7 @@ export function createWorkspaceSecretVault(
 
 /** Returns array so callers can .filter / .map */
 export function inspectEnvSecretStatus(
-  _opts?: { workspaceDir?: string } | string
+  _opts?: { workspaceDir?: string } | string,
 ): SecretStatusItem[] {
   return SECRET_KEYS.map((key) => {
     const inVault = Boolean(resolvePersistentSecret(key));
@@ -398,9 +407,7 @@ export function inspectEnvSecretStatus(
   });
 }
 
-export function resolveAllowedCidrsFromEnv(
-  _opts?: unknown
-): string[] {
+export function resolveAllowedCidrsFromEnv(_opts?: unknown): string[] {
   const raw =
     readMikiEnv("ALLOWED_CIDRS") ||
     process.env.MIKI_ALLOWED_CIDRS ||
@@ -411,5 +418,11 @@ export function resolveAllowedCidrsFromEnv(
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+export {
+  isIpAllowedByCidrs,
+  isValidCidr,
+  normalizeAllowedCidrs,
+} from "./security.js";
 
 export default settings;

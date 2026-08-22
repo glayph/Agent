@@ -51,6 +51,7 @@ import {
   handleModelDelete,
   handleModelSelect,
   handleDirectDownloadSearch,
+  handleWebSearch,
   handleProjectWorkflowCreate,
   handleRuntimeEnsure,
   handleRuntimeEnsureStatus,
@@ -172,7 +173,11 @@ export class ToolRegistry {
     );
 
     this.runtimePaths = runtimePaths;
-    this.workspaceDir = runtimePaths.sourceDir ?? runtimePaths.dataDir;
+    this.workspaceDir = path.resolve(
+      runtimePaths.sourceDir ?? runtimePaths.dataDir,
+    );
+    this.executor.setWorkspaceRoot(this.workspaceDir);
+    this.fileOps.setWorkspaceRoot(this.workspaceDir);
 
     this.browser = new BrowserTool(
       false,
@@ -193,7 +198,8 @@ export class ToolRegistry {
       const level = String(
         runtimeInstallerConfig?.level || "REQUIRE_APPROVAL",
       ).toUpperCase();
-      const approvalLevel: "REQUIRE_APPROVAL" | "TRUSTED_FULL_ACCESS" | "DISABLED" =
+      const approvalLevel:
+        "REQUIRE_APPROVAL" | "TRUSTED_FULL_ACCESS" | "DISABLED" =
         this.isDisabledLevel(level)
           ? "DISABLED"
           : level === "TRUSTED_FULL_ACCESS"
@@ -214,6 +220,20 @@ export class ToolRegistry {
 
   setOrchestrator(orchestrator: AgentOrchestrator): void {
     this.orchestrator = orchestrator;
+  }
+
+  /**
+   * Update the workspace used by workspace-aware built-in tools without
+   * rebuilding the registry. The path is normalized here so callers cannot
+   * accidentally create divergent relative-path behavior after a config
+   * reload.
+   */
+  setWorkspaceDir(workspaceDir: string): void {
+    const trimmed = workspaceDir.trim();
+    if (!trimmed) return;
+    this.workspaceDir = path.resolve(trimmed);
+    this.executor.setWorkspaceRoot(this.workspaceDir);
+    this.fileOps.setWorkspaceRoot(this.workspaceDir);
   }
 
   setPlatformConnectionStore(store: SqlitePlatformConnectionStore): void {
@@ -346,11 +366,26 @@ export class ToolRegistry {
     );
     this.registerHandler("browser_scroll", handleBrowserScroll.bind(this));
     this.registerHandler("browser_close", handleBrowserClose.bind(this));
-    this.registerHandler("platform_connection_start", handlePlatformConnectionStart.bind(this));
-    this.registerHandler("platform_connection_status", handlePlatformConnectionStatus.bind(this));
-    this.registerHandler("platform_connection_complete", handlePlatformConnectionComplete.bind(this));
-    this.registerHandler("platform_connection_validate", handlePlatformConnectionValidate.bind(this));
-    this.registerHandler("platform_connection_revoke", handlePlatformConnectionRevoke.bind(this));
+    this.registerHandler(
+      "platform_connection_start",
+      handlePlatformConnectionStart.bind(this),
+    );
+    this.registerHandler(
+      "platform_connection_status",
+      handlePlatformConnectionStatus.bind(this),
+    );
+    this.registerHandler(
+      "platform_connection_complete",
+      handlePlatformConnectionComplete.bind(this),
+    );
+    this.registerHandler(
+      "platform_connection_validate",
+      handlePlatformConnectionValidate.bind(this),
+    );
+    this.registerHandler(
+      "platform_connection_revoke",
+      handlePlatformConnectionRevoke.bind(this),
+    );
     this.registerHandler("computer_observe", handleComputerObserve.bind(this));
     this.registerHandler("computer_focus", handleComputerFocus.bind(this));
     this.registerHandler("computer_invoke", handleComputerInvoke.bind(this));
@@ -410,6 +445,7 @@ export class ToolRegistry {
       "direct_download_search",
       handleDirectDownloadSearch.bind(this),
     );
+    this.registerHandler("web_search", handleWebSearch.bind(this));
     this.registerHandler(
       "project_workflow_create",
       handleProjectWorkflowCreate.bind(this),
@@ -431,6 +467,7 @@ export class ToolRegistry {
       ...ToolRegistrySchemas.scraperSchemas(),
       ...ToolRegistrySchemas.modelSchemas(),
       ...ToolRegistrySchemas.directDownloadSchema(),
+      ...ToolRegistrySchemas.webSearchSchema(),
       ...ToolRegistrySchemas.projectWorkflowSchemas(),
       ...ToolRegistrySchemas.runtimeSchema(),
     ];

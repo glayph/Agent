@@ -18,9 +18,9 @@ describe("channel array utilities", () => {
   })
 
   it("parses conservative lists without semicolon splitting", () => {
-    expect(parseConservativeStringListInput("alpha, beta\nalpha;gamma")).toEqual(
-      ["alpha", "beta", "alpha;gamma"],
-    )
+    expect(
+      parseConservativeStringListInput("alpha, beta\nalpha;gamma"),
+    ).toEqual(["alpha", "beta", "alpha;gamma"])
   })
 
   it("normalizes persisted allow-from values", () => {
@@ -31,9 +31,9 @@ describe("channel array utilities", () => {
   })
 
   it("merges unique string items while preserving first-seen order", () => {
-    expect(mergeUniqueStringItems(["alpha", " beta "], ["beta", "gamma"])).toEqual(
-      ["alpha", "beta", "gamma"],
-    )
+    expect(
+      mergeUniqueStringItems(["alpha", " beta "], ["beta", "gamma"]),
+    ).toEqual(["alpha", "beta", "gamma"])
   })
 
   it("serializes arrays as newline-delimited strings and preserves non-arrays", () => {

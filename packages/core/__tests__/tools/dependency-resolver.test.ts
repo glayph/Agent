@@ -1,4 +1,7 @@
-import { DependencyResolver, ToolCall } from "../../src/tools/dependency-resolver.js";
+import {
+  DependencyResolver,
+  ToolCall,
+} from "../../src/tools/dependency-resolver.js";
 
 function tool(
   id: string,

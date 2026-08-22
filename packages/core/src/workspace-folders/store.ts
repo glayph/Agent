@@ -42,7 +42,8 @@ function normalizeFolderInput(
     label,
     enabled: input.enabled ?? existing?.enabled ?? true,
     index: input.index ?? existing?.index ?? true,
-    restrictDefault: input.restrictDefault ?? existing?.restrictDefault ?? false,
+    restrictDefault:
+      input.restrictDefault ?? existing?.restrictDefault ?? false,
     rulesFiles,
     notes: input.notes ?? existing?.notes,
     createdAt: existing?.createdAt || now,
@@ -194,17 +195,13 @@ export function addWorkspaceFolder(
 ): WorkspaceFolder {
   const cfg = loadWorkspaceFolders(runtimePaths);
   const resolved = path.resolve(input.path);
-  const existing = cfg.folders.find(
-    (f) => path.resolve(f.path) === resolved,
-  );
+  const existing = cfg.folders.find((f) => path.resolve(f.path) === resolved);
   if (existing) {
     const updated = normalizeFolderInput(
       { ...existing, ...input, path: resolved },
       existing,
     );
-    cfg.folders = cfg.folders.map((f) =>
-      f.id === existing.id ? updated : f,
-    );
+    cfg.folders = cfg.folders.map((f) => (f.id === existing.id ? updated : f));
     saveWorkspaceFolders(runtimePaths, cfg);
     return updated;
   }

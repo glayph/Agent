@@ -1,6 +1,7 @@
 import { IconLayoutGrid, IconLayoutList, IconSearch } from "@tabler/icons-react"
 import { useTranslation } from "react-i18next"
 
+import { cn } from "@/lib/utils"
 import { Input } from "@/shared/ui/input"
 import {
   Select,
@@ -9,7 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select"
-import { cn } from "@/lib/utils"
 
 import { getOriginLabel } from "./origin-utils"
 import type { SkillLayoutMode, SkillSortOption } from "./types"

@@ -10,8 +10,10 @@ import * as fs from "fs";
 import type { IncomingHttpHeaders } from "http";
 import * as os from "os";
 import * as path from "path";
+import * as zlib from "zlib";
 import * as yaml from "js-yaml";
 import QRCode from "qrcode";
+import { ProxyAgent } from "undici";
 
 function positiveIntFromEnv(key: string, fallback: number): number {
   const raw = process.env[key];
@@ -20,7 +22,10 @@ function positiveIntFromEnv(key: string, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function readWorkspaceEnvValue(paths: RuntimePaths, key: string): string | undefined {
+function readWorkspaceEnvValue(
+  paths: RuntimePaths,
+  key: string,
+): string | undefined {
   try {
     const envPath = path.join(paths.configDir, ".env");
     const line = fs
@@ -29,7 +34,11 @@ function readWorkspaceEnvValue(paths: RuntimePaths, key: string): string | undef
       .find((entry) => entry.trimStart().startsWith(`${key}=`));
     if (!line) return undefined;
     const raw = line.slice(line.indexOf("=") + 1).trim();
-    if (raw.length >= 2 && ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'")))) {
+    if (
+      raw.length >= 2 &&
+      ((raw.startsWith('"') && raw.endsWith('"')) ||
+        (raw.startsWith("'") && raw.endsWith("'")))
+    ) {
       return raw.slice(1, -1);
     }
     return raw || undefined;
@@ -51,6 +60,8 @@ import {
   setEnvSecret,
   settings,
   validateRuntimeConfig,
+  isValidCidr,
+  normalizeAllowedCidrs,
   type ConfigValidationResult,
   type SecretVault,
 } from "@miki/config";
@@ -88,15 +99,28 @@ import {
 } from "../plugins/plugin-channel-adapter.js";
 import { buildPluginMarketplaceReadinessReport } from "../plugins/plugin-marketplace-readiness.js";
 import { listRuntimePluginProviderMetadata } from "../plugins/plugin-provider-adapter.js";
+import { providerRegistry } from "../llm/provider/registry.js";
+import {
+  probeProviderCompletion,
+  type CompletionHealthResult,
+} from "../llm/provider/completion-health.js";
+import {
+  probeProviderTools,
+  type ToolHealthResult,
+} from "../llm/provider/tool-health.js";
 import { summarizeAgentRoute } from "../agent-router.js";
 import {
   buildWorkflowAccelerationPlan,
   buildWorkflowDecisionPattern,
 } from "../workflow-accelerator.js";
+import { resolveDownloadedSkillsDir, type RuntimePaths } from "../paths.js";
 import {
-  resolveDownloadedSkillsDir,
-  type RuntimePaths,
-} from "../paths.js";
+  configureLocalModels,
+  getLocalRuntimeHealth,
+  normalizeLocalModelConfig,
+  synchronizeLocalRuntimeForModel,
+} from "../llm/local/local-runtime.js";
+import { globalLogger, type LogLevel } from "../structured-logger.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -349,6 +373,26 @@ interface StoredModel {
   streaming?: { enabled?: boolean };
   extra_body?: JsonRecord;
   custom_headers?: Record<string, string>;
+  local?: import("../llm/local/local-runtime.js").LocalLlamaModelConfig;
+}
+
+interface ProviderPluginOptionInfo {
+  id: string;
+  api_version: string;
+  version: string;
+  display_name: string;
+  source: "builtin" | "external";
+  readiness: "ready" | "metadata_only" | "incompatible" | "rejected";
+  reason?: string;
+  auth_mode: string;
+  model_prefixes: string[];
+  capabilities: {
+    chat: boolean;
+    tools: boolean;
+    streaming: boolean;
+    vision: boolean;
+    local: boolean;
+  };
 }
 
 interface ProviderOption {
@@ -368,6 +412,7 @@ interface ProviderOption {
   common_models?: string[];
   aliases?: string[];
   source?: "builtin" | "plugin";
+  plugin?: ProviderPluginOptionInfo;
 }
 
 interface CatalogEntry {
@@ -481,17 +526,17 @@ export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] = [
     name: "weixin",
     display_name: "WeChat",
     config_key: "weixin",
-    runtime_status: "functional",
+    runtime_status: "partial",
     runtime_note:
-      "WeChat flow/webhook runtime has mock-send readiness coverage.",
+      "QR binding is available, but no production inbound/outbound WeChat adapter is mounted in the Node runtime.",
   },
   {
     name: "wecom",
     display_name: "WeCom",
     config_key: "wecom",
-    runtime_status: "functional",
+    runtime_status: "partial",
     runtime_note:
-      "WeCom flow/webhook runtime has mock-send readiness coverage.",
+      "QR binding is available, but no production inbound/outbound WeCom adapter is mounted in the Node runtime.",
   },
   {
     name: "line",
@@ -573,8 +618,56 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     supports_fetch: true,
     default_auth_method: "api_key",
     priority: 80,
-    common_models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+    // Keep fallback suggestions aligned with the current Gemini API model
+    // catalog. Actual readiness still requires a live model-list and
+    // completion probe for the user's project/key.
+    common_models: [
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+    ],
     aliases: ["gemini"],
+  },
+  {
+    id: "opencode",
+    display_name: "OpenCode Zen",
+    icon_slug: "opencode",
+    domain: "opencode.ai",
+    default_api_base: "https://opencode.ai/zen/v1",
+    empty_api_key_allowed: false,
+    create_allowed: true,
+    default_model_allowed: true,
+    supports_fetch: true,
+    default_auth_method: "api_key",
+    priority: 85,
+    common_models: [
+      "mimo-v2.5-free",
+      "deepseek-v4-flash-free",
+      "x-preview-f-free",
+      "muse-spark-1.2-contributor-free",
+      "nemotron-3-ultra-free",
+      "nemotron-3.5-lightning-free",
+      "laguna-s-2.1-free",
+    ],
+    aliases: ["open-code", "open-code-zen", "zen"],
+  },
+  {
+    id: "llama.cpp",
+    display_name: "llama.cpp Local",
+    icon_slug: "llama",
+    domain: "127.0.0.1",
+    default_api_base: "http://127.0.0.1:39200/v1",
+    empty_api_key_allowed: true,
+    create_allowed: true,
+    default_model_allowed: true,
+    supports_fetch: false,
+    default_auth_method: "none",
+    auth_method_locked: true,
+    local: true,
+    priority: 75,
+    common_models: ["local-model"],
+    aliases: ["llama-cpp", "llamacpp", "local-llama"],
   },
   {
     id: "openrouter",
@@ -599,6 +692,7 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
 ];
 
 const WEB_SEARCH_DEFAULT = {
+  execution_mode: "local" as const,
   provider: "native",
   current_service: "native",
   prefer_native: true,
@@ -646,6 +740,21 @@ function isSecretRef(value: unknown): value is { secret_ref: string } {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+type WebSearchExecutionMode = "local" | "cloud" | "auto";
+
+function normalizeWebSearchExecutionMode(
+  value: unknown,
+): WebSearchExecutionMode {
+  return value === "cloud" || value === "auto" ? value : "local";
+}
+
+function normalizeWebSearchConfig(input: JsonRecord): JsonRecord {
+  const defaults = clone(WEB_SEARCH_DEFAULT) as JsonRecord;
+  const merged = { ...defaults, ...input };
+  merged.execution_mode = normalizeWebSearchExecutionMode(input.execution_mode);
+  return merged;
 }
 
 function channelSecretName(channelName: string, field: string): string {
@@ -864,7 +973,10 @@ function pluginChannelSecretFieldsFromRegistry(
   }
 }
 
-function pluginChannelConfigKeysFromRegistry(paths: RuntimePaths, workspaceDir?: string): string[] {
+function pluginChannelConfigKeysFromRegistry(
+  paths: RuntimePaths,
+  workspaceDir?: string,
+): string[] {
   // Use resolveDownloadedSkillsDir so sandbox_mode is respected (registry is
   // written to downloaded-skills only when sandboxed; otherwise skillsDir)
   const _skillsDir = resolveDownloadedSkillsDir(paths, workspaceDir);
@@ -1044,6 +1156,7 @@ function extractChannelSecretsToVault(
     const settingsBlock = isRecord(raw.settings) ? { ...raw.settings } : {};
     for (const field of fields) {
       const candidate = settingsBlock[field] ?? raw[field];
+      const secretName = channelSecretName(channelName, field);
       if (
         typeof candidate === "string" &&
         candidate.trim() &&
@@ -1053,10 +1166,12 @@ function extractChannelSecretsToVault(
         setRuntimeSecret(
           vault,
           paths.configDir,
-          channelSecretName(channelName, field),
+          secretName,
           candidate.trim(),
           envKey,
         );
+      } else if (candidate === "" || candidate === null) {
+        vault.delete(secretName);
       }
       delete settingsBlock[field];
       delete raw[field];
@@ -1079,17 +1194,15 @@ function extractChannelSecretsToVault(
     const settingsBlock = isRecord(raw.settings) ? { ...raw.settings } : {};
     for (const field of fields) {
       const candidate = settingsBlock[field] ?? raw[field];
+      const secretName = channelSecretName(channelName, field);
       if (
         typeof candidate === "string" &&
         candidate.trim() &&
         !isMaskedSecret(candidate)
       ) {
-        setRuntimeSecret(
-          vault,
-          paths.configDir,
-          channelSecretName(channelName, field),
-          candidate.trim(),
-        );
+        setRuntimeSecret(vault, paths.configDir, secretName, candidate.trim());
+      } else if (candidate === "" || candidate === null) {
+        vault.delete(secretName);
       }
       delete settingsBlock[field];
       delete raw[field];
@@ -1118,13 +1231,17 @@ function extractWebSearchSecretsToVault(
     if (!isRecord(rawSettings)) continue;
     const providerSettings = { ...rawSettings };
     const apiKey = providerSettings.api_key;
+    const secretName = `web_search/${providerId}/api_key`;
     if (
       typeof apiKey === "string" &&
       apiKey.trim() &&
       !isMaskedSecret(apiKey)
     ) {
-      vault.set(`web_search/${providerId}/api_key`, apiKey.trim());
+      vault.set(secretName, apiKey.trim());
       providerSettings.api_key_set = true;
+    } else if (apiKey === "" || apiKey === null) {
+      vault.delete(secretName);
+      providerSettings.api_key_set = false;
     }
     delete providerSettings.api_key;
     settingsBlock[providerId] = providerSettings;
@@ -1157,6 +1274,12 @@ function extractMcpHeaderSecretsToVault(
         const secretName = `mcp/${serverName}/headers/${headerName}`;
         vault.set(secretName, headerValue.trim());
         headers[headerName] = { secret_ref: secretName };
+      } else if (
+        (headerValue === "" || headerValue === null) &&
+        SECRET_REF_FIELD_PATTERN.test(headerName)
+      ) {
+        vault.delete(`mcp/${serverName}/headers/${headerName}`);
+        delete headers[headerName];
       } else if (isSecretRef(headerValue)) {
         headers[headerName] = { secret_ref: headerValue.secret_ref };
       }
@@ -1182,6 +1305,25 @@ function extractRuntimeSecretsToVault(
     ),
     vault,
   );
+}
+
+function collectSecretReferences(
+  value: unknown,
+  references = new Set<string>(),
+): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) collectSecretReferences(item, references);
+    return references;
+  }
+  if (!isRecord(value)) return references;
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "secret_ref" && typeof item === "string" && item.trim()) {
+      references.add(item.trim());
+      continue;
+    }
+    collectSecretReferences(item, references);
+  }
+  return references;
 }
 
 function nowIso(): string {
@@ -1301,11 +1443,34 @@ async function generateQrDataURI(content: string): Promise<string> {
   });
 }
 
-async function fetchJson<T>(targetURL: string, timeoutMs: number): Promise<T> {
+const qrProxyAgents = new Map<string, ProxyAgent>();
+
+function getQrProxyAgent(proxyURL?: string): ProxyAgent | undefined {
+  const normalized = proxyURL?.trim();
+  if (!normalized) return undefined;
+  const parsed = new URL(normalized);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("QR binding proxy must use an http:// or https:// URL.");
+  }
+  let agent = qrProxyAgents.get(normalized);
+  if (!agent) {
+    agent = new ProxyAgent(normalized);
+    qrProxyAgents.set(normalized, agent);
+  }
+  return agent;
+}
+
+async function fetchJson<T>(
+  targetURL: string,
+  timeoutMs: number,
+  options: { proxy?: string } = {},
+): Promise<T> {
+  const dispatcher = getQrProxyAgent(options.proxy);
   const response = await fetch(targetURL, {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(timeoutMs),
-  });
+    ...(dispatcher ? ({ dispatcher } as Record<string, unknown>) : {}),
+  } as RequestInit);
   const text = await response.text();
   let body: unknown = null;
   try {
@@ -1425,6 +1590,7 @@ function runtimeConfigFromFiles(paths: RuntimePaths): JsonRecord {
   );
 
   const runtime: JsonRecord = {
+    agent,
     agents: mergePatch(agents, { defaults }),
     heartbeat,
     session: recordOrEmpty(agentYaml.session),
@@ -1574,8 +1740,13 @@ function syncToolsYaml(
   writeYamlFile(configPath, next);
 }
 
-function fileManagerAllowsSystemWrite(_config: unknown): boolean {
-  return true;
+function fileManagerAllowsSystemWrite(config: unknown): boolean {
+  const root = recordOrEmpty(config);
+  const agent = recordOrEmpty(root.agent);
+  const security = recordOrEmpty(agent.security);
+  return (
+    security.bypass_restrictions === true && security.system_access === "full"
+  );
 }
 
 function defaultAppConfig(paths: RuntimePaths): JsonRecord {
@@ -1583,14 +1754,15 @@ function defaultAppConfig(paths: RuntimePaths): JsonRecord {
   return {
     agent: {
       security: {
-        bypass_restrictions: true,
-        system_access: "full",
+        bypass_restrictions: false,
+        system_access: "workspace_only",
+        sandbox_mode: true,
       },
     },
     agents: {
       defaults: {
         workspace: paths.sourceDir ?? paths.configDir,
-        restrict_to_workspace: false,
+        restrict_to_workspace: true,
         split_on_marker: false,
         max_tokens: settings.defaultMaxTokens || 4096,
         context_window: 0,
@@ -1665,7 +1837,11 @@ function defaultChannelSetupConfig(): JsonRecord {
   const channels: JsonRecord = {};
   for (const channel of SUPPORTED_CHANNELS) {
     channels[channel.config_key] ??= {
-      enabled: true,
+      // Integrations are opt-in. Enabling every channel on a fresh install
+      // makes validation fail for unconfigured transports such as MQTT and
+      // prevents the core backend from starting before the dashboard can be
+      // used to configure them.
+      enabled: false,
       type: channel.config_key,
     };
   }
@@ -1856,7 +2032,11 @@ function noteLoginFailure(req: Request): void {
   existing.count += 1;
 }
 
-function updateEnvVar(paths: RuntimePaths, key: string, rawValue: string): void {
+function updateEnvVar(
+  paths: RuntimePaths,
+  key: string,
+  rawValue: string,
+): void {
   // Strip embedded CR/LF before this value is ever turned into a raw
   // `KEY=value` line. Without this, a dashboard config value containing a
   // newline (e.g. a webhook URL, nickname, or channel list) could inject
@@ -2118,9 +2298,19 @@ function apiKeyEnvForProvider(provider: string): string {
       return "GEMINI_API_KEY";
     case "openrouter":
       return "OPENROUTER_API_KEY";
+    case "opencode":
+      return "OPENCODE_API_KEY";
+    case "omniroute":
+      return "MIKI_OMNIROUTE_API_KEY";
     default:
       return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
   }
+}
+
+function oauthSecretEnvForProvider(provider: string): string {
+  return provider === "google-antigravity"
+    ? "MIKI_ANTIGRAVITY_API_KEY"
+    : apiKeyEnvForProvider(provider);
 }
 
 function maskSecret(value: string): string {
@@ -2133,9 +2323,12 @@ function isMaskedSecret(value: unknown): boolean {
   return typeof value === "string" && /^(\*+|.+\.\.\..+)$/.test(value);
 }
 
-function getProviderOption(provider: string) {
+function getProviderOption(
+  provider: string,
+  options: ProviderOption[] = PROVIDER_OPTIONS,
+): ProviderOption {
   return (
-    PROVIDER_OPTIONS.find(
+    options.find(
       (item) =>
         item.id === provider ||
         item.aliases?.includes(provider) ||
@@ -2152,6 +2345,43 @@ async function launcherProviderOptions(
     source: option.source || ("builtin" as const),
   }));
   const seen = new Set(builtIns.map((option) => option.id));
+  const builtinPluginOptions = providerRegistry
+    .pluginDescriptors()
+    .filter((descriptor) => {
+      const dashboardId =
+        descriptor.manifest.id === "gemini" ? "google" : descriptor.manifest.id;
+      return !seen.has(dashboardId);
+    })
+    .map((descriptor): ProviderOption => {
+      const dashboardId =
+        descriptor.manifest.id === "gemini" ? "google" : descriptor.manifest.id;
+      seen.add(dashboardId);
+      return {
+        id: dashboardId,
+        display_name: descriptor.manifest.displayName,
+        icon_slug: descriptor.manifest.id === "omniroute" ? "route" : "plugin",
+        default_api_base:
+          descriptor.manifest.id === "omniroute"
+            ? process.env.MIKI_OMNIROUTE_BASE_URL || "http://127.0.0.1:20128/v1"
+            : descriptor.manifest.id === "ollama"
+              ? process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434/v1"
+              : descriptor.manifest.id === "claude"
+                ? "https://api.anthropic.com/v1/"
+                : "",
+        empty_api_key_allowed: descriptor.auth.allowEmptyKey,
+        create_allowed: true,
+        default_model_allowed: true,
+        supports_fetch: Boolean(descriptor.manifest.capabilities.chat),
+        default_auth_method:
+          descriptor.auth.mode === "api-key" ? "api_key" : descriptor.auth.mode,
+        auth_method_locked:
+          descriptor.auth.mode === "local" || descriptor.auth.mode === "none",
+        local: descriptor.manifest.capabilities.local,
+        priority: 20,
+        common_models: descriptor.manifest.modelIds || [],
+        source: "builtin",
+      };
+    });
   const pluginOptions = (
     await listRuntimePluginProviderMetadata(paths.sourceDir ?? paths.configDir)
   )
@@ -2175,23 +2405,48 @@ async function launcherProviderOptions(
         source: "plugin",
       };
     });
-  return [...builtIns, ...pluginOptions];
+  const allOptions = [...builtIns, ...builtinPluginOptions, ...pluginOptions];
+  const descriptors = providerRegistry.pluginDescriptors();
+  return allOptions.map((option) => {
+    const pluginId = option.id === "google" ? "gemini" : option.id;
+    const descriptor = descriptors.find(
+      (item) => item.manifest.id === pluginId,
+    );
+    if (!descriptor) return option;
+    return {
+      ...option,
+      plugin: {
+        id: descriptor.manifest.id,
+        api_version: descriptor.manifest.pluginApiVersion,
+        version: descriptor.manifest.version,
+        display_name: descriptor.manifest.displayName,
+        source: descriptor.source,
+        readiness: descriptor.readiness,
+        reason: descriptor.reason,
+        auth_mode: descriptor.auth.mode,
+        model_prefixes: descriptor.manifest.modelPrefixes || [],
+        capabilities: descriptor.manifest.capabilities,
+      },
+    };
+  });
 }
 
 function normalizeProvider(
   provider: string | undefined,
   modelName = "",
+  options: ProviderOption[] = PROVIDER_OPTIONS,
 ): string {
   const raw = (provider || "").trim().toLowerCase();
   if (raw === "gemini") return "google";
-  if (raw && getProviderOption(raw).id === raw) return raw;
+  if (raw && getProviderOption(raw, options).id === raw) return raw;
+  if (raw && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(raw)) return raw;
   const name = modelName.toLowerCase();
   if (name.startsWith("openai/") || name.startsWith("gpt-")) return "openai";
   if (name.startsWith("google/") || name.startsWith("gemini")) return "google";
   const slash = name.indexOf("/");
   if (slash > 0) {
     const prefix = name.slice(0, slash);
-    const option = PROVIDER_OPTIONS.find(
+    const option = options.find(
       (item) => item.id === prefix || item.aliases?.includes(prefix),
     );
     return option?.id || "openrouter";
@@ -2218,9 +2473,29 @@ function modelBodyName(modelName: string, provider: string): string {
  * so a friendly alias such as `gemini-live-test` never gets sent to the LLM
  * provider as if it were the actual model id.
  */
-function runtimeModelName(stored: StoredModel): string {
+export function runtimeModelName(stored: StoredModel): string {
   const provider = normalizeProvider(stored.provider, stored.model_name);
-  return stored.model?.trim() || modelBodyName(stored.model_name, provider);
+  const modelId =
+    stored.model?.trim() || modelBodyName(stored.model_name, provider);
+
+  // Provider-prefixed runtime identities must retain their prefix. The core
+  // provider router treats an unprefixed model id as a legacy cloud/OpenRouter
+  // identifier, so dropping a provider prefix can silently route a request to
+  // the wrong adapter after model selection or restart.
+  const preservePrefix = new Set([
+    "opencode",
+    "omniroute",
+    "llama.cpp",
+    "ollama",
+    "claude",
+  ]);
+  if (preservePrefix.has(provider)) {
+    return modelId.startsWith(`${provider}/`)
+      ? modelId
+      : `${provider}/${modelId}`;
+  }
+
+  return modelId;
 }
 
 function validateModelIdentifier(modelName: string): void {
@@ -2276,7 +2551,9 @@ function validateProviderApiBase(apiBase: string): void {
 }
 
 function defaultModelsFromSettings(): StoredModel[] {
-  const names = Array.from(new Set(settings.getSupportedModels()));
+  const names: string[] = Array.from(
+    new Set<string>(settings.getSupportedModels()),
+  );
   if (!names.includes(settings.defaultModel)) {
     names.unshift(settings.defaultModel);
   }
@@ -2292,19 +2569,45 @@ function defaultModelsFromSettings(): StoredModel[] {
   });
 }
 
+function localModelCapabilityWarning(
+  provider: string,
+  stored: StoredModel,
+): string | undefined {
+  if (provider !== "llama.cpp") return undefined;
+  const identity = `${stored.model_name} ${stored.model || ""}`.toLowerCase();
+  const contextSize = stored.local?.context_size;
+  if (/(?:^|[^0-9])(300|350|0\.3)\s*m|(?:^|[^0-9])0\.3b/.test(identity)) {
+    return "This small local model is suitable for short conversation smoke tests, not reliable tool-heavy coding tasks.";
+  }
+  if (typeof contextSize === "number" && contextSize < 12_000) {
+    return "Increase local context to at least 12,000 tokens for Agent Miki's full system prompt and tool workflow.";
+  }
+  return undefined;
+}
+
 function modelInfoFromStored(
   stored: StoredModel,
   index: number,
   configDir?: string,
+  options: ProviderOption[] = PROVIDER_OPTIONS,
 ) {
-  const provider = normalizeProvider(stored.provider, stored.model_name);
-  const option = getProviderOption(provider);
-  const apiKey = resolveConfiguredSecret(
-    apiKeyEnvForProvider(provider),
-    configDir,
+  const provider = normalizeProvider(
+    stored.provider,
+    stored.model_name,
+    options,
   );
-  const available = Boolean(option.empty_api_key_allowed || apiKey);
+  const option = getProviderOption(provider, options);
   const modelName = stored.model_name;
+  const localHealth =
+    provider === "llama.cpp" ? getLocalRuntimeHealth(modelName) : undefined;
+  const apiKey =
+    provider === "llama.cpp"
+      ? ""
+      : resolveConfiguredSecret(apiKeyEnvForProvider(provider), configDir);
+  const available =
+    provider === "llama.cpp"
+      ? Boolean(localHealth?.configured)
+      : Boolean(option.empty_api_key_allowed || apiKey);
   return {
     index,
     model_name: modelName,
@@ -2327,6 +2630,9 @@ function modelInfoFromStored(
     custom_headers: stored.custom_headers
       ? redactSecrets(stored.custom_headers)
       : undefined,
+    local: stored.local,
+    local_runtime: localHealth,
+    capability_warning: localModelCapabilityWarning(provider, stored),
     enabled: stored.enabled !== false,
     available,
     status: available ? "available" : "unconfigured",
@@ -2338,21 +2644,37 @@ function modelInfoFromStored(
   };
 }
 
-function normalizeStoredModel(stored: StoredModel): StoredModel {
-  const provider = normalizeProvider(stored.provider, stored.model_name);
-  const inferredProvider = normalizeProvider(undefined, stored.model_name);
+function normalizeStoredModel(
+  stored: StoredModel,
+  options: ProviderOption[] = PROVIDER_OPTIONS,
+): StoredModel {
+  const provider = normalizeProvider(
+    stored.provider,
+    stored.model_name,
+    options,
+  );
+  const inferredProvider = normalizeProvider(
+    undefined,
+    stored.model_name,
+    options,
+  );
   const slash = stored.model_name.indexOf("/");
   const providerMismatch =
     slash > 0 &&
     inferredProvider === "openrouter" &&
     !stored.model_name.toLowerCase().startsWith(`${provider}/`);
   const normalizedProvider = providerMismatch ? inferredProvider : provider;
-  const option = getProviderOption(normalizedProvider);
+  const option = getProviderOption(normalizedProvider, options);
   return {
     ...stored,
     provider: normalizedProvider,
+    local:
+      normalizedProvider === "llama.cpp"
+        ? normalizeLocalModelConfig(stored.local, stored.local)
+        : undefined,
     model:
-      stored.model?.trim() || modelBodyName(stored.model_name, normalizedProvider),
+      stored.model?.trim() ||
+      modelBodyName(stored.model_name, normalizedProvider),
     api_base: providerMismatch
       ? option.default_api_base
       : (stored.api_base ?? option.default_api_base),
@@ -2362,6 +2684,7 @@ function normalizeStoredModel(stored: StoredModel): StoredModel {
 function normalizeIncomingModel(
   input: JsonRecord,
   existing?: StoredModel,
+  options: ProviderOption[] = PROVIDER_OPTIONS,
 ): StoredModel {
   const modelName = String(
     input.model_name || input.model || existing?.model_name || "",
@@ -2373,13 +2696,18 @@ function normalizeIncomingModel(
   const provider = normalizeProvider(
     typeof input.provider === "string" ? input.provider : existing?.provider,
     modelName,
+    options,
   );
-  const option = getProviderOption(provider);
+  const option = getProviderOption(provider, options);
+  const local =
+    provider === "llama.cpp"
+      ? normalizeLocalModelConfig(
+          "local" in input ? input.local : existing?.local,
+          existing?.local,
+        )
+      : undefined;
   // Helper: treat null as explicit clear; string/number keep value; missing keeps existing.
-  const strOrClear = (
-    key: string,
-    fallback?: string,
-  ): string | undefined => {
+  const strOrClear = (key: string, fallback?: string): string | undefined => {
     if (!(key in input)) return fallback;
     const v = input[key];
     if (v === null || v === "") return undefined;
@@ -2404,12 +2732,12 @@ function normalizeIncomingModel(
         : existing?.model || modelBodyName(modelName, provider),
     api_base:
       "api_base" in input
-        ? strOrClear("api_base") ?? option.default_api_base
+        ? (strOrClear("api_base") ?? option.default_api_base)
         : existing?.api_base || option.default_api_base,
     proxy: strOrClear("proxy", existing?.proxy),
     auth_method:
       "auth_method" in input
-        ? strOrClear("auth_method") ?? option.default_auth_method
+        ? (strOrClear("auth_method") ?? option.default_auth_method)
         : existing?.auth_method || option.default_auth_method,
     enabled:
       typeof input.enabled === "boolean"
@@ -2422,10 +2750,7 @@ function normalizeIncomingModel(
       "max_tokens_field",
       existing?.max_tokens_field,
     ),
-    request_timeout: numOrClear(
-      "request_timeout",
-      existing?.request_timeout,
-    ),
+    request_timeout: numOrClear("request_timeout", existing?.request_timeout),
     thinking_level: strOrClear("thinking_level", existing?.thinking_level),
     tool_schema_transform: strOrClear(
       "tool_schema_transform",
@@ -2444,6 +2769,7 @@ function normalizeIncomingModel(
           ),
         )
       : existing?.custom_headers,
+    local,
   };
 }
 
@@ -2754,6 +3080,120 @@ function parseMultipartFile(
   return null;
 }
 
+type SkillArchiveEntry = { name: string; content: Buffer };
+
+function readZipEntries(buffer: Buffer): SkillArchiveEntry[] {
+  const MAX_ENTRIES = 64;
+  const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+  const MAX_ENTRY_BYTES = 1 * 1024 * 1024;
+  const eocdSignature = 0x06054b50;
+  const centralSignature = 0x02014b50;
+  const localSignature = 0x04034b50;
+  let eocd = -1;
+  for (
+    let offset = Math.max(0, buffer.length - 65_557);
+    offset <= buffer.length - 22;
+    offset += 1
+  ) {
+    if (buffer.readUInt32LE(offset) === eocdSignature) eocd = offset;
+  }
+  if (eocd < 0) throw new Error("Invalid ZIP archive: end record is missing");
+  const count = buffer.readUInt16LE(eocd + 10);
+  const centralSize = buffer.readUInt32LE(eocd + 12);
+  const centralOffset = buffer.readUInt32LE(eocd + 16);
+  if (count > MAX_ENTRIES || centralOffset + centralSize > buffer.length) {
+    throw new Error("ZIP archive is too large or malformed");
+  }
+  const entries: SkillArchiveEntry[] = [];
+  let cursor = centralOffset;
+  let total = 0;
+  for (let index = 0; index < count; index += 1) {
+    if (
+      cursor + 46 > buffer.length ||
+      buffer.readUInt32LE(cursor) !== centralSignature
+    ) {
+      throw new Error("Invalid ZIP central directory");
+    }
+    const flags = buffer.readUInt16LE(cursor + 8);
+    const method = buffer.readUInt16LE(cursor + 10);
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(cursor + 24);
+    const nameLength = buffer.readUInt16LE(cursor + 28);
+    const extraLength = buffer.readUInt16LE(cursor + 30);
+    const commentLength = buffer.readUInt16LE(cursor + 32);
+    const localOffset = buffer.readUInt32LE(cursor + 42);
+    const name = buffer
+      .subarray(cursor + 46, cursor + 46 + nameLength)
+      .toString("utf8")
+      .replace(/\\/g, "/");
+    cursor += 46 + nameLength + extraLength + commentLength;
+    if (!name || name.startsWith("/") || name.split("/").includes("..")) {
+      throw new Error("ZIP archive contains an unsafe path");
+    }
+    if (
+      flags & 0x0001 ||
+      flags & 0x0008 ||
+      compressedSize > MAX_ENTRY_BYTES ||
+      uncompressedSize > MAX_ENTRY_BYTES
+    ) {
+      throw new Error(
+        "ZIP archive uses unsupported encryption or streaming entries",
+      );
+    }
+    if (
+      localOffset + 30 > buffer.length ||
+      buffer.readUInt32LE(localOffset) !== localSignature
+    ) {
+      throw new Error("Invalid ZIP local entry");
+    }
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    const end = start + compressedSize;
+    if (end > buffer.length)
+      throw new Error("ZIP entry exceeds archive bounds");
+    const compressed = buffer.subarray(start, end);
+    let content: Buffer;
+    if (method === 0) content = Buffer.from(compressed);
+    else if (method === 8) content = zlib.inflateRawSync(compressed);
+    else throw new Error(`ZIP compression method ${method} is not supported`);
+    if (
+      content.length !== uncompressedSize ||
+      (total += content.length) > MAX_TOTAL_BYTES
+    ) {
+      throw new Error("ZIP archive expands beyond the allowed skill size");
+    }
+    if (!name.endsWith("/")) entries.push({ name, content });
+  }
+  return entries;
+}
+
+function resolveSkillArchive(entries: SkillArchiveEntry[]): {
+  name: string;
+  files: SkillArchiveEntry[];
+} {
+  const skillFiles = entries;
+  const skillMarkdown = skillFiles.find((entry) =>
+    /(^|\/)SKILL\.md$/i.test(entry.name),
+  );
+  if (!skillMarkdown) throw new Error("ZIP skill must contain SKILL.md");
+  const parts = skillMarkdown.name.split("/");
+  const prefix = parts.length > 1 ? parts.slice(0, -1).join("/") + "/" : "";
+  const files = skillFiles
+    .filter((entry) => entry.name.startsWith(prefix))
+    .map((entry) => ({ ...entry, name: entry.name.slice(prefix.length) }))
+    .filter(
+      (entry) =>
+        entry.name && !entry.name.startsWith("../") && entry.name !== ".",
+    );
+  const content = skillMarkdown.content.toString("utf8");
+  const titleMatch = content.match(/^#\s+(.+)$/m);
+  const name = slugify(
+    titleMatch?.[1] || parts[parts.length - 2] || "imported-skill",
+  );
+  return { name, files };
+}
+
 function toolCategory(name: string): string {
   if (/file|dir|path|read|write|edit|append/i.test(name)) return "Filesystem";
   if (/computer|screen|window|clipboard|hotkey|keyboard/i.test(name))
@@ -2827,7 +3267,10 @@ async function fetchModelsFromProvider(
   const normalizedBase = base.replace(/\/+$/, "");
   // Gemini exposes chat completions through its OpenAI-compatible endpoint,
   // but model discovery remains on the native /v1beta/models endpoint.
-  const googleModelsBase = normalizedBase.replace(/\/v1beta\/openai$/i, "/v1beta");
+  const googleModelsBase = normalizedBase.replace(
+    /\/v1beta\/openai$/i,
+    "/v1beta",
+  );
   const url = `${isGoogleProvider ? googleModelsBase : normalizedBase}/models`;
   const headers: Record<string, string> = {};
   if (apiKey) {
@@ -2846,12 +3289,14 @@ async function fetchModelsFromProvider(
     throw new Error(`Provider returned ${response.status}`);
   }
   const elapsed = Date.now() - started;
-  const body = (await response.json()) as ProviderModelsResponse;
-  const rawModels = Array.isArray(body.data)
-    ? body.data
-    : Array.isArray(body.models)
-      ? body.models
-      : [];
+  const body = (await response.json()) as ProviderModelsResponse | unknown[];
+  const rawModels = Array.isArray(body)
+    ? body
+    : Array.isArray(body.data)
+      ? body.data
+      : Array.isArray(body.models)
+        ? body.models
+        : [];
   const models = rawModels
     .map((item: unknown): ProviderModelResult =>
       typeof item === "string"
@@ -2888,10 +3333,7 @@ function oauthProviderStatus(
   methods: string[],
   paths: RuntimePaths,
 ) {
-  const key =
-    provider === "google-antigravity"
-      ? "GEMINI_API_KEY"
-      : apiKeyEnvForProvider(provider);
+  const key = oauthSecretEnvForProvider(provider);
   const token = resolveConfiguredSecret(key, paths.configDir);
   return {
     provider,
@@ -2942,7 +3384,10 @@ export function createLauncherCompatRouter({
     extractRuntimeSecretsToVault(config, secretVault, paths);
   const validateWorkspaceConfig = (config: JsonRecord) =>
     validateAndNormalizeConfig(config, {
-      allowedChannelNames: pluginChannelConfigKeysFromRegistry(paths, workspaceDir),
+      allowedChannelNames: pluginChannelConfigKeysFromRegistry(
+        paths,
+        workspaceDir,
+      ),
     });
 
   let state = readJsonFile<CompatState>(statePath, {});
@@ -3034,25 +3479,52 @@ export function createLauncherCompatRouter({
     return state.miki_token;
   };
 
+  const getConfiguredmikiToken = (): string => {
+    const channels = recordOrEmpty(state.config?.channels);
+    const mikiChannel = recordOrEmpty(channels.miki);
+    return (
+      channelSecretValue(secretVault, mikiChannel, "miki", "token") ||
+      state.miki_token ||
+      ""
+    );
+  };
+
   registerRuntimeAuth?.({
     isDashboardAuthenticated: (headers: IncomingHttpHeaders) =>
       isAuthenticatedCookieHeader(headers.cookie),
-    getmikiToken: () => state.miki_token,
+    getmikiToken: getConfiguredmikiToken,
     ensuremikiToken,
   });
 
-  const normalizedModels = state.models.map(normalizeStoredModel);
+  const normalizedModels = state.models.map((model) =>
+    normalizeStoredModel(model),
+  );
   if (JSON.stringify(normalizedModels) !== JSON.stringify(state.models)) {
     state.models = normalizedModels;
     saveState();
   }
   syncProviderSecretsToEnv(paths);
+  configureLocalModels(state.models || []);
+  // Reconcile the selected model at startup. Cloud defaults stop any owned
+  // llama-server child; local defaults start it asynchronously when configured.
+  void synchronizeLocalRuntimeForModel(settings.defaultModel);
 
   const syncConfigToRuntimeFiles = () => {
     state.config = validateWorkspaceConfig(
       state.config || defaultAppConfig(paths),
     ).config;
     const currentConfig = state.config as JsonRecord;
+    const configuredLogLevel = stringOrUndefined(
+      recordOrEmpty(currentConfig.gateway).log_level,
+    );
+    if (
+      configuredLogLevel === "debug" ||
+      configuredLogLevel === "info" ||
+      configuredLogLevel === "warn" ||
+      configuredLogLevel === "error"
+    ) {
+      globalLogger.setModuleLevel("Miki", configuredLogLevel as LogLevel);
+    }
     const execEnabled = boolOrUndefined(
       recordOrEmpty(recordOrEmpty(currentConfig.tools).exec).enabled,
     );
@@ -3375,11 +3847,30 @@ export function createLauncherCompatRouter({
       typeof orchestrator.tools?.getToolDefinitions === "function"
         ? orchestrator.tools.getToolDefinitions()
         : [];
+    const toolNames = new Set(
+      toolDefinitions.map((tool) => String(tool.function?.name || "")),
+    );
+    const hasCoreFileTools = [
+      ["read_file", "file_read"],
+      ["write_file", "file_write"],
+      ["list_files", "file_list", "file_delete"],
+    ].every((aliases) => aliases.some((name) => toolNames.has(name)));
+    const hasShellTools = ["execute_shell", "shell_execute"].some((name) =>
+      toolNames.has(name),
+    );
     const sessions: unknown[] = [];
     const skills = await skillLoader.getAllSkillsMetadata().catch(() => []);
     const workspaceSkills = skills.filter(
       (skill) => skillSourceForPath(paths, skill.path) === "workspace",
     );
+    const memoryDbCandidates = [
+      path.join(paths.dataDir, "agent-memory.db"),
+      path.join(paths.dataDir, "miki_memory.db"),
+    ];
+    const memoryDbPath = memoryDbCandidates.find((candidate) =>
+      fs.existsSync(candidate),
+    );
+    const memoryDbExists = Boolean(memoryDbPath);
     const runtimeApplyStatus = state.runtime_apply_status || "applied";
     const gatewayStatus: FlowComponentStatus =
       runtimeApplyStatus === "failed"
@@ -3409,14 +3900,9 @@ export function createLauncherCompatRouter({
         const runtimeRoot = path.dirname(process.execPath);
         const candidateDirs = [
           path.join(runtimeRoot, "packages", "ui", "frontend", "dist"),
+          path.join(process.cwd(), "packages", "ui", "frontend", "dist"),
           paths.sourceDir
-            ? path.join(
-                paths.sourceDir,
-                "packages",
-                "ui",
-                "frontend",
-                "dist",
-              )
+            ? path.join(paths.sourceDir, "packages", "ui", "frontend", "dist")
             : null,
         ].filter((dir): dir is string => !!dir);
         const dashboardBuilt = candidateDirs.some((dir) =>
@@ -3496,8 +3982,7 @@ export function createLauncherCompatRouter({
         status: (() => {
           if (!orchestrator) return "error" as FlowComponentStatus;
           try {
-            const memoryDbPath = path.join(paths.dataDir, "miki_memory.db");
-            const memoryExists = fs.existsSync(memoryDbPath);
+            const memoryExists = memoryDbExists;
             const agentRunsDbPath = path.join(paths.dataDir, "agent-runs.db");
             const agentRunsExists = fs.existsSync(agentRunsDbPath);
             if (!memoryExists || !agentRunsExists)
@@ -3510,12 +3995,11 @@ export function createLauncherCompatRouter({
         summary: (() => {
           if (!orchestrator) return "Memory subsystem not available.";
           try {
-            const memoryDbPath = path.join(paths.dataDir, "miki_memory.db");
-            const memoryExists = fs.existsSync(memoryDbPath);
+            const memoryExists = memoryDbExists;
             const agentRunsDbPath = path.join(paths.dataDir, "agent-runs.db");
             const agentRunsExists = fs.existsSync(agentRunsDbPath);
             const missing = [];
-            if (!memoryExists) missing.push("miki_memory.db");
+            if (!memoryExists) missing.push("agent-memory.db");
             if (!agentRunsExists) missing.push("agent-runs.db");
             if (missing.length > 0)
               return `Memory DB files missing: ${missing.join(", ")}. Schema may not be initialized yet.`;
@@ -3524,13 +4008,17 @@ export function createLauncherCompatRouter({
             return "Memory probe failed.";
           }
         })(),
-        evidence: ["/memory/search", "/sessions", "miki_memory.db"],
+        evidence: [
+          "/memory/search",
+          "/sessions",
+          memoryDbPath || "agent-memory.db",
+        ],
         metrics: {
           active_sessions: sessions.length,
           memory_ready: !!orchestrator,
           memory_db_exists: (() => {
             try {
-              return fs.existsSync(path.join(paths.dataDir, "miki_memory.db"));
+              return memoryDbExists;
             } catch {
               return false;
             }
@@ -3601,32 +4089,19 @@ export function createLauncherCompatRouter({
         status: (() => {
           if (toolDefinitions.length === 0)
             return "partial" as FlowComponentStatus;
-          const toolNames = new Set(
-            toolDefinitions.map((t) => String(t.function?.name || "")),
-          );
-          const hasCoreTools = [
-            "read_file",
-            "write_file",
-            "list_files",
-            "execute_shell",
-          ].some((name) => toolNames.has(name));
-          if (!hasCoreTools) return "partial" as FlowComponentStatus;
+          if (!hasCoreFileTools || !hasShellTools)
+            return "partial" as FlowComponentStatus;
           return "ready" as FlowComponentStatus;
         })(),
         summary: (() => {
           if (toolDefinitions.length === 0)
             return "No tool handlers registered - external system access is unavailable.";
-          const toolNames = new Set(
-            toolDefinitions.map((t) => String(t.function?.name || "")),
-          );
           const missingCore = [
-            "read_file",
-            "write_file",
-            "list_files",
-            "execute_shell",
-          ].filter((name) => !toolNames.has(name));
+            ...(hasCoreFileTools ? [] : ["file tools"]),
+            ...(hasShellTools ? [] : ["shell tool"]),
+          ];
           if (missingCore.length > 0)
-            return `Core file/shell tools missing (${missingCore.join(", ")}). Limited external system access.`;
+            return `Core ${missingCore.join(" and ")} missing. Limited external system access.`;
           return "File, shell, browser, computer, crawler, system index, and channel/webhook adapters execute through guarded tool handlers.";
         })(),
         evidence: [
@@ -3638,20 +4113,8 @@ export function createLauncherCompatRouter({
         metrics: {
           registered_tools: toolDefinitions.length,
           tools_available: toolDefinitions.length > 0,
-          has_core_file_tools: (() => {
-            const toolNames = new Set(
-              toolDefinitions.map((t) => String(t.function?.name || "")),
-            );
-            return ["read_file", "write_file", "list_files"].every((name) =>
-              toolNames.has(name),
-            );
-          })(),
-          has_shell_tools: (() => {
-            const toolNames = new Set(
-              toolDefinitions.map((t) => String(t.function?.name || "")),
-            );
-            return toolNames.has("execute_shell");
-          })(),
+          has_core_file_tools: hasCoreFileTools,
+          has_shell_tools: hasShellTools,
         },
       },
     ];
@@ -3816,7 +4279,13 @@ export function createLauncherCompatRouter({
   ): { validation: ConfigValidationResult; channelsChanged: string[] } => {
     const previousConfig = clone(state.config || defaultAppConfig(paths));
     const { config, validation } = validateWorkspaceConfig(candidateConfig);
-    state.config = sanitizeRuntimeConfig(config);
+    const nextConfig = sanitizeRuntimeConfig(config);
+    const previousReferences = collectSecretReferences(previousConfig);
+    const nextReferences = collectSecretReferences(nextConfig);
+    for (const reference of previousReferences) {
+      if (!nextReferences.has(reference)) secretVault.delete(reference);
+    }
+    state.config = nextConfig;
     if (isRecord(state.config.web_search))
       state.web_search = state.config.web_search;
     state.gateway_restart_required = true;
@@ -3879,6 +4348,14 @@ export function createLauncherCompatRouter({
     flow.updatedAt = Date.now();
   };
 
+  const getConfiguredChannelProxy = (channel: QrBindingChannel): string => {
+    const channels = recordOrEmpty(state.config?.channels);
+    const channelConfig = recordOrEmpty(channels[channel]);
+    const settings = recordOrEmpty(channelConfig.settings);
+    const proxy = settings.proxy ?? channelConfig.proxy;
+    return typeof proxy === "string" ? proxy.trim() : "";
+  };
+
   const saveQrBoundChannel = async (
     channel: QrBindingChannel,
     settingsPatch: JsonRecord,
@@ -3913,6 +4390,7 @@ export function createLauncherCompatRouter({
         bot_type: WEIXIN_BOT_TYPE,
       }),
       15_000,
+      { proxy: getConfiguredChannelProxy("weixin") },
     );
     if (body.errcode != null && body.errcode !== 0) {
       throw new Error(`Weixin QR error ${body.errcode}: ${body.errmsg || ""}`);
@@ -3938,6 +4416,7 @@ export function createLauncherCompatRouter({
         },
       ),
       10_000,
+      { proxy: getConfiguredChannelProxy("weixin") },
     );
     if (body.errcode != null && body.errcode !== 0) {
       throw new Error(
@@ -4384,8 +4863,41 @@ export function createLauncherCompatRouter({
     }
   });
 
-  router.get("/sessions", (_req, res) => {
-    res.json([]);
+  router.get("/sessions", (req, res) => {
+    const offset = Math.max(
+      0,
+      Number.parseInt(String(req.query.offset || "0"), 10) || 0,
+    );
+    const limit = Math.max(
+      1,
+      Math.min(100, Number.parseInt(String(req.query.limit || "20"), 10) || 20),
+    );
+    const summaries = orchestrator
+      .listSessionIds()
+      .map((id) => {
+        const messages = orchestrator.getSessionMessages(id) || [];
+        const metadata = orchestrator.getSessionMetadata(id);
+        const firstUser = messages.find((message) => message.role === "user");
+        const last = messages[messages.length - 1];
+        const title =
+          String(metadata?.title || firstUser?.content || id)
+            .trim()
+            .slice(0, 80) || id;
+        const preview = String(last?.content || "")
+          .trim()
+          .slice(0, 160);
+        return {
+          id,
+          title,
+          preview,
+          message_count: messages.length,
+          created: metadata?.created || new Date(0).toISOString(),
+          updated: metadata?.updated || new Date(0).toISOString(),
+          pinned: metadata?.pinned === true,
+        };
+      })
+      .sort((a, b) => b.updated.localeCompare(a.updated));
+    res.json(summaries.slice(offset, offset + limit));
   });
 
   router.get("/sessions/:id/permissions", (req, res) => {
@@ -4419,8 +4931,145 @@ export function createLauncherCompatRouter({
     });
   });
 
-  router.get("/sessions/:id", (_req, res) => {
-    res.status(404).json({ error: "Session not found" });
+  router.get("/sessions/:id", (req, res) => {
+    const sessionId = String(req.params.id || "").trim();
+    const messages = orchestrator.getSessionMessages(sessionId);
+    if (!messages) return res.status(404).json({ error: "Session not found" });
+    const metadata = orchestrator.getSessionMetadata(sessionId);
+    const firstUser = messages.find((message) => message.role === "user");
+    res.json({
+      id: sessionId,
+      title:
+        String(metadata?.title || firstUser?.content || sessionId)
+          .trim()
+          .slice(0, 80) || sessionId,
+      pinned: metadata?.pinned === true,
+      messages: messages.map((message) => ({
+        ...message,
+        role: message.role === "user" ? "user" : "assistant",
+        content: String(message.content || ""),
+      })),
+      summary: String(firstUser?.content || "")
+        .trim()
+        .slice(0, 240),
+      created: metadata?.created || new Date(0).toISOString(),
+      updated: metadata?.updated || new Date(0).toISOString(),
+    });
+  });
+  router.patch("/sessions/:id", (req, res) => {
+    const sessionId = String(req.params.id || "").trim();
+    if (!sessionId || !isRecord(req.body)) {
+      return res
+        .status(400)
+        .json({ error: "session id and JSON object are required" });
+    }
+    const patch: { title?: string; pinned?: boolean } = {};
+    if (req.body.title !== undefined) {
+      if (typeof req.body.title !== "string") {
+        return res.status(400).json({ error: "title must be a string" });
+      }
+      const title = req.body.title.trim();
+      if (title.length > 160) {
+        return res.status(400).json({ error: "title is too long" });
+      }
+      patch.title = title;
+    }
+    if (req.body.pinned !== undefined) {
+      if (typeof req.body.pinned !== "boolean") {
+        return res.status(400).json({ error: "pinned must be boolean" });
+      }
+      patch.pinned = req.body.pinned;
+    }
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "title or pinned is required" });
+    }
+    const metadata = orchestrator.updateSessionMetadata(sessionId, patch);
+    if (!metadata) return res.status(404).json({ error: "Session not found" });
+    res.json({ id: sessionId, ...metadata });
+  });
+  router.patch("/sessions/:id/messages/:messageId", (req, res) => {
+    const sessionId = String(req.params.id || "").trim();
+    const messageId = String(req.params.messageId || "").trim();
+    if (!sessionId || !messageId || !isRecord(req.body)) {
+      return res.status(400).json({
+        error: "session id, message id, and JSON object are required",
+      });
+    }
+    const patch: { content?: string; image_urls?: string[] } = {};
+    if (req.body.content !== undefined) {
+      if (typeof req.body.content !== "string") {
+        return res.status(400).json({ error: "content must be a string" });
+      }
+      patch.content = req.body.content;
+    }
+    if (req.body.media !== undefined || req.body.image_urls !== undefined) {
+      const media = req.body.media ?? req.body.image_urls;
+      if (
+        !Array.isArray(media) ||
+        media.some((item) => typeof item !== "string")
+      ) {
+        return res
+          .status(400)
+          .json({ error: "media must be an array of strings" });
+      }
+      patch.image_urls = media.filter(
+        (item): item is string => item.trim().length > 0,
+      );
+    }
+    if (patch.content === undefined && patch.image_urls === undefined) {
+      return res.status(400).json({ error: "content or media is required" });
+    }
+    const message = orchestrator.updateSessionMessage(
+      sessionId,
+      messageId,
+      patch,
+    );
+    if (!message) return res.status(404).json({ error: "Message not found" });
+    res.json({ session_id: sessionId, message });
+  });
+
+  router.delete("/sessions/:id/messages/:messageId", (req, res) => {
+    const sessionId = String(req.params.id || "").trim();
+    const messageId = String(req.params.messageId || "").trim();
+    if (!sessionId || !messageId) {
+      return res
+        .status(400)
+        .json({ error: "session id and message id are required" });
+    }
+    const deleted = orchestrator.deleteSessionMessage(sessionId, messageId);
+    if (!deleted) return res.status(404).json({ error: "Message not found" });
+    res.json({ session_id: sessionId, message_id: messageId, deleted: true });
+  });
+
+  router.post("/sessions/:id/fork", (req, res) => {
+    const sessionId = String(req.params.id || "").trim();
+    const messageId = isRecord(req.body)
+      ? String(req.body.message_id || "").trim()
+      : "";
+    if (!sessionId || !messageId) {
+      return res
+        .status(400)
+        .json({ error: "session id and message_id are required" });
+    }
+    const fork = orchestrator.forkSessionAtMessage(sessionId, messageId);
+    if (!fork) return res.status(404).json({ error: "Message not found" });
+    res.json({ session_id: fork.sessionId, messages: fork.messages });
+  });
+
+  router.post("/sessions/:id/retry", (req, res) => {
+    const sessionId = String(req.params.id || "").trim();
+    const messageId = isRecord(req.body)
+      ? String(req.body.message_id || "").trim()
+      : "";
+    if (!sessionId || !messageId) {
+      return res
+        .status(400)
+        .json({ error: "session id and message_id are required" });
+    }
+    const retry = orchestrator.retrySessionFromMessage(sessionId, messageId);
+    if (!retry)
+      return res.status(404).json({ error: "Retry source message not found" });
+    res.json({ session_id: retry.sessionId, message: retry.message });
   });
 
   router.delete("/sessions/:id", (req, res) => {
@@ -4435,13 +5084,7 @@ export function createLauncherCompatRouter({
     };
 
     try {
-      if (orchestrator && typeof orchestrator["_messageHistory"] === "object") {
-        const history = orchestrator["_messageHistory"] as Map<string, unknown>;
-        if (history.has(sessionId)) {
-          history.delete(sessionId);
-          cleaned.messageHistory = true;
-        }
-      }
+      cleaned.messageHistory = orchestrator.deleteSession(sessionId);
     } catch {
       // best-effort cleanup
     }
@@ -4511,8 +5154,9 @@ export function createLauncherCompatRouter({
       saveSupportedModels(paths, state.models);
       saveState();
     }
+    const providerOptions = await launcherProviderOptions(paths);
     const models = state.models.map((model, index) =>
-      modelInfoFromStored(model, index, paths.configDir),
+      modelInfoFromStored(model, index, paths.configDir, providerOptions),
     );
     const activeStoredModel = state.models.find(
       (model) => runtimeModelName(model) === settings.defaultModel,
@@ -4523,14 +5167,15 @@ export function createLauncherCompatRouter({
       // The UI selects cards by their friendly model_name label, while the
       // runtime keeps the canonical provider model in settings.defaultModel.
       default_model: activeStoredModel?.model_name || settings.defaultModel,
-      provider_options: await launcherProviderOptions(paths),
+      provider_options: providerOptions,
     });
   });
 
   router.post("/models", async (req, res) => {
     try {
       const input = isRecord(req.body) ? req.body : {};
-      const model = normalizeIncomingModel(input);
+      const providerOptions = await launcherProviderOptions(paths);
+      const model = normalizeIncomingModel(input, undefined, providerOptions);
       const apiBase =
         typeof input.api_base === "string" ? input.api_base.trim() : "";
       if (apiBase) {
@@ -4538,10 +5183,29 @@ export function createLauncherCompatRouter({
       }
       const apiKey =
         typeof input.api_key === "string" ? input.api_key.trim() : "";
-      if (apiKey && !isMaskedSecret(apiKey)) {
+      const providerOption = getProviderOption(
+        model.provider || "",
+        providerOptions,
+      );
+      const resolvedApiKey = resolveProviderApiKey(
+        model.provider || "",
+        paths,
+        apiKey,
+      );
+      if (!providerOption.empty_api_key_allowed && !resolvedApiKey) {
+        return res.status(400).json({
+          error: `A credential is required before adding a ${model.provider || "provider"} model. Configure the provider key or select a configured provider model.`,
+        });
+      }
+      if (apiKey && !isMaskedSecret(apiKey) && model.provider !== "llama.cpp") {
         updateEnvVar(paths, apiKeyEnvForProvider(model.provider || ""), apiKey);
       }
       state.models = [...(state.models || []), model];
+      configureLocalModels(state.models);
+      const localRuntime =
+        runtimeModelName(model) === settings.defaultModel
+          ? await synchronizeLocalRuntimeForModel(settings.defaultModel)
+          : undefined;
       saveSupportedModels(paths, state.models);
       state.gateway_restart_required = true;
       saveState();
@@ -4555,6 +5219,7 @@ export function createLauncherCompatRouter({
         runtime_apply_status: apply.status,
         runtime_apply_error: apply.error,
         pending_restart_fields: apply.pending_restart_fields || [],
+        local_runtime: localRuntime,
       });
     } catch (err) {
       res
@@ -4575,7 +5240,8 @@ export function createLauncherCompatRouter({
       }
       const input = isRecord(req.body) ? req.body : {};
       const current = state.models![index];
-      const model = normalizeIncomingModel(input, current);
+      const providerOptions = await launcherProviderOptions(paths);
+      const model = normalizeIncomingModel(input, current, providerOptions);
       const apiBase =
         typeof input.api_base === "string"
           ? input.api_base.trim()
@@ -4587,10 +5253,29 @@ export function createLauncherCompatRouter({
       }
       const apiKey =
         typeof input.api_key === "string" ? input.api_key.trim() : "";
-      if (apiKey && !isMaskedSecret(apiKey)) {
+      const providerOption = getProviderOption(
+        model.provider || "",
+        providerOptions,
+      );
+      const resolvedApiKey = resolveProviderApiKey(
+        model.provider || "",
+        paths,
+        apiKey,
+      );
+      if (!providerOption.empty_api_key_allowed && !resolvedApiKey) {
+        return res.status(400).json({
+          error: `A credential is required before saving a ${model.provider || "provider"} model.`,
+        });
+      }
+      if (apiKey && !isMaskedSecret(apiKey) && model.provider !== "llama.cpp") {
         updateEnvVar(paths, apiKeyEnvForProvider(model.provider || ""), apiKey);
       }
       state.models![index] = model;
+      configureLocalModels(state.models!);
+      const localRuntime =
+        runtimeModelName(model) === settings.defaultModel
+          ? await synchronizeLocalRuntimeForModel(settings.defaultModel)
+          : undefined;
       saveSupportedModels(paths, state.models!);
       state.gateway_restart_required = true;
       saveState();
@@ -4604,6 +5289,7 @@ export function createLauncherCompatRouter({
         runtime_apply_status: apply.status,
         runtime_apply_error: apply.error,
         pending_restart_fields: apply.pending_restart_fields || [],
+        local_runtime: localRuntime,
       });
     } catch (err) {
       res
@@ -4622,6 +5308,39 @@ export function createLauncherCompatRouter({
       return res.status(404).json({ error: "Model not found" });
     }
     const [removed] = state.models!.splice(index, 1);
+    configureLocalModels(state.models!);
+    const removedRuntime = removed ? runtimeModelName(removed) : "";
+    const removedActive =
+      removedRuntime === settings.defaultModel ||
+      removed?.model_name === settings.defaultModel;
+    let localRuntime: Awaited<
+      ReturnType<typeof synchronizeLocalRuntimeForModel>
+    >;
+    if (removedActive) {
+      const fallback = state.models?.find(Boolean);
+      if (fallback) {
+        const fallbackRuntime = runtimeModelName(fallback);
+        const fallbackProvider = normalizeProvider(
+          fallback.provider,
+          fallbackRuntime,
+        );
+        updateEnvVar(paths, "MIKI_MODEL", fallbackRuntime);
+        updateEnvVar(paths, "DEFAULT_MODEL", fallbackRuntime);
+        updateEnvVar(paths, "MIKI_PROVIDER", fallbackProvider);
+        settings.setModel(fallbackRuntime);
+        settings.provider = fallbackProvider;
+        process.env.MIKI_PROVIDER = fallbackProvider;
+        orchestrator.modelName = fallbackRuntime;
+        orchestrator.provider = fallbackProvider;
+        localRuntime = await synchronizeLocalRuntimeForModel(fallbackRuntime);
+      } else {
+        localRuntime = await synchronizeLocalRuntimeForModel("__cloud__");
+      }
+    } else {
+      localRuntime = await synchronizeLocalRuntimeForModel(
+        settings.defaultModel,
+      );
+    }
     saveSupportedModels(paths, state.models!);
     state.gateway_restart_required = true;
     saveState();
@@ -4636,6 +5355,7 @@ export function createLauncherCompatRouter({
       runtime_apply_status: apply.status,
       runtime_apply_error: apply.error,
       pending_restart_fields: apply.pending_restart_fields || [],
+      local_runtime: localRuntime,
     });
   });
 
@@ -4659,9 +5379,11 @@ export function createLauncherCompatRouter({
     const activeModelName = selectedModel
       ? runtimeModelName(selectedModel)
       : modelName;
+    const providerOptions = await launcherProviderOptions(paths);
     const provider = normalizeProvider(
       selectedModel?.provider,
       activeModelName,
+      providerOptions,
     );
     updateEnvVar(paths, "MIKI_MODEL", activeModelName);
     updateEnvVar(paths, "DEFAULT_MODEL", activeModelName);
@@ -4671,6 +5393,7 @@ export function createLauncherCompatRouter({
     process.env.MIKI_PROVIDER = provider;
     orchestrator.modelName = activeModelName;
     orchestrator.provider = provider;
+    const localRuntime = await synchronizeLocalRuntimeForModel(activeModelName);
     state.gateway_restart_required = true;
     saveState();
     const apply = await applyRuntimeChanges({ reason: "models.default" });
@@ -4681,8 +5404,86 @@ export function createLauncherCompatRouter({
       runtime_apply_status: apply.status,
       runtime_apply_error: apply.error,
       pending_restart_fields: apply.pending_restart_fields || [],
+      local_runtime: localRuntime,
     });
   });
+
+  function completionHealthResponse(health: CompletionHealthResult) {
+    return {
+      success: health.status === "ready",
+      latency_ms: health.latencyMs,
+      status: health.status,
+      readiness_status: health.status,
+      verification_level: "completion",
+      completion_tested: health.completionTested,
+      provider: health.providerId,
+      model: health.modelId,
+      response_shape: health.responseShape,
+      correlation_id: health.diagnostic.correlationId,
+      ...(health.error ? { error: health.error } : {}),
+    };
+  }
+
+  function toolHealthResponse(health: ToolHealthResult) {
+    return {
+      success: health.status === "agent_ready",
+      latency_ms: health.latencyMs,
+      status: health.status,
+      readiness_status: health.status,
+      verification_level: "tools",
+      completion_tested: true,
+      tools_tested: health.toolTested,
+      dry_run_executed: health.dryRunExecuted,
+      final_response_received: health.finalResponseReceived,
+      provider: health.providerId,
+      model: health.modelId,
+      tool_name: health.toolName,
+      correlation_id: health.diagnostic?.correlationId,
+      ...(health.error ? { error: health.error } : {}),
+    };
+  }
+
+  async function runCompletionHealth(
+    provider: string,
+    apiBase: string,
+    model: string,
+    apiKey: string,
+  ): Promise<CompletionHealthResult> {
+    const directProviderId = provider === "google" ? "gemini" : provider;
+    const option = getProviderOption(provider);
+    return probeProviderCompletion({
+      provider: {
+        id: directProviderId,
+        displayName: option.display_name || provider,
+        baseUrl: apiBase || option.default_api_base,
+        apiKeyEnv: apiKeyEnvForProvider(provider),
+        emptyApiKeyAllowed: option.empty_api_key_allowed,
+      },
+      model,
+      apiKey,
+    });
+  }
+
+  async function runToolHealth(
+    provider: string,
+    apiBase: string,
+    model: string,
+    apiKey: string,
+  ): Promise<ToolHealthResult> {
+    const directProviderId = provider === "google" ? "gemini" : provider;
+    const option = getProviderOption(provider);
+    return probeProviderTools({
+      provider: {
+        id: directProviderId,
+        displayName: option.display_name || provider,
+        baseUrl: apiBase || option.default_api_base,
+        apiKeyEnv: apiKeyEnvForProvider(provider),
+        emptyApiKeyAllowed: option.empty_api_key_allowed,
+      },
+      model,
+      apiKey,
+    });
+  }
 
   router.post("/models/test-inline", async (req, res) => {
     const input = isRecord(req.body) ? req.body : {};
@@ -4694,8 +5495,13 @@ export function createLauncherCompatRouter({
         .status(400)
         .json({ error: err instanceof Error ? err.message : String(err) });
     }
-    const provider = normalizeProvider(String(input.provider || ""), modelName);
-    const option = getProviderOption(provider);
+    const providerOptions = await launcherProviderOptions(paths);
+    const provider = normalizeProvider(
+      String(input.provider || ""),
+      modelName,
+      providerOptions,
+    );
+    const option = getProviderOption(provider, providerOptions);
     const apiBase = String(input.api_base || option.default_api_base || "");
     const apiKey = resolveProviderApiKey(provider, paths, input.api_key);
     const started = Date.now();
@@ -4706,22 +5512,62 @@ export function createLauncherCompatRouter({
           success: false,
           latency_ms: 0,
           status: "unconfigured",
+          readiness_status: "not_configured",
+          verification_level: "configuration",
+          completion_tested: false,
           error: "API key is required for this provider.",
         });
       }
       if (option.supports_fetch && apiBase) {
-        await fetchModelsFromProvider(provider, apiBase, apiKey);
+        const providerModels = await fetchModelsFromProvider(
+          provider,
+          apiBase,
+          apiKey,
+        );
+        const requestedModel = modelBodyName(modelName, provider).replace(
+          /^models\//i,
+          "",
+        );
+        const advertisedModelIds = new Set(
+          providerModels
+            .map((item) =>
+              String(item.id || "")
+                .trim()
+                .replace(/^models\//i, ""),
+            )
+            .filter(Boolean),
+        );
+        if (
+          advertisedModelIds.size > 0 &&
+          !advertisedModelIds.has(requestedModel)
+        ) {
+          return res.json({
+            success: false,
+            latency_ms: Date.now() - started,
+            status: "model_not_found",
+            readiness_status: "model_not_found",
+            verification_level: "catalog",
+            completion_tested: false,
+            error: `Model ${requestedModel || "(empty)"} was not advertised by the provider.`,
+            available_models: [...advertisedModelIds].slice(0, 100),
+          });
+        }
       }
-      res.json({
-        success: true,
-        latency_ms: Date.now() - started,
-        status: "available",
-      });
+      const health = await runCompletionHealth(
+        provider,
+        apiBase,
+        modelName,
+        apiKey,
+      );
+      return res.json(completionHealthResponse(health));
     } catch (err) {
       res.json({
         success: false,
         latency_ms: Date.now() - started,
         status: "unreachable",
+        readiness_status: "unreachable",
+        verification_level: "catalog",
+        completion_tested: false,
         error: redactSecrets(err instanceof Error ? err.message : String(err), [
           apiKey,
         ]),
@@ -4733,8 +5579,13 @@ export function createLauncherCompatRouter({
     const index = Number(req.params.index);
     const model = state.models?.[index];
     if (!model) return res.status(404).json({ error: "Model not found" });
-    const provider = normalizeProvider(model.provider, model.model_name);
-    const option = getProviderOption(provider);
+    const providerOptions = await launcherProviderOptions(paths);
+    const provider = normalizeProvider(
+      model.provider,
+      model.model_name,
+      providerOptions,
+    );
+    const option = getProviderOption(provider, providerOptions);
     const apiBase = model.api_base || option.default_api_base;
     const apiKey = resolveProviderApiKey(provider, paths);
     const started = Date.now();
@@ -4745,30 +5596,188 @@ export function createLauncherCompatRouter({
           success: false,
           latency_ms: 0,
           status: "unconfigured",
+          readiness_status: "not_configured",
+          verification_level: "configuration",
+          completion_tested: false,
           error: "API key is required for this provider.",
         });
       }
-      await fetchModelsFromProvider(provider, apiBase, apiKey);
-      res.json({
-        success: true,
-        latency_ms: Date.now() - started,
-        status: "available",
-      });
+      const providerModels = await fetchModelsFromProvider(
+        provider,
+        apiBase,
+        apiKey,
+      );
+      const requestedModel = modelBodyName(
+        String(model.model || model.model_name || "").trim(),
+        provider,
+      ).replace(/^models\//i, "");
+      const advertisedModelIds = new Set(
+        providerModels
+          .map((item) =>
+            String(item.id || "")
+              .trim()
+              .replace(/^models\//i, ""),
+          )
+          .filter(Boolean),
+      );
+      if (
+        advertisedModelIds.size > 0 &&
+        !advertisedModelIds.has(requestedModel)
+      ) {
+        return res.json({
+          success: false,
+          latency_ms: Date.now() - started,
+          status: "model_not_found",
+          readiness_status: "model_not_found",
+          verification_level: "catalog",
+          completion_tested: false,
+          error: `Model ${requestedModel || "(empty)"} was not advertised by the provider.`,
+          available_models: [...advertisedModelIds].slice(0, 100),
+        });
+      }
+      const health = await runCompletionHealth(
+        provider,
+        apiBase,
+        model.model || model.model_name,
+        apiKey,
+      );
+      return res.json(completionHealthResponse(health));
     } catch (err) {
       res.json({
         success: false,
         latency_ms: Date.now() - started,
         status: "unreachable",
+        verification_level: "catalog",
+        completion_tested: false,
         error: redactSecrets(err instanceof Error ? err.message : String(err)),
+      });
+    }
+  });
+  router.post("/models/test-tools-inline", async (req, res) => {
+    const input = isRecord(req.body) ? req.body : {};
+    const modelName = String(input.model || "").trim();
+    try {
+      validateModelIdentifier(modelName);
+    } catch (err) {
+      return res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+    const providerOptions = await launcherProviderOptions(paths);
+    const provider = normalizeProvider(
+      String(input.provider || ""),
+      modelName,
+      providerOptions,
+    );
+    const option = getProviderOption(provider, providerOptions);
+    const apiBase = String(input.api_base || option.default_api_base || "");
+    const apiKey = resolveProviderApiKey(provider, paths, input.api_key);
+    try {
+      validateProviderApiBase(apiBase);
+      if (!option.empty_api_key_allowed && !apiKey) {
+        return res.json({
+          success: false,
+          latency_ms: 0,
+          status: "invalid",
+          readiness_status: "not_configured",
+          verification_level: "tools",
+          completion_tested: false,
+          tools_tested: false,
+          error: "API key is required for this provider.",
+        });
+      }
+      const health = await runToolHealth(provider, apiBase, modelName, apiKey);
+      return res.json(toolHealthResponse(health));
+    } catch (err) {
+      return res.json({
+        success: false,
+        latency_ms: 0,
+        status: "unreachable",
+        readiness_status: "unreachable",
+        verification_level: "tools",
+        completion_tested: false,
+        tools_tested: false,
+        error: redactSecrets(err instanceof Error ? err.message : String(err), [
+          apiKey,
+        ]),
+      });
+    }
+  });
+
+  router.post("/models/:index/test-tools", async (req, res) => {
+    const index = Number(req.params.index);
+    const model = state.models?.[index];
+    if (!model) return res.status(404).json({ error: "Model not found" });
+    const providerOptions = await launcherProviderOptions(paths);
+    const provider = normalizeProvider(
+      model.provider,
+      model.model_name,
+      providerOptions,
+    );
+    const option = getProviderOption(provider, providerOptions);
+    const apiBase = model.api_base || option.default_api_base;
+    const apiKey = resolveProviderApiKey(provider, paths);
+    try {
+      validateProviderApiBase(apiBase);
+      if (!option.empty_api_key_allowed && !apiKey) {
+        return res.json({
+          success: false,
+          latency_ms: 0,
+          status: "invalid",
+          readiness_status: "not_configured",
+          verification_level: "tools",
+          completion_tested: false,
+          tools_tested: false,
+          error: "API key is required for this provider.",
+        });
+      }
+      const health = await runToolHealth(
+        provider,
+        apiBase,
+        model.model || model.model_name,
+        apiKey,
+      );
+      return res.json(toolHealthResponse(health));
+    } catch (err) {
+      return res.json({
+        success: false,
+        latency_ms: 0,
+        status: "unreachable",
+        readiness_status: "unreachable",
+        verification_level: "tools",
+        completion_tested: false,
+        tools_tested: false,
+        error: redactSecrets(err instanceof Error ? err.message : String(err), [
+          apiKey,
+        ]),
       });
     }
   });
 
   router.post("/models/fetch", async (req, res) => {
-    const provider = normalizeProvider(String(req.body?.provider || ""));
-    const option = getProviderOption(provider);
+    const requestedIndex = Number(req.body?.model_index);
+    const hasModelIndex =
+      Number.isInteger(requestedIndex) && requestedIndex >= 0;
+    const indexedModel = hasModelIndex
+      ? state.models?.[requestedIndex]
+      : undefined;
+    if (hasModelIndex && !indexedModel) {
+      return res.status(400).json({ error: "Unknown saved model index." });
+    }
+    const providerOptions = await launcherProviderOptions(paths);
+    const provider = normalizeProvider(
+      indexedModel?.provider || String(req.body?.provider || ""),
+      indexedModel?.model_name,
+      providerOptions,
+    );
+    const option = getProviderOption(provider, providerOptions);
     const apiKey = resolveProviderApiKey(provider, paths, req.body?.api_key);
-    const apiBase = String(req.body?.api_base || option.default_api_base || "");
+    const apiBase = String(
+      req.body?.api_base ||
+        indexedModel?.api_base ||
+        option.default_api_base ||
+        "",
+    );
     if (!option.empty_api_key_allowed && !apiKey) {
       return res
         .status(400)
@@ -4842,10 +5851,7 @@ export function createLauncherCompatRouter({
     if (method === "token") {
       const token = String(req.body?.token || "").trim();
       if (!token) return res.status(400).json({ error: "token is required" });
-      const envKey =
-        provider === "google-antigravity"
-          ? "GEMINI_API_KEY"
-          : apiKeyEnvForProvider(provider);
+      const envKey = oauthSecretEnvForProvider(provider);
       updateEnvVar(paths, envKey, token);
       state.oauth![provider] = { method: "token", updated_at: nowIso() };
       state.gateway_restart_required = true;
@@ -4862,25 +5868,18 @@ export function createLauncherCompatRouter({
         runtime_apply_error: apply.error,
       });
     }
-    const flowId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    state.oauth![flowId] = {
+    const manualUrl =
+      provider === "google-antigravity"
+        ? "https://ai.google.dev/gemini-api/docs/api-key"
+        : "https://platform.openai.com/api-keys";
+    return res.status(409).json({
+      status: "manual_required",
       provider,
       method,
-      status: "pending",
-      expires_at: expiresAt,
-    };
-    saveState();
-    return res.json({
-      status: "pending",
-      provider,
-      method,
-      flow_id: flowId,
-      auth_url: "https://platform.openai.com/api-keys",
-      user_code: flowId.slice(0, 8).toUpperCase(),
-      verify_url: "https://platform.openai.com/api-keys",
-      interval: 5,
-      expires_at: expiresAt,
+      auth_url: manualUrl,
+      verify_url: manualUrl,
+      message:
+        "This provider does not expose a browser/device-code exchange in Miki. Create an API key and use the token form instead.",
     });
   });
 
@@ -4905,10 +5904,7 @@ export function createLauncherCompatRouter({
     const provider = String(req.body?.provider || "");
     if (!provider)
       return res.status(400).json({ error: "provider is required" });
-    const envKey =
-      provider === "google-antigravity"
-        ? "GEMINI_API_KEY"
-        : apiKeyEnvForProvider(provider);
+    const envKey = oauthSecretEnvForProvider(provider);
     updateEnvVar(paths, envKey, "");
     delete state.oauth?.[provider];
     state.gateway_restart_required = true;
@@ -4930,10 +5926,7 @@ export function createLauncherCompatRouter({
     if (!provider) {
       return res.status(400).json({ error: "provider is required" });
     }
-    const envKey =
-      provider === "google-antigravity"
-        ? "GEMINI_API_KEY"
-        : apiKeyEnvForProvider(provider);
+    const envKey = oauthSecretEnvForProvider(provider);
     const token = resolveConfiguredSecret(envKey, paths.configDir);
     if (!token) {
       return res.status(404).json({ error: "Token not configured" });
@@ -5034,7 +6027,10 @@ export function createLauncherCompatRouter({
     if (!isRecord(req.body))
       return res.status(400).json({ error: "JSON object expected" });
     const validation = validateRuntimeConfig(stripChannelAliases(req.body), {
-      allowedChannelNames: pluginChannelConfigKeysFromRegistry(paths, workspaceDir),
+      allowedChannelNames: pluginChannelConfigKeysFromRegistry(
+        paths,
+        workspaceDir,
+      ),
     });
     res.json(configValidationSummary(validation));
   });
@@ -5324,10 +6320,41 @@ export function createLauncherCompatRouter({
     res.json(mikiInfo(req));
   });
 
-  router.post("/miki/token", (req, res) => {
+  router.post("/miki/token", async (req, res) => {
     state.miki_token = crypto.randomBytes(24).toString("base64url");
-    saveState();
-    res.json(mikiInfo(req));
+    const channels = {
+      ...(isRecord(state.config?.channels)
+        ? (state.config!.channels as JsonRecord)
+        : {}),
+    };
+    const existing = recordOrEmpty(channels.miki);
+    channels.miki = {
+      ...existing,
+      enabled: existing.enabled !== false,
+      type: "miki",
+      settings: {
+        ...recordOrEmpty(existing.settings),
+        token: state.miki_token,
+      },
+    };
+    try {
+      const committed = commitConfig({ ...(state.config || {}), channels });
+      const apply = await applyRuntimeChanges({
+        channelsChanged: committed.channelsChanged,
+        reason: "miki.token.rotate",
+      });
+      res.json({
+        ...mikiInfo(req),
+        gateway_restart_required: apply.gateway_restart_required,
+        runtime_apply_status: apply.status,
+        runtime_apply_error: apply.error,
+      });
+    } catch (err) {
+      saveState();
+      res.status(500).json({
+        error: redactSecrets(err instanceof Error ? err.message : String(err)),
+      });
+    }
   });
 
   router.post("/miki/setup", async (req, res) => {
@@ -5470,17 +6497,28 @@ export function createLauncherCompatRouter({
         return res.status(400).json({ error: "Skill file is larger than 1MB" });
       }
       const lower = file.filename.toLowerCase();
-      if (!lower.endsWith(".md")) {
+      let name: string;
+      let importedFiles: Array<{ name: string; content: Buffer }>;
+      if (lower.endsWith(".zip")) {
+        const archive = resolveSkillArchive(readZipEntries(file.content));
+        name = archive.name;
+        importedFiles = archive.files;
+      } else if (lower.endsWith(".md")) {
+        const content = file.content.toString("utf-8");
+        const titleMatch = content.match(/^#\s+(.+)$/m);
+        name = slugify(
+          titleMatch?.[1] ||
+            path.basename(file.filename, path.extname(file.filename)),
+        );
+        importedFiles = [
+          { name: "SKILL.md", content: Buffer.from(content, "utf8") },
+        ];
+      } else {
         return res.status(400).json({
-          error: "Only Markdown skill imports are supported in this build.",
+          error:
+            "Skill imports must be a Markdown file or a ZIP containing SKILL.md.",
         });
       }
-      const content = file.content.toString("utf-8");
-      const titleMatch = content.match(/^#\s+(.+)$/m);
-      const name = slugify(
-        titleMatch?.[1] ||
-          path.basename(file.filename, path.extname(file.filename)),
-      );
       // Manually imported skills came from outside the agent (a file the
       // user uploaded, likely sourced from the internet), so they're
       // isolated the same way as installer-fetched skills: under the
@@ -5493,7 +6531,26 @@ export function createLauncherCompatRouter({
       );
       const skillDir = path.join(manualSkillsBase, name);
       ensureDir(skillDir);
-      fs.writeFileSync(path.join(skillDir, "SKILL.md"), content, "utf-8");
+      for (const importedFile of importedFiles) {
+        const relativeName = importedFile.name.replace(/\\\\/g, "/");
+        if (
+          !relativeName ||
+          relativeName.startsWith("/") ||
+          relativeName.split("/").includes("..")
+        ) {
+          return res
+            .status(400)
+            .json({ error: "Skill archive contains an unsafe path" });
+        }
+        const destination = path.join(skillDir, relativeName);
+        if (!destination.startsWith(`${skillDir}${path.sep}`)) {
+          return res
+            .status(400)
+            .json({ error: "Skill archive escapes its destination" });
+        }
+        ensureDir(path.dirname(destination));
+        fs.writeFileSync(destination, importedFile.content);
+      }
       const categoriesPath = path.join(manualSkillsBase, "categories.json");
       const manualSkillsPath = path.join(manualSkillsBase, "skills.json");
       ensureDir(path.dirname(categoriesPath));
@@ -5733,7 +6790,7 @@ export function createLauncherCompatRouter({
   });
 
   router.get("/tools/web-search-config", (_req, res) => {
-    res.json(state.web_search || WEB_SEARCH_DEFAULT);
+    res.json(normalizeWebSearchConfig(state.web_search || WEB_SEARCH_DEFAULT));
   });
 
   router.put("/tools/web-search-config", async (req, res) => {
@@ -5741,18 +6798,19 @@ export function createLauncherCompatRouter({
       return res.status(400).json({ error: "JSON object expected" });
     const previousWebSearch = clone(state.web_search || WEB_SEARCH_DEFAULT);
     const previousConfig = clone(state.config || defaultAppConfig(paths));
-    state.web_search = req.body;
+    const normalizedWebSearch = normalizeWebSearchConfig(req.body);
+    state.web_search = normalizedWebSearch;
     try {
       const committed = commitConfig(
         mergePatch(state.config || defaultAppConfig(paths), {
-          web_search: req.body,
+          web_search: normalizedWebSearch,
         }),
       );
       const apply = await applyRuntimeChanges({
         reason: "tools.web_search",
       });
       res.json({
-        ...(state.web_search || WEB_SEARCH_DEFAULT),
+        ...normalizeWebSearchConfig(state.web_search || WEB_SEARCH_DEFAULT),
         gateway_restart_required: apply.gateway_restart_required,
         runtime_apply_status: apply.status,
         runtime_apply_error: apply.error,
@@ -5809,11 +6867,14 @@ export function createLauncherCompatRouter({
 
   router.put("/system/launcher-config", (req, res) => {
     const port = Number(req.body?.port);
-    const allowed = Array.isArray(req.body?.allowed_cidrs)
-      ? req.body.allowed_cidrs.filter(
-          (item: unknown): item is string => typeof item === "string",
-        )
-      : [];
+    const allowed = normalizeAllowedCidrs(req.body?.allowed_cidrs);
+    const invalidCidrs = allowed.filter((cidr) => !isValidCidr(cidr));
+    if (invalidCidrs.length > 0) {
+      return res.status(400).json({
+        error: `Invalid allowed_cidrs value(s): ${invalidCidrs.join(", ")}`,
+        invalid_cidrs: invalidCidrs,
+      });
+    }
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       return res
         .status(400)

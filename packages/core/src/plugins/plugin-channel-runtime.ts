@@ -522,7 +522,22 @@ export class PluginChannelRuntimeManager {
     });
 
     processState.child.stderr.on("data", (chunk: Buffer) => {
+      processState.outputBytes += chunk.byteLength;
+      if (processState.outputBytes > maxOutputBytes) {
+        this.stopProcess(
+          processState.key,
+          `max output exceeded ${maxOutputBytes} bytes`,
+        );
+        return;
+      }
       stderrBuffer += chunk.toString("utf-8");
+      if (Buffer.byteLength(stderrBuffer, "utf-8") > maxOutputBytes) {
+        this.stopProcess(
+          processState.key,
+          `max output exceeded ${maxOutputBytes} bytes`,
+        );
+        return;
+      }
       const lines = stderrBuffer.split(/\r?\n/);
       stderrBuffer = lines.pop() || "";
       for (const line of lines) {

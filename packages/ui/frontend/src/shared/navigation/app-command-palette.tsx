@@ -2,6 +2,7 @@ import {
   IconActivityHeartbeat,
   IconAtom,
   IconBolt,
+  IconBrain,
   IconFolder,
   IconKey,
   IconListDetails,
@@ -16,6 +17,9 @@ import { useNavigate } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
+import { useGateway } from "@/hooks/use-gateway"
+import { useMikiChat } from "@/hooks/use-miki-chat"
+import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
 import {
   CommandDialog,
   CommandEmpty,
@@ -24,9 +28,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/shared/ui/command"
-import { useGateway } from "@/hooks/use-gateway"
-import { useMikiChat } from "@/hooks/use-miki-chat"
-import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
 
 interface CommandAction {
   id: string
@@ -63,6 +64,13 @@ const staticRoutes = [
     url: "/models",
     description: "Configure model providers, defaults, and API access.",
     icon: IconAtom,
+  },
+  {
+    id: "memory",
+    labelKey: "navigation.memory",
+    url: "/memory",
+    description: "Inspect selective memory, retrieval scores, and graph links.",
+    icon: IconBrain,
   },
   {
     id: "credentials",
@@ -148,11 +156,7 @@ function PaletteItemIcon({
   )
 }
 
-function PaletteItemText({
-  title,
-}: {
-  title: React.ReactNode
-}) {
+function PaletteItemText({ title }: { title: React.ReactNode }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="text-foreground block truncate text-[13.5px] leading-5 font-medium">
@@ -291,9 +295,7 @@ export function AppCommandPalette({
           </CommandEmpty>
         )}
 
-        <PaletteGroup
-          heading={t("command.groups.navigation")}
-        >
+        <PaletteGroup heading={t("command.groups.navigation")}>
           {staticRoutes.map((item) => {
             const Icon = item.icon
             return (
@@ -310,9 +312,7 @@ export function AppCommandPalette({
           })}
         </PaletteGroup>
 
-        <PaletteGroup
-          heading={t("navigation.channels_group")}
-        >
+        <PaletteGroup heading={t("navigation.channels_group")}>
           {channelItems.map((item) => {
             const Icon = item.icon
             return (
@@ -329,9 +329,7 @@ export function AppCommandPalette({
           })}
         </PaletteGroup>
 
-        <PaletteGroup
-          heading={t("command.groups.actions")}
-        >
+        <PaletteGroup heading={t("command.groups.actions")}>
           {actions.map((action) => {
             const Icon = action.icon
             return (
@@ -348,7 +346,6 @@ export function AppCommandPalette({
             )
           })}
         </PaletteGroup>
-
       </CommandList>
     </CommandDialog>
   )

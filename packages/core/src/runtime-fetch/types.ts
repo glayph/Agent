@@ -109,5 +109,10 @@ export interface ShellRunner {
     command: string,
     cwd?: string,
     timeout?: number,
-  ): Promise<{ stdout: string; stderr: string; exitCode: number; error: string }>;
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    error: string;
+  }>;
 }

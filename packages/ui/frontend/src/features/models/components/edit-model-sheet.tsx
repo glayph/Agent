@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
+  type LocalLlamaModelConfig,
   type ModelInfo,
   type ModelProviderOption,
   getCatalogs,
@@ -14,6 +15,8 @@ import {
   updateModel,
 } from "@/api/models"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { maskedSecretPlaceholder } from "@/shared/forms/secret-placeholder"
 import {
   AdvancedSection,
@@ -33,8 +36,6 @@ import {
   SheetTitle,
 } from "@/shared/ui/sheet"
 import { Textarea } from "@/shared/ui/textarea"
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
-import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
 import { FetchModelsDialog } from "./fetch-models-dialog"
@@ -74,6 +75,12 @@ interface EditForm {
   streamingEnabled: boolean
   extraBody: string
   customHeaders: string
+  localModelPath: string
+  localExecutablePath: string
+  localPort: string
+  localContextSize: string
+  localGpuLayers: string
+  localAutoStart: boolean
 }
 
 interface EditModelSheetProps {
@@ -106,6 +113,17 @@ function buildInitialEditForm(model: ModelInfo): EditForm {
     customHeaders: model.custom_headers
       ? JSON.stringify(model.custom_headers, null, 2)
       : "",
+    localModelPath: model.local?.model_path ?? "",
+    localExecutablePath: model.local?.executable_path ?? "",
+    localPort: model.local?.port ? String(model.local.port) : "",
+    localContextSize: model.local?.context_size
+      ? String(model.local.context_size)
+      : "",
+    localGpuLayers:
+      model.local?.gpu_layers !== undefined
+        ? String(model.local.gpu_layers)
+        : "",
+    localAutoStart: model.local?.auto_start !== false,
   }
 }
 
@@ -134,6 +152,12 @@ export function EditModelSheet({
     streamingEnabled: false,
     extraBody: "",
     customHeaders: "",
+    localModelPath: "",
+    localExecutablePath: "",
+    localPort: "",
+    localContextSize: "",
+    localGpuLayers: "",
+    localAutoStart: true,
   })
   const [saving, setSaving] = useState(false)
   const [setAsDefault, setSetAsDefault] = useState(false)
@@ -368,6 +392,26 @@ export function EditModelSheet({
         model.streaming?.enabled === true || form.streamingEnabled
           ? { enabled: form.streamingEnabled }
           : undefined
+      const local: LocalLlamaModelConfig | null =
+        provider === "llama.cpp"
+          ? {
+              runtime: "llama.cpp",
+              model_format: "gguf",
+              model_path: form.localModelPath.trim() || undefined,
+              executable_path: form.localExecutablePath.trim() || undefined,
+              port: form.localPort ? Number(form.localPort) : undefined,
+              context_size: form.localContextSize
+                ? Number(form.localContextSize)
+                : undefined,
+              gpu_layers: form.localGpuLayers
+                ? form.localGpuLayers === "auto"
+                  ? "auto"
+                  : Number(form.localGpuLayers)
+                : undefined,
+              enabled: true,
+              auto_start: form.localAutoStart,
+            }
+          : null
       await updateModel(model.index, {
         model_name: model.model_name,
         provider: provider,
@@ -391,6 +435,7 @@ export function EditModelSheet({
         streaming,
         extra_body: extraBody,
         custom_headers: customHeaders,
+        local,
       })
       if (setAsDefault && !model.is_default) {
         await setDefaultModel(model.model_name)
@@ -540,19 +585,70 @@ export function EditModelSheet({
                 </div>
               </Field>
 
-              {!isOAuth && (
+              {canonicalProvider === "llama.cpp" ? (
                 <Field
-                  label={t("models.field.apiKey")}
-                  hint={
-                    hasSavedAPIKey ? t("models.edit.apiKeyHint") : undefined
-                  }
+                  label="llama.cpp runtime"
+                  hint="Use a GGUF file with llama-server, or an existing loopback OpenAI-compatible endpoint. No API key is used."
                 >
-                  <KeyInput
-                    value={form.apiKey}
-                    onChange={(v) => setForm((f) => ({ ...f, apiKey: v }))}
-                    placeholder={apiKeyPlaceholder}
-                  />
+                  <div className="grid gap-2">
+                    <Input
+                      value={form.localModelPath}
+                      onChange={setField("localModelPath")}
+                      placeholder="/models/Miki-7B-Instruct.Q4_K_M.gguf"
+                    />
+                    <Input
+                      value={form.localExecutablePath}
+                      onChange={setField("localExecutablePath")}
+                      placeholder="/usr/local/bin/llama-server"
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <Input
+                        value={form.localPort}
+                        onChange={setField("localPort")}
+                        placeholder="39200"
+                      />
+                      <Input
+                        value={form.localContextSize}
+                        onChange={setField("localContextSize")}
+                        placeholder="4096"
+                      />
+                      <Input
+                        value={form.localGpuLayers}
+                        onChange={setField("localGpuLayers")}
+                        placeholder="auto"
+                      />
+                    </div>
+                    <label className="text-muted-foreground flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={form.localAutoStart}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            localAutoStart: e.target.checked,
+                          }))
+                        }
+                      />
+                      Start llama-server automatically when this model is
+                      selected
+                    </label>
+                  </div>
                 </Field>
+              ) : (
+                !isOAuth && (
+                  <Field
+                    label={t("models.field.apiKey")}
+                    hint={
+                      hasSavedAPIKey ? t("models.edit.apiKeyHint") : undefined
+                    }
+                  >
+                    <KeyInput
+                      value={form.apiKey}
+                      onChange={(v) => setForm((f) => ({ ...f, apiKey: v }))}
+                      placeholder={apiKeyPlaceholder}
+                    />
+                  </Field>
+                )
               )}
 
               <Field

@@ -2,9 +2,7 @@ import * as dotenv from "dotenv";
 import * as path from "path";
 import * as fs from "fs";
 import { validateRuntimeConfig } from "./schema.js";
-import {
-  isSecretEnvKey,
-} from "./secret-vault.js";
+import { isSecretEnvKey } from "./secret-vault.js";
 import { resolveConfiguredSecret, setConfiguredSecret } from "./user-config.js";
 import { readMikiEnv } from "./env-compat.js";
 

@@ -88,6 +88,7 @@ export class SystemIndexer {
   private completedAt: string | null = null;
   private lastErrors: string[] = [];
   private watchers: fs.FSWatcher[] = [];
+  private watchedDirectories = new Set<string>();
   private watchQueue = new Map<string, NodeJS.Timeout>();
 
   constructor(
@@ -333,28 +334,92 @@ export class SystemIndexer {
 
   private startWatchers(): void {
     this.closeWatchers();
-    if (!this.config.realtime) return;
+    if (!this.config.realtime || this.paused) return;
 
     for (const root of this.effectiveRoots()) {
       if (!fs.existsSync(root)) continue;
-      try {
-        const watcher = fs.watch(
-          root,
-          { recursive: process.platform === "win32" },
-          (_eventType, filename) => {
-            if (!filename) return;
-            const target = path.resolve(root, String(filename));
-            if (!pathInsideRoot(root, target)) return;
-            this.enqueueWatchUpdate(target);
-          },
-        );
-        watcher.on("error", (err) => {
-          this.recordError(`watch ${root}: ${getErrorMessage(err)}`);
-        });
-        this.watchers.push(watcher);
-      } catch (err) {
-        this.recordError(`watch ${root}: ${getErrorMessage(err)}`);
+      if (process.platform === "win32") {
+        this.watchDirectory(root, root, true);
+      } else {
+        this.watchDirectoryTree(root);
       }
+    }
+  }
+
+  private watchDirectoryTree(root: string): void {
+    const maxWatchers = Math.max(
+      32,
+      Math.min(
+        20_000,
+        Number(process.env.MIKI_SYSTEM_INDEX_MAX_WATCHERS || 5000),
+      ),
+    );
+    const pending = [path.resolve(root)];
+    while (pending.length > 0 && this.watchers.length < maxWatchers) {
+      const directory = pending.pop();
+      if (!directory || this.watchedDirectories.has(directory)) continue;
+      if (
+        shouldSkipDirectory(directory, this.config) &&
+        directory !== path.resolve(root)
+      )
+        continue;
+      this.watchDirectory(directory, root, false);
+      try {
+        for (const entry of fs.readdirSync(directory, {
+          withFileTypes: true,
+        })) {
+          if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+          const child = path.join(directory, entry.name);
+          if (!shouldSkipDirectory(child, this.config)) pending.push(child);
+        }
+      } catch (err) {
+        this.recordError(`watch scan ${directory}: ${getErrorMessage(err)}`);
+      }
+    }
+    if (pending.length > 0) {
+      this.recordError(
+        `watcher limit reached at ${maxWatchers}; nested directories beyond the limit are not watched`,
+      );
+    }
+  }
+
+  private watchDirectory(
+    directory: string,
+    root: string,
+    recursive: boolean,
+  ): void {
+    const normalizedDirectory = path.resolve(directory);
+    if (this.watchedDirectories.has(normalizedDirectory)) return;
+    try {
+      const watcher = fs.watch(
+        normalizedDirectory,
+        { recursive },
+        (eventType, filename) => {
+          if (!filename || this.paused) return;
+          const target = path.resolve(normalizedDirectory, String(filename));
+          if (!pathInsideRoot(path.resolve(root), target)) return;
+          if (!recursive && eventType === "rename") {
+            try {
+              const stat = fs.lstatSync(target);
+              if (stat.isDirectory() && !stat.isSymbolicLink()) {
+                this.watchDirectoryTree(target);
+              }
+            } catch {
+              // A deleted or transient path will be handled by indexPath.
+            }
+          }
+          this.enqueueWatchUpdate(target);
+        },
+      );
+      watcher.on("error", (err) => {
+        this.recordError(
+          `watch ${normalizedDirectory}: ${getErrorMessage(err)}`,
+        );
+      });
+      this.watchers.push(watcher);
+      this.watchedDirectories.add(normalizedDirectory);
+    } catch (err) {
+      this.recordError(`watch ${normalizedDirectory}: ${getErrorMessage(err)}`);
     }
   }
 
@@ -376,6 +441,7 @@ export class SystemIndexer {
       watcher.close();
     }
     this.watchers = [];
+    this.watchedDirectories.clear();
     for (const timer of this.watchQueue.values()) {
       clearTimeout(timer);
     }

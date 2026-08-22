@@ -17,6 +17,8 @@ export interface AgentTokenBudgetInput {
   configuredCycleBudget: number;
   spentBudgetTokens: number;
   defaultMaxTokens?: number;
+  contextWindowTokens?: number;
+  summarizeTokenPercent?: number;
   manager?: TokenBudgetManager;
 }
 
@@ -39,6 +41,8 @@ export function buildAgentTokenBudget({
   configuredCycleBudget,
   spentBudgetTokens,
   defaultMaxTokens,
+  contextWindowTokens,
+  summarizeTokenPercent,
   manager = globalTokenBudgetManager,
 }: AgentTokenBudgetInput): AgentTokenBudgetSnapshot {
   const contextText = messages
@@ -83,7 +87,10 @@ export function buildAgentTokenBudget({
     inputTokens,
     effectiveCycleBudget,
     remainingCycleBudget,
-    contextUsage: manager.buildContextUsage(modelName, inputTokens),
+    contextUsage: manager.buildContextUsage(modelName, inputTokens, {
+      contextWindowTokens,
+      compressPercent: summarizeTokenPercent,
+    }),
     tier: adaptiveBudget.tier,
     suggestedModel: adaptiveBudget.model,
   };

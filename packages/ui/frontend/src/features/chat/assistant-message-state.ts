@@ -102,16 +102,16 @@ export function parseAssistantMessageUpdateState(
   if (existing?.kind === "thought" || existing?.kind === "tool_calls") {
     return {
       content,
-      kind: "normal",
-      toolCalls: undefined,
+      kind: existing.kind,
+      ...(existing.toolCalls ? { toolCalls: existing.toolCalls } : {}),
     }
   }
 
   if (existing?.toolCalls) {
     return {
       content,
-      kind: existing.kind ?? "normal",
-      toolCalls: undefined,
+      kind: existing.kind ?? "tool_calls",
+      toolCalls: existing.toolCalls,
     }
   }
 

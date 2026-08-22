@@ -1,6 +1,5 @@
 import { readMikiEnv } from "@miki/config";
 import type { LLMResponse } from "@miki/config";
-import type OpenAI from "openai";
 import {
   directProviderForModel,
   normalizeDirectModelName,
@@ -19,14 +18,24 @@ import type {
   ProviderModel,
 } from "./contracts.js";
 import { LLMMissingCredentialError } from "./errors.js";
+import { ensureLocalRuntime } from "../local/local-runtime.js";
+import { ProviderPluginRegistry } from "./sdk/registry.js";
+import { builtinProviderPlugins } from "./sdk/builtin.js";
+import type { MikiProviderMessage } from "./sdk/index.js";
 
 function nativeClaudeEnabled(): boolean {
   const value = process.env.CLAUDE_NATIVE;
-  return value === undefined || (value !== "0" && value.toLowerCase() !== "false");
+  return (
+    value === undefined || (value !== "0" && value.toLowerCase() !== "false")
+  );
 }
 
 function workspaceDir(): string {
-  return readMikiEnv("MIKI_CONFIG_DIR") || readMikiEnv("MIKI_WORKSPACE_DIR") || process.cwd();
+  return (
+    readMikiEnv("MIKI_CONFIG_DIR") ||
+    readMikiEnv("MIKI_WORKSPACE_DIR") ||
+    process.cwd()
+  );
 }
 
 class AnthropicNativeAdapter implements LLMProviderAdapter {
@@ -52,10 +61,27 @@ class AnthropicNativeAdapter implements LLMProviderAdapter {
  */
 export class ProviderRegistry {
   private readonly adapters = new Map<string, LLMProviderAdapter>();
+  private readonly pluginRegistry: ProviderPluginRegistry;
 
   constructor() {
     this.register(openAICompatibleAdapter);
     this.register(new AnthropicNativeAdapter());
+    this.pluginRegistry = new ProviderPluginRegistry({
+      workspaceDir: workspaceDir(),
+      configDir: workspaceDir(),
+      resolveCredentials: (auth, providerId) => {
+        if (auth.mode === "local" || auth.mode === "none") return {};
+        const provider = directProviderForModel(`${providerId}/model`);
+        const apiKey = provider
+          ? resolveProviderApiKey(provider, workspaceDir())
+          : "";
+        return apiKey ? { apiKey } : {};
+      },
+      logger: (event, details) =>
+        console.info(`[ProviderPlugin] ${event}`, details || {}),
+    });
+    for (const plugin of builtinProviderPlugins)
+      this.pluginRegistry.register(plugin);
   }
 
   register(adapter: LLMProviderAdapter): void {
@@ -63,7 +89,11 @@ export class ProviderRegistry {
   }
 
   adapterFor(provider: DirectProviderConfig): LLMProviderAdapter {
-    return this.adapters.get(provider.id === "claude" ? "claude" : "openai-compatible") ?? openAICompatibleAdapter;
+    return (
+      this.adapters.get(
+        provider.id === "claude" ? "claude" : "openai-compatible",
+      ) ?? openAICompatibleAdapter
+    );
   }
 
   resolve(model: string): DirectProviderConfig | undefined {
@@ -72,12 +102,33 @@ export class ProviderRegistry {
 
   async complete(
     model: string,
-    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    messages: MikiProviderMessage[],
     extra?: Record<string, unknown>,
   ): Promise<LLMResponse> {
     const provider = this.resolve(model);
     if (!provider) {
-      throw new LLMMissingCredentialError(`No supported provider matches model "${model}".`);
+      throw new LLMMissingCredentialError(
+        `No supported provider matches model "${model}".`,
+      );
+    }
+
+    const plugin = this.pluginRegistry.get(provider.id);
+    if (plugin && !(provider.id === "claude" && !nativeClaudeEnabled())) {
+      return this.pluginRegistry.complete(model, messages, { extra });
+    }
+
+    // Local llama.cpp routing is deliberately resolved before any remote
+    // credential lookup. A local request may start a managed loopback server,
+    // but it must never resolve or transmit a Gemini/OpenAI/etc. secret.
+    if (provider.id === "llama.cpp") {
+      const runtime = await ensureLocalRuntime(model);
+      return openAICompatibleAdapter.complete({
+        provider: { ...provider, baseUrl: runtime.baseUrl },
+        model: runtime.model,
+        apiKey: "local-no-auth-required",
+        messages: messages as never,
+        extra,
+      });
     }
 
     const apiKey = resolveProviderApiKey(provider, workspaceDir());
@@ -92,7 +143,7 @@ export class ProviderRegistry {
       provider,
       model: normalizeDirectModelName(provider.id, model),
       apiKey: apiKey ?? "",
-      messages,
+      messages: messages as never,
       extra,
     };
 
@@ -103,7 +154,11 @@ export class ProviderRegistry {
     return adapter.complete(request);
   }
 
-  listModels(provider: DirectProviderConfig, apiKey: string, timeoutMs?: number): Promise<ProviderModel[]> {
+  listModels(
+    provider: DirectProviderConfig,
+    apiKey: string,
+    timeoutMs?: number,
+  ): Promise<ProviderModel[]> {
     const adapter = this.adapterFor(provider);
     if (!adapter.listModels) return Promise.resolve([]);
     return adapter.listModels(provider, apiKey, timeoutMs);
@@ -115,12 +170,25 @@ export class ProviderRegistry {
     timeoutMs?: number,
   ): Promise<ProviderConnectionResult> {
     const adapter = this.adapterFor(provider);
-    if (!adapter.testConnection) return Promise.resolve({ ok: false, latencyMs: 0, error: "Connection testing is not supported." });
+    if (!adapter.testConnection)
+      return Promise.resolve({
+        ok: false,
+        latencyMs: 0,
+        error: "Connection testing is not supported.",
+      });
     return adapter.testConnection(provider, apiKey, timeoutMs);
   }
 
   clearCaches(): void {
     for (const adapter of this.adapters.values()) adapter.clearCache?.();
+  }
+
+  pluginDescriptors() {
+    return this.pluginRegistry.descriptors();
+  }
+
+  getPluginRegistry(): ProviderPluginRegistry {
+    return this.pluginRegistry;
   }
 }
 

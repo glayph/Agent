@@ -2,8 +2,8 @@ import {
   IconAdjustmentsHorizontal,
   IconAlertCircle,
   IconArrowUp,
-  IconPlus,
   IconPhotoPlus,
+  IconPlus,
   IconX,
 } from "@tabler/icons-react"
 import { type KeyboardEvent as ReactKeyboardEvent, useId, useRef } from "react"
@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
 
 import { ContextUsageRing } from "@/features/chat/components/context-usage-ring"
+import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import {
   DropdownMenu,
@@ -18,12 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/shared/ui/tooltip"
-import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import type { ChatAttachment, ContextUsage } from "@/store/chat"
 
 export type ChatInputDisabledReason =
@@ -179,7 +175,7 @@ export function ChatComposer({
     <div className="pointer-events-none relative z-10 shrink-0 bg-transparent px-[var(--chat-inline-padding)] pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
       <div
         className={cn(
-          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col rounded-[1.5rem] border transition-[border-color,box-shadow,background-color] [background:var(--chat-composer-bg)] [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] focus-within:[border-color:var(--chat-composer-focus-border)] focus-within:[box-shadow:var(--chat-composer-focus-shadow)]",
+          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col rounded-[1.5rem] border [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] transition-[border-color,box-shadow,background-color] [background:var(--chat-composer-bg)] focus-within:[border-color:var(--chat-composer-focus-border)] focus-within:[box-shadow:var(--chat-composer-focus-shadow)]",
           canInput
             ? "min-h-[var(--chat-composer-min-height)] rounded-[1.5rem] p-2"
             : "min-h-12 rounded-[1.5rem] p-2",
@@ -190,7 +186,7 @@ export function ChatComposer({
             {attachments.map((attachment, index) => (
               <div
                 key={`${attachment.url}-${index}`}
-                className="bg-muted/40 relative size-[clamp(3.5rem,15vw,4.75rem)] overflow-hidden rounded-xl border border-border/70"
+                className="bg-muted/40 border-border/70 relative size-[clamp(3.5rem,15vw,4.75rem)] overflow-hidden rounded-xl border"
               >
                 <img
                   src={attachment.url}
@@ -204,7 +200,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(index)}
-                  className="bg-background/90 text-foreground hover:bg-primary hover:text-primary-foreground absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border border-border/70 shadow-sm transition-colors"
+                  className="bg-background/90 text-foreground hover:bg-primary hover:text-primary-foreground border-border/70 absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border shadow-sm transition-colors"
                   aria-label={t("chat.removeImage")}
                   title={t("chat.removeImage")}
                 >
@@ -337,7 +333,6 @@ export function ChatComposer({
             {disabledMessage}
           </p>
         )}
-
       </div>
     </div>
   )

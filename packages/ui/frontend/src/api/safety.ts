@@ -62,6 +62,38 @@ export interface WatchdogStatus {
   }>
 }
 
+export type DeliveryStatus =
+  | "pending"
+  | "waiting_approval"
+  | "sending"
+  | "sent"
+  | "failed"
+  | "unknown_outcome"
+  | "dead_letter"
+
+export interface DeliveryReceipt {
+  id: string
+  runId?: string
+  stepId?: string
+  correlationId?: string
+  channel: string
+  destination: string
+  body: string
+  idempotencyKey: string
+  status: DeliveryStatus
+  attempts: number
+  maxAttempts: number
+  approvalRequired?: boolean
+  approvalRequestId?: string
+  previewHash?: string
+  replayOf?: string
+  errorClass?: string
+  nextAction?: string
+  replayAllowed?: boolean
+  lastError?: string
+  updatedAt: string
+}
+
 export interface RuntimeJob {
   id: string
   type: string
@@ -138,9 +170,7 @@ export function createBackup(): Promise<{ backup: BackupManifest }> {
   )
 }
 
-export function rollbackBackup(
-  backupId: string,
-): Promise<{
+export function rollbackBackup(backupId: string): Promise<{
   rollback: { restoredBackupId: string; restoredEntries: number }
 }> {
   return request("/api/enhancements/safety/rollback", {
@@ -203,4 +233,101 @@ export function getDeadLetterJobs(): Promise<{
   count: number
 }> {
   return request("/api/enhancements/runtime/jobs/dead-letter")
+}
+
+export function getRuntimeDeliveries(): Promise<{
+  receipts: DeliveryReceipt[]
+  stats: Record<string, number>
+}> {
+  return request("/api/enhancements/runtime/deliveries")
+}
+
+export interface MockDeliveryInput {
+  runId: string
+  stepId: string
+  action: string
+  risk: string
+  target: string
+  body: string
+  channel: string
+  destination: string
+  idempotencyKey: string
+  correlationId: string
+  maxAttempts?: number
+}
+
+export function createMockDelivery(input: MockDeliveryInput): Promise<{
+  preview: {
+    externalSideEffect: false
+    previewHash: string
+    bodyPreview: string
+  }
+  receipt: DeliveryReceipt
+  approval: { id: string; status: string; tokenIssued: boolean }
+}> {
+  return request("/api/enhancements/runtime/deliveries/mock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+}
+
+export function getRuntimeDelivery(deliveryId: string): Promise<{
+  receipt: DeliveryReceipt
+  approval: Record<string, unknown> | null
+  replayEligible: boolean
+}> {
+  return request(
+    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}`,
+  )
+}
+
+export function approveMockDelivery(
+  deliveryId: string,
+  decidedBy = "dashboard-operator",
+): Promise<{ receipt: DeliveryReceipt; approval: Record<string, unknown> }> {
+  return request(
+    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decidedBy }),
+    },
+  )
+}
+
+export function dispatchMockDelivery(
+  deliveryId: string,
+  outcome: "sent" | "failed" | "unknown_outcome",
+): Promise<{ receipt: DeliveryReceipt; outcome: Record<string, unknown> }> {
+  return request(
+    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}/mock-dispatch`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome }),
+    },
+  )
+}
+
+export function replayMockDelivery(
+  deliveryId: string,
+  idempotencyKey: string,
+): Promise<{
+  receipt: DeliveryReceipt
+  preview: {
+    externalSideEffect: false
+    previewHash: string
+    bodyPreview: string
+  }
+  approval: Record<string, unknown>
+}> {
+  return request(
+    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}/replay`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotencyKey }),
+    },
+  )
 }

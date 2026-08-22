@@ -6,6 +6,7 @@ import {
 import {
   asStringArray,
   parseAllowFromInput,
+  parseConservativeStringListInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
@@ -120,6 +121,22 @@ export function OneBotForm({
               ariaLabel="Mention Only"
             />
           </div>
+          <ChannelArrayListField
+            label="Group Trigger Prefixes"
+            hint="Respond to group messages that begin with one of these prefixes."
+            value={asStringArray(groupTriggerConfig.prefixes)}
+            onChange={(value) =>
+              onChange("group_trigger", {
+                ...groupTriggerConfig,
+                prefixes: value,
+              })
+            }
+            placeholder="/miki, !miki"
+            parser={parseConservativeStringListInput}
+            fieldPath="group_trigger.prefixes"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
         </CardContent>
       </Card>
     </div>

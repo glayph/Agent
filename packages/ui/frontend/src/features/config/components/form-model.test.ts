@@ -127,11 +127,9 @@ describe("config page form model", () => {
   it("parses optional positive integer fields without rejecting default zero", () => {
     expect(parseOptionalPositiveIntField("", "Context window")).toBeUndefined()
     expect(parseOptionalPositiveIntField("0", "Context window")).toBeUndefined()
-    expect(parseOptionalPositiveIntField(" 4096 ", "Context window")).toBe(
-      4096,
+    expect(parseOptionalPositiveIntField(" 4096 ", "Context window")).toBe(4096)
+    expect(() => parseOptionalPositiveIntField("-1", "Context window")).toThrow(
+      "Context window must be >= 1.",
     )
-    expect(() =>
-      parseOptionalPositiveIntField("-1", "Context window"),
-    ).toThrow("Context window must be >= 1.")
   })
 })

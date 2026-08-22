@@ -71,6 +71,7 @@ export interface InstallResult {
   permissions?: string[];
   contracts?: PluginContracts;
   plugin?: PluginManifest["plugin"];
+  marketplace?: Record<string, unknown>;
 }
 
 export interface VersionConflict {
@@ -95,6 +96,7 @@ export interface InstalledSkill {
   permissions?: string[];
   contracts?: PluginContracts;
   plugin?: PluginManifest["plugin"];
+  marketplace?: Record<string, unknown>;
 }
 
 export interface PluginContractCatalogEntry {

@@ -55,7 +55,8 @@ describe("SkillInstaller.install", () => {
 
   it("serializes descriptions without template-literal injection", async () => {
     const manifestPath = path.join(pluginDir, "plugin.json");
-    const description = "unsafe `; ${globalThis.process?.env?.SECRET ?? \"none\"}";
+    const description =
+      'unsafe `; ${globalThis.process?.env?.SECRET ?? "none"}';
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
       description: string;
     };

@@ -41,6 +41,8 @@ interface ToolsConfig {
 export class FileSecurityExecutor {
   public configPath: string;
   public systemRoots: string[];
+  private workspaceRoot: string | null = null;
+  private workspaceRealRoot: string | null = null;
 
   constructor(configPath: string = "config/tools.yaml") {
     this.configPath = path.resolve(configPath);
@@ -60,8 +62,49 @@ export class FileSecurityExecutor {
     return roots;
   }
 
+  public setWorkspaceRoot(root: string): void {
+    const trimmed = root.trim();
+    this.workspaceRoot = trimmed ? path.resolve(trimmed) : null;
+    this.workspaceRealRoot = this.workspaceRoot
+      ? this.realpathIfAvailable(this.workspaceRoot)
+      : null;
+  }
+
+  private realpathIfAvailable(target: string): string {
+    try {
+      return fs.realpathSync.native(target);
+    } catch {
+      return path.resolve(target);
+    }
+  }
+
+  private nearestExistingRealPath(target: string): string {
+    let probe = path.resolve(target);
+    const suffix: string[] = [];
+    while (!fs.existsSync(probe)) {
+      const parent = path.dirname(probe);
+      if (parent === probe) break;
+      suffix.unshift(path.basename(probe));
+      probe = parent;
+    }
+    return path.resolve(this.realpathIfAvailable(probe), ...suffix);
+  }
+
   private _resolvePath(pathStr: string): string {
-    return path.resolve(pathStr);
+    const base = this.workspaceRoot || process.cwd();
+    const resolved = path.isAbsolute(pathStr)
+      ? path.resolve(pathStr)
+      : path.resolve(base, pathStr);
+    if (this.workspaceRoot) {
+      const boundaryTarget = this.nearestExistingRealPath(resolved);
+      const root = this.workspaceRealRoot || this.workspaceRoot;
+      const relative = path.relative(root, boundaryTarget);
+      const outside = relative.startsWith("..") || path.isAbsolute(relative);
+      if (outside) {
+        throw new Error("path must remain inside the active workspace");
+      }
+    }
+    return resolved;
   }
 
   private loadConfig(): ToolsConfig {
@@ -123,7 +166,12 @@ export class FileSecurityExecutor {
         maxFileSizeMb >= 0 &&
         stat.size > maxFileSizeMb * 1024 * 1024
       ) {
-        logFileEvent("file_read", pathStr, "failed", "exceeds max_file_size_mb");
+        logFileEvent(
+          "file_read",
+          pathStr,
+          "failed",
+          "exceeds max_file_size_mb",
+        );
         return `Error: File '${pathStr}' exceeds the configured max_file_size_mb limit.`;
       }
       const content = fs.readFileSync(p, { encoding: "utf-8" });

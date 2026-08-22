@@ -6,7 +6,7 @@ import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 
 const IRC_LINE_LIMIT = 400;
 const DEFAULT_IRC_PORT = 6667;
@@ -22,6 +22,8 @@ export interface IrcRuntimeConfig {
   username: string;
   realname: string;
   password: string;
+  saslUsername: string;
+  saslPassword: string;
   nickservPassword: string;
   channels: string[];
   allowedIds: string[];
@@ -108,6 +110,13 @@ export function resolveIrcRuntimeConfig(
   const realname =
     stringOrEmpty(env.IRC_REALNAME ?? settings.realname ?? raw.realname) ||
     "Miki Agent";
+  const saslPassword = stringOrEmpty(
+    env.IRC_SASL_PASSWORD ?? settings.sasl_password ?? raw.sasl_password,
+  );
+  const saslUsername =
+    stringOrEmpty(
+      env.IRC_SASL_USERNAME ?? settings.sasl_username ?? raw.sasl_username,
+    ) || username;
 
   return {
     enabled:
@@ -123,6 +132,8 @@ export function resolveIrcRuntimeConfig(
     password: stringOrEmpty(
       env.IRC_PASSWORD ?? settings.password ?? raw.password,
     ),
+    saslUsername,
+    saslPassword,
     nickservPassword: stringOrEmpty(
       env.IRC_NICKSERV_PASSWORD ??
         settings.nickserv_password ??
@@ -227,6 +238,8 @@ export class IrcBot {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private runtimeConfig: IrcRuntimeConfig | null = null;
+  private saslRequested = false;
+  private saslActive = false;
 
   constructor(orchestrator: AgentOrchestrator) {
     this.orchestrator = orchestrator;
@@ -303,6 +316,9 @@ export class IrcBot {
   }
 
   private register(config: IrcRuntimeConfig): void {
+    this.saslRequested = Boolean(config.saslPassword);
+    this.saslActive = false;
+    if (this.saslRequested) this.write("CAP LS 302");
     if (config.password) this.write(`PASS ${config.password}`);
     this.write(`NICK ${config.nick}`);
     this.write(`USER ${config.username} 0 * :${config.realname}`);
@@ -332,7 +348,59 @@ export class IrcBot {
       this.write(`PONG :${message.trailing || message.params[0] || ""}`);
       return;
     }
+    if (message.command === "CAP" && config.saslPassword) {
+      const subcommand = (message.params[1] || "").toUpperCase();
+      const capabilities = (
+        message.trailing ||
+        message.params[2] ||
+        ""
+      ).toLowerCase();
+      if (subcommand === "LS" && capabilities.split(/\s+/).includes("sasl")) {
+        this.write("CAP REQ :sasl");
+        return;
+      }
+      if (subcommand === "ACK" && capabilities.split(/\s+/).includes("sasl")) {
+        this.saslActive = true;
+        this.write("AUTHENTICATE PLAIN");
+        return;
+      }
+      if (subcommand === "NAK" || subcommand === "DEL") {
+        this.saslRequested = false;
+        this.write("CAP END");
+        return;
+      }
+    }
+    if (message.command === "AUTHENTICATE" && config.saslPassword) {
+      const challenge = message.trailing || message.params[0] || "";
+      if (challenge === "+" && this.saslActive) {
+        const payload = Buffer.from(
+          `\u0000${config.saslUsername}\u0000${config.saslPassword}`,
+          "utf8",
+        ).toString("base64");
+        this.write(`AUTHENTICATE ${payload}`);
+        return;
+      }
+    }
+    if (message.command === "903" || message.command === "900") {
+      if (this.saslActive) {
+        this.saslActive = false;
+        this.saslRequested = false;
+        this.write("CAP END");
+      }
+    }
+    if (
+      message.command === "904" ||
+      message.command === "905" ||
+      message.command === "906"
+    ) {
+      this.saslActive = false;
+      this.saslRequested = false;
+      this.write("CAP END");
+      console.warn(`IRC SASL authentication failed (${message.command})`);
+      return;
+    }
     if (message.command === "001") {
+      if (this.saslRequested) this.write("CAP END");
       if (config.nickservPassword) {
         this.write(`PRIVMSG NickServ :IDENTIFY ${config.nickservPassword}`);
       }
@@ -361,10 +429,19 @@ export class IrcBot {
 
     const response = await collectAgentResponse(
       this.orchestrator,
-      UNIVERSAL_SESSION_ID,
+      resolveChannelSessionId(
+        this.orchestrator.config,
+        "irc",
+        senderNick,
+        replyTarget,
+      ),
       prompt,
     );
-    for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, IRC_LINE_LIMIT)) {
+    for (const part of splitOutboundMessageForOrchestrator(
+      this.orchestrator,
+      response,
+      IRC_LINE_LIMIT,
+    )) {
       this.write(`PRIVMSG ${replyTarget} :${part.replace(/\r?\n/g, " ")}`);
     }
   }

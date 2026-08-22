@@ -56,7 +56,11 @@ describe("RuntimeInstallConsentStore", () => {
     const store = new RuntimeInstallConsentStore(db);
 
     const req = store.createPending("skill-a", "ruby", ["nokogiri"]);
-    store.markFailed(req.id, "network unreachable", "run `gem install nokogiri` yourself");
+    store.markFailed(
+      req.id,
+      "network unreachable",
+      "run `gem install nokogiri` yourself",
+    );
     const updated = store.getById(req.id)!;
     expect(updated.status).toBe("failed");
     expect(updated.error).toBe("network unreachable");

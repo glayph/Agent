@@ -5,11 +5,11 @@ import { useTranslation } from "react-i18next"
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
 import { LiveActivityStrip } from "@/features/chat/components/live-activity-strip"
 import { TypingIndicator } from "@/features/chat/components/typing-indicator"
-import { Button } from "@/shared/ui/button"
+import type { MonitorNode } from "@/features/monitor/store"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
+import { Button } from "@/shared/ui/button"
 import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
 import { shouldShowAssistantMessage } from "@/store/chat"
-import type { MonitorNode } from "@/features/monitor/store"
 
 import { ChatMessage as WorkspaceChatMessage } from "./chat-message"
 

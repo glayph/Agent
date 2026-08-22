@@ -34,13 +34,9 @@ function normalizeSearchPage(value: unknown): number {
   return Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1
 }
 
-export function normalizeAgentRunsSearch(
-  value: unknown,
-): AgentRunsSearchState {
+export function normalizeAgentRunsSearch(value: unknown): AgentRunsSearchState {
   const source =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {}
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
   const rawStatus = source.status
   const status =
     typeof rawStatus === "string" &&

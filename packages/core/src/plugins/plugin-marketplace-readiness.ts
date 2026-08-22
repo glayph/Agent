@@ -5,10 +5,7 @@ import {
   type InstalledSkill,
   type PluginContractKind,
 } from "@miki/installer";
-import {
-  normalizeRuntimePaths,
-  resolveDownloadedSkillsDir,
-} from "../paths.js";
+import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths.js";
 import {
   SqliteAuditLog,
   type AuditEvent,

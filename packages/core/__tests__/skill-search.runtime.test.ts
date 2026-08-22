@@ -82,7 +82,11 @@ describe("SkillMetadata runtime requirements", () => {
     const skill = await engine.getSkill("software-development/python-debugpy");
     expect(skill).not.toBeNull();
     expect(skill!.runtime).toEqual([
-      { language: "python", version: undefined, packages: ["debugpy", "remote-pdb"] },
+      {
+        language: "python",
+        version: undefined,
+        packages: ["debugpy", "remote-pdb"],
+      },
     ]);
   });
 

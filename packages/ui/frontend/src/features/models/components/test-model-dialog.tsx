@@ -1,4 +1,9 @@
-import { IconLoader2, IconPlugConnected, IconX } from "@tabler/icons-react"
+import {
+  IconLoader2,
+  IconPlugConnected,
+  IconRobot,
+  IconX,
+} from "@tabler/icons-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -7,6 +12,8 @@ import {
   type TestModelInlineRequest,
   testModel,
   testModelInline,
+  testModelTools,
+  testModelToolsInline,
 } from "@/api/models"
 import { Button } from "@/shared/ui/button"
 import {
@@ -38,6 +45,16 @@ interface TestResult {
   success: boolean
   latency_ms: number
   status: string
+  readiness_status?: string
+  verification_level?: "catalog" | "runtime_ready" | "completion" | "tools"
+  completion_tested?: boolean
+  tools_tested?: boolean
+  dry_run_executed?: boolean
+  final_response_received?: boolean
+  tool_name?: string
+  provider?: string
+  model?: string
+  correlation_id?: string
   error?: string
 }
 
@@ -49,9 +66,11 @@ export function TestModelDialog({
 }: TestModelDialogProps) {
   const { t } = useTranslation()
   const [testing, setTesting] = useState(false)
+  const [testKind, setTestKind] = useState<"connection" | "agent">("connection")
   const [result, setResult] = useState<TestResult | null>(null)
 
-  const handleTest = async () => {
+  const handleTest = async (kind: "connection" | "agent" = "connection") => {
+    setTestKind(kind)
     setTesting(true)
     setResult(null)
     try {
@@ -65,9 +84,15 @@ export function TestModelDialog({
           auth_method: inlineParams.authMethod || undefined,
           model_index: inlineParams.modelIndex,
         }
-        res = await testModelInline(req)
+        res =
+          kind === "agent"
+            ? await testModelToolsInline(req)
+            : await testModelInline(req)
       } else if (model) {
-        res = await testModel(model.index)
+        res =
+          kind === "agent"
+            ? await testModelTools(model.index)
+            : await testModel(model.index)
       } else {
         return
       }
@@ -132,10 +157,16 @@ export function TestModelDialog({
             </div>
 
             {!result && !testing && (
-              <Button onClick={handleTest} className="w-full">
-                <IconPlugConnected className="size-4" />
-                {t("models.test.testConnection")}
-              </Button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button onClick={() => handleTest("connection")}>
+                  <IconPlugConnected className="size-4" />
+                  {t("models.test.testConnection")}
+                </Button>
+                <Button variant="outline" onClick={() => handleTest("agent")}>
+                  <IconRobot className="size-4" />
+                  {t("models.test.testAgentReadiness")}
+                </Button>
+              </div>
             )}
 
             {testing && (
@@ -161,6 +192,44 @@ export function TestModelDialog({
                     <div className="text-xs opacity-80">
                       {t("models.test.responseTime", { ms: result.latency_ms })}
                     </div>
+                    {result.verification_level && (
+                      <div className="text-xs opacity-80">
+                        {t("models.test.verificationLevel", {
+                          level: result.verification_level,
+                        })}
+                      </div>
+                    )}
+                    {result.readiness_status && (
+                      <div className="text-xs opacity-80">
+                        {t("models.test.readinessStatus", {
+                          status: result.readiness_status,
+                        })}
+                      </div>
+                    )}
+                    {result.provider && result.model && (
+                      <div className="font-mono text-xs opacity-80">
+                        {result.provider}/{result.model}
+                      </div>
+                    )}
+                    {result.correlation_id && (
+                      <div className="font-mono text-xs opacity-60">
+                        {t("models.test.correlationId", {
+                          id: result.correlation_id,
+                        })}
+                      </div>
+                    )}
+                    {result.tools_tested && (
+                      <div className="text-xs opacity-80">
+                        {t("models.test.toolDryRun", {
+                          executed: result.dry_run_executed ? "yes" : "no",
+                        })}
+                      </div>
+                    )}
+                    {result.completion_tested === false && (
+                      <div className="text-xs opacity-80">
+                        {t("models.test.completionNotTested")}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -184,8 +253,10 @@ export function TestModelDialog({
             {t("common.cancel")}
           </Button>
           {result && (
-            <Button variant="outline" onClick={handleTest}>
-              {t("models.test.testAgain")}
+            <Button variant="outline" onClick={() => handleTest(testKind)}>
+              {testKind === "agent"
+                ? t("models.test.testAgentAgain")
+                : t("models.test.testAgain")}
             </Button>
           )}
         </DialogFooter>

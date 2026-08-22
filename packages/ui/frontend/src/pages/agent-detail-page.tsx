@@ -38,9 +38,9 @@ export function AgentDetailPage({ id }: AgentDetailPageProps) {
         </div>
       </div>
 
-      <div className="mx-auto flex-1 overflow-auto p-6 max-w-4xl w-full">
+      <div className="mx-auto w-full max-w-4xl flex-1 overflow-auto p-6">
         <div className="border-border/60 bg-card rounded-2xl border p-6 shadow-sm">
-          <div className="text-muted-foreground mb-4 text-xs font-semibold uppercase tracking-wider">
+          <div className="text-muted-foreground mb-4 text-xs font-semibold tracking-wider uppercase">
             Activity Log
           </div>
           <div className="divide-border/40 divide-y">

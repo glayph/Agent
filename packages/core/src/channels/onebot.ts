@@ -4,7 +4,7 @@ import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 
 const ONEBOT_MESSAGE_LIMIT = 3500;
 
@@ -345,10 +345,19 @@ export class OneBotBot {
 
     const response = await collectAgentResponse(
       this.orchestrator,
-      UNIVERSAL_SESSION_ID,
+      resolveChannelSessionId(
+        this.orchestrator.config,
+        "onebot",
+        idOrEmpty(event.user_id) || idOrEmpty(event.group_id),
+        idOrEmpty(event.group_id) || idOrEmpty(event.user_id),
+      ),
       prompt,
     );
-    for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, ONEBOT_MESSAGE_LIMIT)) {
+    for (const part of splitOutboundMessageForOrchestrator(
+      this.orchestrator,
+      response,
+      ONEBOT_MESSAGE_LIMIT,
+    )) {
       await this.sendMessage(event, part, config);
     }
   }

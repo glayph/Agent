@@ -1,5 +1,4 @@
 import { Router, Request, Response } from "express";
-import * as path from "path";
 import { SkillLoader } from "./skill-loader.js";
 import { type RuntimePaths, resolveDownloadedSkillsDir } from "./paths.js";
 import { SkillInstaller, type PluginContractKind } from "@miki/installer";

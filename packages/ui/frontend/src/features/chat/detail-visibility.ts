@@ -1,14 +1,8 @@
 export type AssistantDetailVisibility =
-  | "none"
-  | "thought"
-  | "tool_calls"
-  | "all"
+  "none" | "thought" | "tool_calls" | "all"
 
 export type AssistantDetailMessageKind =
-  | "normal"
-  | "thought"
-  | "tool_calls"
-  | undefined
+  "normal" | "thought" | "tool_calls" | undefined
 
 interface StorageLike {
   getItem(key: string): string | null
@@ -27,7 +21,7 @@ export const ASSISTANT_DETAIL_VISIBILITY_STORAGE_KEY =
 export const LEGACY_SHOW_ASSISTANT_DETAILS_STORAGE_KEY =
   "Miki:chat-show-thoughts"
 export const DEFAULT_ASSISTANT_DETAIL_VISIBILITY: AssistantDetailVisibility =
-  "all"
+  "none"
 
 function getSafeLocalStorage(): StorageLike | undefined {
   try {

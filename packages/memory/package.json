@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "echo 'No build step needed'",
-    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js"
+    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js && node src/test/selective-memory-engine.test.js && node --test src/test/memory-prompt-budget.test.js"
   },
   "keywords": [
     "miki",

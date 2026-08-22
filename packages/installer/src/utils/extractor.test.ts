@@ -22,9 +22,9 @@ describe("extractTarGz", () => {
       const extracted = await extractTarGz(archive, destination);
 
       expect(extracted).toContain(path.join(destination, "plugin.json"));
-      expect(fs.readFileSync(path.join(destination, "plugin.json"), "utf8")).toBe(
-        '{"name":"safe"}',
-      );
+      expect(
+        fs.readFileSync(path.join(destination, "plugin.json"), "utf8"),
+      ).toBe('{"name":"safe"}');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -38,7 +38,10 @@ describe("extractTarGz", () => {
     fs.mkdirSync(source, { recursive: true });
     fs.writeFileSync(path.join(source, "plugin.json"), '{"name":"unsafe"}');
     fs.writeFileSync(path.join(root, "outside.txt"), "outside");
-    fs.symlinkSync(path.join(root, "outside.txt"), path.join(source, "link.txt"));
+    fs.symlinkSync(
+      path.join(root, "outside.txt"),
+      path.join(source, "link.txt"),
+    );
 
     try {
       await tar.c({ file: archive, gzip: true, cwd: root }, ["package"]);
@@ -51,4 +54,3 @@ describe("extractTarGz", () => {
     }
   });
 });
-

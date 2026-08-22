@@ -1,15 +1,15 @@
 import {
   IconBrandGoogle,
+  IconCheck,
+  IconCopy,
+  IconEye,
+  IconEyeOff,
   IconKey,
   IconLoader2,
   IconPlayerStopFilled,
-  IconEye,
-  IconEyeOff,
-  IconCopy,
-  IconCheck,
 } from "@tabler/icons-react"
-import { useTranslation } from "react-i18next"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { OAuthProviderStatus } from "@/api/oauth"
 import { Button } from "@/shared/ui/button"
@@ -47,6 +47,7 @@ export function AntigravityCredentialCard({
   const actionBusy = activeAction !== ""
   const tokenLoading = activeAction === "google-antigravity:token"
   const stopLabel = t("credentials.actions.stopLoading")
+
   const tokenLabel = t("credentials.fields.antigravityToken")
 
   const handleCopy = () => {
@@ -90,11 +91,13 @@ export function AntigravityCredentialCard({
             )}
           </div>
           {status?.logged_in && (
-            <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-2">
-              <span className="font-mono text-xs text-foreground truncate select-all">
-                {revealedToken ? revealedToken : (status?.account_id || "••••••••••••••••")}
+            <div className="border-border bg-muted/30 mt-1 flex items-center justify-between gap-2 rounded-lg border p-2">
+              <span className="text-foreground truncate font-mono text-xs select-all">
+                {revealedToken
+                  ? revealedToken
+                  : status?.account_id || "••••••••••••••••"}
               </span>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex shrink-0 items-center gap-1">
                 <Button
                   size="icon-xs"
                   variant="ghost"
@@ -102,7 +105,11 @@ export function AntigravityCredentialCard({
                   title={revealedToken ? "Hide Key" : "Reveal Key"}
                   aria-label={revealedToken ? "Hide Key" : "Reveal Key"}
                 >
-                  {revealedToken ? <IconEyeOff className="size-3.5" /> : <IconEye className="size-3.5" />}
+                  {revealedToken ? (
+                    <IconEyeOff className="size-3.5" />
+                  ) : (
+                    <IconEye className="size-3.5" />
+                  )}
                 </Button>
                 {revealedToken && (
                   <Button
@@ -112,7 +119,11 @@ export function AntigravityCredentialCard({
                     title={copied ? "Copied" : "Copy Key"}
                     aria-label="Copy Key"
                   >
-                    {copied ? <IconCheck className="size-3.5 text-success" /> : <IconCopy className="size-3.5" />}
+                    {copied ? (
+                      <IconCheck className="text-success size-3.5" />
+                    ) : (
+                      <IconCopy className="size-3.5" />
+                    )}
                   </Button>
                 )}
               </div>

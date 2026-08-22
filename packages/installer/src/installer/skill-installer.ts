@@ -13,6 +13,30 @@ import { fetchSkill } from "../source-dispatch.js";
 import { validatePluginManifest } from "../utils/validator.js";
 import { SkillRegistry } from "../registry/skill-registry.js";
 
+const MAX_MARKETPLACE_METADATA_BYTES = 128 * 1024;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function readMarketplaceMetadata(
+  filesDir: string,
+): Promise<Record<string, unknown> | undefined> {
+  const metadataPath = path.join(filesDir, ".marketplace.json");
+  try {
+    const stat = await fs.promises.stat(metadataPath);
+    if (!stat.isFile() || stat.size > MAX_MARKETPLACE_METADATA_BYTES) {
+      return undefined;
+    }
+    const parsed: unknown = JSON.parse(
+      await fs.promises.readFile(metadataPath, "utf-8"),
+    );
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class SkillInstaller {
   private registry: SkillRegistry;
   private skillsDir: string;
@@ -93,6 +117,9 @@ export class SkillInstaller {
         }
 
         const manifest = validation.manifest!;
+        const marketplace = await readMarketplaceMetadata(
+          downloadResult.filesDir,
+        );
         const skillTsPath = path.join(this.skillsDir, `${manifest.name}.ts`);
         const assetsDir = path.join(this.skillsDir, `${manifest.name}_assets`);
         const existingVersion = await this.getExistingVersion(manifest.name);
@@ -141,6 +168,7 @@ export class SkillInstaller {
           permissions: manifest.permissions,
           contracts: manifest.contracts,
           plugin: manifest.plugin,
+          marketplace,
         };
 
         await this.registry.installAndLoad(result);

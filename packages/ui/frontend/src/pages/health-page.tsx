@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import {
+  type DeliveryReceipt,
   type FullHealthReport,
   type HealthStatus,
   type SafetyStatus,
@@ -19,19 +20,16 @@ import {
   clearSafeMode,
   createBackup,
   getFullHealthReport,
+  getRuntimeDeliveries,
   restartWatchdog,
   retryRuntimeJob,
   rollbackBackup,
   runDoctor,
   runSecretScan,
 } from "@/api/safety"
-import { FlowStatusPanel } from "@/features/health/components/flow-status-panel"
-import {
-  CompactActionRow,
-  SectionPanel,
-  StatusDot,
-} from "@/shared/ui/minimal-primitives"
 import { PageHeader } from "@/app/layout/page-header"
+import { FlowStatusPanel } from "@/features/health/components/flow-status-panel"
+import { formatDateTime } from "@/lib/format"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,9 +43,13 @@ import {
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card"
+import {
+  CompactActionRow,
+  SectionPanel,
+  StatusDot,
+} from "@/shared/ui/minimal-primitives"
 import { Separator } from "@/shared/ui/separator"
 import { Skeleton } from "@/shared/ui/skeleton"
-import { formatDateTime } from "@/lib/format"
 
 function statusVariant(status: SafetyStatus | HealthStatus) {
   if (status === "pass" || status === "healthy") return "default" as const
@@ -89,9 +91,50 @@ function StatCard({
   )
 }
 
+function DeliveryReceiptRow({ receipt }: { receipt: DeliveryReceipt }) {
+  const variant =
+    receipt.status === "sent"
+      ? "default"
+      : receipt.status === "unknown_outcome" || receipt.status === "dead_letter"
+        ? "destructive"
+        : receipt.status === "waiting_approval"
+          ? "secondary"
+          : "outline"
+  return (
+    <div className="border-border/70 flex flex-col gap-1 rounded-md border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="truncate text-sm font-medium">{receipt.channel}</span>
+        <Badge variant={variant}>{receipt.status}</Badge>
+        <span className="text-muted-foreground text-xs">
+          {receipt.attempts}/{receipt.maxAttempts} attempts · {receipt.id}
+        </span>
+      </div>
+      {receipt.approvalRequired && (
+        <div className="text-muted-foreground text-xs">
+          Approval: {receipt.approvalRequestId ?? "pending request"}
+        </div>
+      )}
+      {receipt.errorClass && (
+        <div className="text-muted-foreground text-xs">
+          Error class: {receipt.errorClass}
+        </div>
+      )}
+      {receipt.nextAction && (
+        <div className="text-muted-foreground text-xs">
+          Next action: {receipt.nextAction}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function HealthPage() {
   const { t } = useTranslation()
   const [report, setReport] = useState<FullHealthReport | null>(null)
+  const [deliveryReport, setDeliveryReport] = useState<{
+    receipts: DeliveryReceipt[]
+    stats: Record<string, number>
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<{
@@ -105,7 +148,12 @@ export function HealthPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setReport(await getFullHealthReport())
+      const [nextReport, nextDeliveryReport] = await Promise.all([
+        getFullHealthReport(),
+        getRuntimeDeliveries(),
+      ])
+      setReport(nextReport)
+      setDeliveryReport(nextDeliveryReport)
     } catch (err) {
       const message =
         err instanceof Error ? err.message : t("pages.health.load_error")
@@ -289,9 +337,7 @@ export function HealthPage() {
                     size="sm"
                     disabled={busy !== null}
                     onClick={() =>
-                      void runAction("clear-safe-mode", () =>
-                        clearSafeMode(),
-                      )
+                      void runAction("clear-safe-mode", () => clearSafeMode())
                     }
                   >
                     <IconShieldCheck data-icon="inline-start" />
@@ -552,6 +598,39 @@ export function HealthPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </SectionPanel>
+
+              <SectionPanel
+                title={t("pages.health.sections.delivery_recovery", {
+                  defaultValue: "Delivery recovery",
+                })}
+                description={t("pages.health.delivery_summary", {
+                  count: deliveryReport?.receipts.length ?? 0,
+                  defaultValue: "{{count}} persisted delivery receipt(s)",
+                })}
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(deliveryReport?.stats ?? {}).map(
+                      ([key, value]) => (
+                        <Badge key={key} variant="outline">
+                          {key}: {value}
+                        </Badge>
+                      ),
+                    )}
+                  </div>
+                  {(deliveryReport?.receipts.length ?? 0) === 0 ? (
+                    <div className="text-muted-foreground text-sm">
+                      {t("pages.health.no_deliveries", {
+                        defaultValue: "No persisted deliveries recorded.",
+                      })}
+                    </div>
+                  ) : (
+                    deliveryReport?.receipts.map((receipt) => (
+                      <DeliveryReceiptRow key={receipt.id} receipt={receipt} />
+                    ))
+                  )}
                 </div>
               </SectionPanel>
             </div>

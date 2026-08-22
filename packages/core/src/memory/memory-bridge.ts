@@ -49,19 +49,25 @@ export function initMemory(dataDir: string): AgentMemoryIntegration {
   fs.mkdirSync(dataDir, { recursive: true });
 
   const mikiMemory = require("@miki/memory") as MikiMemoryModule;
-  const { TemporalKnowledgeGraph, AgentMemoryIntegration, MemoryConsolidationDaemon } =
-    mikiMemory;
+  const {
+    TemporalKnowledgeGraph,
+    AgentMemoryIntegration,
+    MemoryConsolidationDaemon,
+  } = mikiMemory;
 
   const tkg = new TemporalKnowledgeGraph(dbPath);
   // Use initializeSync so schema + FTS tables exist before any caller can
   // write/query. Previously initialize() was fire-and-forget async, which
   // raced the first turn against CREATE TABLE.
   try {
-    if (typeof (tkg as { initializeSync?: () => unknown }).initializeSync === "function") {
+    if (
+      typeof (tkg as { initializeSync?: () => unknown }).initializeSync ===
+      "function"
+    ) {
       (tkg as { initializeSync: () => unknown }).initializeSync();
     } else {
       // Fallback for older package shapes: block on the async path.
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+
       void tkg.initialize();
     }
   } catch (err) {
@@ -112,30 +118,157 @@ export function getTKG(): TemporalKnowledgeGraph | null {
  * Thin wrapper over TKG.multiHopRetrieve when available.
  */
 export function multiHopRetrieve(opts: Record<string, unknown> = {}): unknown {
-  if (!_tkg) return { hops: [], nodes: [], edges: [], analysis: "memory not initialized" };
-  const fn = (_tkg as { multiHopRetrieve?: (o: unknown) => unknown }).multiHopRetrieve;
+  if (!_tkg)
+    return {
+      hops: [],
+      nodes: [],
+      edges: [],
+      analysis: "memory not initialized",
+    };
+  const fn = (_tkg as { multiHopRetrieve?: (o: unknown) => unknown })
+    .multiHopRetrieve;
   if (typeof fn === "function") return fn.call(_tkg, opts);
-  return { hops: [], nodes: [], edges: [], analysis: "multiHopRetrieve unavailable" };
+  return {
+    hops: [],
+    nodes: [],
+    edges: [],
+    analysis: "multiHopRetrieve unavailable",
+  };
 }
 
 /**
  * Temporary memory helper (project-scoped scratch). Returns null if not ready.
  */
+export function getSelectiveContext(
+  query: string,
+  options: Record<string, unknown> = {},
+): unknown {
+  if (!_tkg) {
+    return {
+      items: [],
+      text: "",
+      trace: {},
+      stats: {
+        candidateCount: 0,
+        selectedCount: 0,
+        tokensUsed: 0,
+        maxTokens: 0,
+        latencyMs: 0,
+        fallbackReason: "memory_not_initialized",
+      },
+    };
+  }
+  const fn = (
+    _tkg as {
+      getSelectiveContext?: (q: string, o?: Record<string, unknown>) => unknown;
+    }
+  ).getSelectiveContext;
+  return typeof fn === "function"
+    ? fn.call(_tkg, query, options)
+    : {
+        items: [],
+        text: "",
+        trace: {},
+        stats: { fallbackReason: "selective_retrieval_unavailable" },
+      };
+}
+
+export function getSelectiveMemoryStats(
+  scope?: Record<string, string>,
+): unknown {
+  if (!_tkg)
+    return { chunks: 0, edges: 0, postings: 0, retrievals: 0, byRegion: [] };
+  const fn = (
+    _tkg as {
+      getSelectiveMemoryStats?: (s?: Record<string, string>) => unknown;
+    }
+  ).getSelectiveMemoryStats;
+  return typeof fn === "function"
+    ? fn.call(_tkg, scope)
+    : { chunks: 0, edges: 0, postings: 0, retrievals: 0, byRegion: [] };
+}
+
+export function listSelectiveMemory(
+  scope?: Record<string, string>,
+  options: Record<string, unknown> = {},
+): unknown[] {
+  if (!_tkg) return [];
+  const fn = (
+    _tkg as {
+      listSelectiveMemory?: (
+        s?: Record<string, string>,
+        o?: Record<string, unknown>,
+      ) => unknown[];
+    }
+  ).listSelectiveMemory;
+  return typeof fn === "function" ? fn.call(_tkg, scope, options) : [];
+}
+
+export function inspectSelectiveMemory(
+  scope: Record<string, string>,
+  chunkId: string,
+): unknown {
+  if (!_tkg) return null;
+  const fn = (
+    _tkg as {
+      inspectSelectiveMemory?: (
+        s: Record<string, string>,
+        id: string,
+      ) => unknown;
+    }
+  ).inspectSelectiveMemory;
+  return typeof fn === "function" ? fn.call(_tkg, scope, chunkId) : null;
+}
+
+export function forgetSelectiveMemory(
+  scope: Record<string, string>,
+  chunkId: string,
+): unknown {
+  if (!_tkg) return { forgotten: false, chunkId };
+  const fn = (
+    _tkg as {
+      forgetSelectiveMemory?: (
+        s: Record<string, string>,
+        id: string,
+      ) => unknown;
+    }
+  ).forgetSelectiveMemory;
+  return typeof fn === "function"
+    ? fn.call(_tkg, scope, chunkId)
+    : { forgotten: false, chunkId };
+}
+
+export function reindexSelectiveMemory(
+  scope?: Record<string, string>,
+): unknown {
+  if (!_tkg) return { reindexed: 0 };
+  const fn = (
+    _tkg as { reindexSelectiveMemory?: (s?: Record<string, string>) => unknown }
+  ).reindexSelectiveMemory;
+  return typeof fn === "function" ? fn.call(_tkg, scope) : { reindexed: 0 };
+}
+
 export function getNodeGraphContext(query: string, limit = 8): unknown[] {
   if (!_tkg) return [];
-  const fn = (_tkg as { getNodeGraphContext?: (q: string, n?: number) => unknown[] }).getNodeGraphContext;
+  const fn = (
+    _tkg as { getNodeGraphContext?: (q: string, n?: number) => unknown[] }
+  ).getNodeGraphContext;
   return typeof fn === "function" ? fn.call(_tkg, query, limit) : [];
 }
 
 export function getNodeGraphSnapshot(limit = 100): unknown {
   if (!_tkg) return { nodes: [], edges: [] };
-  const fn = (_tkg as { getNodeGraphSnapshot?: (n?: number) => unknown }).getNodeGraphSnapshot;
-  return typeof fn === "function" ? fn.call(_tkg, limit) : { nodes: [], edges: [] };
+  const fn = (_tkg as { getNodeGraphSnapshot?: (n?: number) => unknown })
+    .getNodeGraphSnapshot;
+  return typeof fn === "function"
+    ? fn.call(_tkg, limit)
+    : { nodes: [], edges: [] };
 }
 
 export function getTemporaryMemory(): unknown | null {
   if (!_tkg) return null;
-  const fn = (_tkg as { getTemporaryMemory?: () => unknown }).getTemporaryMemory;
+  const fn = (_tkg as { getTemporaryMemory?: () => unknown })
+    .getTemporaryMemory;
   if (typeof fn === "function") return fn.call(_tkg);
   return null;
 }
@@ -155,7 +288,13 @@ export function closeMemory(): void {
   if (_tkg) {
     // Best-effort: close any stale temporary sessions before shutting down.
     try {
-      const tm = (_tkg as { getTemporaryMemory?: () => { closeStaleSessions?: (ms?: number) => number } }).getTemporaryMemory?.();
+      const tm = (
+        _tkg as {
+          getTemporaryMemory?: () => {
+            closeStaleSessions?: (ms?: number) => number;
+          };
+        }
+      ).getTemporaryMemory?.();
       tm?.closeStaleSessions?.(60 * 60 * 1000);
     } catch {
       // ignore

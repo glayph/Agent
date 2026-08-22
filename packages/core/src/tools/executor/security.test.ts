@@ -196,9 +196,11 @@ describe("runtime.exec.allow_remote enforcement (#94)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-shell-default-"));
     const configPath = writeConfig(
       dir,
-      ["permissions:", "  shell_execute:", "    level: TRUSTED_FULL_ACCESS"].join(
-        "\n",
-      ),
+      [
+        "permissions:",
+        "  shell_execute:",
+        "    level: TRUSTED_FULL_ACCESS",
+      ].join("\n"),
     );
     const executor = new ShellExecutor(configPath);
 
@@ -207,5 +209,128 @@ describe("runtime.exec.allow_remote enforcement (#94)", () => {
     );
 
     expect(result.exitCode).toBe(0);
+  });
+});
+
+describe("active workspace boundary", () => {
+  it("resolves relative file operations inside the active workspace and rejects outside paths", () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-workspace-"),
+    );
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-outside-"));
+    const configPath = writeConfig(
+      workspaceDir,
+      [
+        "permissions:",
+        "  file_read:",
+        "    level: TRUSTED_FULL_ACCESS",
+        "  file_write:",
+        "    level: TRUSTED_FULL_ACCESS",
+      ].join("\n"),
+    );
+    const executor = new FileSecurityExecutor(configPath);
+    executor.setWorkspaceRoot(workspaceDir);
+
+    expect(executor.writeFile("generated/result.txt", "ok")).toContain(
+      "Success:",
+    );
+    expect(
+      fs.readFileSync(path.join(workspaceDir, "generated/result.txt"), "utf8"),
+    ).toBe("ok");
+    expect(
+      executor.writeFile(path.join(outsideDir, "blocked.txt"), "nope"),
+    ).toContain("inside the active workspace");
+  });
+
+  it("uses the active workspace as shell default cwd and rejects outside cwd", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-shell-workspace-"),
+    );
+    const outsideDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-shell-outside-"),
+    );
+    const configPath = writeConfig(
+      workspaceDir,
+      [
+        "permissions:",
+        "  shell_execute:",
+        "    level: TRUSTED_FULL_ACCESS",
+      ].join("\n"),
+    );
+    const executor = new ShellExecutor(configPath);
+    executor.setWorkspaceRoot(workspaceDir);
+
+    const defaultCwd = await executor.runShell(
+      process.platform === "win32" ? "cd" : "pwd",
+      undefined,
+      5,
+    );
+    expect(defaultCwd.exitCode).toBe(0);
+    expect(path.resolve(defaultCwd.stdout.trim())).toBe(
+      path.resolve(workspaceDir),
+    );
+
+    const blocked = await executor.runShell(
+      process.platform === "win32" ? "cd" : "pwd",
+      outsideDir,
+      5,
+    );
+    expect(blocked.exitCode).toBe(-1);
+    expect(blocked.error).toContain("inside the active workspace");
+  });
+});
+
+describe("symlink-aware workspace boundary", () => {
+  it("rejects file operations through a workspace symlink to an outside directory", () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-symlink-workspace-"),
+    );
+    const outsideDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-symlink-outside-"),
+    );
+    const configPath = writeConfig(
+      workspaceDir,
+      "permissions:\n  file_write:\n    level: TRUSTED_FULL_ACCESS\n",
+    );
+    const linkPath = path.join(workspaceDir, "linked");
+    try {
+      fs.symlinkSync(outsideDir, linkPath, "junction");
+    } catch {
+      return;
+    }
+    const executor = new FileSecurityExecutor(configPath);
+    executor.setWorkspaceRoot(workspaceDir);
+    expect(executor.writeFile("linked/escaped.txt", "outside")).toContain(
+      "inside the active workspace",
+    );
+    expect(fs.existsSync(path.join(outsideDir, "escaped.txt"))).toBe(false);
+  });
+
+  it("rejects a symlinked shell cwd outside the active workspace", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-shell-symlink-workspace-"),
+    );
+    const outsideDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-shell-symlink-outside-"),
+    );
+    const configPath = writeConfig(
+      workspaceDir,
+      "permissions:\n  shell_execute:\n    level: TRUSTED_FULL_ACCESS\n",
+    );
+    const linkPath = path.join(workspaceDir, "linked");
+    try {
+      fs.symlinkSync(outsideDir, linkPath, "junction");
+    } catch {
+      return;
+    }
+    const executor = new ShellExecutor(configPath);
+    executor.setWorkspaceRoot(workspaceDir);
+    const result = await executor.runShell(
+      process.platform === "win32" ? "cd" : "pwd",
+      linkPath,
+      5,
+    );
+    expect(result.exitCode).toBe(-1);
+    expect(result.error).toContain("inside the active workspace");
   });
 });

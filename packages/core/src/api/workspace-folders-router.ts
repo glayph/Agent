@@ -28,7 +28,9 @@ function asBool(v: unknown, fallback?: boolean): boolean | undefined {
  * Settings API: manage folders the agent indexes / prefers for work.
  * Full system access remains; these entries control default index + rules.
  */
-export function createWorkspaceFoldersRouter(runtimePaths: RuntimePaths): Router {
+export function createWorkspaceFoldersRouter(
+  runtimePaths: RuntimePaths,
+): Router {
   const router = Router();
 
   router.get("/", (_req: Request, res: Response) => {

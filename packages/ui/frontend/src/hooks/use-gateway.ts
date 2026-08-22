@@ -57,7 +57,9 @@ export function useGateway() {
       const result = await stopGateway()
       if (result.supported === false) {
         cancelGatewayStoppingTransition()
-        setError(result.error || "Gateway stop is not supported in this runtime.")
+        setError(
+          result.error || "Gateway stop is not supported in this runtime.",
+        )
       }
     } catch (err) {
       console.error("Failed to stop gateway:", err)

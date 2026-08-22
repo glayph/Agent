@@ -21,7 +21,9 @@ import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
-import type { SessionSummary } from "@/api/sessions"
+import { type SessionSummary, updateSessionMetadata } from "@/api/sessions"
+import { copyText } from "@/lib/clipboard"
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,8 +51,6 @@ import {
 } from "@/shared/ui/dropdown-menu"
 import { Input } from "@/shared/ui/input"
 import { ScrollArea } from "@/shared/ui/scroll-area"
-import { copyText } from "@/lib/clipboard"
-import { cn } from "@/lib/utils"
 
 const PINNED_SESSIONS_STORAGE_KEY = "Miki.chat.history.pinned"
 const RENAMED_SESSIONS_STORAGE_KEY = "Miki.chat.history.renamed"
@@ -165,7 +165,8 @@ export function SessionHistoryMenu({
         .map((session, index) => ({
           ...session,
           title: renamedSessions[session.id] ?? session.title,
-          isPinned: pinnedSessionIdSet.has(session.id),
+          isPinned:
+            session.pinned === true || pinnedSessionIdSet.has(session.id),
           originalIndex: index,
         }))
         .sort((first, second) => {
@@ -325,24 +326,30 @@ export function SessionHistoryMenu({
     }
   }, [])
 
-  const togglePinSession = (sessionId: string) => {
-    setPinnedSessionIds((current) => {
-      const isPinned = current.includes(sessionId)
-      const next = isPinned
-        ? current.filter((id) => id !== sessionId)
-        : [sessionId, ...current]
+  const togglePinSession = async (sessionId: string) => {
+    const serverSession = sessions.find((session) => session.id === sessionId)
+    const wasPinned =
+      serverSession?.pinned === true || pinnedSessionIdSet.has(sessionId)
+    const next = wasPinned
+      ? pinnedSessionIds.filter((id) => id !== sessionId)
+      : [sessionId, ...pinnedSessionIds]
+    setPinnedSessionIds(next)
+    try {
+      await updateSessionMetadata(sessionId, { pinned: !wasPinned })
       writePinnedSessionIds(next)
       toast.success(
-        isPinned
-          ? t("chat.historyActions.unpinned", {
-              defaultValue: "Unpinned",
-            })
-          : t("chat.historyActions.pinned", {
-              defaultValue: "Pinned",
-            }),
+        wasPinned
+          ? t("chat.historyActions.unpinned", { defaultValue: "Unpinned" })
+          : t("chat.historyActions.pinned", { defaultValue: "Pinned" }),
       )
-      return next
-    })
+    } catch {
+      setPinnedSessionIds(pinnedSessionIds)
+      toast.error(
+        t("chat.historyActions.updateFailed", {
+          defaultValue: "Could not update session metadata",
+        }),
+      )
+    }
   }
 
   const openRenameDialog = (session: SessionSummary) => {
@@ -352,26 +359,44 @@ export function SessionHistoryMenu({
     setMenuOpen(false)
   }
 
-  const submitRename = (event: FormEvent<HTMLFormElement>) => {
+  const submitRename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!renameTarget) {
       return
     }
-
-    const currentTitle = renamedSessions[renameTarget.id] ?? renameTarget.title
+    const target = renameTarget
+    const currentTitle = renamedSessions[target.id] ?? target.title
     const trimmedTitle = renameTitle.trim()
     if (!trimmedTitle || trimmedTitle === currentTitle) {
       setRenameTarget(null)
       return
     }
-
-    setRenamedSessions((current) => {
-      const next = { ...current, [renameTarget.id]: trimmedTitle }
-      writeRenamedSessions(next)
-      return next
-    })
-    setRenameTarget(null)
-    toast.success(t("chat.historyActions.renamed", { defaultValue: "Renamed" }))
+    const previousTitle = renamedSessions[target.id]
+    setRenamedSessions((current) => ({ ...current, [target.id]: trimmedTitle }))
+    try {
+      await updateSessionMetadata(target.id, { title: trimmedTitle })
+      setRenamedSessions((current) => {
+        const next = { ...current, [target.id]: trimmedTitle }
+        writeRenamedSessions(next)
+        return next
+      })
+      setRenameTarget(null)
+      toast.success(
+        t("chat.historyActions.renamed", { defaultValue: "Renamed" }),
+      )
+    } catch {
+      setRenamedSessions((current) => {
+        const next = { ...current }
+        if (previousTitle === undefined) delete next[target.id]
+        else next[target.id] = previousTitle
+        return next
+      })
+      toast.error(
+        t("chat.historyActions.updateFailed", {
+          defaultValue: "Could not update session metadata",
+        }),
+      )
+    }
   }
 
   const shareSession = async (session: SessionSummary) => {
@@ -410,8 +435,9 @@ export function SessionHistoryMenu({
         writeRenamedSessions(next)
         return next
       })
-    } catch {
+    } catch (error) {
       toast.error("Failed to delete session")
+      throw error
     }
   }
 
@@ -420,8 +446,12 @@ export function SessionHistoryMenu({
       return
     }
 
-    await deleteSession(deleteTarget.id)
-    setDeleteTarget(null)
+    try {
+      await deleteSession(deleteTarget.id)
+      setDeleteTarget(null)
+    } catch {
+      // Keep the dialog open so the user can retry after a backend failure.
+    }
   }
 
   return (

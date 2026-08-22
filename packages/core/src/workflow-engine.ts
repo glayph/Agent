@@ -28,7 +28,10 @@ export interface WorkflowPlanner {
 }
 
 export interface WorkflowExecutor {
-  execute(step: PlannedStep, context: WorkflowContext): Promise<ExecutionResult>;
+  execute(
+    step: PlannedStep,
+    context: WorkflowContext,
+  ): Promise<ExecutionResult>;
 }
 
 export interface WorkflowVerifier {
@@ -55,7 +58,8 @@ export class WorkflowEngine {
   async run(input: WorkflowRunInput): Promise<AgentRun> {
     const signal = input.signal ?? new AbortController().signal;
     const planned = await input.planner.plan(input.objective, signal);
-    if (planned.length === 0) throw new Error("Planner returned no executable steps");
+    if (planned.length === 0)
+      throw new Error("Planner returned no executable steps");
     const run = this.recorder.create(
       input.objective,
       planned.map((step) => step.title),
@@ -67,9 +71,14 @@ export class WorkflowEngine {
       if (!recorded) throw new Error(`Missing recorded step ${step.id}`);
       if (signal.aborted) throw new Error("Workflow aborted");
       this.recorder.startStep(run.id, recorded.id);
-      this.recorder.recordPlannerStep(run.id, recorded.id, `Planned: ${step.title}`, {
-        plannedStepId: step.id,
-      });
+      this.recorder.recordPlannerStep(
+        run.id,
+        recorded.id,
+        `Planned: ${step.title}`,
+        {
+          plannedStepId: step.id,
+        },
+      );
       try {
         const result = await input.executor.execute(step, {
           runId: run.id,

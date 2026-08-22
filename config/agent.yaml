@@ -5,65 +5,74 @@ agent:
   persona: >
     You are Miki, বাংলা-only RULEPLAY .
 
-    You operate as a computer-based agent with full system access. You can read, write, and delete
-    files anywhere on the filesystem, launch applications, control windows, use the virtual your keyboard, manage
-    processes, and automate the desktop. Use tools purposefully, keep actions auditable, and always
-    verify your results. You have access to every drive, directory, and application on this computer.
+    You operate as a workspace-scoped computer-based agent. Use approved tools
+    only within the active workspace by default, keep actions auditable, and
+    always verify your results. Destructive or external side effects require
+    explicit approval and must never be assumed from a default setting.
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
-  resource:
-    mode: balanced
-    message_history_limit: 15
-    max_context_chars: 80000
-    system_index_limit: 6
-    system_index_cache_ttl_ms: 15000
-    tool_warmup_enabled: true
-    quality_retry_limit: 1
   browser:
     max_retries: 2
     clear_state_every_n_navigations: 5
     chrome_path: null
+  resource:
+    mode: balanced
+    message_history_limit: 8
+    max_context_chars: 40000
+    system_index_limit: 6
+    system_index_cache_ttl_ms: 15000
+    tool_warmup_enabled: true
+    quality_retry_limit: 1
   memory:
     short_term_limit: 20
     long_term_enabled: true
-    personality_enabled: true
-    procedural_enabled: true
     auto_summarize: true
     message_retention_days: null
     vector_search_threshold: 0.5
     consolidation_batch_size: 5
     consolidation_debounce_ms: 60000
-    max_context_memories: 5
-    max_context_facts: 5
-    max_context_procedures: 5
-    max_context_chars: 6000
+    max_context_memories: 3
+    max_context_facts: 3
+    max_context_chars: 4000
     prune_low_value_facts: true
     fact_prune_threshold: 0.15
     fact_prune_min_age_days: 30
+    personality_enabled: true
+    procedural_enabled: true
+    max_context_procedures: 3
+  security:
+    bypass_restrictions: false
+    system_access: workspace_only
+    sandbox_mode: true
+    risk_acceptance: false
+    privileged_account_required: false
+    audit_logging: true
+    approval_note: >-
+      Workspace-scoped access is enabled by default. The agent must verify
+      boundaries and obtain explicit approval before destructive or external
+      side effects.
   visual:
     screen_cooldown_seconds: 10
   tools:
     auto_approve_safe: true
     require_confirm_destructive: true
-  security:
-    bypass_restrictions: true
-    system_access: full
-    sandbox_mode: true
-    risk_acceptance: true
-    privileged_account_required: false
-    audit_logging: true
-    approval_note: Full system access enabled by default. The agent operates as a computer-based agent across the entire OS.
 self_improvement:
   enabled: true
   reflection_interval_minutes: 60
-  max_reflections_per_day: 12
   optimization_interval_minutes: 180
   prompt_tuning_interval_minutes: 120
+  max_reflections_per_day: 12
   auto_apply_optimizations: false
   guardrails:
     enabled: true
     max_prompt_drift_percent: 20
+  behavior_learning:
+    enabled: true
+    mode: draft
+    exploration_rate: 0.1
+    min_samples: 3
+    max_draft_notes: 3
 concurrency:
   maxConcurrentTasks: 3
   maxParallelToolCalls: 8
@@ -91,12 +100,12 @@ skill_governance:
     test_execution: true
 agents:
   defaults:
-    system_access: full
-    restrict_to_workspace: false
+    system_access: workspace_only
+    restrict_to_workspace: true
     split_on_marker: true
     max_tokens: 16384
     context_window: 0
-    max_tool_iterations: 100
+    max_tool_iterations: 40
     summarize_message_threshold: 20
     summarize_token_percent: 75
     tool_feedback:
@@ -122,7 +131,9 @@ agents:
     general:
       name: General Coordinator
       description: Coordinates ordinary requests and preserves conversational context.
-      persona: Choose the lightest reliable path and escalate only when specialist evidence is strong.
+      persona: >-
+        Choose the lightest reliable path and escalate only when specialist
+        evidence is strong.
       capabilities:
         - coordination
         - triage
@@ -136,7 +147,9 @@ agents:
     engineer:
       name: Software Engineer
       description: Implements, debugs, tests, and verifies code or runtime changes.
-      persona: Prefer scoped implementation, type safety, tests, and concrete verification evidence.
+      persona: >-
+        Prefer scoped implementation, type safety, tests, and concrete
+        verification evidence.
       capabilities:
         - code
         - debug
@@ -187,7 +200,9 @@ agents:
     planner:
       name: Workflow Planner
       description: Breaks complex ecosystem goals into sequenced work with checkpoints.
-      persona: Decompose complex work into explicit phases and keep verification tied to milestones.
+      persona: >-
+        Decompose complex work into explicit phases and keep verification tied
+        to milestones.
       capabilities:
         - planning
         - workflow
@@ -212,8 +227,8 @@ agents:
       name: Miki
       description: Routes every task through Miki's single-agent runtime profile.
       persona: >-
-        Choose the lightest reliable path, gather only relevant context, apply scoped changes, and
-        verify meaningful results before final output.
+        Choose the lightest reliable path, gather only relevant context, apply
+        scoped changes, and verify meaningful results before final output.
       capabilities:
         - coordination
         - triage
@@ -278,93 +293,93 @@ devices:
   monitor_usb: true
 channels:
   telegram:
-    enabled: true
+    enabled: false
     type: telegram
   discord:
-    enabled: true
+    enabled: false
     type: discord
   slack:
-    enabled: true
+    enabled: false
     type: slack
   feishu:
-    enabled: true
+    enabled: false
     type: feishu
   dingtalk:
-    enabled: true
+    enabled: false
     type: dingtalk
   qq:
-    enabled: true
+    enabled: false
     type: qq
   weixin:
-    enabled: true
+    enabled: false
     type: weixin
   wecom:
-    enabled: true
+    enabled: false
     type: wecom
   line:
-    enabled: true
+    enabled: false
     type: line
   onebot:
-    enabled: true
+    enabled: false
     type: onebot
   whatsapp:
-    enabled: true
+    enabled: false
     type: whatsapp
   miki:
-    enabled: true
+    enabled: false
     type: miki
   matrix:
-    enabled: true
+    enabled: false
     type: matrix
   irc:
-    enabled: true
+    enabled: false
     type: irc
   mqtt:
-    enabled: true
+    enabled: false
     type: mqtt
 channel_list:
   telegram:
-    enabled: true
+    enabled: false
     type: telegram
   discord:
-    enabled: true
+    enabled: false
     type: discord
   slack:
-    enabled: true
+    enabled: false
     type: slack
   feishu:
-    enabled: true
+    enabled: false
     type: feishu
   dingtalk:
-    enabled: true
+    enabled: false
     type: dingtalk
   qq:
-    enabled: true
+    enabled: false
     type: qq
   weixin:
-    enabled: true
+    enabled: false
     type: weixin
   wecom:
-    enabled: true
+    enabled: false
     type: wecom
   line:
-    enabled: true
+    enabled: false
     type: line
   onebot:
-    enabled: true
+    enabled: false
     type: onebot
   whatsapp:
-    enabled: true
+    enabled: false
     type: whatsapp
   miki:
-    enabled: true
+    enabled: false
     type: miki
   matrix:
-    enabled: true
+    enabled: false
     type: matrix
   irc:
-    enabled: true
+    enabled: false
     type: irc
   mqtt:
-    enabled: true
+    enabled: false
     type: mqtt

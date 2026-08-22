@@ -28,9 +28,9 @@ describe("event runtime contracts", () => {
   });
 
   it("rejects malformed events and supports explicit correlation", () => {
-    expect(() => normalizeInboundEvent({ channel: "web", sender: { id: "" } })).toThrow(
-      "sender.id is required",
-    );
+    expect(() =>
+      normalizeInboundEvent({ channel: "web", sender: { id: "" } }),
+    ).toThrow("sender.id is required");
     const event = normalizeInboundEvent({
       channel: "api",
       sender: { id: "service" },
@@ -74,11 +74,17 @@ describe("event runtime contracts", () => {
       check: async () => ({ summary: value, data: { value } }),
     });
     const changes: string[] = [];
-    await registry.tick((_watcher, observation) => changes.push(observation.summary));
-    await registry.tick((_watcher, observation) => changes.push(observation.summary));
+    await registry.tick((_watcher, observation) =>
+      changes.push(observation.summary),
+    );
+    await registry.tick((_watcher, observation) =>
+      changes.push(observation.summary),
+    );
     value = "changed";
     await new Promise((resolve) => setTimeout(resolve, 105));
-    await registry.tick((_watcher, observation) => changes.push(observation.summary));
+    await registry.tick((_watcher, observation) =>
+      changes.push(observation.summary),
+    );
     expect(changes).toEqual(["changed"]);
     expect(registry.health()).toMatchObject({ total: 1, healthy: 1 });
     expect(fs.existsSync(file)).toBe(true);

@@ -58,10 +58,48 @@ export interface ContextUsage {
 }
 
 export type ConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "error"
+  "disconnected" | "connecting" | "connected" | "error"
+
+export type RunStatus =
+  | "starting"
+  | "running"
+  | "completed"
+  | "completed_with_warning"
+  | "failed"
+  | "cancelled"
+
+export type DeliveryOutcomeStatus =
+  | "created"
+  | "waiting_approval"
+  | "approved"
+  | "sending"
+  | "sent"
+  | "failed"
+  | "unknown_outcome"
+  | "dead_letter"
+  | "reconciliation_required"
+
+export interface DeliveryOutcome {
+  runId: string
+  stepId?: string
+  deliveryId?: string
+  status: DeliveryOutcomeStatus
+  provider?: string
+  model?: string
+  artifactRefs: string[]
+  verification?: Record<string, unknown>
+  approval?: {
+    required: boolean
+    requestId?: string
+    action?: string
+    risk?: string
+    previewHash?: string
+    consumed?: boolean
+  }
+  warnings: string[]
+  nextAction?: string
+  correlationId: string
+}
 
 export interface ChatStoreState {
   messages: ChatMessage[]
@@ -70,6 +108,10 @@ export interface ChatStoreState {
   activeSessionId: string
   hasHydratedActiveSession: boolean
   contextUsage?: ContextUsage
+  activeRunId?: string
+  runStatus?: RunStatus
+  runError?: string
+  deliveryOutcome?: DeliveryOutcome
 }
 
 type ChatStorePatch = Partial<ChatStoreState>

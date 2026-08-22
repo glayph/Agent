@@ -8,12 +8,14 @@ const SpecialEventHighlighter = require('./special-event-highlighter');
 const { createEmbeddingProvider } = require('./embedding-provider');
 const NodeGraph = require('./node-graph');
 const GraphCognitiveMemory = require('./graph-cognitive-memory');
+const SelectiveMemoryEngine = require('./selective-memory-engine');
 
 class TemporalKnowledgeGraph {
   constructor(dbPath) {
     this.dbPath = dbPath;
     this.db = null;
     this.nodeGraph = null;
+    this.selectiveMemory = null;
     this.initialized = false;
     // Regex-pattern-based importance scoring, used by writeEvent() in place
     // of a cruder inline keyword-substring check. Constructed here (not
@@ -216,6 +218,19 @@ class TemporalKnowledgeGraph {
       },
     });
     this.graphMemory.initializeSync();
+
+    // Canonical selective retrieval/index layer. It shares this SQLite
+    // connection so ingestion and retrieval remain transactional with the
+    // legacy event graph during migration.
+    this.selectiveMemory = new SelectiveMemoryEngine(this.db, {
+      scope: {
+        agentId: process.env.MIKI_AGENT_ID || 'miki',
+        ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
+        workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
+      },
+      embeddingProvider: this._embeddingProvider,
+    });
+    this.selectiveMemory.initializeSync();
   }
 
   /**
@@ -552,6 +567,40 @@ class TemporalKnowledgeGraph {
     }
 
     this._updateWorkingAnchor(eventData);
+
+    // Keep the new selective layer synchronized with the canonical event
+    // chokepoint. Failure is isolated so the legacy memory contract remains
+    // available during migration or a partial index outage.
+    if (this.selectiveMemory) {
+      try {
+        const selectiveScope = eventData.memoryScope || eventData.scope || eventData.metadata?.memoryScope || {
+          agentId: process.env.MIKI_AGENT_ID || 'miki',
+          ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
+          workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
+        };
+        this.selectiveMemory.ingest({
+          scope: selectiveScope,
+          content: eventData.content || '',
+          region: memoryCategory,
+          summary: eventData.summary || null,
+          sourceType: eventData.source || 'system',
+          sourceReference: eventData.messageId || eventData.runId || eventData.taskId || eventId,
+          provenance: eventData.source || 'conversation',
+          confidence: typeof eventData.confidence === 'number' ? eventData.confidence : 0.7,
+          importance,
+          createdAt: now,
+          entities: graphEntityIds.map(({ entity }) => entity.name),
+          metadata: {
+            eventId,
+            legacyChunkId: chunk.id,
+            eventType: eventData.event_type || 'general',
+            source: eventData.source || 'system',
+          },
+        });
+      } catch (err) {
+        console.warn('[TemporalKnowledgeGraph] Selective memory sync warning:', err.message);
+      }
+    }
 
     return { eventId, chunkId: chunk.id, isSpecial: !!isSpecial, specialEventName, memoryCategory };
   }
@@ -1592,6 +1641,31 @@ class TemporalKnowledgeGraph {
    */
   getNodeGraph() {
     return this.nodeGraph;
+  }
+
+  getSelectiveContext(queryStr, options = {}) {
+    if (!this.selectiveMemory) return { items: [], text: '', trace: {}, stats: { fallbackReason: 'not_initialized' } };
+    return this.selectiveMemory.retrieve(queryStr, options);
+  }
+
+  getSelectiveMemoryStats(scope) {
+    return this.selectiveMemory ? this.selectiveMemory.stats(scope) : { chunks: 0, edges: 0, postings: 0, retrievals: 0, byRegion: [] };
+  }
+
+  listSelectiveMemory(scope, options = {}) {
+    return this.selectiveMemory ? this.selectiveMemory.list(scope, options) : [];
+  }
+
+  inspectSelectiveMemory(scope, chunkId) {
+    return this.selectiveMemory ? this.selectiveMemory.inspect(scope, chunkId) : null;
+  }
+
+  forgetSelectiveMemory(scope, chunkId) {
+    return this.selectiveMemory ? this.selectiveMemory.forget(scope, chunkId) : { forgotten: false, chunkId };
+  }
+
+  reindexSelectiveMemory(scope) {
+    return this.selectiveMemory ? this.selectiveMemory.reindex(scope) : { reindexed: 0 };
   }
 
   getNodeGraphContext(queryStr, limit = 8) {

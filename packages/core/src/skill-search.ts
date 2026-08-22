@@ -1,7 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { normalizeRuntimePaths, resolveDownloadedSkillsDir, type RuntimePaths } from "./paths.js";
+import {
+  normalizeRuntimePaths,
+  resolveDownloadedSkillsDir,
+  type RuntimePaths,
+} from "./paths.js";
 import type { RuntimeRequirement } from "./runtime-fetch/types.js";
 import { SkillRegistry, type InstalledSkill } from "@miki/installer";
 
@@ -384,8 +388,7 @@ export class SkillSearchEngine {
 
     const meta: Partial<SkillMetadata> = { tags: [] };
     if (typeof raw.name === "string") meta.name = raw.name;
-    if (typeof raw.description === "string")
-      meta.description = raw.description;
+    if (typeof raw.description === "string") meta.description = raw.description;
     if (typeof raw.version === "string") meta.version = String(raw.version);
     if (typeof raw.author === "string") meta.author = raw.author;
     if (typeof raw.category === "string") {

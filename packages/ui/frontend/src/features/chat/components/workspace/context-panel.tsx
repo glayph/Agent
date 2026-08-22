@@ -2,8 +2,8 @@ import { IconDatabase, IconInfoCircle, IconTool } from "@tabler/icons-react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
-import { Badge } from "@/shared/ui/badge"
 import { formatCompactNumber } from "@/lib/format"
+import { Badge } from "@/shared/ui/badge"
 import type { ContextUsage } from "@/store/chat"
 
 import type { ContextSummaryItem } from "./types"

@@ -7,12 +7,15 @@ import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
+  type LocalLlamaModelConfig,
   type ModelProviderOption,
   addModel,
   getCatalogs,
   setDefaultModel,
 } from "@/api/models"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { maskedSecretPlaceholder } from "@/shared/forms/secret-placeholder"
 import {
   AdvancedSection,
@@ -32,8 +35,6 @@ import {
   SheetTitle,
 } from "@/shared/ui/sheet"
 import { Textarea } from "@/shared/ui/textarea"
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
-import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
 import { FetchModelsDialog } from "./fetch-models-dialog"
@@ -74,6 +75,12 @@ interface AddForm {
   streamingEnabled: boolean
   extraBody: string
   customHeaders: string
+  localModelPath: string
+  localExecutablePath: string
+  localPort: string
+  localContextSize: string
+  localGpuLayers: string
+  localAutoStart: boolean
 }
 
 const EMPTY_ADD_FORM: AddForm = {
@@ -94,6 +101,12 @@ const EMPTY_ADD_FORM: AddForm = {
   streamingEnabled: false,
   extraBody: "",
   customHeaders: "",
+  localModelPath: "",
+  localExecutablePath: "",
+  localPort: "",
+  localContextSize: "",
+  localGpuLayers: "",
+  localAutoStart: true,
 }
 
 function joinIds(...ids: Array<string | false | null | undefined>) {
@@ -417,6 +430,26 @@ export function AddModelSheet({
       const modelName = form.modelName.trim()
       const provider = canonicalProvider
       const modelId = form.model.trim()
+      const local: LocalLlamaModelConfig | undefined =
+        provider === "llama.cpp"
+          ? {
+              runtime: "llama.cpp",
+              model_format: "gguf",
+              model_path: form.localModelPath.trim() || undefined,
+              executable_path: form.localExecutablePath.trim() || undefined,
+              port: form.localPort ? Number(form.localPort) : undefined,
+              context_size: form.localContextSize
+                ? Number(form.localContextSize)
+                : undefined,
+              gpu_layers: form.localGpuLayers
+                ? form.localGpuLayers === "auto"
+                  ? "auto"
+                  : Number(form.localGpuLayers)
+                : undefined,
+              enabled: true,
+              auto_start: form.localAutoStart,
+            }
+          : undefined
       await addModel({
         model_name: modelName,
         provider: provider || undefined,
@@ -439,6 +472,7 @@ export function AddModelSheet({
         streaming: form.streamingEnabled ? { enabled: true } : undefined,
         extra_body: extraBody,
         custom_headers: customHeaders,
+        local,
       })
       if (setAsDefault) {
         await setDefaultModel(modelName)
@@ -647,20 +681,71 @@ export function AddModelSheet({
                 </div>
               </Field>
 
-              {!isOAuth && (
+              {canonicalProvider === "llama.cpp" ? (
                 <Field
-                  label={t("models.field.apiKey")}
-                  labelFor={fieldIds.apiKey}
+                  label="llama.cpp runtime"
+                  hint="Use a GGUF file with llama-server, or an existing loopback OpenAI-compatible endpoint. No API key is used."
                 >
-                  <KeyInput
-                    id={fieldIds.apiKey}
-                    name="api_key"
-                    value={form.apiKey}
-                    onChange={(v) => setForm((f) => ({ ...f, apiKey: v }))}
-                    placeholder={apiKeyPlaceholder}
-                    autoComplete="off"
-                  />
+                  <div className="grid gap-2">
+                    <Input
+                      value={form.localModelPath}
+                      onChange={setField("localModelPath")}
+                      placeholder="/models/Miki-7B-Instruct.Q4_K_M.gguf"
+                    />
+                    <Input
+                      value={form.localExecutablePath}
+                      onChange={setField("localExecutablePath")}
+                      placeholder="/usr/local/bin/llama-server"
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <Input
+                        value={form.localPort}
+                        onChange={setField("localPort")}
+                        placeholder="39200"
+                      />
+                      <Input
+                        value={form.localContextSize}
+                        onChange={setField("localContextSize")}
+                        placeholder="4096"
+                      />
+                      <Input
+                        value={form.localGpuLayers}
+                        onChange={setField("localGpuLayers")}
+                        placeholder="auto"
+                      />
+                    </div>
+                    <label className="text-muted-foreground flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={form.localAutoStart}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            localAutoStart: e.target.checked,
+                          }))
+                        }
+                      />
+                      Start llama-server automatically when this model is
+                      selected
+                    </label>
+                  </div>
                 </Field>
+              ) : (
+                !isOAuth && (
+                  <Field
+                    label={t("models.field.apiKey")}
+                    labelFor={fieldIds.apiKey}
+                  >
+                    <KeyInput
+                      id={fieldIds.apiKey}
+                      name="api_key"
+                      value={form.apiKey}
+                      onChange={(v) => setForm((f) => ({ ...f, apiKey: v }))}
+                      placeholder={apiKeyPlaceholder}
+                      autoComplete="off"
+                    />
+                  </Field>
+                )
               )}
 
               <Field

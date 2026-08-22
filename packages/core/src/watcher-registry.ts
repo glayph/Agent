@@ -12,7 +12,9 @@ export interface WatcherObservation {
 export interface DeterministicWatcher {
   id: string;
   intervalMs: number;
-  check(signal: AbortSignal): Promise<Omit<WatcherObservation, "changed" | "fingerprint"> | unknown>;
+  check(
+    signal: AbortSignal,
+  ): Promise<Omit<WatcherObservation, "changed" | "fingerprint"> | unknown>;
 }
 
 export interface WatcherState {
@@ -56,7 +58,12 @@ export class WatcherRegistry {
     }
   }
 
-  start(onChanged: (watcher: DeterministicWatcher, observation: WatcherObservation) => void): void {
+  start(
+    onChanged: (
+      watcher: DeterministicWatcher,
+      observation: WatcherObservation,
+    ) => void,
+  ): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
       void this.tick(onChanged);
@@ -69,11 +76,19 @@ export class WatcherRegistry {
     this.timer = undefined;
   }
 
-  async tick(onChanged: (watcher: DeterministicWatcher, observation: WatcherObservation) => void): Promise<void> {
+  async tick(
+    onChanged: (
+      watcher: DeterministicWatcher,
+      observation: WatcherObservation,
+    ) => void,
+  ): Promise<void> {
     const now = Date.now();
     for (const watcher of this.watchers.values()) {
       const state = this.states.get(watcher.id);
-      if (state?.lastCheckedAt && now - Date.parse(state.lastCheckedAt) < watcher.intervalMs) {
+      if (
+        state?.lastCheckedAt &&
+        now - Date.parse(state.lastCheckedAt) < watcher.intervalMs
+      ) {
         continue;
       }
       const controller = new AbortController();
@@ -81,15 +96,23 @@ export class WatcherRegistry {
         const raw = await watcher.check(controller.signal);
         const normalized = normalizeObservation(raw);
         const fingerprint = stableEventFingerprint(normalized);
-        const changed = state?.lastFingerprint !== undefined && state.lastFingerprint !== fingerprint;
-        const observation: WatcherObservation = { ...normalized, fingerprint, changed };
+        const changed =
+          state?.lastFingerprint !== undefined &&
+          state.lastFingerprint !== fingerprint;
+        const observation: WatcherObservation = {
+          ...normalized,
+          fingerprint,
+          changed,
+        };
         const nextState: WatcherState = {
           id: watcher.id,
           status: "healthy",
           lastFingerprint: fingerprint,
           lastSummary: normalized.summary,
           lastCheckedAt: new Date().toISOString(),
-          lastChangedAt: changed ? new Date().toISOString() : state?.lastChangedAt,
+          lastChangedAt: changed
+            ? new Date().toISOString()
+            : state?.lastChangedAt,
           consecutiveFailures: 0,
         };
         this.states.set(watcher.id, nextState);
@@ -125,14 +148,23 @@ export class WatcherRegistry {
   }
 
   private nextInterval(): number {
-    return Math.max(100, Math.min(...[...this.watchers.values()].map((watcher) => watcher.intervalMs), 60_000));
+    return Math.max(
+      100,
+      Math.min(
+        ...[...this.watchers.values()].map((watcher) => watcher.intervalMs),
+        60_000,
+      ),
+    );
   }
 
   private load(): void {
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as WatcherFile;
+      const parsed = JSON.parse(
+        fs.readFileSync(this.filePath, "utf-8"),
+      ) as WatcherFile;
       for (const state of Array.isArray(parsed.states) ? parsed.states : []) {
-        if (state && typeof state.id === "string") this.states.set(state.id, state);
+        if (state && typeof state.id === "string")
+          this.states.set(state.id, state);
       }
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -142,16 +174,25 @@ export class WatcherRegistry {
   private save(): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const temp = `${this.filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, `${JSON.stringify({ version: 1, states: [...this.states.values()] }, null, 2)}\n`, "utf-8");
+    fs.writeFileSync(
+      temp,
+      `${JSON.stringify({ version: 1, states: [...this.states.values()] }, null, 2)}\n`,
+      "utf-8",
+    );
     fs.renameSync(temp, this.filePath);
   }
 }
 
-function normalizeObservation(value: unknown): Omit<WatcherObservation, "changed" | "fingerprint"> {
+function normalizeObservation(
+  value: unknown,
+): Omit<WatcherObservation, "changed" | "fingerprint"> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
     return {
-      summary: typeof record.summary === "string" ? record.summary : JSON.stringify(record),
+      summary:
+        typeof record.summary === "string"
+          ? record.summary
+          : JSON.stringify(record),
       data: record,
     };
   }

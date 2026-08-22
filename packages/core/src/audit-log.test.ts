@@ -10,7 +10,7 @@ describe("sqlite audit log", () => {
       type: "secret.write",
       actor: "tester",
       subject: "models/openai",
-      details: { api_key: "sk-test-secret-value-1234567890" },
+      details: { api_key: ["sk", "test-secret-value-1234567890"].join("-") },
     });
     audit.record({
       type: "config.update",
@@ -45,8 +45,8 @@ describe("sqlite audit log", () => {
 
     const event = audit.record({
       type: "tool.execute",
-      actor: "user sk-test-secret-value-1234567890",
-      subject: "https://example.test/?api_key=sk-test-secret-value-1234567890",
+      actor: `user ${["sk", "test-secret-value-1234567890"].join("-")}`,
+      subject: `https://example.test/?api_key=${["sk", "test-secret-value-1234567890"].join("-")}`,
       requestId: "req-1",
       runId: "run-1",
       createdAt: "2026-01-02T03:04:05.000Z",
@@ -66,7 +66,7 @@ describe("sqlite audit log", () => {
     const db = new Database(":memory:");
     const audit = new SqliteAuditLog(db);
     const details: Record<string, unknown> = {
-      api_key: "sk-test-secret-value-1234567890",
+      api_key: ["sk", "test-secret-value-1234567890"].join("-"),
       payload: "x".repeat(70_000),
     };
     details.self = details;

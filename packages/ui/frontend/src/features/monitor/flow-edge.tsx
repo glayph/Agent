@@ -1,10 +1,10 @@
-import { memo } from "react"
 import {
   BaseEdge,
   EdgeLabelRenderer,
-  getBezierPath,
   type EdgeProps,
+  getBezierPath,
 } from "@xyflow/react"
+import { memo } from "react"
 
 function FlowEdgeInner({
   id,
@@ -16,7 +16,9 @@ function FlowEdgeInner({
   targetPosition,
   data,
 }: EdgeProps) {
-  const animated = Boolean((data as { animated?: boolean } | undefined)?.animated)
+  const animated = Boolean(
+    (data as { animated?: boolean } | undefined)?.animated,
+  )
 
   const [edgePath] = getBezierPath({
     sourceX,

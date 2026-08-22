@@ -30,9 +30,8 @@ function resolveTheme(preference: ThemePreference): ResolvedTheme {
 }
 
 export function useTheme() {
-  const [preference, setPreference] = useState<ThemePreference>(
-    readStoredPreference,
-  )
+  const [preference, setPreference] =
+    useState<ThemePreference>(readStoredPreference)
   const [theme, setResolvedTheme] = useState<ResolvedTheme>(() =>
     resolveTheme(readStoredPreference()),
   )

@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
 import * as dotenv from "dotenv";
-import { loadConfiguredSecretsIntoEnv, reloadProviderSecretsIntoEnv, readMikiEnv } from "@miki/config";
+import { loadConfiguredSecretsIntoEnv, readMikiEnv } from "@miki/config";
 import {
   allowedCorsOriginsFromEnv,
   hasExplicitAllowedOrigins,
@@ -42,12 +42,6 @@ function env(key: string, fallback: string): string {
 function positiveIntEnv(key: string, fallback: number): number {
   const parsed = Number.parseInt(env(key, String(fallback)), 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function booleanEnv(key: string, fallback: boolean): boolean {
-  const raw = process.env[key];
-  if (raw == null || raw.trim() === "") return fallback;
-  return !["0", "false", "no", "off"].includes(raw.trim().toLowerCase());
 }
 
 const inferredSourceRoot = path.resolve(__dirname, "../../..");
@@ -394,7 +388,10 @@ function startCoreHealthMonitor(): void {
               // SIGKILL raced with an already-dying process and the
               // "exit" event was missed), fall back to an explicit
               // restart attempt so recovery still happens.
-              if (!shutdownInProgress && (!coreProcess || coreProcess === zombie)) {
+              if (
+                !shutdownInProgress &&
+                (!coreProcess || coreProcess === zombie)
+              ) {
                 attemptCoreRestart();
               }
             });
@@ -509,7 +506,6 @@ async function gatewayAuthMiddleware(
   res.status(401).json({ error: "Unauthorized" });
 }
 
-
 // ── Express app ──────────────────────────────────────────────────────────────
 
 const app = express();
@@ -610,27 +606,6 @@ function loadIndexHtml(): string | null {
   }
 }
 
-function tailTextFile(
-  filePath: string,
-  maxLines: number,
-  maxBytes = 256 * 1024,
-): { lines: string[]; truncated: boolean } {
-  const stat = fs.statSync(filePath);
-  const start = Math.max(0, stat.size - maxBytes);
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const buffer = Buffer.alloc(stat.size - start);
-    fs.readSync(fd, buffer, 0, buffer.length, start);
-    const lines = buffer.toString("utf-8").split(/\r?\n/).filter(Boolean);
-    return {
-      lines: lines.slice(-maxLines),
-      truncated: start > 0,
-    };
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 function sendDashboardHtml(res: express.Response): void {
   const html = loadIndexHtml();
   if (!html) {
@@ -683,25 +658,6 @@ app.post("/gateway/shutdown", (_req, res) => {
 // ── API proxy to core ────────────────────────────────────────────────────────
 
 const coreProxyTarget = `http://127.0.0.1:${config.corePort}`;
-
-function rewriteApiProxyPath(proxyPath: string): string {
-  // Most core routes are mounted below /api. Health is intentionally public
-  // at /health, while run orchestration is mounted below /api/enhancements.
-  // Keep both the current frontend path and the legacy /api/runs path working
-  // through the gateway contract.
-  if (proxyPath === "/health") return "/health";
-  if (proxyPath === "/runs" || proxyPath.startsWith("/runs/")) {
-    return `/api/enhancements/agent${proxyPath}`;
-  }
-  if (proxyPath === "/agent/runs" || proxyPath.startsWith("/agent/runs/")) {
-    return `/api/enhancements${proxyPath}`;
-  }
-  if (proxyPath === "/goals" || proxyPath.startsWith("/goals/")) {
-    return `/api/enhancements${proxyPath}`;
-  }
-  return `/api${proxyPath}`;
-}
-
 const apiProxy = createProxyMiddleware({
   target: coreProxyTarget,
   changeOrigin: false,
@@ -717,7 +673,7 @@ const apiProxy = createProxyMiddleware({
   xfwd: true,
   proxyTimeout: 120000,
   timeout: 120000,
-  pathRewrite: (proxyPath) => rewriteApiProxyPath(proxyPath),
+  pathRewrite: (proxyPath) => `/api${proxyPath}`,
   on: {
     proxyReq: fixRequestBody,
   },

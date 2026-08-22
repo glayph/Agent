@@ -1,44 +1,60 @@
 #!/usr/bin/env node
-/**
- * Minimal launcher for Miki monorepo.
- * Builds runtime if needed, then starts gateway (and core if available).
- */
-'use strict';
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
 
-const root = path.resolve(__dirname, '..');
-console.log('[miki] Starting monorepo from', root);
+import { spawn } from "node:child_process";
+import process from "node:process";
 
-function run(cmd, args, opts = {}) {
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+let child;
+let shuttingDown = false;
+
+function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      cwd: root,
-      stdio: 'inherit',
-      shell: true,
-      ...opts,
+    const task = spawn(command, args, {
+      cwd: process.cwd(),
+      stdio: "inherit",
+      shell: false,
     });
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
+    task.once("error", reject);
+    task.once("exit", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} ${args.join(" ")} exited with ${code ?? signal ?? "unknown"}`));
+    });
   });
 }
 
 async function main() {
-  // Ensure memory package can load (native dep)
-  const memPkg = path.join(root, 'packages/memory');
-  if (!fs.existsSync(path.join(memPkg, 'node_modules', 'better-sqlite3'))) {
-    console.log('[miki] Installing @miki/memory dependencies...');
-    await run('npm', ['install', '--workspace=@miki/memory', '--no-fund', '--no-audit']).catch(() => {});
-  }
-
-  console.log('[miki] Memory system regions: long_term, daily, static, skill, rule_emotion, temporary');
-  console.log('[miki] Multi-hop + TemporaryMemory ready.');
-  console.log('[miki] Run individual packages with: npm run start --workspace=@miki/gateway');
-  console.log('[miki] Monorepo is ready. Use gateway/core start scripts for full runtime.');
-  console.log('[miki] OK — setup complete.');
+  console.log("[miki] Building Agent Miki and the vendored headless llama.cpp runtime...");
+  await run(npm, ["run", "build:all"]);
+  console.log("[miki] Build complete. Starting the integrated Agent Miki runtime...");
+  child = spawn(npm, ["start"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    shell: false,
+    env: process.env,
+  });
+  child.once("error", (error) => {
+    if (!shuttingDown) {
+      console.error(`[miki] start failed: ${error.message}`);
+      process.exitCode = 1;
+    }
+  });
+  child.once("exit", (code, signal) => {
+    child = undefined;
+    if (!shuttingDown && signal) process.exitCode = 1;
+    else if (!shuttingDown) process.exitCode = code ?? 0;
+  });
 }
 
-main().catch((err) => {
-  console.error('[miki] dev failed:', err.message);
+function stop(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (child?.pid) child.kill(signal);
+}
+
+process.once("SIGINT", () => stop("SIGINT"));
+process.once("SIGTERM", () => stop("SIGTERM"));
+
+main().catch((error) => {
+  console.error(`[miki] dev failed: ${error.message}`);
   process.exit(1);
 });

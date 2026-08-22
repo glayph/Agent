@@ -96,7 +96,8 @@ function isInstalledSkill(value: unknown): value is InstalledSkill {
         skill.assetsPath.trim().length > 0)) &&
     isOptionalStringArray(skill.permissions) &&
     isOptionalRecord(skill.contracts) &&
-    isOptionalRecord(skill.plugin)
+    isOptionalRecord(skill.plugin) &&
+    isOptionalRecord(skill.marketplace)
   );
 }
 
@@ -222,6 +223,7 @@ export class SkillRegistry {
       permissions: result.permissions || existing?.permissions,
       contracts: result.contracts || existing?.contracts,
       plugin: result.plugin || existing?.plugin,
+      marketplace: result.marketplace || existing?.marketplace,
     };
 
     if (existingIdx >= 0) {

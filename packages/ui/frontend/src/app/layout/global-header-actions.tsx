@@ -14,8 +14,10 @@ import {
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
-import { postLauncherDashboardLogout } from "@/api/launcher-auth"
 import { shutdownGateway } from "@/api/gateway"
+import { postLauncherDashboardLogout } from "@/api/launcher-auth"
+import { useGateway } from "@/hooks/use-gateway.ts"
+import { type ThemePreference, useTheme } from "@/hooks/use-theme.ts"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,8 +35,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu.tsx"
-import { useGateway } from "@/hooks/use-gateway.ts"
-import { type ThemePreference, useTheme } from "@/hooks/use-theme.ts"
 
 type ThemeOption = {
   value: ThemePreference
@@ -87,21 +87,24 @@ export function GlobalHeaderActions() {
   }
 
   const handleShutdownBackend = async () => {
-    if (confirm("Are you sure you want to completely shut down the backend daemon?")) {
-      await shutdownGateway();
-      alert("Backend shutting down. You can close this tab.");
+    if (
+      confirm(
+        "Are you sure you want to completely shut down the backend daemon?",
+      )
+    ) {
+      await shutdownGateway()
+      alert("Backend shutting down. You can close this tab.")
     }
-  };
+  }
 
   const handleGatewayToggle = () => {
     if (gwLoading || isRestarting || isStopping || (!isRunning && !canStart)) {
       return
     }
     if (isRunning) {
-      setShowStopDialog(true)
-    } else {
-      void start()
+      return
     }
+    void start()
   }
 
   const handleGatewayRestart = () => {
@@ -225,7 +228,6 @@ export function GlobalHeaderActions() {
         </Button>
 
         <DropdownMenu>
-
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
@@ -273,27 +275,26 @@ export function GlobalHeaderActions() {
                 </span>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem
-              onSelect={handleGatewayToggle}
-              className="h-8 px-2 py-1.5 text-xs"
-              disabled={
-                gwLoading ||
-                isStarting ||
-                isRestarting ||
-                isStopping ||
-                !canStart
-              }
-              variant={isRunning ? "destructive" : "default"}
-            >
-              {gatewayBusy ? (
-                <IconLoader2 className="size-3.5 animate-spin" />
-              ) : isRunning ? (
-                <IconPower className="size-3.5" />
-              ) : (
-                <IconPlayerPlay className="size-3.5" />
-              )}
-              <span className="truncate">{gatewayActionLabel}</span>
-            </DropdownMenuItem>
+            {!isRunning && (
+              <DropdownMenuItem
+                onSelect={handleGatewayToggle}
+                className="h-8 px-2 py-1.5 text-xs"
+                disabled={
+                  gwLoading ||
+                  isStarting ||
+                  isRestarting ||
+                  isStopping ||
+                  !canStart
+                }
+              >
+                {gatewayBusy ? (
+                  <IconLoader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <IconPlayerPlay className="size-3.5" />
+                )}
+                <span className="truncate">{gatewayActionLabel}</span>
+              </DropdownMenuItem>
+            )}
             {gatewayNotice ? (
               <div className="text-warning truncate px-2 py-1 text-[11px] leading-none">
                 {gatewayNotice}

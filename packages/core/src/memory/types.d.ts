@@ -20,7 +20,8 @@ export interface MemoryEvent {
 }
 
 /** The 4 categories writeEvent classifies every event into. */
-export type MemoryCategory = "long_term" | "daily" | "skill" | "rule_emotion";
+export type MemoryCategory =
+  "long_term" | "daily" | "day_to_day" | "static" | "skill" | "rule_emotion";
 
 /**
  * Actual return shape of writeEvent() / the memory write gateway - a
@@ -78,6 +79,37 @@ export interface NodeGraphSnapshot {
   edges: Array<Record<string, unknown>>;
 }
 
+export interface SelectiveMemoryItem {
+  id: string;
+  text: string;
+  summary?: string;
+  region: string;
+  provenance: string;
+  confidence: number;
+  importance: number;
+  score: number;
+  lexical: number;
+  semantic: number;
+  depth: number;
+  via?: Record<string, unknown> | null;
+  sourceType?: string;
+  sourceReference?: string | null;
+}
+
+export interface SelectiveMemoryContext {
+  items: SelectiveMemoryItem[];
+  text: string;
+  trace: Record<string, unknown>;
+  stats: {
+    candidateCount: number;
+    selectedCount: number;
+    tokensUsed: number;
+    maxTokens: number;
+    latencyMs: number;
+    fallbackReason?: string | null;
+  };
+}
+
 export interface TemporalKnowledgeGraph {
   initialize(): Promise<void>;
   initializeSync(): void;
@@ -91,6 +123,26 @@ export interface TemporalKnowledgeGraph {
     skipNoiseFilter?: boolean;
   }): WriteEventResult;
   getContextWindow(queryStr: string, maxEvents?: number): string;
+  getSelectiveContext(
+    queryStr: string,
+    options?: Record<string, unknown>,
+  ): SelectiveMemoryContext;
+  getSelectiveMemoryStats(
+    scope?: Record<string, string>,
+  ): Record<string, unknown>;
+  listSelectiveMemory(
+    scope?: Record<string, string>,
+    options?: Record<string, unknown>,
+  ): Array<Record<string, unknown>>;
+  inspectSelectiveMemory(
+    scope: Record<string, string>,
+    chunkId: string,
+  ): Record<string, unknown> | null;
+  forgetSelectiveMemory(
+    scope: Record<string, string>,
+    chunkId: string,
+  ): { forgotten: boolean; chunkId: string };
+  reindexSelectiveMemory(scope?: Record<string, string>): { reindexed: number };
   getNodeGraphContext(queryStr: string, limit?: number): NodeGraphContext[];
   getNodeGraphSnapshot(limit?: number): NodeGraphSnapshot;
   getWorkingAnchor(): WorkingAnchor;
@@ -98,7 +150,11 @@ export interface TemporalKnowledgeGraph {
   getEventsByCategory(category: MemoryCategory, limit?: number): MemoryEvent[];
   getStats(): {
     chunks: unknown[];
-    entities: { total: number; active: number; byCategory: Record<MemoryCategory, number> };
+    entities: {
+      total: number;
+      active: number;
+      byCategory: Record<MemoryCategory, number>;
+    };
     edges: number;
     events: number;
     eventsByCategory: Record<MemoryCategory, number>;
@@ -115,8 +171,13 @@ export interface TemporalKnowledgeGraph {
     relationType: string,
     metadata?: { factText?: string; weight?: number; [key: string]: unknown },
   ): AddRelationResult;
-  _ensureEntity(data: { name: string; type?: string }, memoryCategory?: MemoryCategory): string;
-  _extractEntities(data: { content: string }): Array<{ name: string; type?: string }>;
+  _ensureEntity(
+    data: { name: string; type?: string },
+    memoryCategory?: MemoryCategory,
+  ): string;
+  _extractEntities(data: {
+    content: string;
+  }): Array<{ name: string; type?: string }>;
   _getHourKey(date?: Date): string;
   _getDateKey(date?: Date): string;
   _now(): string;
@@ -136,6 +197,7 @@ export interface AgentMemoryIntegration {
     contextWindow: string;
     formattedAnchor: string;
     formattedSpecialEvents: string;
+    selectiveContext?: SelectiveMemoryContext | null;
   };
   postExecutionHook(
     agentOutput: string,

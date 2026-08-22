@@ -9,12 +9,16 @@ const TemporaryMemory = require('./temporary-memory');
 const MultiHopRetriever = require('./multi-hop-retriever');
 const NodeGraph = require('./node-graph');
 const GraphCognitiveMemory = require('./graph-cognitive-memory');
+const SelectiveMemoryEngine = require('./selective-memory-engine');
 const {
   REGIONS,
   ALL_REGIONS,
   REGION_LABELS,
   isDurableRegion,
   DEFAULT_REGION,
+  CANONICAL_REGIONS,
+  REGION_ALIASES,
+  canonicalRegion,
 } = require('./regions');
 const {
   HashEmbeddingProvider,
@@ -33,11 +37,15 @@ module.exports = {
   MultiHopRetriever,
   NodeGraph,
   GraphCognitiveMemory,
+  SelectiveMemoryEngine,
   REGIONS,
   ALL_REGIONS,
   REGION_LABELS,
   isDurableRegion,
   DEFAULT_REGION,
+  CANONICAL_REGIONS,
+  REGION_ALIASES,
+  canonicalRegion,
   HashEmbeddingProvider,
   NoopEmbeddingProvider,
   createEmbeddingProvider,

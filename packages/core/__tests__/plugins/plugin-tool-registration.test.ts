@@ -4,7 +4,10 @@ import * as os from "os";
 import { SkillRegistry } from "@miki/installer";
 import { ToolRegistry } from "../../src/tools/registry/executor";
 import { registerRuntimePluginTools } from "../../src/plugins/plugin-tool-registration";
-import { resolveDownloadedSkillsDir, type RuntimePaths } from "../../src/paths.js";
+import {
+  resolveDownloadedSkillsDir,
+  type RuntimePaths,
+} from "../../src/paths.js";
 
 function makeRuntimePaths(workspaceDir: string): RuntimePaths {
   return {
@@ -24,7 +27,10 @@ function makeRuntimePaths(workspaceDir: string): RuntimePaths {
 // on, which is the default), not runtimePaths.skillsDir directly — the
 // fixture below must write plugins to the same place production code reads.
 function skillsDirFor(workspaceDir: string): string {
-  return resolveDownloadedSkillsDir(makeRuntimePaths(workspaceDir), workspaceDir);
+  return resolveDownloadedSkillsDir(
+    makeRuntimePaths(workspaceDir),
+    workspaceDir,
+  );
 }
 
 function createWorkspace() {

@@ -3,8 +3,8 @@ import {
   IconCpu,
   IconFileCode,
   IconPlugConnected,
-  IconTerminal2,
   IconSparkles,
+  IconTerminal2,
   IconTool,
 } from "@tabler/icons-react"
 

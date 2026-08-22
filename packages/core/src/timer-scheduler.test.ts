@@ -17,7 +17,9 @@ describe("PersistentTimerScheduler", () => {
       schedule: "every 1 seconds",
     });
     expect(scheduler.list()).toHaveLength(1);
-    const timerData = JSON.parse(fs.readFileSync(timerFile, "utf8")) as { timers: unknown[] };
+    const timerData = JSON.parse(fs.readFileSync(timerFile, "utf8")) as {
+      timers: unknown[];
+    };
     expect(timerData.timers).toHaveLength(1);
 
     const due = scheduler as unknown as { tick: () => void };
@@ -25,7 +27,9 @@ describe("PersistentTimerScheduler", () => {
     if (stored) stored.nextRunAt = Date.now() - 1;
     due.tick();
     expect(jobs.list()).toHaveLength(1);
-    expect(jobs.list()[0]?.idempotencyKey).toBe(`timer:${timer.id}:${stored?.lastEnqueuedAt ? stored.nextRunAt - 1000 : ""}`);
+    expect(jobs.list()[0]?.idempotencyKey).toBe(
+      `timer:${timer.id}:${stored?.lastEnqueuedAt ? stored.nextRunAt - 1000 : ""}`,
+    );
     expect(scheduler.list()[0]?.nextRunAt).toBeGreaterThan(Date.now());
 
     const recovered = new PersistentTimerScheduler(timerFile, jobs);

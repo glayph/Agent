@@ -247,7 +247,10 @@ describe("RuntimeFetcher", () => {
     });
     // Same fingerprint -> same still-pending request, not a new one.
     expect(second.outcome).toBe("awaiting-consent");
-    if (first.outcome === "awaiting-consent" && second.outcome === "awaiting-consent") {
+    if (
+      first.outcome === "awaiting-consent" &&
+      second.outcome === "awaiting-consent"
+    ) {
       expect(second.requestId).toBe(first.requestId);
     }
     expect(fetcher.getConsentStore().listPending()).toHaveLength(1);

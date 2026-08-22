@@ -24,7 +24,10 @@ function readTimers(filePath: string): Map<string, PersistentTimer> {
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as TimerFile;
     return new Map(
-      (Array.isArray(parsed.timers) ? parsed.timers : []).map((timer) => [timer.id, timer]),
+      (Array.isArray(parsed.timers) ? parsed.timers : []).map((timer) => [
+        timer.id,
+        timer,
+      ]),
     );
   } catch {
     return new Map();
@@ -56,7 +59,8 @@ export class PersistentTimerScheduler {
     if (!input.sessionId.trim()) throw new Error("sessionId is required");
     if (!input.message.trim()) throw new Error("message is required");
     const nextRunAt = parseCronToNextRun(input.schedule);
-    if (nextRunAt === null) throw new Error(`Unsupported schedule expression: ${input.schedule}`);
+    if (nextRunAt === null)
+      throw new Error(`Unsupported schedule expression: ${input.schedule}`);
     const now = Date.now();
     const timer: PersistentTimer = {
       id: `timer_${now}_${Math.random().toString(36).slice(2, 8)}`,

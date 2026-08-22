@@ -15,6 +15,12 @@ export type AuditEventType =
   | "plugin.channel_runtime"
   | "channel.message"
   | "agent.run"
+  | "approval.requested"
+  | "approval.approved"
+  | "approval.consumed"
+  | "approval.denied"
+  | "approval.expired"
+  | "approval.revoked"
   | "system.event";
 
 export interface AuditEventInput {
@@ -51,6 +57,12 @@ const AUDIT_EVENT_TYPES = new Set<AuditEventType>([
   "plugin.channel_runtime",
   "channel.message",
   "agent.run",
+  "approval.requested",
+  "approval.approved",
+  "approval.consumed",
+  "approval.denied",
+  "approval.expired",
+  "approval.revoked",
   "system.event",
 ]);
 const MAX_TEXT_LENGTH = 512;
@@ -92,7 +104,10 @@ function jsonSafeDetails(value: unknown): Record<string, unknown> {
 }
 
 function normalizeDetails(value: unknown): Record<string, unknown> {
-  const details = (redactSecrets(jsonSafeDetails(value)) ?? {}) as Record<string, unknown>;
+  const details = (redactSecrets(jsonSafeDetails(value)) ?? {}) as Record<
+    string,
+    unknown
+  >;
   const json = JSON.stringify(details);
   if (json.length <= MAX_DETAILS_JSON_LENGTH) return details;
   return {

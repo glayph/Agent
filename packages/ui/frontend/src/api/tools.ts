@@ -21,6 +21,10 @@ interface ToolsResponse {
 
 interface ToolActionResponse {
   status: string
+  gateway_restart_required?: boolean
+  runtime_apply_status?: "applied" | "pending_restart" | "failed"
+  runtime_apply_error?: string
+  pending_restart_fields?: string[]
 }
 
 export interface WebSearchProviderOption {
@@ -41,6 +45,12 @@ export interface WebSearchProviderConfig {
 }
 
 export interface WebSearchConfigResponse {
+  gateway_restart_required?: boolean
+  runtime_apply_status?: "applied" | "pending_restart" | "failed"
+  runtime_apply_error?: string
+  pending_restart_fields?: string[]
+  /** Local execution is the safe default; cloud/auto require explicit selection. */
+  execution_mode?: "local" | "cloud" | "auto"
   provider: string
   current_service: string
   prefer_native: boolean

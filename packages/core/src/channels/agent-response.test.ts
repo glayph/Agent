@@ -27,10 +27,13 @@ import { sessionTurnLock } from "../session-turn-lock.js";
  * (how many calls are in-flight at once, and the start/end order) instead
  * of doing anything with an LLM.
  */
-function makeTrackingOrchestrator(events: string[], maxConcurrentRef: {
-  current: number;
-  max: number;
-}) {
+function makeTrackingOrchestrator(
+  events: string[],
+  maxConcurrentRef: {
+    current: number;
+    max: number;
+  },
+) {
   return {
     async *runAgentLoop(sessionId: string, message: string) {
       maxConcurrentRef.current++;
@@ -88,7 +91,6 @@ describe("collectAgentResponse session concurrency", () => {
   it("releases the lock even if runAgentLoop throws", async () => {
     const sessionId = `test-throw-${Date.now()}`;
     const throwingOrchestrator = {
-      // eslint-disable-next-line require-yield
       async *runAgentLoop(): AsyncGenerator<string, void, unknown> {
         throw new Error("boom");
       },
@@ -128,16 +130,12 @@ describe("isChattyModeEnabled", () => {
 
   it("is false when split_on_marker is explicitly false", () => {
     const config = { agents: { defaults: { split_on_marker: false } } };
-    expect(isChattyModeEnabled(makeOrchestratorWithConfig(config))).toBe(
-      false,
-    );
+    expect(isChattyModeEnabled(makeOrchestratorWithConfig(config))).toBe(false);
   });
 
   it("is true when split_on_marker is true", () => {
     const config = { agents: { defaults: { split_on_marker: true } } };
-    expect(isChattyModeEnabled(makeOrchestratorWithConfig(config))).toBe(
-      true,
-    );
+    expect(isChattyModeEnabled(makeOrchestratorWithConfig(config))).toBe(true);
   });
 
   it("does not throw on malformed config shapes", () => {

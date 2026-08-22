@@ -1,4 +1,7 @@
-import { classifyAgentTask, formatAgentTaskProfile } from "../src/task-profile.js";
+import {
+  classifyAgentTask,
+  formatAgentTaskProfile,
+} from "../src/task-profile.js";
 
 describe("agent task profile", () => {
   it("classifies direct questions as simple", () => {

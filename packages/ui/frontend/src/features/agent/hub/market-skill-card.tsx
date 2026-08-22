@@ -18,11 +18,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/shared/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 
 export function MarketSkillCard({
   result,

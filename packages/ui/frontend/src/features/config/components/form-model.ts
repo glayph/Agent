@@ -404,7 +404,8 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
     heartbeatInterval: (() => {
       const rawSeconds = heartbeat.interval_seconds ?? heartbeat.interval
       if (rawSeconds == null) return EMPTY_FORM.heartbeatInterval
-      const num = typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds)
+      const num =
+        typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds)
       if (!Number.isFinite(num) || num <= 0) return EMPTY_FORM.heartbeatInterval
       return String(Math.max(1, Math.round(num / 60)))
     })(),

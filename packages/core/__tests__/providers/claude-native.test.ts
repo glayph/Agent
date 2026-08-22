@@ -65,15 +65,19 @@ function makeAnthropicResponse(
   };
 }
 
+function asAnthropicMessage(
+  response: MockAnthropicMessage,
+): Parameters<typeof translateResponseToLLM>[0] {
+  return response as unknown as Parameters<typeof translateResponseToLLM>[0];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // extractSystemPrompt
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("extractSystemPrompt", () => {
   it("returns empty string when no system message", () => {
-    expect(
-      extractSystemPrompt([{ role: "user", content: "Hello" }]),
-    ).toBe("");
+    expect(extractSystemPrompt([{ role: "user", content: "Hello" }])).toBe("");
   });
 
   it("returns the system message content", () => {
@@ -135,7 +139,10 @@ describe("translateToolsToAnthropic", () => {
     const tools = [
       {
         type: "function" as const,
-        function: { name: "noop", parameters: { type: "object", properties: {} } },
+        function: {
+          name: "noop",
+          parameters: { type: "object", properties: {} },
+        },
       },
     ];
     const result = translateToolsToAnthropic(tools);
@@ -144,8 +151,14 @@ describe("translateToolsToAnthropic", () => {
 
   it("converts multiple tools", () => {
     const tools = [
-      { type: "function" as const, function: { name: "a", parameters: { type: "object", properties: {} } } },
-      { type: "function" as const, function: { name: "b", parameters: { type: "object", properties: {} } } },
+      {
+        type: "function" as const,
+        function: { name: "a", parameters: { type: "object", properties: {} } },
+      },
+      {
+        type: "function" as const,
+        function: { name: "b", parameters: { type: "object", properties: {} } },
+      },
     ];
     expect(translateToolsToAnthropic(tools)).toHaveLength(2);
   });
@@ -206,7 +219,12 @@ describe("translateMessagesToAnthropic", () => {
     const result = translateMessagesToAnthropic(msgs);
     const assistantMsg = result[1];
     expect(assistantMsg.role).toBe("assistant");
-    const content = assistantMsg.content as Array<{ type: string; id?: string; name?: string; input?: unknown }>;
+    const content = assistantMsg.content as Array<{
+      type: string;
+      id?: string;
+      name?: string;
+      input?: unknown;
+    }>;
     // Empty text is skipped, only tool_use block
     expect(content).toHaveLength(1);
     expect(content[0].type).toBe("tool_use");
@@ -259,11 +277,23 @@ describe("translateMessagesToAnthropic", () => {
         role: "assistant" as const,
         content: "",
         tool_calls: [
-          { id: "call_001", type: "function" as const, function: { name: "read_file", arguments: "{}" } },
-          { id: "call_002", type: "function" as const, function: { name: "write_file", arguments: "{}" } },
+          {
+            id: "call_001",
+            type: "function" as const,
+            function: { name: "read_file", arguments: "{}" },
+          },
+          {
+            id: "call_002",
+            type: "function" as const,
+            function: { name: "write_file", arguments: "{}" },
+          },
         ],
       },
-      { role: "tool" as const, tool_call_id: "call_001", content: "file content here" },
+      {
+        role: "tool" as const,
+        tool_call_id: "call_001",
+        content: "file content here",
+      },
       { role: "tool" as const, tool_call_id: "call_002", content: "write ok" },
     ];
     const result = translateMessagesToAnthropic(msgs);
@@ -294,10 +324,18 @@ describe("translateMessagesToAnthropic", () => {
         role: "assistant" as const,
         content: "Let me check.",
         tool_calls: [
-          { id: "call_001", type: "function" as const, function: { name: "list_files", arguments: "{}" } },
+          {
+            id: "call_001",
+            type: "function" as const,
+            function: { name: "list_files", arguments: "{}" },
+          },
         ],
       },
-      { role: "tool" as const, tool_call_id: "call_001", content: "config.yaml, readme.md" },
+      {
+        role: "tool" as const,
+        tool_call_id: "call_001",
+        content: "config.yaml, readme.md",
+      },
       { role: "assistant" as const, content: "Found 2 files." },
       { role: "user" as const, content: "Thanks" },
     ];
@@ -307,7 +345,7 @@ describe("translateMessagesToAnthropic", () => {
     expect(result).toHaveLength(5);
     expect(result[0].role).toBe("user");
     expect(result[1].role).toBe("assistant");
-    expect(result[2].role).toBe("user");   // merged tool result
+    expect(result[2].role).toBe("user"); // merged tool result
     expect(result[3].role).toBe("assistant");
     expect(result[4].role).toBe("user");
   });
@@ -325,8 +363,7 @@ describe("translateResponseToLLM", () => {
       5,
       15,
     );
-    // Cast to any to bypass the Anthropic type — function works on runtime shape
-    const result = translateResponseToLLM(response as any);
+    const result = translateResponseToLLM(asAnthropicMessage(response));
 
     expect(result.choices).toHaveLength(1);
     const msg = result.choices![0].message;
@@ -340,10 +377,17 @@ describe("translateResponseToLLM", () => {
 
   it("(b) translates a single tool_use response", () => {
     const response = makeAnthropicResponse(
-      [{ type: "tool_use", id: "toolu_01", name: "read_file", input: { path: "config.yaml" } }],
+      [
+        {
+          type: "tool_use",
+          id: "toolu_01",
+          name: "read_file",
+          input: { path: "config.yaml" },
+        },
+      ],
       "tool_use",
     );
-    const result = translateResponseToLLM(response as any);
+    const result = translateResponseToLLM(asAnthropicMessage(response));
 
     const msg = result.choices![0].message;
     expect(msg?.content).toBeNull();
@@ -361,19 +405,32 @@ describe("translateResponseToLLM", () => {
   it("(c) translates multiple tool_use blocks in one response", () => {
     const response = makeAnthropicResponse(
       [
-        { type: "tool_use", id: "toolu_01", name: "read_file", input: { path: "a.txt" } },
-        { type: "tool_use", id: "toolu_02", name: "write_file", input: { path: "b.txt", content: "hello" } },
+        {
+          type: "tool_use",
+          id: "toolu_01",
+          name: "read_file",
+          input: { path: "a.txt" },
+        },
+        {
+          type: "tool_use",
+          id: "toolu_02",
+          name: "write_file",
+          input: { path: "b.txt", content: "hello" },
+        },
       ],
       "tool_use",
     );
-    const result = translateResponseToLLM(response as any);
+    const result = translateResponseToLLM(asAnthropicMessage(response));
 
     const tc = result.choices![0].message?.tool_calls;
     expect(tc).toHaveLength(2);
     expect(tc![0].id).toBe("toolu_01");
     expect(tc![1].id).toBe("toolu_02");
     expect(JSON.parse(tc![0].function.arguments)).toEqual({ path: "a.txt" });
-    expect(JSON.parse(tc![1].function.arguments)).toEqual({ path: "b.txt", content: "hello" });
+    expect(JSON.parse(tc![1].function.arguments)).toEqual({
+      path: "b.txt",
+      content: "hello",
+    });
   });
 
   it("maps stop_reason=max_tokens to finish_reason=length", () => {
@@ -381,7 +438,10 @@ describe("translateResponseToLLM", () => {
       [{ type: "text", text: "Truncated..." }],
       "max_tokens",
     );
-    expect(translateResponseToLLM(response as any).choices![0].finish_reason).toBe("length");
+    expect(
+      translateResponseToLLM(asAnthropicMessage(response)).choices![0]
+        .finish_reason,
+    ).toBe("length");
   });
 
   it("maps stop_reason=tool_use to finish_reason=tool_calls", () => {
@@ -389,7 +449,10 @@ describe("translateResponseToLLM", () => {
       [{ type: "tool_use", id: "t", name: "fn", input: {} }],
       "tool_use",
     );
-    expect(translateResponseToLLM(response as any).choices![0].finish_reason).toBe("tool_calls");
+    expect(
+      translateResponseToLLM(asAnthropicMessage(response)).choices![0]
+        .finish_reason,
+    ).toBe("tool_calls");
   });
 
   it("concatenates multiple text blocks into a single string", () => {
@@ -397,18 +460,27 @@ describe("translateResponseToLLM", () => {
       { type: "text", text: "Hello " },
       { type: "text", text: "World" },
     ]);
-    expect(translateResponseToLLM(response as any).choices![0].message?.content).toBe("Hello World");
+    expect(
+      translateResponseToLLM(asAnthropicMessage(response)).choices![0].message
+        ?.content,
+    ).toBe("Hello World");
   });
 
   it("includes both text content and tool_calls for mixed-block response", () => {
     const response = makeAnthropicResponse(
       [
         { type: "text", text: "Let me do that." },
-        { type: "tool_use", id: "toolu_03", name: "shell_exec", input: { cmd: "ls" } },
+        {
+          type: "tool_use",
+          id: "toolu_03",
+          name: "shell_exec",
+          input: { cmd: "ls" },
+        },
       ],
       "tool_use",
     );
-    const msg = translateResponseToLLM(response as any).choices![0].message;
+    const msg = translateResponseToLLM(asAnthropicMessage(response)).choices![0]
+      .message;
     expect(msg?.content).toBe("Let me do that.");
     expect(msg?.tool_calls).toHaveLength(1);
     expect(msg?.tool_calls![0].function.name).toBe("shell_exec");
@@ -421,7 +493,7 @@ describe("translateResponseToLLM", () => {
       100,
       50,
     );
-    const usage = translateResponseToLLM(response as any).usage;
+    const usage = translateResponseToLLM(asAnthropicMessage(response)).usage;
     expect(usage?.prompt_tokens).toBe(100);
     expect(usage?.completion_tokens).toBe(50);
     expect(usage?.total_tokens).toBe(150);
@@ -442,7 +514,8 @@ describe("LLM error classes (f)", () => {
   });
 
   it("LLMRateLimitError is instanceof LLMProviderError", async () => {
-    const { LLMRateLimitError, LLMProviderError } = await import("../../src/llm.js");
+    const { LLMRateLimitError, LLMProviderError } =
+      await import("../../src/llm.js");
     const err = new LLMRateLimitError("rate limited");
     expect(err).toBeInstanceOf(LLMProviderError);
     expect(err).toBeInstanceOf(Error);

@@ -195,7 +195,9 @@ export function createLineWebhookRouter(
       const replyToken = stringOrEmpty(event.replyToken);
       if (!prompt || !replyToken) continue;
       void collectAgentResponse(orchestrator, UNIVERSAL_SESSION_ID, prompt)
-        .then((reply) => replyToLine(orchestrator, config.token, replyToken, reply))
+        .then((reply) =>
+          replyToLine(orchestrator, config.token, replyToken, reply),
+        )
         .catch((err) => {
           console.warn(
             `LINE webhook handling failed: ${

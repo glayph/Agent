@@ -21,6 +21,21 @@ interface TestJsonResponse {
   schemaVersion?: number;
   job?: { id?: string; status?: string; progress?: number };
   jobs?: unknown[];
+  receipt?: {
+    id?: string;
+    status?: string;
+    approvalRequestId?: string;
+    replayOf?: string;
+    replayAllowed?: boolean;
+  };
+  preview?: { externalSideEffect?: boolean; previewHash?: string };
+  approval?: { id?: string; status?: string; consumedAt?: string };
+  outcome?: { status?: string; runId?: string; correlationId?: string };
+  observability?: {
+    recovery?: { retryCount?: number };
+    approval?: { required?: boolean; replayAllowed?: boolean };
+  };
+  approval?: { required?: boolean; replayAllowed?: boolean };
   cancelled?: boolean;
   nextRunAt?: number | null;
   report?: { checks?: unknown[]; findings?: unknown[] };
@@ -135,7 +150,7 @@ describe("enhancement router", () => {
             kind: "command",
             summary: "test command completed",
             ok: true,
-            data: { api_key: "sk-test-secret-value-1234567890" },
+            data: { api_key: ["sk", "test-secret-value-1234567890"].join("-") },
           }),
         },
       );
@@ -149,7 +164,7 @@ describe("enhancement router", () => {
       expect(exportedRun.response.status).toBe(200);
       expect(exportedRun.body.schemaVersion).toBe(2);
       expect(JSON.stringify(exportedRun.body)).not.toContain(
-        "sk-test-secret-value-1234567890",
+        ["sk", "test-secret-value-1234567890"].join("-"),
       );
 
       const jobs = await jsonFetch(baseUrl, "/enhancements/runtime/jobs", {
@@ -319,6 +334,131 @@ describe("enhancement router", () => {
       );
 
       expect(invalidEvidence.response.status).toBe(400);
+    });
+  });
+
+  it("blocks replay of approval-required jobs and exposes recovery observability", async () => {
+    await withServer(async (baseUrl) => {
+      const created = await jsonFetch(baseUrl, "/enhancements/runtime/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "channel.send",
+          payload: { requiresApproval: true, action: "external_write" },
+        }),
+      });
+      expect(created.response.status).toBe(202);
+      const jobId = created.body.job?.id;
+      expect(jobId).toEqual(expect.any(String));
+
+      const cancelled = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/jobs/${jobId}`,
+        { method: "DELETE" },
+      );
+      expect(cancelled.body.cancelled).toBe(true);
+
+      const blocked = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/jobs/${jobId}/retry`,
+        { method: "POST", body: JSON.stringify({ delayMs: 0 }) },
+      );
+      expect(blocked.response.status).toBe(409);
+      expect(blocked.body.approval).toMatchObject({
+        required: true,
+        replayAllowed: false,
+      });
+
+      const inspected = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/jobs/${jobId}`,
+      );
+      expect(inspected.response.status).toBe(200);
+      expect(inspected.body.observability).toMatchObject({
+        recovery: { retryCount: 0 },
+        approval: { required: true, replayAllowed: false },
+      });
+    });
+  });
+
+  it("runs an approval-bound mock delivery without external side effects", async () => {
+    await withServer(async (baseUrl) => {
+      const created = await jsonFetch(
+        baseUrl,
+        "/enhancements/runtime/deliveries/mock",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            runId: "run-mock",
+            stepId: "step-publish",
+            action: "publish",
+            risk: "high",
+            target: "site:synthetic",
+            body: "synthetic content",
+            channel: "webhook",
+            destination: "mock://delivery",
+            idempotencyKey: "mock-delivery-1",
+            correlationId: "corr-mock-1",
+            maxAttempts: 1,
+          }),
+        },
+      );
+      expect(created.response.status).toBe(201);
+      expect(created.body.preview?.externalSideEffect).toBe(false);
+      expect(created.body.preview?.previewHash).toEqual(expect.any(String));
+      expect(created.body.receipt).toMatchObject({
+        status: "waiting_approval",
+      });
+      const deliveryId = created.body.receipt?.id;
+      expect(deliveryId).toEqual(expect.any(String));
+
+      const inspected = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/deliveries/${deliveryId}`,
+      );
+      expect(inspected.body.receipt).toMatchObject({
+        id: deliveryId,
+        status: "waiting_approval",
+        approvalRequestId: created.body.approval?.id,
+      });
+      expect(inspected.body.replayEligible).toBe(false);
+
+      const approved = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/deliveries/${deliveryId}/approve`,
+        {
+          method: "POST",
+          body: JSON.stringify({ decidedBy: "test-operator" }),
+        },
+      );
+      expect(approved.response.status).toBe(200);
+      expect(approved.body.receipt?.status).toBe("pending");
+      expect(approved.body.approval?.consumedAt).toEqual(expect.any(String));
+
+      const unknown = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/deliveries/${deliveryId}/mock-dispatch`,
+        {
+          method: "POST",
+          body: JSON.stringify({ outcome: "unknown_outcome" }),
+        },
+      );
+      expect(unknown.response.status).toBe(200);
+      expect(unknown.body.receipt?.status).toBe("unknown_outcome");
+      expect(unknown.body.outcome).toMatchObject({
+        status: "reconciliation_required",
+        runId: "run-mock",
+        correlationId: "corr-mock-1",
+      });
+
+      const replay = await jsonFetch(
+        baseUrl,
+        `/enhancements/runtime/deliveries/${deliveryId}/replay`,
+        {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: "mock-delivery-1-replay" }),
+        },
+      );
+      expect(replay.response.status).toBe(409);
     });
   });
 

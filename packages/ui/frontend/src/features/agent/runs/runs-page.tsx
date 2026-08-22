@@ -19,9 +19,9 @@ import {
   listAgentRuns,
 } from "@/api/agent-runs"
 import { PageHeader } from "@/app/layout/page-header"
-import { EmptyState } from "@/shared/ui/minimal-primitives"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { EmptyState } from "@/shared/ui/minimal-primitives"
 import { Skeleton } from "@/shared/ui/skeleton"
 
 import { CreateRunDialog } from "./create-run-dialog"
@@ -62,7 +62,7 @@ function SummaryTile({
 }) {
   return (
     <div className="bg-muted/45 rounded-lg px-3 py-2.5">
-      <div className="text-muted-foreground text-[11px] font-medium uppercase tracking-wide">
+      <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
         {label}
       </div>
       <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
@@ -150,7 +150,7 @@ export function RunsPage({
 
   const runsQuery = useQuery({
     queryKey: ["agent-runs"],
-    queryFn: () => listAgentRuns(100),
+    queryFn: () => listAgentRuns({ limit: 100 }),
   })
 
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data?.runs])
@@ -310,7 +310,9 @@ export function RunsPage({
     <div className="bg-background flex h-full flex-col">
       <PageHeader
         title={t("navigation.runs", "Runs")}
-        titleExtra={selectedRun && <RunStatusBadge status={selectedRun.status} />}
+        titleExtra={
+          selectedRun && <RunStatusBadge status={selectedRun.status} />
+        }
       >
         <div className="flex items-center gap-2">
           <Button
@@ -362,7 +364,9 @@ export function RunsPage({
             title={t("agentRuns.actions.create")}
           >
             <IconPlus data-icon="inline-start" />
-            <span className="max-sm:hidden">{t("agentRuns.actions.newRun")}</span>
+            <span className="max-sm:hidden">
+              {t("agentRuns.actions.newRun")}
+            </span>
           </Button>
         </div>
       </PageHeader>
@@ -384,7 +388,9 @@ export function RunsPage({
                   : "border-border bg-muted/60 text-foreground mb-3 rounded-lg border px-3 py-2 text-sm"
               }
               role={statusMessage.kind === "error" ? "alert" : "status"}
-              aria-live={statusMessage.kind === "error" ? "assertive" : "polite"}
+              aria-live={
+                statusMessage.kind === "error" ? "assertive" : "polite"
+              }
             >
               {statusMessage.text}
             </div>
@@ -471,10 +477,10 @@ export function RunsPage({
                     <section className="border-border bg-card rounded-xl border p-4 sm:p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
-                          <div className="text-muted-foreground mb-1 text-xs font-medium uppercase tracking-wide">
+                          <div className="text-muted-foreground mb-1 text-xs font-medium tracking-wide uppercase">
                             {t("navigation.runs", "Run")}
                           </div>
-                          <h2 className="break-words text-lg font-semibold leading-7">
+                          <h2 className="text-lg leading-7 font-semibold break-words">
                             {selectedRun.objective}
                           </h2>
                           <p className="text-muted-foreground mt-1 text-xs">

@@ -54,7 +54,11 @@ export class ChannelAdapterRegistry {
     return this.adapters.has(channel as ChannelName);
   }
 
-  normalize(channel: string, input: unknown, context?: { senderId?: string }): InboundEvent {
+  normalize(
+    channel: string,
+    input: unknown,
+    context?: { senderId?: string },
+  ): InboundEvent {
     const adapter = this.adapters.get(channel as ChannelName);
     if (!adapter) throw new Error(`Unsupported channel: ${channel}`);
     return adapter.normalize(input, context);
@@ -78,7 +82,8 @@ export function normalizeInboundEvent(input: InboundEventInput): InboundEvent {
   const senderId = normalizeRequired(input.sender?.id, "sender.id");
   const sessionId = normalizeRequired(input.sessionId, "sessionId", senderId);
   const eventId = normalizeOptional(input.eventId) ?? crypto.randomUUID();
-  const receivedAt = normalizeOptional(input.receivedAt) ?? new Date().toISOString();
+  const receivedAt =
+    normalizeOptional(input.receivedAt) ?? new Date().toISOString();
   const correlationId = normalizeOptional(input.correlationId) ?? eventId;
   const replyChannel = normalizeChannel(input.replyRoute?.channel ?? channel);
   const address = normalizeRequired(
@@ -117,18 +122,25 @@ function createJsonChannelAdapter(channel: ChannelName): ChannelAdapter {
         channel,
         eventId: typeof body.eventId === "string" ? body.eventId : undefined,
         idempotencyKey:
-          typeof body.idempotencyKey === "string" ? body.idempotencyKey : undefined,
+          typeof body.idempotencyKey === "string"
+            ? body.idempotencyKey
+            : undefined,
         sender: {
           id:
             typeof body.senderId === "string"
               ? body.senderId
               : context?.senderId,
-          name: typeof body.senderName === "string" ? body.senderName : undefined,
+          name:
+            typeof body.senderName === "string" ? body.senderName : undefined,
         },
-        sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+        sessionId:
+          typeof body.sessionId === "string" ? body.sessionId : undefined,
         correlationId:
-          typeof body.correlationId === "string" ? body.correlationId : undefined,
-        receivedAt: typeof body.receivedAt === "string" ? body.receivedAt : undefined,
+          typeof body.correlationId === "string"
+            ? body.correlationId
+            : undefined,
+        receivedAt:
+          typeof body.receivedAt === "string" ? body.receivedAt : undefined,
         replyRoute:
           body.replyRoute && typeof body.replyRoute === "object"
             ? (body.replyRoute as { channel?: ChannelName; address?: string })
@@ -150,7 +162,11 @@ function normalizeChannel(value: string): ChannelName {
   throw new Error(`Unsupported channel: ${value}`);
 }
 
-function normalizeRequired(value: unknown, field: string, fallback?: string): string {
+function normalizeRequired(
+  value: unknown,
+  field: string,
+  fallback?: string,
+): string {
   const normalized = normalizeOptional(value) ?? fallback;
   if (!normalized) throw new Error(`${field} is required`);
   return normalized;

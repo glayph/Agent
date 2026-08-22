@@ -60,8 +60,8 @@ import { initializeSafetyAtStartup } from "../safety/startup.js";
 import { getErrorMessage } from "../errors.js";
 import {
   detectArtifactContract as _detectArtifactContract,
+  reconcileArtifactOutcome as _reconcileArtifactOutcome,
   verifyArtifactContract as _verifyArtifactContract,
-  writeArtifactManifest as _writeArtifactManifest,
   type ArtifactContract,
 } from "./artifact-contract.js";
 import { SqliteAuditLog } from "../audit-log.js";
@@ -100,6 +100,11 @@ import {
   type SearchMode,
 } from "../search/local-first-search.js";
 import { createMemoryRouter } from "./memory-router.js";
+import { normalizeChatSessionId } from "./chat-session.js";
+import {
+  subscribeDeliveryOutcome,
+  type DeliveryOutcomeEvent,
+} from "../approval-delivery.js";
 
 globalStartupTimer.start("core.process_start");
 
@@ -159,7 +164,6 @@ if (process.env.MIKI_MODEL || process.env.DEFAULT_MODEL) {
           : "openrouter");
 }
 
-const SINGLE_CHAT_SESSION_ID = "miki-main-chat";
 const chatRunQueues = new Map<string, Promise<void>>();
 const activeRunIds = new Map<string, string>();
 const pendingFeedback = new Map<string, string[]>();
@@ -340,15 +344,21 @@ persistentJobRunner.register("agent.message", async (job) => {
     sessionId,
     response,
     eventId:
-      event && typeof event === "object" && typeof (event as Record<string, unknown>).eventId === "string"
+      event &&
+      typeof event === "object" &&
+      typeof (event as Record<string, unknown>).eventId === "string"
         ? (event as Record<string, unknown>).eventId
         : undefined,
     correlationId:
-      event && typeof event === "object" && typeof (event as Record<string, unknown>).correlationId === "string"
+      event &&
+      typeof event === "object" &&
+      typeof (event as Record<string, unknown>).correlationId === "string"
         ? (event as Record<string, unknown>).correlationId
         : undefined,
     replyRoute:
-      event && typeof event === "object" && (event as Record<string, unknown>).replyRoute
+      event &&
+      typeof event === "object" &&
+      (event as Record<string, unknown>).replyRoute
         ? (event as Record<string, unknown>).replyRoute
         : undefined,
   };
@@ -466,6 +476,7 @@ const enhancementRouter = createEnhancementRouter({
   runtimePaths,
   jobQueue: persistentJobQueue,
   jobRunner: persistentJobRunner,
+  approvalInbox,
   executeAgentRun: async (run, hooks) => {
     for (const step of run.steps) {
       hooks.startStep(step.id);
@@ -700,7 +711,9 @@ function parseSearchFilters(value: unknown): SearchFilters | undefined {
   if (!value || typeof value !== "object") return undefined;
   const input = value as Record<string, unknown>;
   const domains = Array.isArray(input.domains)
-    ? input.domains.filter((item): item is string => typeof item === "string").slice(0, 20)
+    ? input.domains
+        .filter((item): item is string => typeof item === "string")
+        .slice(0, 20)
     : undefined;
   const freshness =
     input.freshness === "day" ||
@@ -710,18 +723,26 @@ function parseSearchFilters(value: unknown): SearchFilters | undefined {
     input.freshness === "any"
       ? input.freshness
       : undefined;
-  const locale = typeof input.locale === "string" ? input.locale.slice(0, 20) : undefined;
-  const maxResults = typeof input.maxResults === "number" ? input.maxResults : undefined;
+  const locale =
+    typeof input.locale === "string" ? input.locale.slice(0, 20) : undefined;
+  const maxResults =
+    typeof input.maxResults === "number" ? input.maxResults : undefined;
   return { domains, freshness, locale, maxResults };
 }
 
 function parseSearchMode(value: unknown): SearchMode | undefined {
-  return value === "local" || value === "cloud" || value === "auto" ? value : undefined;
+  return value === "local" || value === "cloud" || value === "auto"
+    ? value
+    : undefined;
 }
 
 async function handleSearchRequest(req: Request, res: Response): Promise<void> {
-  const input = (req.method === "GET" ? req.query : req.body) as Record<string, unknown>;
-  const query = typeof input.query === "string" ? input.query.trim().slice(0, 2_000) : "";
+  const input = (req.method === "GET" ? req.query : req.body) as Record<
+    string,
+    unknown
+  >;
+  const query =
+    typeof input.query === "string" ? input.query.trim().slice(0, 2_000) : "";
   if (!query) {
     res.status(400).json({ error: "query is required" });
     return;
@@ -736,7 +757,11 @@ async function handleSearchRequest(req: Request, res: Response): Promise<void> {
     res.json(result);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    const status = /blocked|not configured|cannot be empty|sensitive/i.test(message) ? 400 : 502;
+    const status = /blocked|not configured|cannot be empty|sensitive/i.test(
+      message,
+    )
+      ? 400
+      : 502;
     res.status(status).json({ error: message });
   }
 }
@@ -964,12 +989,10 @@ app.post(
   (req, res) => {
     try {
       const execution = automationManager.runNow(req.params.automationId);
-      res
-        .status(202)
-        .json({
-          execution,
-          requestId: (req as AuthenticatedRequest).requestId,
-        });
+      res.status(202).json({
+        execution,
+        requestId: (req as AuthenticatedRequest).requestId,
+      });
     } catch (error: unknown) {
       res.status(404).json({ error: getErrorMessage(error) });
     }
@@ -1134,12 +1157,10 @@ app.post(
         "refreshToken",
       ]) {
         if (typeof body[field] === "string" && body[field].trim()) {
-          res
-            .status(400)
-            .json({
-              error:
-                "Raw credentials are not accepted here. Complete provider login in the browser and return an opaque credential reference.",
-            });
+          res.status(400).json({
+            error:
+              "Raw credentials are not accepted here. Complete provider login in the browser and return an opaque credential reference.",
+          });
           return;
         }
       }
@@ -1166,12 +1187,10 @@ app.post(
         req.params.sessionId,
         input,
       );
-      res
-        .status(201)
-        .json({
-          ...result,
-          requestId: (req as AuthenticatedRequest).requestId,
-        });
+      res.status(201).json({
+        ...result,
+        requestId: (req as AuthenticatedRequest).requestId,
+      });
     } catch (error: unknown) {
       res.status(400).json({ error: getErrorMessage(error) });
     }
@@ -1262,6 +1281,15 @@ const mikiWss = new WebSocketServer({
   noServer: true,
   maxPayload: 5 * 1024 * 1024,
 });
+
+const unsubscribeDeliveryOutcome = subscribeDeliveryOutcome(
+  (event: DeliveryOutcomeEvent) => {
+    const serialized = JSON.stringify(event);
+    mikiWss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) client.send(serialized);
+    });
+  },
+);
 
 server.on("upgrade", (request, socket, head) => {
   const pathname = new URL(request.url || "/", "http://127.0.0.1").pathname;
@@ -1560,17 +1588,17 @@ function _mikiContextUsage(
   };
 }
 
-mikiWss.on("connection", (ws, _req) => {
+mikiWss.on("connection", (ws, req) => {
   const aliveWs = ws as AliveWebSocket;
   aliveWs.__alive = true;
   ws.on("pong", () => {
     aliveWs.__alive = true;
   });
 
-  // The console deliberately exposes one persistent conversation only.
-  // Ignore client-provided IDs so another tab or stale URL cannot create a
-  // second chat session on the backend.
-  const sessionId = SINGLE_CHAT_SESSION_ID;
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const sessionId = normalizeChatSessionId(
+    requestUrl.searchParams.get("session_id"),
+  );
 
   ws.on("message", async (raw) => {
     const data = _parseJsonMessage(
@@ -1674,7 +1702,6 @@ mikiWss.on("connection", (ws, _req) => {
         let artifactContract: ArtifactContract | null = null;
         let lastContextUsage: mikiContextUsage | null = null;
         let providerFailureDetected = false;
-        const failedToolCallIds = new Set<string>();
         const toolFeedback = _getToolFeedbackConfig();
         const streaming = _getmikiStreamingConfig();
         let lastStreamSentAt = 0;
@@ -1710,7 +1737,10 @@ mikiWss.on("connection", (ws, _req) => {
           media.length > 0
             ? `${content}\n\nAttached media:\n${media.join("\n")}`.trim()
             : content;
-        artifactContract = _detectArtifactContract(messageForAgent, workspaceDir);
+        artifactContract = _detectArtifactContract(
+          messageForAgent,
+          workspaceDir,
+        );
 
         try {
           for await (const chunk of orchestrator.runAgentLoop(
@@ -1754,7 +1784,8 @@ mikiWss.on("connection", (ws, _req) => {
               const grewEnough =
                 fullResponse.length - lastStreamSentLength >=
                 streaming.minGrowthChars;
-              const throttleElapsed = now - lastStreamSentAt >= streaming.throttleMs;
+              const throttleElapsed =
+                now - lastStreamSentAt >= streaming.throttleMs;
               if (
                 streaming.enabled &&
                 fullResponse.length > 0 &&
@@ -1782,48 +1813,17 @@ mikiWss.on("connection", (ws, _req) => {
               continue;
             }
 
-            if (event.type === "execution_progress") {
-              const phase = String(event.phase || "execution");
-              const turn = Number(event.turn || 0);
-              _sendInspectorThought(
-                ws,
-                sessionId,
-                assistantMessageId,
-                `Execution progress: ${phase}${turn > 0 ? ` · turn ${turn}/${Number(event.max_turns || 0) || "?"}` : ""}.`,
-                "Progress",
-              );
-              _sendmiki(ws, {
-                type: "node.progress",
-                id: crypto.randomUUID(),
-                session_id: sessionId,
-                timestamp: Date.now(),
-                payload: {
-                  run_id: assistantMessageId,
-                  phase,
-                  turn: event.turn,
-                  max_turns: event.max_turns,
-                  local_model: event.local_model,
-                  context_usage: event.context_usage,
-                },
-              });
-              continue;
-            }
-
-            if (event.type === "tool_call_rejected") {
-              _sendInspectorThought(
-                ws,
-                sessionId,
-                assistantMessageId,
-                `A model-proposed ${String(event.tool || "tool action")} was not executed because it was emitted as plain text instead of a native tool call.`,
-                "Verification",
-              );
-              providerFailureDetected = true;
-              continue;
-            }
-
             if (event.type === "completion_guard_failed") {
+              // The previous model turn may have streamed a provisional
+              // "incomplete" status before the repair turn created the files.
+              // Clear it so a successful repair cannot inherit stale failure
+              // text in the final user-facing reply.
+              fullResponse = "";
+              lastStreamSentLength = 0;
               const missing = Array.isArray(event.missing)
-                ? event.missing.filter((item): item is string => typeof item === "string")
+                ? event.missing.filter(
+                    (item): item is string => typeof item === "string",
+                  )
                 : [];
               _sendInspectorThought(
                 ws,
@@ -1997,11 +1997,6 @@ mikiWss.on("connection", (ws, _req) => {
             }
 
             if (event.type === "tool_result") {
-              const toolCallId = typeof event.tool_call_id === "string" ? event.tool_call_id : "";
-              if (toolCallId) {
-                if (event.ok === true) failedToolCallIds.delete(toolCallId);
-                else failedToolCallIds.add(toolCallId);
-              }
               const invocationIndex = Number(event.invocation_index ?? 0);
               const toolInput = toolInputs.get(invocationIndex);
               const nodeId = `${assistantMessageId}-node-${invocationIndex}`;
@@ -2115,12 +2110,11 @@ mikiWss.on("connection", (ws, _req) => {
             }
           }
 
-          let finalRunStatus: "completed" | "failed" =
-            providerFailureDetected || failedToolCallIds.size > 0
-              ? "failed"
-              : "completed";
-          if ((providerFailureDetected || failedToolCallIds.size > 0) && !fullResponse.trim()) {
-            fullResponse = "I couldn’t complete that request because an execution check failed.";
+          let finalRunStatus:
+            "completed" | "completed_with_warning" | "failed" =
+            providerFailureDetected ? "failed" : "completed";
+          if (providerFailureDetected && !fullResponse.trim()) {
+            fullResponse = "I couldn’t complete that request this time.";
           }
           if (artifactContract) {
             const verification = _verifyArtifactContract(artifactContract);
@@ -2133,23 +2127,21 @@ mikiWss.on("connection", (ws, _req) => {
                 : `Required ${artifactContract.label} files are still missing or empty: ${[...verification.missing, ...verification.invalid].join(", ")}.`,
               "Verification",
             );
+            finalRunStatus = _reconcileArtifactOutcome(
+              verification,
+              providerFailureDetected,
+            );
             if (!verification.ok) {
-              finalRunStatus = "failed";
               fullResponse = `I started the ${artifactContract.label}, but it is not complete yet. ${[...verification.missing, ...verification.invalid].join(", ")} still needs attention.`;
-            } else {
-              try {
-                const manifestPath = _writeArtifactManifest(artifactContract);
-                _sendInspectorThought(
-                  ws,
-                  sessionId,
-                  assistantMessageId,
-                  `Artifact manifest written for the verified ${artifactContract.label}: ${manifestPath}`,
-                  "Verification",
-                );
-              } catch (manifestError) {
-                finalRunStatus = "failed";
-                fullResponse = `The ${artifactContract.label} passed file checks, but its handoff manifest could not be written: ${getErrorMessage(manifestError)}`;
-              }
+            } else if (providerFailureDetected) {
+              fullResponse = `Completed and verified the required ${artifactContract.label} files: ${artifactContract.required.join(", ")}. A provider warning occurred while preparing the final response; see the run diagnostics.`;
+            } else if (
+              !fullResponse.trim() ||
+              /not complete yet|still needs attention|missing or empty/i.test(
+                fullResponse,
+              )
+            ) {
+              fullResponse = `Completed and verified the required ${artifactContract.label} files: ${artifactContract.required.join(", ")}.`;
             }
           }
 
@@ -2183,7 +2175,7 @@ mikiWss.on("connection", (ws, _req) => {
             id: crypto.randomUUID(),
             session_id: sessionId,
             timestamp: Date.now(),
-            payload: {               run_id: assistantMessageId, status: finalRunStatus },
+            payload: { run_id: assistantMessageId, status: finalRunStatus },
           });
         } catch (err: unknown) {
           const safeError = getErrorMessage(err);
@@ -2201,7 +2193,9 @@ mikiWss.on("connection", (ws, _req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
-              content: fullResponse.trim() || "I couldn’t complete that request this time.",
+              content:
+                fullResponse.trim() ||
+                "I couldn’t complete that request this time.",
               kind: "normal",
               model_name: orchestrator.modelName,
             },
@@ -2232,7 +2226,18 @@ mikiWss.on("connection", (ws, _req) => {
           if (activeRunIds.get(sessionId) === assistantMessageId) {
             activeRunIds.delete(sessionId);
           }
-          if (!activeRunIds.has(sessionId)) pendingFeedback.delete(sessionId);
+          if (!activeRunIds.has(sessionId)) {
+            const queuedCount = pendingFeedback.get(sessionId)?.length ?? 0;
+            if (queuedCount > 0) {
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `${queuedCount} feedback message${queuedCount === 1 ? "" : "s"} preserved for the next safe checkpoint.`,
+                "Progress",
+              );
+            }
+          }
         }
       });
     chatRunQueues.set(sessionId, currentRun);
@@ -2431,7 +2436,12 @@ wss.on("connection", (ws) => {
         const envelopeStr = JSON.stringify(envelopeObj);
         ws.send(envelopeStr);
         lastSeq = currentSequence;
-        _saveStreamChunk(sessionId!, checkpointId!, currentSequence, envelopeStr);
+        _saveStreamChunk(
+          sessionId!,
+          checkpointId!,
+          currentSequence,
+          envelopeStr,
+        );
       }
       const doneEnvelope = {
         type: "stream_done",
@@ -3269,7 +3279,7 @@ if (enableMcp) {
     console.log(`MCP in-process ready at /mcp with API key auth`);
   } catch (err: unknown) {
     console.warn(
-      `MCP is unavailable until API_KEY_SECRET is configured: ${getErrorMessage(err)}. MCP endpoints remain unmounted.`,
+      `MCP in-process skipped: ${getErrorMessage(err)}. Set a strong API_KEY_SECRET before enabling ENABLE_MCP=true.`,
     );
   }
 }
@@ -3321,6 +3331,7 @@ async function shutdown() {
   shutdownInProgress = true;
   console.log("Shutting down...");
   _clearWSPing();
+  unsubscribeDeliveryOutcome();
   await Promise.all([closeWebSocketServer(wss), closeWebSocketServer(mikiWss)]);
   await closeHttpServer(server, {
     timeoutMs: 5000,

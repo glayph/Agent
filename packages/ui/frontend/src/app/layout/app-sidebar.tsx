@@ -1,8 +1,9 @@
 import {
   IconActivityHeartbeat,
-  IconClockPlay,
   IconAtom,
+  IconBrain,
   IconBroadcast,
+  IconClockPlay,
   IconFolder,
   IconKey,
   IconListDetails,
@@ -17,6 +18,7 @@ import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
+import { cn } from "@/lib/utils"
 import {
   Sidebar,
   SidebarContent,
@@ -26,12 +28,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/shared/ui/sidebar"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/shared/ui/tooltip"
-import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 
 // Dev-tool sidebar styles — dark surfaces, orange accent for active state
 const materialSidebarStyles = `
@@ -74,12 +71,17 @@ const primaryNav: NavItem[] = [
   { titleKey: "navigation.channels", url: "/channels", icon: IconBroadcast },
   { titleKey: "navigation.drive", url: "/drive", icon: IconFolder },
   { titleKey: "navigation.models", url: "/models", icon: IconAtom },
+  { titleKey: "navigation.memory", url: "/memory", icon: IconBrain },
   { titleKey: "navigation.credentials", url: "/credentials", icon: IconKey },
   { titleKey: "navigation.hub", url: "/agent/hub", icon: IconSearch },
   { titleKey: "navigation.skills", url: "/agent/skills", icon: IconSparkles },
   { titleKey: "navigation.tools", url: "/agent/tools", icon: IconTools },
   { titleKey: "navigation.runs", url: "/agent/runs", icon: IconTimeline },
-  { titleKey: "navigation.automations", url: "/agent/automations", icon: IconClockPlay },
+  {
+    titleKey: "navigation.automations",
+    url: "/agent/automations",
+    icon: IconClockPlay,
+  },
   { titleKey: "navigation.config", url: "/config", icon: IconSettings },
   { titleKey: "navigation.logs", url: "/logs", icon: IconListDetails },
   {
@@ -142,7 +144,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <Link
             to="/"
             onClick={closeMobileSidebar}
-            className="bg-primary/10 text-primary mx-auto flex size-9 items-center justify-center overflow-hidden rounded-lg border p-0 shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/20"
+            className="bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/20 mx-auto flex size-9 items-center justify-center overflow-hidden rounded-lg border p-0 shadow-sm transition-colors"
             aria-label="Miki"
             title="Miki"
           >
@@ -180,7 +182,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         )}
                       >
                         <Icon className="size-4" />
-
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right">{label}</TooltipContent>

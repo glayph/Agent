@@ -165,6 +165,23 @@ export function FeishuForm({
           </div>
 
           <ChannelArrayListField
+            label={t("channels.field.groupTriggerPrefixes")}
+            hint={t("channels.form.desc.groupTriggerPrefixes")}
+            value={asStringArray(groupTriggerConfig.prefixes)}
+            onChange={(value) =>
+              onChange("group_trigger", {
+                ...groupTriggerConfig,
+                prefixes: value,
+              })
+            }
+            placeholder={t("channels.field.groupTriggerPrefixes")}
+            parser={parseConservativeStringListInput}
+            fieldPath="group_trigger.prefixes"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
+
+          <ChannelArrayListField
             label={t("channels.field.randomReactionEmoji")}
             hint={t("channels.form.desc.randomReactionEmoji")}
             value={asStringArray(config.random_reaction_emoji)}

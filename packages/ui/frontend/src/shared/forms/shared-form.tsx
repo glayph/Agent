@@ -2,6 +2,7 @@ import { IconChevronDown, IconEye, IconEyeOff } from "@tabler/icons-react"
 import { type ReactNode, useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { cn } from "@/lib/utils"
 import {
   FieldControlProvider,
   FieldDescription,
@@ -10,7 +11,6 @@ import {
 } from "@/shared/ui/field"
 import { Input } from "@/shared/ui/input"
 import { Switch } from "@/shared/ui/switch"
-import { cn } from "@/lib/utils"
 
 type FieldLayout = "default" | "setting-row"
 

@@ -5,6 +5,10 @@ export interface ToolCall {
 }
 
 export interface ChatMessage {
+  /** Stable identifier used by persisted session history mutations. */
+  id?: string;
+  /** ISO creation timestamp for persisted session history. */
+  created_at?: string;
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   tool_calls?: ToolCall[];

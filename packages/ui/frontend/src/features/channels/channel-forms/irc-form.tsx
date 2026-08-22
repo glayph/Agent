@@ -23,7 +23,12 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
     <div className="space-y-6">
       <Card className="shadow-sm">
         <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field label="Server" required hint="IRC server address" error={fieldErrors.server}>
+          <Field
+            label="Server"
+            required
+            hint="IRC server address"
+            error={fieldErrors.server}
+          >
             <Input
               value={asString(config.server)}
               onChange={(e) => onChange("server", e.target.value)}
@@ -40,7 +45,12 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
             />
           </Field>
 
-          <Field label="Nickname" required hint="Bot nickname" error={fieldErrors.nick}>
+          <Field
+            label="Nickname"
+            required
+            hint="Bot nickname"
+            error={fieldErrors.nick}
+          >
             <Input
               value={asString(config.nick)}
               onChange={(e) => onChange("nick", e.target.value)}
@@ -60,7 +70,11 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
             />
           </Field>
 
-          <Field label="TLS" hint="Use TLS, usually on port 6697" error={fieldErrors.tls}>
+          <Field
+            label="TLS"
+            hint="Use TLS, usually on port 6697"
+            error={fieldErrors.tls}
+          >
             <Switch
               checked={asBoolean(config.tls ?? config.use_tls)}
               onCheckedChange={(checked) => onChange("tls", checked)}
@@ -68,7 +82,11 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
             />
           </Field>
 
-          <Field label="Server Password" hint="Optional IRC PASS secret" error={fieldErrors.password}>
+          <Field
+            label="Server Password"
+            hint="Optional IRC PASS secret"
+            error={fieldErrors.password}
+          >
             <Input
               value={asString(config.password)}
               onChange={(e) => onChange("password", e.target.value)}

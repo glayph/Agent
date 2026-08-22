@@ -16,16 +16,15 @@ import {
   setDefaultModel,
 } from "@/api/models"
 import { PageHeader } from "@/app/layout/page-header"
-import { Button } from "@/shared/ui/button"
-import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
-import { refreshGatewayState } from "@/store/gateway"
-
 import { AddModelSheet } from "@/features/models/components/add-model-sheet"
 import { CatalogDialog } from "@/features/models/components/catalog-dialog"
 import { DeleteModelDialog } from "@/features/models/components/delete-model-dialog"
 import { EditModelSheet } from "@/features/models/components/edit-model-sheet"
 import { buildProviderGroups } from "@/features/models/components/models-page-model"
 import { ProviderSection } from "@/features/models/components/provider-section"
+import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
+import { Button } from "@/shared/ui/button"
+import { refreshGatewayState } from "@/store/gateway"
 
 export function ModelsPage() {
   const { t } = useTranslation()
@@ -183,17 +182,21 @@ export function ModelsPage() {
 
         {!loading && !fetchError && (
           <div className="pb-8">
-            {providerGroups.map((providerGroup: ReturnType<typeof buildProviderGroups>[number]) => (
-              <ProviderSection
-                key={providerGroup.key}
-                provider={providerGroup.provider}
-                models={providerGroup.models}
-                onEdit={setEditingModel}
-                onSetDefault={handleSetDefault}
-                onDelete={setDeletingModel}
-                settingDefaultIndex={settingDefaultIndex}
-              />
-            ))}
+            {providerGroups.map(
+              (
+                providerGroup: ReturnType<typeof buildProviderGroups>[number],
+              ) => (
+                <ProviderSection
+                  key={providerGroup.key}
+                  provider={providerGroup.provider}
+                  models={providerGroup.models}
+                  onEdit={setEditingModel}
+                  onSetDefault={handleSetDefault}
+                  onDelete={setDeletingModel}
+                  settingDefaultIndex={settingDefaultIndex}
+                />
+              ),
+            )}
           </div>
         )}
       </div>

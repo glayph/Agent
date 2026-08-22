@@ -4,6 +4,7 @@
     "chat": "Chat",
     "model_group": "Modelos",
     "models": "Modelos",
+    "memory": "Memória",
     "credentials": "Credenciais",
     "agent_group": "Agente",
     "hub": "Hub",
@@ -139,6 +140,7 @@
       "newConversation": "Novo chat",
       "notSelected": "Não selecionado",
       "paused": "Pausado",
+      "ready": "Pronto",
       "running": "Rodando",
       "session": "Sessão",
       "title": "Workspace do Agente",
@@ -301,7 +303,7 @@
         "description": "Suporta OAuth via navegador, device code e login por token."
       },
       "antigravity": {
-        "description": "Usa OAuth via navegador para o Google Cloud Code Assist."
+        "description": "Usa uma chave de API Gemini para o Google Cloud Code Assist."
       }
     },
     "status": {
@@ -513,9 +515,16 @@
       "identifierLabel": "Identificador:",
       "endpointLabel": "Endpoint:",
       "testConnection": "Testar Conexão",
+      "testAgentReadiness": "Testar prontidão do agente",
+      "testAgentAgain": "Testar prontidão novamente",
+      "toolDryRun": "Dry run da ferramenta executado: {{executed}}",
       "testing": "Testando conexão…",
       "success": "Conexão bem-sucedida",
       "responseTime": "Tempo de resposta: {{ms}}ms",
+      "verificationLevel": "Nível de verificação: {{level}}",
+      "readinessStatus": "Status de prontidão: {{status}}",
+      "correlationId": "Correlação: {{id}}",
+      "completionNotTested": "A disponibilidade do catálogo/runtime foi verificada; a conclusão real não foi testada.",
       "failed": "Falha na conexão",
       "status": "Status: {{status}}",
       "testFailed": "Falha no teste",
@@ -994,6 +1003,20 @@
     }
   },
   "pages": {
+    "memory": {
+      "title": "Memória",
+      "reindex": "Reindexar",
+      "load_error": "Não foi possível carregar os diagnósticos de memória.",
+      "search_title": "Busca seletiva de memória",
+      "search_description": "A busca é limitada ao runtime ativo e retorna apenas blocos pontuados e controlados.",
+      "search_placeholder": "Buscar fatos, tarefas, regras ou habilidades lembradas…",
+      "chunks_title": "Blocos de memória",
+      "chunks_description": "Blocos ativos recentes agrupados por região funcional.",
+      "inspect_title": "Inspetor de bloco",
+      "inspect_empty": "Selecione um bloco para inspecionar a origem e os vínculos do grafo.",
+      "forget_confirm": "Esquecer este bloco de memória? Ele será excluído das próximas buscas.",
+      "forgotten": "Bloco de memória esquecido."
+    },
     "health": {
       "title": "Saude",
       "refresh": "Atualizar",
@@ -1032,7 +1055,8 @@
         "doctor_checks": "Checks do doctor",
         "backups": "Backups",
         "watchdog": "Watchdog",
-        "queue_scan": "Fila e scan"
+        "queue_scan": "Fila e scan",
+        "delivery_recovery": "Recuperação de entregas"
       },
       "backups_description": "Snapshots de config + DB",
       "checks_count": "{{count}} checks",
@@ -1044,7 +1068,9 @@
       "rollback_confirm": "Fazer rollback para {{id}}?",
       "rollback_confirm_desc": "Isso restaurará o backup selecionado e pode substituir o estado atual do runtime.",
       "backup_entries": "{{count}} entradas - {{date}}",
-      "scan_summary": "{{files}} arquivos escaneados, {{findings}} possiveis vazamentos encontrados."
+      "scan_summary": "{{files}} arquivos escaneados, {{findings}} possiveis vazamentos encontrados.",
+      "delivery_summary": "{{count}} recibo(s) de entrega persistido(s)",
+      "no_deliveries": "Nenhuma entrega persistida registrada."
     },
     "agent": {
       "load_error": "Falha ao carregar informações de suporte do agente.",

@@ -9,7 +9,11 @@ export function useGatewayQuery(enabled = true) {
     enabled,
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      if (status === "starting" || status === "restarting" || status === "stopping") {
+      if (
+        status === "starting" ||
+        status === "restarting" ||
+        status === "stopping"
+      ) {
         return 1000 // Fast polling during state transitions
       }
       return 3000 // Standard polling

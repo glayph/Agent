@@ -672,9 +672,7 @@ describe("file manager router", () => {
         });
         expect(res.response.status).toBeGreaterThanOrEqual(400);
         expect(fs.existsSync(path.join(outsideDir, "owned.txt"))).toBe(true);
-        expect(fs.existsSync(path.join(outsideDir, "renamed.txt"))).toBe(
-          false,
-        );
+        expect(fs.existsSync(path.join(outsideDir, "renamed.txt"))).toBe(false);
       });
     });
 

@@ -42,7 +42,12 @@ export function MatrixForm({
             />
           </Field>
 
-          <Field label="User ID" required hint="Matrix user ID" error={fieldErrors.user_id}>
+          <Field
+            label="User ID"
+            required
+            hint="Matrix user ID"
+            error={fieldErrors.user_id}
+          >
             <Input
               value={asString(config.user_id)}
               onChange={(e) => onChange("user_id", e.target.value)}

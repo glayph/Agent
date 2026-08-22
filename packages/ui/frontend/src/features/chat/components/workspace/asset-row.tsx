@@ -12,6 +12,7 @@ import {
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +30,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
 
 import type { WorkspaceAsset, WorkspaceAssetKind } from "./types"
 
@@ -125,9 +125,7 @@ export function AssetRow({ asset, onDelete }: AssetRowProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => onDelete?.(asset)}
-            >
+            <AlertDialogAction onClick={() => onDelete?.(asset)}>
               {t("chat.assets.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>

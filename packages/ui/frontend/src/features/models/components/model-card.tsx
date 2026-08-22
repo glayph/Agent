@@ -10,11 +10,7 @@ import { useTranslation } from "react-i18next"
 
 import type { ModelInfo } from "@/api/models"
 import { Button } from "@/shared/ui/button"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/shared/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 
 interface ModelCardProps {
   model: ModelInfo
@@ -159,8 +155,14 @@ export function ModelCard({
             }}
             aria-disabled={editDisabled ? true : undefined}
             aria-label={editLabel}
-            title={editDisabled ? t("models.action.setDefaultDisabled.isVirtual") : editLabel}
-            className={editDisabled ? "cursor-not-allowed opacity-50" : undefined}
+            title={
+              editDisabled
+                ? t("models.action.setDefaultDisabled.isVirtual")
+                : editLabel
+            }
+            className={
+              editDisabled ? "cursor-not-allowed opacity-50" : undefined
+            }
           >
             <IconEdit className="size-3.5" aria-hidden="true" />
           </Button>
@@ -194,6 +196,12 @@ export function ModelCard({
       <p className="text-muted-foreground truncate font-mono text-xs leading-snug">
         {model.model}
       </p>
+
+      {model.capability_warning && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
+          {model.capability_warning}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         {isOAuth ? (

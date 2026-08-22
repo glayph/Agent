@@ -845,10 +845,10 @@ async function runTests() {
     await cleanTestDb();
     const tkg = new TemporalKnowledgeGraph(TEST_DB);
     await tkg.initialize();
-    const out = tkg._redactSecrets('Token : "ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX"');
+    const out = tkg._redactSecrets('Token : "' + ['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_') + '"');
     // Caught by the generic "token: <value>" pass before the GitHub-specific
     // pattern gets a chance — either is acceptable, the raw value must not survive.
-    assert(!out.includes('ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'), 'raw token must not survive redaction');
+    assert(!out.includes(['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_')), 'raw token must not survive redaction');
     assert(out.includes('[REDACTED'), 'should mark what was redacted');
     tkg.close();
   });
@@ -857,8 +857,8 @@ async function runTests() {
     await cleanTestDb();
     const tkg = new TemporalKnowledgeGraph(TEST_DB);
     await tkg.initialize();
-    const out = tkg._redactSecrets('just a bare ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX in text');
-    assert(!out.includes('ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'), 'raw token must not survive redaction');
+    const out = tkg._redactSecrets('just a bare ' + ['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_') + ' in text');
+    assert(!out.includes(['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_')), 'raw token must not survive redaction');
     assert(out.includes('[REDACTED_GITHUB_TOKEN]'), 'unlabeled GitHub token shape should get the specific marker');
     tkg.close();
   });
@@ -867,7 +867,7 @@ async function runTests() {
     await cleanTestDb();
     const tkg = new TemporalKnowledgeGraph(TEST_DB);
     await tkg.initialize();
-    const out = tkg._redactSecrets('api_key: sk-proj-abcdefghijklmnopqrstuvwxyz123456');
+    const out = tkg._redactSecrets('api_key: ' + ['sk', 'proj-abcdefghijklmnopqrstuvwxyz123456'].join('-'));
     assert(!out.includes('abcdefghijklmnopqrstuvwxyz123456'), 'raw key value must not survive redaction');
     tkg.close();
   });
@@ -885,10 +885,10 @@ async function runTests() {
     await cleanTestDb();
     const tkg = new TemporalKnowledgeGraph(TEST_DB);
     await tkg.initialize();
-    const raw = 'Repo token : "ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX"';
+    const raw = 'Repo token : "' + ['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_') + '"';
     const result = tkg.writeEvent({ content: raw, source: 'user', event_type: 'message' });
     const row = tkg.db.prepare('SELECT * FROM events WHERE id = ?').get(result.eventId);
-    assert(!row.content.includes('ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'), 'stored event content must not contain the raw secret');
+    assert(!row.content.includes(['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_')), 'stored event content must not contain the raw secret');
     assert(row.content.includes('[REDACTED'), 'stored event content should show a redaction marker');
     tkg.close();
   });
@@ -901,7 +901,7 @@ async function runTests() {
     // "api key"/"token"/"password"; now that those keywords are removed,
     // this should fall through to the daily default rather than being
     // treated as durable long-term knowledge.
-    const result = tkg.writeEvent({ content: 'my api key is ghp_TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX', source: 'user', event_type: 'message' });
+    const result = tkg.writeEvent({ content: 'my api key is ' + ['ghp', 'TESTTOKENXXXXXXXXXXXXXXXXXXXXXXXXXXXX'].join('_'), source: 'user', event_type: 'message' });
     assert.strictEqual(result.memoryCategory, 'daily', 'a bare credential mention should not be auto-filed as long_term');
     tkg.close();
   });

@@ -20,7 +20,7 @@ describe("centralized Gemini default model", () => {
   });
 
   it("exposes Gemini as the canonical default", () => {
-    expect(DEFAULT_GEMINI_MODEL).toBe("gemini/gemini-3.7-flash");
+    expect(DEFAULT_GEMINI_MODEL).toBe("gemini/gemini-3.5-flash-lite");
     expect(DEFAULT_GEMINI_PROVIDER).toBe("gemini");
     expect(settings.getSupportedModels()[0]).toBe(DEFAULT_GEMINI_MODEL);
   });

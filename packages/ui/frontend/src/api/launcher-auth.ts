@@ -3,8 +3,7 @@
  * Uses plain fetch (not launcherFetch) to avoid redirect loops on auth pages.
  */
 export type LoginResult =
-  | { ok: true }
-  | { ok: false; status: number; error: string }
+  { ok: true } | { ok: false; status: number; error: string }
 
 export async function postLauncherDashboardLogin(
   password: string,

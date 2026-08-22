@@ -44,7 +44,7 @@ export async function loadSessionMessages(
 ): Promise<ChatMessage[]> {
   const detail = await getSessionHistory(sessionId)
   return detail.messages.map((message, index) => ({
-    id: `hist-${index}-${Date.now()}`,
+    id: message.id ?? `hist-${index}-${Date.now()}`,
     role: message.role,
     content: message.content,
     kind: message.role === "assistant" ? (message.kind ?? "normal") : undefined,

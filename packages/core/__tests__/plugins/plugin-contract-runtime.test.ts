@@ -3,7 +3,10 @@ import * as path from "path";
 import * as os from "os";
 import { SkillRegistry } from "@miki/installer";
 import { SqliteAuditLog } from "../../src/audit-log";
-import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../../src/paths";
+import {
+  normalizeRuntimePaths,
+  resolveDownloadedSkillsDir,
+} from "../../src/paths";
 import {
   executeRuntimePluginTool,
   loadRuntimePluginContracts,

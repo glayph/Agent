@@ -8,7 +8,10 @@ import { ProviderIcon } from "./provider-icon"
 import type { ProviderCatalogEntry } from "./provider-registry"
 
 interface ProviderSectionProps {
-  provider: Pick<ProviderCatalogEntry, "key" | "label" | "iconSlug" | "domain">
+  provider: Pick<
+    ProviderCatalogEntry,
+    "key" | "label" | "iconSlug" | "domain" | "plugin"
+  >
   models: ModelInfo[]
   onEdit: (model: ModelInfo) => void
   onSetDefault: (model: ModelInfo) => void
@@ -39,6 +42,18 @@ export function ProviderSection({
           <span className="text-foreground truncate text-sm font-semibold">
             {provider.label}
           </span>
+          {provider.plugin && (
+            <span
+              className="text-muted-foreground bg-muted/45 hidden shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none sm:inline"
+              title={
+                provider.plugin.reason ||
+                `${provider.plugin.display_name} provider plugin`
+              }
+            >
+              {provider.plugin.id} v{provider.plugin.version} ·{" "}
+              {provider.plugin.readiness}
+            </span>
+          )}
           <span className="text-muted-foreground bg-muted/60 shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-none">
             {models.length}
           </span>

@@ -68,12 +68,12 @@ function stringifyInspectorValue(value: unknown): string | undefined {
 
 function StatusGlyph({ node }: { node: MonitorNode }) {
   if (node.status === "running" || node.status === "retrying") {
-    return <IconLoader2 className="size-4 animate-spin text-primary" />
+    return <IconLoader2 className="text-primary size-4 animate-spin" />
   }
   if (node.status === "failed") {
-    return <IconAlertTriangle className="size-4 text-destructive" />
+    return <IconAlertTriangle className="text-destructive size-4" />
   }
-  return <IconCheck className="size-4 text-success" />
+  return <IconCheck className="text-success size-4" />
 }
 
 function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
@@ -173,22 +173,25 @@ function ActivityInspector({
   return (
     <aside
       aria-label="Live activity inspector"
-      className="pointer-events-auto absolute top-4 right-4 z-20 flex max-h-[calc(100%-2rem)] w-[min(390px,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-primary/25 bg-card/95 text-card-foreground shadow-2xl shadow-primary/10 backdrop-blur-xl"
+      className="border-primary/25 bg-card/95 text-card-foreground shadow-primary/10 pointer-events-auto absolute top-4 right-4 z-20 flex max-h-[calc(100%-2rem)] w-[min(390px,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl"
     >
-      <div className="flex items-start gap-3 border-b border-border/70 bg-primary/[0.06] px-4 py-3.5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
+      <div className="border-border/70 bg-primary/[0.06] flex items-start gap-3 border-b px-4 py-3.5">
+        <div className="border-primary/25 bg-primary/10 text-primary flex size-9 shrink-0 items-center justify-center rounded-xl border">
           <IconActivity className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] text-primary uppercase">
+          <div className="text-primary flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] uppercase">
             <span>Live inspector</span>
-            <span className="size-1 rounded-full bg-primary" />
+            <span className="bg-primary size-1 rounded-full" />
             <span>{activityTypeLabel(node.type)}</span>
           </div>
-          <h2 className="mt-1 truncate text-[15px] font-semibold" title={activityTitle(node)}>
+          <h2
+            className="mt-1 truncate text-[15px] font-semibold"
+            title={activityTitle(node)}
+          >
             {activityTitle(node)}
           </h2>
-          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+          <p className="text-muted-foreground mt-1 text-[11px] leading-4">
             {activitySummary(node)}
           </p>
         </div>
@@ -196,7 +199,7 @@ function ActivityInspector({
           type="button"
           aria-label="Close activity inspector"
           onClick={() => selectMonitorNode(undefined)}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="border-border/70 text-muted-foreground hover:border-primary/35 hover:bg-primary/10 hover:text-foreground focus-visible:ring-ring inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:outline-none"
         >
           <IconX className="size-4" />
         </button>
@@ -204,32 +207,34 @@ function ActivityInspector({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="grid grid-cols-2 gap-2 text-[11px]">
-          <div className="rounded-xl border border-border/60 bg-muted/35 px-3 py-2.5">
+          <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
             <div className="text-muted-foreground">Status</div>
             <div className="mt-1 flex items-center gap-2 font-medium">
               <StatusGlyph node={node} />
               <span>{activityStatusLabel(node.status)}</span>
             </div>
           </div>
-          <div className="rounded-xl border border-border/60 bg-muted/35 px-3 py-2.5">
+          <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
             <div className="text-muted-foreground">Duration</div>
             <div className="mt-1 flex items-center gap-1.5 font-medium">
-              <IconClock className="size-3.5 text-primary" />
+              <IconClock className="text-primary size-3.5" />
               {formatActivityDuration(node.durationMs)}
             </div>
           </div>
-          <div className="rounded-xl border border-border/60 bg-muted/35 px-3 py-2.5">
+          <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
             <div className="text-muted-foreground">Started</div>
-            <div className="mt-1 font-medium">{formatActivityTime(node.createdAt) || "—"}</div>
+            <div className="mt-1 font-medium">
+              {formatActivityTime(node.createdAt) || "—"}
+            </div>
           </div>
-          <div className="rounded-xl border border-border/60 bg-muted/35 px-3 py-2.5">
+          <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
             <div className="text-muted-foreground">Planner level</div>
             <div className="mt-1 font-medium">{node.level + 1}</div>
           </div>
         </div>
 
         {node.parallel && (
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/[0.07] px-3 py-2.5 text-[11px] text-primary">
+          <div className="border-primary/20 bg-primary/[0.07] text-primary mt-3 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[11px]">
             <IconRefresh className="size-3.5" />
             Running in parallel with sibling activities
           </div>
@@ -239,19 +244,22 @@ function ActivityInspector({
           {action && <InspectorBlock label="Action" value={action} />}
           {input && <InspectorBlock label="Input" value={input} code />}
           {result && <InspectorBlock label="Result" value={result} />}
-          {output && <InspectorBlock label="Output preview" value={output} code />}
+          {output && (
+            <InspectorBlock label="Output preview" value={output} code />
+          )}
           {node.error && (
             <InspectorBlock label="Error" value={node.error} tone="danger" />
           )}
           {!action && !input && !result && !output && !node.error && (
-            <div className="flex items-start gap-2 rounded-xl border border-dashed border-border/70 px-3 py-3 text-[11px] leading-5 text-muted-foreground">
-              <IconInfoCircle className="mt-0.5 size-3.5 shrink-0 text-primary" />
-              Detailed activity output will appear here as Miki receives live execution events.
+            <div className="border-border/70 text-muted-foreground flex items-start gap-2 rounded-xl border border-dashed px-3 py-3 text-[11px] leading-5">
+              <IconInfoCircle className="text-primary mt-0.5 size-3.5 shrink-0" />
+              Detailed activity output will appear here as Miki receives live
+              execution events.
             </div>
           )}
         </div>
 
-        <div className="mt-4 space-y-2 border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
+        <div className="border-border/60 text-muted-foreground mt-4 space-y-2 border-t pt-3 text-[11px]">
           <div className="flex items-center justify-between gap-3">
             <span>Run</span>
             <span className="truncate font-mono" title={run?.id}>
@@ -276,7 +284,7 @@ function ActivityInspector({
       <Link
         to="/"
         onClick={() => selectMonitorNode(undefined)}
-        className="m-3 inline-flex items-center justify-center gap-2 rounded-xl border border-border/70 px-3 py-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/[0.07] hover:text-foreground"
+        className="border-border/70 text-muted-foreground hover:border-primary/35 hover:bg-primary/[0.07] hover:text-foreground m-3 inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-medium transition-colors"
       >
         <IconExternalLink className="size-3.5" />
         Open conversation
@@ -314,11 +322,11 @@ function InspectorBlock({
         {label}
       </div>
       {code ? (
-        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-foreground/75">
+        <pre className="text-foreground/75 mt-2 max-h-36 overflow-auto font-mono text-[10px] leading-4 break-words whitespace-pre-wrap">
           {value}
         </pre>
       ) : (
-        <p className="mt-1.5 whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground/75">
+        <p className="text-foreground/75 mt-1.5 text-[11px] leading-5 break-words whitespace-pre-wrap">
           {value}
         </p>
       )}
@@ -343,16 +351,23 @@ function MonitorWorkspace() {
     ? state.nodes[state.selectedNodeId]
     : undefined
   if (nodes.length === 0) {
-    return <div className="h-full min-h-0 bg-background" aria-label="Agent Inspector" />
+    return (
+      <div
+        className="bg-background h-full min-h-0"
+        aria-label="Agent Inspector"
+      />
+    )
   }
 
   return (
-    <main className="relative h-full min-h-0 min-w-0 overflow-hidden bg-background">
+    <main className="bg-background relative h-full min-h-0 min-w-0 overflow-hidden">
       <ReactFlowProvider>
         <CanvasInner selectedNodeId={state.selectedNodeId} />
       </ReactFlowProvider>
 
-      {selectedNode && <ActivityInspector node={selectedNode} run={selectedRun} />}
+      {selectedNode && (
+        <ActivityInspector node={selectedNode} run={selectedRun} />
+      )}
     </main>
   )
 }

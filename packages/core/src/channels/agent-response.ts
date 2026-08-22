@@ -17,6 +17,29 @@ export function extractAgentChunkContent(chunk: string): string {
   return "";
 }
 
+export async function streamAgentResponse(
+  orchestrator: AgentOrchestrator,
+  sessionId: string,
+  message: string,
+  onText: (text: string) => Promise<void> | void,
+  maxChars = 12000,
+): Promise<string> {
+  return sessionTurnLock.withLock(sessionId, async () => {
+    let response = "";
+    for await (const chunk of orchestrator.runAgentLoop(sessionId, message)) {
+      const content = extractAgentChunkContent(chunk);
+      if (!content) continue;
+      const remaining = maxChars - response.length;
+      if (remaining <= 0) break;
+      const next = content.slice(0, remaining);
+      response += next;
+      await onText(next);
+      if (next.length < content.length) break;
+    }
+    return response.trim() || "No response was generated.";
+  });
+}
+
 export async function collectAgentResponse(
   orchestrator: AgentOrchestrator,
   sessionId: string,

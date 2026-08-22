@@ -52,6 +52,9 @@ interface Permissions {
 
 interface RuntimeExecConfig {
   allow_remote?: boolean;
+  enable_deny_patterns?: boolean;
+  custom_allow_patterns?: string[];
+  custom_deny_patterns?: string[];
 }
 
 interface ShellExecutionError extends Error {
@@ -65,6 +68,8 @@ export class ShellExecutor {
   public configPath: string;
   public permissions: Permissions;
   public execConfig: RuntimeExecConfig;
+  private workspaceRoot: string | null = null;
+  private workspaceRealRoot: string | null = null;
 
   constructor(configPath: string = "config/tools.yaml") {
     this.configPath = path.resolve(configPath);
@@ -102,13 +107,51 @@ export class ShellExecutor {
         runtime?: { exec?: RuntimeExecConfig };
       } | null;
       const permissions = data?.permissions || defaultPermissions;
+      const rawExec = data?.runtime?.exec || {};
+      const toPatterns = (value: unknown): string[] =>
+        Array.isArray(value)
+          ? value.filter(
+              (item): item is string =>
+                typeof item === "string" && item.trim().length > 0,
+            )
+          : [];
       const execConfig: RuntimeExecConfig = {
-        allow_remote: data?.runtime?.exec?.allow_remote ?? true,
+        allow_remote: rawExec.allow_remote ?? true,
+        enable_deny_patterns: rawExec.enable_deny_patterns ?? false,
+        custom_allow_patterns: toPatterns(rawExec.custom_allow_patterns),
+        custom_deny_patterns: toPatterns(rawExec.custom_deny_patterns),
       };
       return { permissions, execConfig };
     } catch {
       return { permissions: defaultPermissions, execConfig: defaultExecConfig };
     }
+  }
+
+  public setWorkspaceRoot(root: string): void {
+    const trimmed = root.trim();
+    this.workspaceRoot = trimmed ? path.resolve(trimmed) : null;
+    this.workspaceRealRoot = this.workspaceRoot
+      ? this.realpathIfAvailable(this.workspaceRoot)
+      : null;
+  }
+
+  private realpathIfAvailable(target: string): string {
+    try {
+      return fs.realpathSync.native(target);
+    } catch {
+      return path.resolve(target);
+    }
+  }
+
+  private isWithinWorkspace(candidate: string): boolean {
+    if (!this.workspaceRoot) return true;
+    const realCandidate = this.realpathIfAvailable(candidate);
+    const root = this.workspaceRealRoot || this.workspaceRoot;
+    const relative = path.relative(root, realCandidate);
+    return (
+      relative === "" ||
+      (!relative.startsWith("..") && !path.isAbsolute(relative))
+    );
   }
 
   private isDisabled(level?: string): boolean {
@@ -147,6 +190,33 @@ export class ShellExecutor {
           "shell_execute is blocked for remote callers by config/tools.yaml runtime.exec.allow_remote=false.",
       };
     }
+    const deniedPatterns = this.execConfig.enable_deny_patterns
+      ? this.execConfig.custom_deny_patterns || []
+      : [];
+    if (
+      deniedPatterns.some((pattern) => this.matchesPattern(command, pattern))
+    ) {
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: -1,
+        error:
+          "shell_execute command denied by runtime.exec.custom_deny_patterns.",
+      };
+    }
+    const allowedPatterns = this.execConfig.custom_allow_patterns || [];
+    if (
+      allowedPatterns.length > 0 &&
+      !allowedPatterns.some((pattern) => this.matchesPattern(command, pattern))
+    ) {
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: -1,
+        error:
+          "shell_execute command is not included in runtime.exec.custom_allow_patterns.",
+      };
+    }
     const maxTimeout = shellConfig.max_timeout_seconds || 300;
     const effectiveTimeout =
       timeout != null ? Math.min(timeout, maxTimeout) : maxTimeout;
@@ -163,12 +233,23 @@ export class ShellExecutor {
     let runCwd: string;
     if (cwd) {
       try {
-        runCwd = path.isAbsolute(cwd) ? cwd : path.resolve(cwd);
+        runCwd = path.isAbsolute(cwd)
+          ? path.resolve(cwd)
+          : path.resolve(this.workspaceRoot || process.cwd(), cwd);
       } catch {
         runCwd = process.cwd();
       }
     } else {
-      runCwd = process.cwd();
+      runCwd = this.workspaceRoot || process.cwd();
+    }
+
+    if (!this.isWithinWorkspace(runCwd)) {
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: -1,
+        error: "shell_execute cwd must remain inside the active workspace.",
+      };
     }
 
     if (!this.isDirectory(runCwd)) {
@@ -226,6 +307,32 @@ export class ShellExecutor {
       };
       logShellEvent(command, failResult, runCwd);
       return failResult;
+    }
+  }
+
+  private matchesPattern(command: string, pattern: string): boolean {
+    const source = pattern.trim();
+    if (!source) return false;
+    if (
+      source.length > 2 &&
+      source.startsWith("/") &&
+      source.lastIndexOf("/") > 0
+    ) {
+      const end = source.lastIndexOf("/");
+      try {
+        return new RegExp(source.slice(1, end), source.slice(end + 1)).test(
+          command,
+        );
+      } catch {
+        return false;
+      }
+    }
+    const escaped = source.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    const glob = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
+    try {
+      return new RegExp(`^${glob}$`).test(command.trim());
+    } catch {
+      return false;
     }
   }
 

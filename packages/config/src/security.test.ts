@@ -2,6 +2,8 @@ import {
   allowedCorsOriginsFromEnv,
   getRequiredEnvSecret,
   isAllowedCorsOrigin,
+  isIpAllowedByCidrs,
+  isValidCidr,
   isLoopbackAddress,
 } from "./security.js";
 import * as fs from "fs";
@@ -55,15 +57,15 @@ describe("security helpers", () => {
     } as NodeJS.ProcessEnv);
     const explicit = true;
 
-    expect(isAllowedCorsOrigin("http://localhost:18800", allowed, explicit)).toBe(
-      true,
-    );
-    expect(isAllowedCorsOrigin("http://127.0.0.1:18800", allowed, explicit)).toBe(
-      false,
-    );
-    expect(isAllowedCorsOrigin("http://localhost:5173", allowed, explicit)).toBe(
-      false,
-    );
+    expect(
+      isAllowedCorsOrigin("http://localhost:18800", allowed, explicit),
+    ).toBe(true);
+    expect(
+      isAllowedCorsOrigin("http://127.0.0.1:18800", allowed, explicit),
+    ).toBe(false);
+    expect(
+      isAllowedCorsOrigin("http://localhost:5173", allowed, explicit),
+    ).toBe(false);
     expect(isAllowedCorsOrigin("http://[::1]:9999", allowed, explicit)).toBe(
       false,
     );
@@ -87,9 +89,7 @@ describe("security helpers", () => {
     } as NodeJS.ProcessEnv);
 
     expect(isAllowedCorsOrigin("http://new.example.com", allowed)).toBe(true);
-    expect(isAllowedCorsOrigin("http://old.example.com", allowed)).toBe(
-      false,
-    );
+    expect(isAllowedCorsOrigin("http://old.example.com", allowed)).toBe(false);
   });
 
   it("allows all valid browser origins when explicitly configured with wildcard", () => {
@@ -136,6 +136,23 @@ describe("security helpers", () => {
         weakValues: ["sk-anything"],
       }),
     ).toThrow(/unsafe default/);
+  });
+
+  it("matches configured IPv4 and IPv6 CIDRs without a loopback bypass", () => {
+    expect(isIpAllowedByCidrs("10.20.30.40", ["10.20.0.0/16"])).toBe(true);
+    expect(isIpAllowedByCidrs("10.21.30.40", ["10.20.0.0/16"])).toBe(false);
+    expect(isIpAllowedByCidrs("127.0.0.1", ["127.0.0.1/32"])).toBe(true);
+    expect(isIpAllowedByCidrs("127.0.0.1", ["10.0.0.0/8"])).toBe(false);
+    expect(isIpAllowedByCidrs("2001:db8::42", ["2001:db8::/64"])).toBe(true);
+    expect(isIpAllowedByCidrs("2001:db9::42", ["2001:db8::/64"])).toBe(false);
+  });
+
+  it("validates allowed CIDR values", () => {
+    expect(isValidCidr("10.0.0.0/8")).toBe(true);
+    expect(isValidCidr("2001:db8::/32")).toBe(true);
+    expect(isValidCidr("*")).toBe(true);
+    expect(isValidCidr("10.0.0.0/33")).toBe(false);
+    expect(isValidCidr("not-a-network")).toBe(false);
   });
 
   it("identifies loopback addresses in their various forms (#94)", () => {

@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next"
 
+import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
-import { useIncrementalList } from "@/hooks/use-incremental-list"
 
 const DEFAULT_MODEL_SUGGESTION_PAGE_SIZE = 48
 

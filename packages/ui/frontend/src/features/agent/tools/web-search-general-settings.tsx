@@ -33,6 +33,61 @@ export function WebSearchGeneralSettings({
 
       <div className="bg-card border-border/40 divide-border/40 divide-y overflow-hidden rounded-2xl border shadow-sm">
         <SettingRow
+          label={t(
+            "pages.agent.tools.web_search.execution_mode",
+            "Execution Mode",
+          )}
+          description={t(
+            "pages.agent.tools.web_search.execution_mode_description",
+            "Local is the default and keeps web retrieval on this Miki host. Cloud is explicit; Auto tries local first and falls back only when allowed.",
+          )}
+        >
+          <Select
+            value={draft.execution_mode ?? "local"}
+            onValueChange={(value) =>
+              onUpdateDraft((current) => ({
+                ...current,
+                execution_mode:
+                  value === "cloud" || value === "auto" ? value : "local",
+              }))
+            }
+          >
+            <SelectTrigger className="bg-muted/40 hover:bg-muted/60 focus:ring-foreground/5 focus:border-border/80 w-full rounded-xl border-transparent shadow-none transition-[background-color,border-color,box-shadow] sm:w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-border/40 rounded-xl shadow-lg">
+              <SelectItem value="local" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.web_search.execution_local",
+                  "Local (default)",
+                )}
+              </SelectItem>
+              <SelectItem value="cloud" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.web_search.execution_cloud",
+                  "Cloud (explicit)",
+                )}
+              </SelectItem>
+              <SelectItem value="auto" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.web_search.execution_auto",
+                  "Auto (local then cloud)",
+                )}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+
+        {(draft.execution_mode ?? "local") !== "local" && (
+          <div className="bg-amber-500/10 px-5 py-3 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+            {t(
+              "pages.agent.tools.web_search.execution_privacy_warning",
+              "Privacy note: Cloud or Auto may send non-sensitive public queries to a remote provider. Sensitive queries remain blocked from cloud fallback unless explicitly authorized by policy.",
+            )}
+          </div>
+        )}
+
+        <SettingRow
           label={t("pages.agent.tools.web_search.provider", "Primary Provider")}
           description={t(
             "pages.agent.tools.web_search.provider_description",

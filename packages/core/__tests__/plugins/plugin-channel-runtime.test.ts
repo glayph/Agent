@@ -5,7 +5,10 @@ import { createWorkspaceSecretVault } from "@miki/config";
 import { SkillRegistry, type PluginContracts } from "@miki/installer";
 import type { AgentOrchestrator } from "../../src/agent";
 import { SqliteAuditLog } from "../../src/audit-log";
-import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../../src/paths";
+import {
+  normalizeRuntimePaths,
+  resolveDownloadedSkillsDir,
+} from "../../src/paths";
 import { PluginChannelRuntimeManager } from "../../src/plugins/plugin-channel-runtime";
 import { UNIVERSAL_SESSION_ID } from "../../src/universal-session";
 

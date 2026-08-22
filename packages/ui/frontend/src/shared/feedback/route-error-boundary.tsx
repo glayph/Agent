@@ -1,5 +1,5 @@
-import { Component, type ErrorInfo, type ReactNode } from "react"
 import { IconAlertTriangle, IconRefresh } from "@tabler/icons-react"
+import { Component, type ErrorInfo, type ReactNode } from "react"
 
 import { Button } from "@/shared/ui/button"
 
@@ -38,14 +38,14 @@ export class RouteErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="flex h-full w-full flex-col items-center justify-center p-6 text-center animate-fade-in">
+        <div className="animate-fade-in flex h-full w-full flex-col items-center justify-center p-6 text-center">
           <div className="bg-destructive/10 text-destructive mb-4 flex size-14 items-center justify-center rounded-2xl">
             <IconAlertTriangle size={28} />
           </div>
           <h2 className="text-foreground text-lg font-bold tracking-tight">
             Something went wrong on this page
           </h2>
-          <p className="text-muted-foreground mt-1.5 max-w-md text-xs font-mono">
+          <p className="text-muted-foreground mt-1.5 max-w-md font-mono text-xs">
             {this.state.error?.message || "An unexpected error occurred."}
           </p>
           <div className="mt-6 flex items-center gap-3">

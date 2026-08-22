@@ -10,18 +10,18 @@ import {
 import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-const MarkdownRenderer = lazy(() => import("./markdown-renderer"))
-
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { MessageCodeBlock } from "@/features/chat/components/message-code-block"
-import { Button } from "@/shared/ui/button"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
 import { cn } from "@/lib/utils"
+import { Button } from "@/shared/ui/button"
 import {
   type AssistantMessageKind,
   type ChatAttachment,
   type ChatToolCall,
 } from "@/store/chat"
+
+const MarkdownRenderer = lazy(() => import("./markdown-renderer"))
 
 interface AssistantMessageProps {
   id: string
@@ -141,7 +141,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         <div
           data-chat-bubble="assistant"
           className={cn(
-            "group group/message-bubble relative flex w-full max-w-full flex-col rounded-xl border border-transparent bg-transparent px-1.5 py-1.5 shadow-none transition-colors hover:bg-background/25",
+            "group group/message-bubble hover:bg-background/25 relative flex w-full max-w-full flex-col rounded-xl border border-transparent bg-transparent px-1.5 py-1.5 shadow-none transition-colors",
             isCollapsedBlock &&
               "rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
           )}
@@ -165,9 +165,15 @@ export const AssistantMessage = memo(function AssistantMessage({
               >
                 <div className="flex items-center gap-1.5">
                   {isThought ? (
-                    <IconBrain className="size-3.5 opacity-75" aria-hidden="true" />
+                    <IconBrain
+                      className="size-3.5 opacity-75"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <IconTool className="size-3.5 opacity-75" aria-hidden="true" />
+                    <IconTool
+                      className="size-3.5 opacity-75"
+                      aria-hidden="true"
+                    />
                   )}
                   <span>{collapsedLabel}</span>
                   {trimmedModelName && (
@@ -221,7 +227,13 @@ export const AssistantMessage = memo(function AssistantMessage({
                               {t("chat.toolCallExplanationLabel")}
                             </div>
                             <div className="prose dark:prose-invert prose-p:my-1 prose-p:whitespace-pre-wrap max-w-none text-[12px] leading-5 [overflow-wrap:anywhere] break-words opacity-75">
-                              <Suspense fallback={<span className="animate-pulse opacity-50">...</span>}>
+                              <Suspense
+                                fallback={
+                                  <span className="animate-pulse opacity-50">
+                                    ...
+                                  </span>
+                                }
+                              >
                                 <MarkdownRenderer content={explanation} />
                               </Suspense>
                             </div>
@@ -332,7 +344,13 @@ export const AssistantMessage = memo(function AssistantMessage({
                     isBodyCompact && "max-h-72 overflow-hidden",
                   )}
                 >
-                  <Suspense fallback={<div className="animate-pulse opacity-50 text-sm py-1">Loading format...</div>}>
+                  <Suspense
+                    fallback={
+                      <div className="animate-pulse py-1 text-sm opacity-50">
+                        Loading format...
+                      </div>
+                    }
+                  >
                     <MarkdownRenderer content={content} />
                   </Suspense>
                   {isBodyCompact && (
@@ -428,7 +446,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               href={attachment.url}
               target="_blank"
               rel="noreferrer"
-              className="group/img bg-muted/30 focus-visible:ring-ring/30 relative overflow-hidden rounded-xl border border-border/60 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              className="group/img bg-muted/30 focus-visible:ring-ring/30 border-border/60 relative overflow-hidden rounded-xl border transition-colors focus-visible:ring-2 focus-visible:outline-none"
             >
               <img
                 src={attachment.url}

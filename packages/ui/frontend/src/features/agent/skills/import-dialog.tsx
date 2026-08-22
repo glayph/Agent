@@ -2,6 +2,7 @@ import { IconLoader2, IconUpload, IconX } from "@tabler/icons-react"
 import type { DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 
+import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import {
   Dialog,
@@ -10,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/dialog"
-import { cn } from "@/lib/utils"
 
 interface ImportDialogProps {
   open: boolean

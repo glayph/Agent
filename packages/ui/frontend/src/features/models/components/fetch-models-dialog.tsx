@@ -7,6 +7,7 @@ import {
   type UpstreamModel,
   fetchUpstreamModels,
 } from "@/api/models"
+import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { Button } from "@/shared/ui/button"
 import {
   Dialog,
@@ -17,7 +18,6 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
-import { useIncrementalList } from "@/hooks/use-incremental-list"
 
 import {
   getCanonicalProviderKey,

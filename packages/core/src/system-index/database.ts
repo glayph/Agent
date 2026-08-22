@@ -221,7 +221,12 @@ export class SystemIndexDatabase {
           ORDER BY modified_at_ms DESC
           LIMIT ? OFFSET ?`,
         )
-        .all(pattern, pattern, normalizedLimit, normalizedOffset) as SearchRow[];
+        .all(
+          pattern,
+          pattern,
+          normalizedLimit,
+          normalizedOffset,
+        ) as SearchRow[];
       return rows.map(rowToSearchResult);
     }
   }

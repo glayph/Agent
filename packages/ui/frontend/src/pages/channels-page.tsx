@@ -11,19 +11,8 @@ import {
   patchAppConfig,
   probeChannelRuntime,
 } from "@/api/channels"
-import { type ArrayFieldFlusher } from "@/features/channels/components/channel-array-list-field"
-import {
-  buildEditConfig,
-  getFieldValueForValidation,
-} from "@/features/channels/components/channel-config-fields"
-import {
-  buildSavePayload,
-  getChannelFieldValidationError,
-  getMissingRequiredFieldKeys,
-  getRequiredFieldKeys,
-  normalizeConfig,
-} from "@/features/channels/components/channel-config-model"
-import { getChannelDisplayName } from "@/features/channels/components/channel-display-name"
+import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
+import { PageHeader } from "@/app/layout/page-header"
 import { DingTalkForm } from "@/features/channels/channel-forms/dingtalk-form"
 import { DiscordForm } from "@/features/channels/channel-forms/discord-form"
 import { FeishuForm } from "@/features/channels/channel-forms/feishu-form"
@@ -42,14 +31,25 @@ import {
   WhatsAppForm,
   WhatsAppNativeForm,
 } from "@/features/channels/channel-forms/whatsapp-form"
-import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
-import { PageHeader } from "@/app/layout/page-header"
-import { Badge } from "@/shared/ui/badge"
-import { Button } from "@/shared/ui/button"
-import { Switch } from "@/shared/ui/switch"
+import { type ArrayFieldFlusher } from "@/features/channels/components/channel-array-list-field"
+import {
+  buildEditConfig,
+  getFieldValueForValidation,
+} from "@/features/channels/components/channel-config-fields"
+import {
+  buildSavePayload,
+  getChannelFieldValidationError,
+  getMissingRequiredFieldKeys,
+  getRequiredFieldKeys,
+  normalizeConfig,
+} from "@/features/channels/components/channel-config-model"
+import { getChannelDisplayName } from "@/features/channels/components/channel-display-name"
 import { useGateway } from "@/hooks/use-gateway"
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
+import { Badge } from "@/shared/ui/badge"
+import { Button } from "@/shared/ui/button"
+import { Switch } from "@/shared/ui/switch"
 import { refreshGatewayState } from "@/store/gateway"
 
 interface ChannelConfigPageProps {
@@ -438,7 +438,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
     setFieldErrors({})
     try {
       const savePayload = buildSavePayload(channel, preparedEditConfig, enabled)
-      await patchAppConfig({
+      const channelApply = await patchAppConfig({
         channel_list: {
           [channel.config_key]: savePayload,
         },
@@ -449,7 +449,10 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
         t,
         t("channels.page.saveSuccess"),
         channelDisplayName,
-        gateway?.restartRequired === true,
+        channelApply.gateway_restart_required ??
+          gateway?.restartRequired === true,
+        channelApply.runtime_apply_status,
+        channelApply.runtime_apply_error,
       )
     } catch (e) {
       const message =

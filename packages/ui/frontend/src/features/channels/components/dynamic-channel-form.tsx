@@ -67,7 +67,9 @@ export function DynamicChannelForm({
           <div key={field.key} className="flex flex-col gap-2">
             <Label htmlFor={field.key} className="text-xs font-medium">
               {t(field.labelKey)}
-              {field.required && <span className="text-destructive ml-1">*</span>}
+              {field.required && (
+                <span className="text-destructive ml-1">*</span>
+              )}
             </Label>
             <Input
               id={field.key}

@@ -36,7 +36,7 @@ export function AgentSwarmPage() {
           </p>
         </div>
         {status?.status === "healthy" && (
-          <div className="flex items-center gap-2 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-green-500">
+          <div className="flex items-center gap-2 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-semibold tracking-wider text-green-500 uppercase">
             <IconActivityHeartbeat size={14} />
             Swarm Online
           </div>

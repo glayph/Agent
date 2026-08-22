@@ -4,7 +4,6 @@ import {
   type MonitorNode,
   type MonitorNodeStatus,
   type MonitorNodeType,
-  clearMonitorRun,
   getMonitorState,
   updateMonitorStore,
 } from "@/features/monitor/store"
@@ -267,9 +266,9 @@ export function handleMonitorMessage(message: mikiMessage) {
         }
       })
 
-      // Keep the terminal state visible for a short moment so the inspector
-      // can be read, then return the Monitor to its silent default canvas.
-      window.setTimeout(() => clearMonitorRun(runId), 1600)
+      // Keep terminal runs in session monitor history so the Inspector's
+      // Work, Evidence, and Events tabs remain useful after streaming stops.
+      // Session reset owns cleanup instead of a short timer.
       break
     }
 

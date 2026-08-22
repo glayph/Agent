@@ -8,11 +8,11 @@ import {
   type FlowStatusResponse,
   getFlowStatus,
 } from "@/api/system"
-import { SectionPanel, StatusDot } from "@/shared/ui/minimal-primitives"
+import { formatDateTime } from "@/lib/format"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { SectionPanel, StatusDot } from "@/shared/ui/minimal-primitives"
 import { Skeleton } from "@/shared/ui/skeleton"
-import { formatDateTime } from "@/lib/format"
 
 function statusVariant(status: FlowComponentStatus) {
   if (status === "ready") return "default" as const

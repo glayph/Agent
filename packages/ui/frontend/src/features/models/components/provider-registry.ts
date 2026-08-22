@@ -1,4 +1,4 @@
-import type { ModelProviderOption } from "@/api/models"
+import type { ModelProviderOption, ModelProviderPluginInfo } from "@/api/models"
 
 export interface ProviderCatalogEntry {
   key: string
@@ -17,6 +17,7 @@ export interface ProviderCatalogEntry {
   emptyApiKeyAllowed?: boolean
   commonModels: string[]
   aliases: string[]
+  plugin?: ModelProviderPluginInfo
 }
 
 // Frontend still needs the same trim/lower normalization as the backend
@@ -46,6 +47,7 @@ function toCatalogEntry(option: ModelProviderOption): ProviderCatalogEntry {
     emptyApiKeyAllowed: option.empty_api_key_allowed,
     commonModels: option.common_models || [],
     aliases: option.aliases || [],
+    plugin: option.plugin,
   }
 }
 
@@ -126,14 +128,18 @@ export function getProviderDefaultAuthMethod(
   provider: string | undefined,
   backendOptions?: ModelProviderOption[],
 ): string {
-  return getProviderCatalogEntry(provider, backendOptions)?.defaultAuthMethod ?? ""
+  return (
+    getProviderCatalogEntry(provider, backendOptions)?.defaultAuthMethod ?? ""
+  )
 }
 
 export function isProviderAuthMethodLocked(
   provider: string | undefined,
   backendOptions?: ModelProviderOption[],
 ): boolean {
-  return getProviderCatalogEntry(provider, backendOptions)?.authMethodLocked === true
+  return (
+    getProviderCatalogEntry(provider, backendOptions)?.authMethodLocked === true
+  )
 }
 
 export function providerSupportsFetch(

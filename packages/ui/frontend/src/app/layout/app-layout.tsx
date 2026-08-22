@@ -1,5 +1,5 @@
 import { useRouterState } from "@tanstack/react-router"
-import { Suspense, lazy, useEffect, useState, type ReactNode } from "react"
+import { type ReactNode, Suspense, lazy, useEffect, useState } from "react"
 import { Toaster } from "sonner"
 
 import { AppBackground } from "@/app/layout/app-background"

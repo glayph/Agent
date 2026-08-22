@@ -24,7 +24,10 @@ function makeRuntimePaths(workspaceDir: string): RuntimePaths {
 // on, which is the default), not runtimePaths.skillsDir directly — the
 // fixture below must write plugins to the same place production code reads.
 function skillsDirFor(workspaceDir: string): string {
-  return resolveDownloadedSkillsDir(makeRuntimePaths(workspaceDir), workspaceDir);
+  return resolveDownloadedSkillsDir(
+    makeRuntimePaths(workspaceDir),
+    workspaceDir,
+  );
 }
 
 function createWorkspace() {

@@ -62,9 +62,7 @@ export function clearSessionIdFromHash() {
   if (typeof window === "undefined") return
   const hash = window.location.hash
   if (hash.includes("session=")) {
-    const cleaned = hash
-      .replace(/[#&]session=[^&]*/, "")
-      .replace(/^#/, "")
+    const cleaned = hash.replace(/[#&]session=[^&]*/, "").replace(/^#/, "")
     window.history.replaceState(
       null,
       "",
@@ -74,9 +72,12 @@ export function clearSessionIdFromHash() {
 }
 
 export function getInitialActiveSessionId(): string {
-  // Miki is intentionally a single-chat console. Ignore legacy hash/storage
-  // session IDs so the UI cannot create or switch to a second conversation.
-  return SINGLE_CHAT_SESSION_ID
+  // A shared link is an explicit request to open that server-backed session.
+  // Normal launches retain the last session, while fresh installs use the
+  // single-chat default.
+  return (
+    readSessionIdFromHash() || readStoredSessionId() || SINGLE_CHAT_SESSION_ID
+  )
 }
 
 export function normalizeUnixTimestamp(timestamp: number): number {

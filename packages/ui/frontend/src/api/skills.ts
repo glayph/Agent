@@ -65,11 +65,7 @@ export interface InstallSkillResponse {
 }
 
 export type PluginMarketplaceReadinessStatus =
-  | "ready"
-  | "metadata_only"
-  | "needs_policy"
-  | "incomplete"
-  | "blocked"
+  "ready" | "metadata_only" | "needs_policy" | "incomplete" | "blocked"
 
 export type PluginMarketplaceIssueSeverity = "error" | "warning" | "info"
 

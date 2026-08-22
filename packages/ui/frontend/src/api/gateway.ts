@@ -81,7 +81,10 @@ export async function startGateway(): Promise<GatewayActionResponse> {
 }
 
 export async function stopGateway(): Promise<GatewayActionResponse> {
-  return request<GatewayActionResponse>("/api/gateway/stop", {
+  // The Node runtime is the gateway process itself, so the compatibility
+  // /api/gateway/stop route cannot stop its parent and intentionally returns
+  // 501. Use the authenticated gateway-owned shutdown handoff instead.
+  return request<GatewayActionResponse>("/gateway/shutdown", {
     method: "POST",
   })
 }

@@ -13,12 +13,7 @@ import { Button } from "@/shared/ui/button"
 import { Card, CardContent } from "@/shared/ui/card"
 
 type NormalizedQrBindingStatus =
-  | "idle"
-  | "wait"
-  | "scanned"
-  | "confirmed"
-  | "expired"
-  | "error"
+  "idle" | "wait" | "scanned" | "confirmed" | "expired" | "error"
 
 interface QrBindingPanelProps {
   channel: QrBindingChannel

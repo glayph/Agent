@@ -1,0 +1,204 @@
+/* ================================================
+   লগইন ডেমো — styles.css
+   ================================================ */
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2a2d3a;
+  --primary: #6c63ff;
+  --primary-hover: #5a52e0;
+  --danger: #e74c5e;
+  --danger-hover: #c93d4e;
+  --success: #2ecc71;
+  --text: #e4e4e7;
+  --muted: #8b8fa3;
+  --error: #e74c5e;
+  --radius: 12px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* ---------- Container ---------- */
+.container {
+  width: 100%;
+  max-width: 420px;
+}
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem 1.75rem;
+  display: none;
+  animation: fadeIn .3s ease;
+}
+.card.active { display: block; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Headings ---------- */
+h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: .35rem;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: .88rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ---------- Demo Credentials Box ---------- */
+.demo-creds {
+  background: rgba(108, 99, 255, .08);
+  border: 1px dashed var(--primary);
+  border-radius: 8px;
+  padding: .65rem .85rem;
+  font-size: .82rem;
+  margin-bottom: 1.25rem;
+  color: var(--muted);
+}
+.demo-creds code {
+  color: var(--primary);
+  font-weight: 600;
+  background: rgba(108, 99, 255, .12);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: .82rem;
+}
+
+/* ---------- Fields ---------- */
+.field { margin-bottom: 1rem; }
+
+label {
+  display: block;
+  font-size: .82rem;
+  font-weight: 600;
+  margin-bottom: .3rem;
+  color: var(--muted);
+}
+
+input {
+  width: 100%;
+  padding: .6rem .75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: .95rem;
+  transition: border-color .2s;
+}
+input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+input.invalid {
+  border-color: var(--error);
+}
+
+.error {
+  display: block;
+  font-size: .75rem;
+  color: var(--error);
+  margin-top: .25rem;
+  min-height: 1rem;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  width: 100%;
+  padding: .7rem;
+  border: none;
+  border-radius: 8px;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, transform .1s;
+}
+.btn:active { transform: scale(.98); }
+
+.btn.primary {
+  background: var(--primary);
+  color: #fff;
+  margin-top: .5rem;
+}
+.btn.primary:hover { background: var(--primary-hover); }
+.btn.primary:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+  margin-top: 1.25rem;
+}
+.btn.danger:hover { background: var(--danger-hover); }
+
+/* ---------- Banners ---------- */
+.banner {
+  display: none;
+  padding: .6rem .8rem;
+  border-radius: 8px;
+  font-size: .85rem;
+  margin-top: 1rem;
+  text-align: center;
+}
+.banner.visible { display: block; }
+
+.error-banner {
+  background: rgba(231, 76, 94, .12);
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+/* ---------- Spinner ---------- */
+.spinner {
+  display: none;
+  text-align: center;
+  font-size: .88rem;
+  color: var(--muted);
+  margin-top: 1rem;
+}
+.spinner.visible { display: block; }
+
+/* ---------- Profile Box ---------- */
+.profile-box {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: rgba(46, 204, 113, .08);
+  border: 1px solid rgba(46, 204, 113, .25);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: .5rem;
+}
+.avatar { font-size: 2rem; }
+.profile-box strong { display: block; font-size: 1.05rem; }
+.muted  { color: var(--muted); font-size: .82rem; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 480px) {
+  .card { padding: 1.5rem 1.2rem; }
+}

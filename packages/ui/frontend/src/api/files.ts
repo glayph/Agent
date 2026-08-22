@@ -18,6 +18,8 @@ export interface FileRoot {
   path: string
   kind: "home" | "workspace" | "drive" | "root" | "quickAccess"
   protected: boolean
+  canWrite?: boolean
+  canRun?: boolean
   storage?: FileRootStorage
 }
 
@@ -42,7 +44,10 @@ export interface DirectoryListing {
   path: string
   parentPath: string | null
   entries: FileEntry[]
+  total: number
+  offset: number
   limit: number
+  hasMore: boolean
 }
 
 export interface ReadFileResponse {
@@ -57,7 +62,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await launcherFetch(path, options)
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new FilesApiError(body.error || `API error: ${res.status}`, res.status)
+    throw new FilesApiError(
+      body.error || `API error: ${res.status}`,
+      res.status,
+    )
   }
   return res.json() as Promise<T>
 }
@@ -78,9 +86,36 @@ export function getFileRoots(): Promise<{ roots: FileRoot[] }> {
   return request<{ roots: FileRoot[] }>("/api/files/roots")
 }
 
-export function listFiles(path: string): Promise<DirectoryListing> {
-  const params = new URLSearchParams({ path })
-  return request<DirectoryListing>(`/api/files?${params.toString()}`)
+export async function listFiles(path: string): Promise<DirectoryListing> {
+  const pageSize = 1000
+  const allEntries: FileEntry[] = []
+  let offset = 0
+  let listing: DirectoryListing | null = null
+
+  do {
+    const params = new URLSearchParams({
+      path,
+      offset: String(offset),
+      limit: String(pageSize),
+    })
+    listing = await request<DirectoryListing>(`/api/files?${params.toString()}`)
+    allEntries.push(...listing.entries)
+    offset += listing.entries.length
+    if (listing.entries.length === 0) break
+  } while (listing.hasMore)
+
+  if (!listing) {
+    throw new FilesApiError("Directory listing was empty", 500)
+  }
+
+  return {
+    ...listing,
+    entries: allEntries,
+    offset: 0,
+    limit: allEntries.length,
+    hasMore: false,
+    total: listing.total,
+  }
 }
 
 export function readFile(path: string): Promise<ReadFileResponse> {
@@ -154,7 +189,10 @@ export async function uploadFile(
   })
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new FilesApiError(body.error || `API error: ${res.status}`, res.status)
+    throw new FilesApiError(
+      body.error || `API error: ${res.status}`,
+      res.status,
+    )
   }
   return res.json() as Promise<{ status: string; entry: FileEntry }>
 }

@@ -84,10 +84,20 @@ export interface AgentRun {
   retrievalDiagnostics?: Record<string, unknown>;
 }
 
+export interface AgentRunListOptions {
+  limit?: number;
+  offset?: number;
+  query?: string;
+  status?: TaskGraphStepStatus;
+}
+
+export type AgentRunListInput = number | AgentRunListOptions;
+
 export interface AgentRunStore {
   save(run: AgentRun): void;
   get(runId: string): AgentRun | null;
-  list(limit?: number): AgentRun[];
+  list(input?: AgentRunListInput): AgentRun[];
+  count(filters?: Pick<AgentRunListOptions, "query" | "status">): number;
 }
 
 export interface AgentRunStepPatch {
@@ -299,6 +309,32 @@ function normalizeStep(raw: unknown): TaskGraphStep {
   };
 }
 
+function normalizeAgentRunListOptions(
+  input: AgentRunListInput = 50,
+): Required<Pick<AgentRunListOptions, "limit" | "offset">> &
+  Pick<AgentRunListOptions, "query" | "status"> {
+  const raw = typeof input === "number" ? { limit: input } : input;
+  return {
+    limit: Math.max(1, Math.min(500, Math.floor(raw.limit ?? 50))),
+    offset: Math.max(0, Math.floor(raw.offset ?? 0)),
+    query: raw.query?.trim() || undefined,
+    status: raw.status,
+  };
+}
+
+function matchesAgentRun(
+  run: AgentRun,
+  filters: Pick<AgentRunListOptions, "query" | "status">,
+): boolean {
+  return (
+    (!filters.status || run.status === filters.status) &&
+    (!filters.query ||
+      run.objective
+        .toLocaleLowerCase()
+        .includes(filters.query.toLocaleLowerCase()))
+  );
+}
+
 export class InMemoryAgentRunStore implements AgentRunStore {
   private readonly runs = new Map<string, AgentRun>();
 
@@ -311,11 +347,19 @@ export class InMemoryAgentRunStore implements AgentRunStore {
     return run ? clone(run) : null;
   }
 
-  list(limit = 50): AgentRun[] {
+  list(input: AgentRunListInput = 50): AgentRun[] {
+    const options = normalizeAgentRunListOptions(input);
     return [...this.runs.values()]
+      .filter((run) => matchesAgentRun(run, options))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, limit)
+      .slice(options.offset, options.offset + options.limit)
       .map((run) => clone(run));
+  }
+
+  count(filters: Pick<AgentRunListOptions, "query" | "status"> = {}): number {
+    return [...this.runs.values()].filter((run) =>
+      matchesAgentRun(run, filters),
+    ).length;
   }
 }
 
@@ -374,17 +418,51 @@ export class SqliteAgentRunStore implements AgentRunStore {
     return row ? this.rowToRun(row) : null;
   }
 
-  list(limit = 50): AgentRun[] {
-    const safeLimit = Math.max(1, Math.min(500, limit));
+  list(input: AgentRunListInput = 50): AgentRun[] {
+    const options = normalizeAgentRunListOptions(input);
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (options.status) {
+      conditions.push("status = ?");
+      params.push(options.status);
+    }
+    if (options.query) {
+      conditions.push("LOWER(objective) LIKE ?");
+      params.push(`%${options.query.toLocaleLowerCase()}%`);
+    }
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = this.db
       .prepare(
         `SELECT id, objective, status, steps_json, timeline_json, context_json, created_at, updated_at
          FROM agent_runs
+         ${where}
          ORDER BY updated_at DESC
-         LIMIT ?`,
+         LIMIT ? OFFSET ?`,
       )
-      .all(safeLimit) as Array<Record<string, unknown>>;
+      .all(...params, options.limit, options.offset) as Array<
+      Record<string, unknown>
+    >;
     return rows.map((row) => this.rowToRun(row));
+  }
+
+  count(filters: Pick<AgentRunListOptions, "query" | "status"> = {}): number {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (filters.status) {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
+    if (filters.query?.trim()) {
+      conditions.push("LOWER(objective) LIKE ?");
+      params.push(`%${filters.query.trim().toLocaleLowerCase()}%`);
+    }
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS count FROM agent_runs ${where}`)
+      .get(...params) as { count?: number };
+    return Number(row.count || 0);
   }
 
   private init(): void {
@@ -735,8 +813,12 @@ export class AgentRunRecorder {
     return this.store.get(runId);
   }
 
-  list(limit?: number): AgentRun[] {
-    return this.store.list(limit);
+  list(input?: AgentRunListInput): AgentRun[] {
+    return this.store.list(input);
+  }
+
+  count(filters?: Pick<AgentRunListOptions, "query" | "status">): number {
+    return this.store.count(filters);
   }
 
   private updateStep(
@@ -866,7 +948,8 @@ function sanitizeToolCallMetadata(
       status === "denied"
         ? status
         : undefined,
-    latencyMs: typeof value.latencyMs === "number" ? value.latencyMs : undefined,
+    latencyMs:
+      typeof value.latencyMs === "number" ? value.latencyMs : undefined,
     permission: sanitizePermissionMetadata(value.permission),
   };
 }

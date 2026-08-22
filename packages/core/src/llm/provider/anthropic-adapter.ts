@@ -84,7 +84,9 @@ type AnthropicContentBlock = Anthropic.ContentBlockParam;
  * Extracts and joins the system prompt(s) from an OpenAI messages array.
  * Anthropic puts the system prompt at top level, not inside messages[].
  */
-export function extractSystemPrompt(messages: ChatCompletionMessageParam[]): string {
+export function extractSystemPrompt(
+  messages: ChatCompletionMessageParam[],
+): string {
   return messages
     .filter((m) => m.role === "system")
     .map((m) => (typeof m.content === "string" ? m.content : ""))
@@ -167,8 +169,7 @@ export function translateMessagesToAnthropic(
         toolResultBlocks.push({
           type: "tool_result",
           tool_use_id: toolMsg.tool_call_id,
-          content:
-            typeof toolMsg.content === "string" ? toolMsg.content : "",
+          content: typeof toolMsg.content === "string" ? toolMsg.content : "",
         });
         i++;
       }
@@ -259,8 +260,7 @@ export function translateResponseToLLM(
     usage: {
       prompt_tokens: response.usage.input_tokens,
       completion_tokens: response.usage.output_tokens,
-      total_tokens:
-        response.usage.input_tokens + response.usage.output_tokens,
+      total_tokens: response.usage.input_tokens + response.usage.output_tokens,
     },
   };
 }

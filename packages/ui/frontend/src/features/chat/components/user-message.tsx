@@ -64,7 +64,7 @@ export const UserMessage = memo(function UserMessage({
               height={360}
               loading="lazy"
               decoding="async"
-              className="max-h-[clamp(10rem,34svh,18rem)] max-w-full rounded-2xl border border-border/60 object-cover shadow-sm"
+              className="border-border/60 max-h-[clamp(10rem,34svh,18rem)] max-w-full rounded-2xl border object-cover shadow-sm"
             />
           ))}
         </div>
@@ -84,15 +84,13 @@ export const UserMessage = memo(function UserMessage({
         >
           <div
             className={cn(
-              "wrap-break-word rounded-xl rounded-br-sm border px-3 py-2 text-[14px] leading-5 whitespace-pre-wrap transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)] [border-color:var(--chat-user-border)] [box-shadow:var(--chat-user-shadow)] [color:var(--chat-user-text)]",
+              "rounded-xl rounded-br-sm border [border-color:var(--chat-user-border)] px-3 py-2 text-[14px] leading-5 wrap-break-word whitespace-pre-wrap [color:var(--chat-user-text)] [box-shadow:var(--chat-user-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)]",
               isCommand && "font-mono text-[12.5px]",
             )}
           >
             {isCommand ? (
               <div className="flex items-start gap-2.5">
-                <span className="font-bold opacity-70 select-none">
-                  &gt;
-                </span>
+                <span className="font-bold opacity-70 select-none">&gt;</span>
                 <span className="mt-[1px]">{content}</span>
               </div>
             ) : (

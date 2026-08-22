@@ -16,6 +16,7 @@ import {
   setLauncherConfig as updateLauncherConfig,
 } from "@/api/system"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
+import { PageHeader } from "@/app/layout/page-header"
 import {
   AgentDefaultsSection,
   CronSection,
@@ -41,7 +42,8 @@ import {
   parseMultilineList,
   parseOptionalPositiveIntField,
 } from "@/features/config/components/form-model"
-import { PageHeader } from "@/app/layout/page-header"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,8 +57,6 @@ import {
 } from "@/shared/ui/alert-dialog"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
-import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
 function buildStringMapMergePatch(
@@ -288,6 +288,7 @@ export function ConfigPage() {
   }
 
   const handleSave = async () => {
+    let configApply: Awaited<ReturnType<typeof patchAppConfig>> | undefined
     try {
       setSaving(true)
       const password = launcherForm.dashboardPassword.trim()
@@ -572,7 +573,7 @@ export function ConfigPage() {
           }
         }
 
-        await patchAppConfig({
+        configApply = await patchAppConfig({
           agent: {
             security: {
               bypass_restrictions: form.bypassRestrictions,
@@ -701,7 +702,10 @@ export function ConfigPage() {
         t,
         t("pages.config.save_success"),
         t("navigation.config"),
-        gateway?.restartRequired === true,
+        configApply?.gateway_restart_required ??
+          gateway?.restartRequired === true,
+        configApply?.runtime_apply_status,
+        configApply?.runtime_apply_error,
       )
     } catch (err) {
       toast.error(

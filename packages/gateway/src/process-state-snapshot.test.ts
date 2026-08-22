@@ -1,7 +1,10 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createProcessStateStore, ProcessStateStore } from "./process-state-snapshot.js";
+import {
+  createProcessStateStore,
+  ProcessStateStore,
+} from "./process-state-snapshot.js";
 
 describe("ProcessStateStore", () => {
   let tmpDir: string;
@@ -41,7 +44,9 @@ describe("ProcessStateStore", () => {
     const snapshot = store.read();
     expect(snapshot.cleanShutdown).toBe(false);
     expect(snapshot.lastHealthyAt).not.toBeNull();
-    expect(Number.isNaN(Date.parse(snapshot.lastHealthyAt as string))).toBe(false);
+    expect(Number.isNaN(Date.parse(snapshot.lastHealthyAt as string))).toBe(
+      false,
+    );
   });
 
   it("increments restartAttempts across repeated calls without clobbering", () => {

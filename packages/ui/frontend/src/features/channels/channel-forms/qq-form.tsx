@@ -29,7 +29,12 @@ export function QQForm({
     <div className="space-y-6">
       <Card className="shadow-sm">
         <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field label="Bot ID" required hint="QQ Bot ID" error={fieldErrors.bot_id}>
+          <Field
+            label="Bot ID"
+            required
+            hint="QQ Bot ID"
+            error={fieldErrors.bot_id}
+          >
             <Input
               value={asString(config.bot_id)}
               onChange={(e) => onChange("bot_id", e.target.value)}
@@ -37,7 +42,12 @@ export function QQForm({
             />
           </Field>
 
-          <Field label="Bot Token" required hint="QQ Bot token" error={fieldErrors.token}>
+          <Field
+            label="Bot Token"
+            required
+            hint="QQ Bot token"
+            error={fieldErrors.token}
+          >
             <KeyInput
               value={asString(config._token)}
               onChange={(v) => onChange("_token", v)}

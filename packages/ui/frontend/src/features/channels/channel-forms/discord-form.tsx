@@ -8,6 +8,7 @@ import {
 import {
   asStringArray,
   parseAllowFromInput,
+  parseConservativeStringListInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
@@ -110,6 +111,22 @@ export function DiscordForm({
               ariaLabel={t("channels.field.mentionOnly")}
             />
           </div>
+          <ChannelArrayListField
+            label={t("channels.field.groupTriggerPrefixes")}
+            hint={t("channels.form.desc.groupTriggerPrefixes")}
+            value={asStringArray(groupTriggerConfig.prefixes)}
+            onChange={(value) =>
+              onChange("group_trigger", {
+                ...groupTriggerConfig,
+                prefixes: value,
+              })
+            }
+            placeholder={t("channels.field.groupTriggerPrefixes")}
+            parser={parseConservativeStringListInput}
+            fieldPath="group_trigger.prefixes"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
         </CardContent>
       </Card>
     </div>

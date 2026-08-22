@@ -1,9 +1,9 @@
 import {
   Children,
-  cloneElement,
   Fragment,
-  isValidElement,
   type ReactNode,
+  cloneElement,
+  isValidElement,
 } from "react"
 
 export interface MarkdownNode {
@@ -74,7 +74,8 @@ export function extractTextFromMarkdownNode(
 
 export function extractCodeBlockLanguage(className: unknown): string | null {
   const languageToken = toClassNameTokens(className).find(
-    (token) => token.startsWith("language-") && token.length > "language-".length,
+    (token) =>
+      token.startsWith("language-") && token.length > "language-".length,
   )
 
   return languageToken ? languageToken.slice("language-".length) : null
@@ -91,7 +92,9 @@ export function extractCodeBlockFromPreNode(node: MarkdownNode | undefined): {
   const codeNode = findFirstDescendantByTagName(node, "code")
 
   return {
-    code: stripSingleTrailingLineBreak(extractTextFromMarkdownNode(codeNode ?? node)),
+    code: stripSingleTrailingLineBreak(
+      extractTextFromMarkdownNode(codeNode ?? node),
+    ),
     language: extractCodeBlockLanguage(codeNode?.properties?.className),
   }
 }
@@ -189,7 +192,9 @@ function mergeReactLineGroups(
 }
 
 function splitTextNodeIntoLines(value: string | number): ReactNode[][] {
-  return String(value).split("\n").map((line) => (line.length > 0 ? [line] : []))
+  return String(value)
+    .split("\n")
+    .map((line) => (line.length > 0 ? [line] : []))
 }
 
 function splitReactNodeIntoLines(node: ReactNode): ReactNode[][] {
@@ -210,14 +215,13 @@ function splitReactNodeIntoLines(node: ReactNode): ReactNode[][] {
   }
 
   if (node.type === Fragment) {
-    return splitRenderedCodeContentIntoLines(Children.toArray(node.props.children))
+    return splitRenderedCodeContentIntoLines(
+      Children.toArray(node.props.children),
+    )
   }
 
   if (typeof node.type === "string" && node.type === "br") {
-    return [
-      [],
-      [],
-    ]
+    return [[], []]
   }
 
   const childLines = splitRenderedCodeContentIntoLines(

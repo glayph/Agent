@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentRouteImport } from './routes/agent'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
+import { Route as ChatRouteImport } from './routes/chat'
 import { Route as ConfigRouteImport } from './routes/config'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DriveRouteImport } from './routes/drive'
@@ -20,6 +21,7 @@ import { Route as HealthRouteImport } from './routes/health'
 import { Route as LauncherLoginRouteImport } from './routes/launcher-login'
 import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
 import { Route as LogsRouteImport } from './routes/logs'
+import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as AgentAutomationsRouteImport } from './routes/agent/automations'
 import { Route as AgentHubRouteImport } from './routes/agent/hub'
@@ -59,6 +61,11 @@ const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
   path: '/channels',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConfigRoute = ConfigRouteImport.update({
   id: '/config',
   path: '/config',
@@ -92,6 +99,11 @@ const LauncherSetupRoute = LauncherSetupRouteImport.update({
 const LogsRoute = LogsRouteImport.update({
   id: '/logs',
   path: '/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MemoryRoute = MemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsRoute = ModelsRouteImport.update({
@@ -191,6 +203,7 @@ export interface FileRoutesByFullPath {
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRouteWithChildren
+  '/chat': typeof ChatRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
@@ -198,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/launcher-login': typeof LauncherLoginRoute
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
+  '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
   '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
@@ -221,6 +235,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
+  '/chat': typeof ChatRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
@@ -228,6 +243,7 @@ export interface FileRoutesByTo {
   '/launcher-login': typeof LauncherLoginRoute
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
+  '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
@@ -252,6 +268,7 @@ export interface FileRoutesById {
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRouteWithChildren
+  '/chat': typeof ChatRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
@@ -259,6 +276,7 @@ export interface FileRoutesById {
   '/launcher-login': typeof LauncherLoginRoute
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
+  '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
   '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
@@ -285,6 +303,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/agent'
     | '/agents'
+    | '/chat'
     | '/config'
     | '/credentials'
     | '/drive'
@@ -292,6 +311,7 @@ export interface FileRouteTypes {
     | '/launcher-login'
     | '/launcher-setup'
     | '/logs'
+    | '/memory'
     | '/models'
     | '/agent/automations'
     | '/agent/hub'
@@ -315,6 +335,7 @@ export interface FileRouteTypes {
     | '/'
     | '/channels'
     | '/agent'
+    | '/chat'
     | '/config'
     | '/credentials'
     | '/drive'
@@ -322,6 +343,7 @@ export interface FileRouteTypes {
     | '/launcher-login'
     | '/launcher-setup'
     | '/logs'
+    | '/memory'
     | '/models'
     | '/agent/hub'
     | '/agent/monitor'
@@ -345,6 +367,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/agent'
     | '/agents'
+    | '/chat'
     | '/config'
     | '/credentials'
     | '/drive'
@@ -352,6 +375,7 @@ export interface FileRouteTypes {
     | '/launcher-login'
     | '/launcher-setup'
     | '/logs'
+    | '/memory'
     | '/models'
     | '/agent/automations'
     | '/agent/hub'
@@ -377,6 +401,7 @@ export interface RootRouteChildren {
   ChannelsRouteRoute: typeof ChannelsRouteRouteWithChildren
   AgentRoute: typeof AgentRouteWithChildren
   AgentsRoute: typeof AgentsRouteWithChildren
+  ChatRoute: typeof ChatRoute
   ConfigRoute: typeof ConfigRouteWithChildren
   CredentialsRoute: typeof CredentialsRoute
   DriveRoute: typeof DriveRoute
@@ -384,6 +409,7 @@ export interface RootRouteChildren {
   LauncherLoginRoute: typeof LauncherLoginRoute
   LauncherSetupRoute: typeof LauncherSetupRoute
   LogsRoute: typeof LogsRoute
+  MemoryRoute: typeof MemoryRoute
   ModelsRoute: typeof ModelsRoute
 }
 
@@ -415,6 +441,13 @@ declare module '@tanstack/react-router' {
       path: '/channels'
       fullPath: '/channels'
       preLoaderRoute: typeof ChannelsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/config': {
@@ -464,6 +497,13 @@ declare module '@tanstack/react-router' {
       path: '/logs'
       fullPath: '/logs'
       preLoaderRoute: typeof LogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/memory': {
+      id: '/memory'
+      path: '/memory'
+      fullPath: '/memory'
+      preLoaderRoute: typeof MemoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models': {
@@ -679,6 +719,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChannelsRouteRoute: ChannelsRouteRouteWithChildren,
   AgentRoute: AgentRouteWithChildren,
   AgentsRoute: AgentsRouteWithChildren,
+  ChatRoute: ChatRoute,
   ConfigRoute: ConfigRouteWithChildren,
   CredentialsRoute: CredentialsRoute,
   DriveRoute: DriveRoute,
@@ -686,6 +727,7 @@ const rootRouteChildren: RootRouteChildren = {
   LauncherLoginRoute: LauncherLoginRoute,
   LauncherSetupRoute: LauncherSetupRoute,
   LogsRoute: LogsRoute,
+  MemoryRoute: MemoryRoute,
   ModelsRoute: ModelsRoute,
 }
 export const routeTree = rootRouteImport

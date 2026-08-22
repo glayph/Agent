@@ -62,7 +62,10 @@ export function useHubMarketplace() {
       } catch (err) {
         return {
           available: false,
-          error: err instanceof Error ? err.message : "Skill install API unavailable",
+          error:
+            err instanceof Error
+              ? err.message
+              : "Skill install API unavailable",
         }
       }
     },
@@ -71,7 +74,8 @@ export function useHubMarketplace() {
   })
 
   const canSearchMarketplace = skillSearchHealthQuery.data?.available ?? true
-  const canInstallFromMarketplace = skillInstallHealthQuery.data?.available ?? true
+  const canInstallFromMarketplace =
+    skillInstallHealthQuery.data?.available ?? true
   const hasSubmittedQuery = submittedMarketQuery.trim() !== ""
   const isMarketSearchActive = canSearchMarketplace && hasSubmittedQuery
 

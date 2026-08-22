@@ -14,13 +14,7 @@ export type MonitorNodeStatus =
   "pending" | "running" | "retrying" | "completed" | "failed"
 
 export type MonitorNodeType =
-  | "tool"
-  | "skill"
-  | "plugin"
-  | "file"
-  | "command"
-  | "pattern"
-  | "system"
+  "tool" | "skill" | "plugin" | "file" | "command" | "pattern" | "system"
 
 export type MonitorNodeUIState = "minimized" | "expanded"
 
@@ -124,16 +118,13 @@ export function clearMonitorRun(runId: string) {
       Object.entries(prev.nodes).filter(([nodeId]) => !nodeIds.has(nodeId)),
     )
     const edges = Object.fromEntries(
-      Object.entries(prev.edges).filter(
-        ([, edge]) => edge.runId !== runId,
-      ),
+      Object.entries(prev.edges).filter(([, edge]) => edge.runId !== runId),
     )
     const selectedNodeId = nodeIds.has(prev.selectedNodeId ?? "")
       ? undefined
       : prev.selectedNodeId
-    const selectedRunId = prev.selectedRunId === runId
-      ? undefined
-      : prev.selectedRunId
+    const selectedRunId =
+      prev.selectedRunId === runId ? undefined : prev.selectedRunId
 
     return {
       runs: Object.fromEntries(

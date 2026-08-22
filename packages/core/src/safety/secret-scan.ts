@@ -1,246 +1,244 @@
-import * as fs from "fs";
-import * as path from "path";
-import { type RuntimePaths } from "../paths.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { RuntimePaths } from "../paths.js";
 
-export interface SecretLeakFinding {
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const TEXT_EXTENSIONS = new Set([
+  ".cjs",
+  ".conf",
+  ".config",
+  ".css",
+  ".env",
+  ".go",
+  ".html",
+  ".ini",
+  ".java",
+  ".js",
+  ".json",
+  ".jsx",
+  ".log",
+  ".md",
+  ".mjs",
+  ".py",
+  ".rs",
+  ".sh",
+  ".sql",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml",
+]);
+const IGNORED_DIRS = new Set([
+  ".git",
+  ".trash",
+  ".miki-build",
+  ".next",
+  ".cache",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "vendor",
+  "vendorized",
+  "__pycache__",
+]);
+
+export interface SecretScanFinding {
   file: string;
   line: number;
-  column: number;
   pattern: string;
   redactedPreview: string;
 }
 
 export interface SecretScanReport {
+  scannedAt: string;
+  checkedFiles: number;
   scannedFiles: number;
-  findings: SecretLeakFinding[];
+  skippedFiles: number;
+  findings: SecretScanFinding[];
   fixedFiles: string[];
 }
 
-interface SecretPattern {
-  id: string;
-  pattern: RegExp;
+export interface SecretScanOptions {
+  fix?: boolean;
+  maxFileBytes?: number;
 }
 
-interface SecretMatch {
-  start: number;
-  end: number;
-  value: string;
-  pattern: string;
-}
+type Match = { pattern: string; start: number; end: number; value: string };
 
-const PATTERNS: SecretPattern[] = [
-  { id: "openai_key", pattern: /\bsk-[A-Za-z0-9_-]{16,}\b/g },
-  { id: "slack_token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{16,}\b/g },
+const PATTERNS: Array<{ name: string; regex: RegExp }> = [
   {
-    id: "jwt_like_token",
-    pattern: /\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b/g,
+    name: "provider-key",
+    regex:
+      /\b(?:OPENAI|ANTHROPIC|GEMINI|GOOGLE|OPENROUTER|DEEPSEEK|AZURE_OPENAI)_API_KEY\b\s*[:=]\s*["']?([A-Za-z0-9_./+=:-]{12,})/gi,
   },
   {
-    id: "generic_secret_assignment",
-    pattern:
-      /\b(?:api[_-]?key|token|secret|password|refresh[_-]?token|access[_-]?token)\s*[:=]\s*["']?[^"'\s,}]{12,}/gi,
+    name: "oauth-token",
+    regex: /\b(?:xox[baprs]-|gh[pousr]_)[A-Za-z0-9_-]{12,}\b/g,
   },
+  { name: "cloud-key", regex: /\bAIza[A-Za-z0-9_-]{20,}\b/g },
+  { name: "aws-key", regex: /\bAKIA[0-9A-Z]{16}\b/g },
+  {
+    name: "secret-assignment",
+    regex:
+      /\b(?:token|secret|password|api[_-]?key|authorization)\b\s*[:=]\s*["']([A-Za-z0-9_./+=:-]{16,})["']/gi,
+  },
+  { name: "bearer-token", regex: /\bBearer\s+[A-Za-z0-9._~+\-/=]{16,}/gi },
 ];
 
-const TEXT_FILE_PATTERN = /\.(env|json|ya?ml|md|txt|log|mjs|cjs)$/i;
-const SCAN_DIRS = ["config", "docs", "logs", "packages", "scripts", "bin"];
-const MAX_SCAN_FILE_BYTES = 2 * 1024 * 1024;
-
-function redact(input: string): string {
-  if (input.length <= 12) return "[REDACTED]";
-  return `${input.slice(0, 4)}...[REDACTED]...${input.slice(-4)}`;
+function rootFor(paths: RuntimePaths): string {
+  return path.resolve(paths.sourceDir || path.dirname(paths.configDir));
 }
 
-function walkFiles(root: string): string[] {
-  if (!fs.existsSync(root)) return [];
-  const stat = fs.lstatSync(root);
-  if (stat.isSymbolicLink()) return [];
-  if (stat.isFile()) return [root];
-  const files: string[] = [];
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (
-      entry.name === "backups" ||
-      entry.name === "node_modules" ||
-      entry.name === "dist" ||
-      entry.name === ".git" ||
-      entry.name === "coverage" ||
-      entry.name === ".next" ||
-      entry.name === "build" ||
-      entry.name === "__pycache__"
-    ) {
-      continue;
-    }
-    const child = path.join(root, entry.name);
-    if (entry.isSymbolicLink()) {
-      continue;
-    } else if (entry.isDirectory()) {
-      files.push(...walkFiles(child));
-    } else if (entry.isFile()) {
-      files.push(child);
-    }
-  }
-  return files;
+function isTextCandidate(filePath: string): boolean {
+  const base = path.basename(filePath);
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  return TEXT_EXTENSIONS.has(path.extname(base).toLowerCase());
 }
 
-function candidateFiles(paths: RuntimePaths): string[] {
+function collectFiles(
+  root: string,
+  maxBytes: number,
+): { files: string[]; skippedFiles: number } {
   const files: string[] = [];
-  const base = paths.sourceDir ?? paths.dataDir;
-  const envFile = path.join(base, ".env");
-  if (fs.existsSync(envFile)) files.push(envFile);
-  const scanDirs: string[] = [];
-  for (const dir of SCAN_DIRS) {
-    if (dir === "config" && fs.existsSync(paths.configDir))
-      scanDirs.push(paths.configDir);
-    else if (dir === "docs" && fs.existsSync(paths.docsDir))
-      scanDirs.push(paths.docsDir);
-    else {
-      const fullDir = path.resolve(paths.dataDir, "..", dir);
-      if (fs.existsSync(fullDir)) scanDirs.push(fullDir);
-    }
-  }
-  for (const fullDir of scanDirs) {
-    files.push(...walkFiles(fullDir));
-  }
-  if (fs.existsSync(paths.dataDir)) {
-    for (const entry of fs.readdirSync(paths.dataDir, {
-      withFileTypes: true,
-    })) {
-      if (entry.isFile() && TEXT_FILE_PATTERN.test(entry.name)) {
-        files.push(path.join(paths.dataDir, entry.name));
-      }
-    }
-  }
-  return [...new Set(files)].filter((file) => {
-    if (!TEXT_FILE_PATTERN.test(file)) return false;
+  let skippedFiles = 0;
+  const walk = (directory: string) => {
+    let entries: fs.Dirent[];
     try {
-      const resolved = path.resolve(file);
-      const stat = fs.lstatSync(resolved);
-      return stat.isFile() && !stat.isSymbolicLink();
+      entries = fs.readdirSync(directory, { withFileTypes: true });
     } catch {
-      return false;
+      return;
     }
-  });
-}
-
-function rangesOverlap(a: SecretMatch, b: SecretMatch): boolean {
-  return a.start < b.end && b.start < a.end;
-}
-
-function collectMatches(content: string): SecretMatch[] {
-  const matches: SecretMatch[] = [];
-  for (const { id, pattern } of PATTERNS) {
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(content))) {
-      const value = match[0];
-      if (isPlaceholderSecret(value)) continue;
-      const candidate = {
-        start: match.index,
-        end: match.index + value.length,
-        value,
-        pattern: id,
-      };
-      if (!matches.some((existing) => rangesOverlap(existing, candidate))) {
-        matches.push(candidate);
+    for (const entry of entries) {
+      const full = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        skippedFiles += 1;
+        continue;
       }
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.name)) walk(full);
+        continue;
+      }
+      if (!entry.isFile() || !isTextCandidate(full)) continue;
+      try {
+        const size = fs.statSync(full).size;
+        if (size > maxBytes) {
+          skippedFiles += 1;
+          continue;
+        }
+        files.push(full);
+      } catch {
+        skippedFiles += 1;
+      }
+    }
+  };
+  walk(root);
+  return { files, skippedFiles };
+}
+
+function collectMatches(content: string): Match[] {
+  const matches: Match[] = [];
+  for (const pattern of PATTERNS) {
+    pattern.regex.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.regex.exec(content))) {
+      const value =
+        match[1] &&
+        pattern.name !== "bearer-token" &&
+        pattern.name !== "oauth-token" &&
+        pattern.name !== "cloud-key" &&
+        pattern.name !== "aws-key"
+          ? match[1]
+          : match[0];
+      const offset = match[0].indexOf(value);
+      matches.push({
+        pattern: pattern.name,
+        start: match.index + Math.max(0, offset),
+        end: match.index + Math.max(0, offset) + value.length,
+        value,
+      });
+      if (matches.length >= 32) break;
     }
   }
   return matches.sort((a, b) => a.start - b.start);
 }
 
-function isPlaceholderSecret(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return (
-    normalized.includes("os.environ/") ||
-    normalized.includes("process.env.") ||
-    normalized.includes("process.env[") ||
-    normalized.includes("${") ||
-    normalized.includes("[redacted]")
-  );
+function redactPreview(value: string): string {
+  if (value.length <= 8) return "[REDACTED]";
+  return `${value.slice(0, 3)}…${value.slice(-4)}`;
 }
 
-function canFixFile(paths: RuntimePaths, file: string): boolean {
-  const resolved = path.resolve(file);
-  const docsResolved = path.resolve(paths.docsDir);
-  const dataResolved = path.resolve(paths.dataDir);
-  if (resolved.startsWith(docsResolved + path.sep) || resolved === docsResolved)
-    return true;
-  const logsResolved = path.resolve(paths.dataDir, "..", "logs");
-  if (resolved.startsWith(logsResolved + path.sep) || resolved === logsResolved)
-    return true;
-  if (
-    resolved.startsWith(dataResolved + path.sep) ||
-    resolved === dataResolved
-  ) {
-    const relative = path.relative(dataResolved, resolved);
-    return TEXT_FILE_PATTERN.test(relative);
-  }
-  return false;
+function relativeFile(root: string, filePath: string): string {
+  const relative = path.relative(root, filePath);
+  return relative || path.basename(filePath);
 }
 
-function isSafeScanSize(file: string): boolean {
-  try {
-    return fs.statSync(file).size <= MAX_SCAN_FILE_BYTES;
-  } catch {
-    return false;
-  }
+function lineAt(content: string, offset: number): number {
+  return content.slice(0, offset).split(/\r?\n/).length;
 }
 
-function redactMatches(content: string, matches: SecretMatch[]): string {
-  let next = content;
+function replaceMatches(content: string, matches: Match[]): string {
+  let output = content;
   for (const match of [...matches].sort((a, b) => b.start - a.start)) {
-    next = `${next.slice(0, match.start)}[REDACTED]${next.slice(match.end)}`;
+    output = `${output.slice(0, match.start)}[REDACTED]${output.slice(match.end)}`;
   }
-  return next;
+  return output;
 }
 
 export function scanSecrets(
   paths: RuntimePaths,
-  options: { fix?: boolean } = {},
+  options: SecretScanOptions = {},
 ): SecretScanReport {
-  const findings: SecretLeakFinding[] = [];
-  const fixedFiles: string[] = [];
-  let scannedFiles = 0;
+  const root = rootFor(paths);
+  const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
+  const { files, skippedFiles: initialSkipped } = collectFiles(
+    root,
+    maxFileBytes,
+  );
+  const findings: SecretScanFinding[] = [];
+  const fixedFiles = new Set<string>();
+  let skippedFiles = initialSkipped;
 
-  for (const file of candidateFiles(paths)) {
+  for (const filePath of files) {
     let content: string;
     try {
-      if (!isSafeScanSize(file)) continue;
-      content = fs.readFileSync(file, "utf-8");
+      content = fs.readFileSync(filePath, "utf8");
     } catch {
+      skippedFiles += 1;
       continue;
     }
-    scannedFiles += 1;
-    const original = content;
-    const matches = collectMatches(original);
-
-    for (const match of matches) {
-      const prefix = original.slice(0, match.start);
-      const line = prefix.split(/\r?\n/).length;
-      const lastBreak = Math.max(
-        prefix.lastIndexOf("\n"),
-        prefix.lastIndexOf("\r"),
-      );
-      findings.push({
-        file,
-        line,
-        column: match.start - lastBreak,
-        pattern: match.pattern,
-        redactedPreview: redact(match.value),
-      });
-    }
-
-    if (options.fix && matches.length > 0 && canFixFile(paths, file)) {
-      content = redactMatches(original, matches);
-    }
-
-    if (options.fix && content !== original) {
-      const tmpPath = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmpPath, content, "utf-8");
-      fs.renameSync(tmpPath, file);
-      fixedFiles.push(path.relative(path.resolve(paths.dataDir, ".."), file));
+    const matches = collectMatches(content);
+    if (matches.length === 0) continue;
+    const file = relativeFile(root, filePath);
+    findings.push({
+      file,
+      line: lineAt(content, matches[0].start),
+      pattern: matches[0].pattern,
+      redactedPreview: redactPreview(matches[0].value),
+    });
+    if (
+      options.fix &&
+      path.basename(filePath) !== ".env" &&
+      !path.basename(filePath).startsWith(".env.")
+    ) {
+      try {
+        fs.writeFileSync(filePath, replaceMatches(content, matches), "utf8");
+        fixedFiles.add(file);
+      } catch {
+        skippedFiles += 1;
+      }
     }
   }
 
-  return { scannedFiles, findings, fixedFiles };
+  return {
+    scannedAt: new Date().toISOString(),
+    checkedFiles: files.length,
+    scannedFiles: files.length,
+    skippedFiles,
+    findings,
+    fixedFiles: [...fixedFiles].sort(),
+  };
 }

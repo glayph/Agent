@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { PageHeader } from "@/app/layout/page-header"
+import { useGateway } from "@/hooks/use-gateway"
+import { useGatewayLogs } from "@/hooks/use-gateway-logs"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card"
 import { ScrollArea } from "@/shared/ui/scroll-area"
-import { useGateway } from "@/hooks/use-gateway"
-import { useGatewayLogs } from "@/hooks/use-gateway-logs"
 
 export function LogsPage() {
   const { t } = useTranslation()
@@ -54,13 +54,11 @@ export function LogsPage() {
       <PageHeader
         title={t("navigation.logs")}
         titleExtra={
-          logs.length > 0
-            ? (
-                <span className="text-muted-foreground text-xs">
-                  {t("pages.logs.line_count", { count: logs.length })}
-                </span>
-              )
-            : undefined
+          logs.length > 0 ? (
+            <span className="text-muted-foreground text-xs">
+              {t("pages.logs.line_count", { count: logs.length })}
+            </span>
+          ) : undefined
         }
       >
         <Button
@@ -70,7 +68,9 @@ export function LogsPage() {
           className={autoScroll ? "bg-primary/10" : undefined}
         >
           <IconPlayerPlay data-icon="inline-start" />
-          {autoScroll ? t("pages.logs.auto_scroll_on") : t("pages.logs.auto_scroll_off")}
+          {autoScroll
+            ? t("pages.logs.auto_scroll_on")
+            : t("pages.logs.auto_scroll_off")}
         </Button>
         <Button
           variant="outline"
@@ -116,7 +116,10 @@ export function LogsPage() {
               <ScrollArea className="h-full">
                 <pre className="bg-muted/40 text-muted-foreground p-4 font-mono text-xs leading-5">
                   {logs.map((line, index) => (
-                    <div key={index} className="min-h-5 whitespace-pre-wrap break-all">
+                    <div
+                      key={index}
+                      className="min-h-5 break-all whitespace-pre-wrap"
+                    >
                       {line}
                     </div>
                   ))}

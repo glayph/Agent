@@ -80,7 +80,9 @@ describe("Agent tool calls are logged to memory", () => {
     const agent = setUp();
     const internal = agent as unknown as {
       _scoreToolConfidence: () => Promise<void>;
-      tools: { executeToolStructured: (...args: unknown[]) => Promise<unknown> };
+      tools: {
+        executeToolStructured: (...args: unknown[]) => Promise<unknown>;
+      };
       _executePlannedToolInvocation: (
         sessionId: string,
         planned: {
@@ -89,7 +91,11 @@ describe("Agent tool calls are logged to memory", () => {
           policy: {
             locks: unknown[];
             timeoutMs: number;
-            retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number };
+            retry: {
+              maxAttempts: number;
+              baseDelayMs: number;
+              maxDelayMs: number;
+            };
           };
         },
       ) => Promise<unknown>;
@@ -127,7 +133,9 @@ describe("Agent tool calls are logged to memory", () => {
     const agent = setUp();
     const internal = agent as unknown as {
       _scoreToolConfidence: () => Promise<void>;
-      tools: { executeToolStructured: (...args: unknown[]) => Promise<unknown> };
+      tools: {
+        executeToolStructured: (...args: unknown[]) => Promise<unknown>;
+      };
       _executePlannedToolInvocation: (
         sessionId: string,
         planned: {
@@ -136,7 +144,11 @@ describe("Agent tool calls are logged to memory", () => {
           policy: {
             locks: unknown[];
             timeoutMs: number;
-            retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number };
+            retry: {
+              maxAttempts: number;
+              baseDelayMs: number;
+              maxDelayMs: number;
+            };
           };
         },
       ) => Promise<unknown>;
@@ -172,7 +184,9 @@ describe("Agent tool calls are logged to memory", () => {
   it("still calls memory.logToolCall with ok:false when the tool throws before running (e.g. lock failure)", async () => {
     const agent = setUp();
     const internal = agent as unknown as {
-      toolLockManager: { acquireMany: (...args: unknown[]) => Promise<unknown> };
+      toolLockManager: {
+        acquireMany: (...args: unknown[]) => Promise<unknown>;
+      };
       _executePlannedToolInvocation: (
         sessionId: string,
         planned: {
@@ -181,7 +195,11 @@ describe("Agent tool calls are logged to memory", () => {
           policy: {
             locks: unknown[];
             timeoutMs: number;
-            retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number };
+            retry: {
+              maxAttempts: number;
+              baseDelayMs: number;
+              maxDelayMs: number;
+            };
           };
         },
       ) => Promise<unknown>;
@@ -218,7 +236,9 @@ describe("Agent tool calls are logged to memory", () => {
     });
     const internal = agent as unknown as {
       _scoreToolConfidence: () => Promise<void>;
-      tools: { executeToolStructured: (...args: unknown[]) => Promise<unknown> };
+      tools: {
+        executeToolStructured: (...args: unknown[]) => Promise<unknown>;
+      };
       _executePlannedToolInvocation: (
         sessionId: string,
         planned: {
@@ -227,7 +247,11 @@ describe("Agent tool calls are logged to memory", () => {
           policy: {
             locks: unknown[];
             timeoutMs: number;
-            retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number };
+            retry: {
+              maxAttempts: number;
+              baseDelayMs: number;
+              maxDelayMs: number;
+            };
           };
         },
       ) => Promise<{ ok: boolean }>;
@@ -238,15 +262,18 @@ describe("Agent tool calls are logged to memory", () => {
       output: "ok",
     });
 
-    const result = await internal._executePlannedToolInvocation("mem-log-session-throw", {
-      index: 0,
-      invocation: { tcId: "tc-4", toolName: "file_read", toolArgs: {} },
-      policy: {
-        locks: [],
-        timeoutMs: 5000,
-        retry: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10 },
+    const result = await internal._executePlannedToolInvocation(
+      "mem-log-session-throw",
+      {
+        index: 0,
+        invocation: { tcId: "tc-4", toolName: "file_read", toolArgs: {} },
+        policy: {
+          locks: [],
+          timeoutMs: 5000,
+          retry: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10 },
+        },
       },
-    });
+    );
 
     expect(result.ok).toBe(true);
   });

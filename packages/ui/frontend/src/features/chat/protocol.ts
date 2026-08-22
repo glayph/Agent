@@ -8,6 +8,9 @@ import { normalizeUnixTimestamp } from "@/features/chat/state"
 import {
   type ChatAttachment,
   type ContextUsage,
+  type DeliveryOutcome,
+  type DeliveryOutcomeStatus,
+  type RunStatus,
   updateChatStore,
 } from "@/store/chat"
 
@@ -117,27 +120,38 @@ export function handlemikiMessage(
           ? normalizeUnixTimestamp(Number(message.timestamp))
           : Date.now()
 
-      updateChatStore((prev) => ({
-        messages: [
-          ...prev.messages,
-          {
-            id: messageId,
-            role: "assistant",
-            content,
-            kind,
-            ...(modelName ? { modelName } : {}),
-            ...(toolCalls ? { toolCalls } : {}),
-            attachments,
-            timestamp,
-          },
-        ],
-        isTyping:
-          !isPlaceholder &&
-          (kind === "normal" || message.type === "media.create")
-            ? false
-            : prev.isTyping,
-        ...(contextUsage ? { contextUsage } : {}),
-      }))
+      updateChatStore((prev) => {
+        const nextMessage = {
+          id: messageId,
+          role: "assistant" as const,
+          content,
+          kind,
+          ...(modelName ? { modelName } : {}),
+          ...(toolCalls ? { toolCalls } : {}),
+          attachments,
+          timestamp,
+        }
+        const existingIndex = prev.messages.findIndex(
+          (candidate) => candidate.id === messageId,
+        )
+        const messages =
+          existingIndex >= 0
+            ? prev.messages.map((candidate, index) =>
+                index === existingIndex
+                  ? { ...candidate, ...nextMessage }
+                  : candidate,
+              )
+            : [...prev.messages, nextMessage]
+        return {
+          messages,
+          isTyping:
+            !isPlaceholder &&
+            (kind === "normal" || message.type === "media.create")
+              ? false
+              : prev.isTyping,
+          ...(contextUsage ? { contextUsage } : {}),
+        }
+      })
       break
     }
 
@@ -213,6 +227,63 @@ export function handlemikiMessage(
       break
     }
 
+    case "node.run_start": {
+      const runId =
+        typeof payload.run_id === "string" ? payload.run_id.trim() : ""
+      updateChatStore({
+        ...(runId ? { activeRunId: runId } : {}),
+        runStatus: "running",
+        runError: undefined,
+      })
+      break
+    }
+
+    case "delivery.outcome": {
+      const outcome = parseDeliveryOutcome(payload)
+      if (!outcome) break
+      const runStatus: RunStatus =
+        outcome.status === "sent"
+          ? "completed"
+          : outcome.status === "created" ||
+              outcome.status === "waiting_approval" ||
+              outcome.status === "approved" ||
+              outcome.status === "sending"
+            ? "running"
+            : "failed"
+      updateChatStore({
+        activeRunId: outcome.runId,
+        runStatus,
+        deliveryOutcome: outcome,
+        ...(outcome.nextAction
+          ? { runError: outcome.nextAction }
+          : { runError: undefined }),
+        isTyping: false,
+      })
+      break
+    }
+
+    case "node.run_end": {
+      const runId =
+        typeof payload.run_id === "string" ? payload.run_id.trim() : undefined
+      const rawStatus = payload.status
+      const status: RunStatus =
+        rawStatus === "completed_with_warning" ||
+        rawStatus === "completed" ||
+        rawStatus === "failed" ||
+        rawStatus === "cancelled"
+          ? rawStatus
+          : "failed"
+      const error =
+        typeof payload.error === "string" ? payload.error : undefined
+      updateChatStore({
+        ...(runId ? { activeRunId: runId } : {}),
+        runStatus: status,
+        ...(error ? { runError: error } : { runError: undefined }),
+        isTyping: false,
+      })
+      break
+    }
+
     case "typing.start":
       updateChatStore({ isTyping: true })
       break
@@ -245,5 +316,63 @@ export function handlemikiMessage(
 
     default:
       console.log("Unknown miki message type:", message.type)
+  }
+}
+
+function parseDeliveryOutcome(
+  payload: Record<string, unknown>,
+): DeliveryOutcome | undefined {
+  if (typeof payload.runId !== "string" || typeof payload.status !== "string") {
+    return undefined
+  }
+  const statuses: DeliveryOutcomeStatus[] = [
+    "created",
+    "waiting_approval",
+    "approved",
+    "sending",
+    "sent",
+    "failed",
+    "unknown_outcome",
+    "dead_letter",
+    "reconciliation_required",
+  ]
+  if (!statuses.includes(payload.status as DeliveryOutcomeStatus)) {
+    return undefined
+  }
+  const artifactRefs = Array.isArray(payload.artifactRefs)
+    ? payload.artifactRefs.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : []
+  const warnings = Array.isArray(payload.warnings)
+    ? payload.warnings.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : []
+  return {
+    runId: payload.runId,
+    stepId: typeof payload.stepId === "string" ? payload.stepId : undefined,
+    deliveryId:
+      typeof payload.deliveryId === "string" ? payload.deliveryId : undefined,
+    status: payload.status as DeliveryOutcomeStatus,
+    provider:
+      typeof payload.provider === "string" ? payload.provider : undefined,
+    model: typeof payload.model === "string" ? payload.model : undefined,
+    artifactRefs,
+    verification:
+      payload.verification && typeof payload.verification === "object"
+        ? (payload.verification as Record<string, unknown>)
+        : undefined,
+    approval:
+      payload.approval && typeof payload.approval === "object"
+        ? (payload.approval as DeliveryOutcome["approval"])
+        : undefined,
+    warnings,
+    nextAction:
+      typeof payload.nextAction === "string" ? payload.nextAction : undefined,
+    correlationId:
+      typeof payload.correlationId === "string"
+        ? payload.correlationId
+        : payload.runId,
   }
 }

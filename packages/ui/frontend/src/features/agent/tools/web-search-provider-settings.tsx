@@ -3,12 +3,12 @@ import { type ReactNode, useId } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { WebSearchProviderConfig } from "@/api/tools"
+import { cn } from "@/lib/utils"
 import { maskedSecretPlaceholder } from "@/shared/forms/secret-placeholder"
 import { KeyInput } from "@/shared/forms/shared-form"
 import { FieldControlProvider } from "@/shared/ui/field"
 import { Input } from "@/shared/ui/input"
 import { Switch } from "@/shared/ui/switch"
-import { cn } from "@/lib/utils"
 
 import type { WebSearchDraftUpdater } from "./types"
 

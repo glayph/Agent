@@ -2,9 +2,9 @@ import { useTranslation } from "react-i18next"
 
 import type { WebSearchConfigResponse } from "@/api/tools"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { Button } from "@/shared/ui/button"
 import { Skeleton } from "@/shared/ui/skeleton"
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 
 import type { WebSearchDraftUpdater } from "./types"
 import { WebSearchGeneralSettings } from "./web-search-general-settings"

@@ -237,7 +237,10 @@ describe("validatePluginManifest", () => {
   });
 
   it("validates entrypoint existence", async () => {
-    fs.writeFileSync(path.join(tmpDir, "index.js"), "export const test = true;");
+    fs.writeFileSync(
+      path.join(tmpDir, "index.js"),
+      "export const test = true;",
+    );
     const result = await validatePluginManifest(
       {
         name: "my_plugin",

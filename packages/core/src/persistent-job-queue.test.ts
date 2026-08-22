@@ -38,6 +38,16 @@ describe("persistent job queue", () => {
       attempts: 0,
       progress: 0,
       error: undefined,
+      recovery: { retryCount: 1 },
+    });
+    expect(retried?.recovery.lastFailure?.message).toContain(
+      "provider timeout",
+    );
+    expect(retried?.recovery.deadLetteredAt).toEqual(expect.any(String));
+    expect(
+      new PersistentJobQueue(path.join(tempDir, "queue.json")).get(job.id),
+    ).toMatchObject({
+      recovery: { retryCount: 1 },
     });
     expect(queue.list({ status: "queued" }).map((item) => item.id)).toContain(
       job.id,
@@ -98,6 +108,7 @@ describe("persistent job queue", () => {
     expect(queue.cancel(job.id)).toBe(true);
     expect(queue.retry(job.id, 25)?.status).toBe("queued");
     expect(queue.dequeue(Date.now() + 25)?.id).toBe(job.id);
+    expect(queue.get(job.id)?.recovery.retryCount).toBe(1);
   });
 
   it("deduplicates active jobs by idempotency key", () => {
@@ -125,16 +136,67 @@ describe("persistent job queue", () => {
     const claimed = queue.dequeue(Date.now(), "worker-a", 1_000);
 
     expect(claimed?.id).toBe(job.id);
-    expect(queue.checkpoint(job.id, {
-      id: "cp-1",
-      step: "plan",
-      status: "completed",
-      data: { planVersion: 1 },
-    }, "worker-a")?.checkpoint?.id).toBe("cp-1");
+    expect(
+      queue.checkpoint(
+        job.id,
+        {
+          id: "cp-1",
+          step: "plan",
+          status: "completed",
+          data: { planVersion: 1 },
+        },
+        "worker-a",
+      )?.checkpoint?.id,
+    ).toBe("cp-1");
     expect(queue.complete(job.id, { ok: true }, "worker-b")).toBeNull();
     expect(queue.complete(job.id, { ok: true }, "worker-a")?.status).toBe(
       "completed",
     );
+  });
+
+  it("preserves checkpoints and idempotency across a worker restart", () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-jobs-restart-"),
+    );
+    const filePath = path.join(tempDir, "queue.json");
+    const first = new PersistentJobQueue(filePath);
+    const job = first.enqueue(
+      "agent.run",
+      { artifact: "workspace/result.md" },
+      { idempotencyKey: "artifact-run-1" },
+    );
+    const claimed = first.dequeue(Date.now(), "worker-a", 60_000);
+    expect(claimed?.id).toBe(job.id);
+    expect(
+      first.checkpoint(
+        job.id,
+        {
+          id: "checkpoint-1",
+          step: "artifact-written",
+          status: "completed",
+          data: { verified: false },
+        },
+        "worker-a",
+      )?.checkpoint?.id,
+    ).toBe("checkpoint-1");
+
+    const restarted = new PersistentJobQueue(filePath);
+    const duplicate = restarted.enqueue(
+      "agent.run",
+      { artifact: "workspace/result.md" },
+      { idempotencyKey: "artifact-run-1" },
+    );
+    expect(duplicate.id).toBe(job.id);
+    expect(restarted.list()).toHaveLength(1);
+    expect(restarted.list()[0]?.checkpoint).toMatchObject({
+      id: "checkpoint-1",
+      step: "artifact-written",
+    });
+    expect(restarted.dequeue(Date.now(), "worker-b", 60_000)).toBeNull();
+    expect(
+      restarted.complete(job.id, { verified: true }, "worker-a")?.status,
+    ).toBe("completed");
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("reclaims an expired worker lease", () => {

@@ -1,7 +1,7 @@
 import type { AgentRun, TaskGraphStep } from "@/api/agent-runs"
-import { StatusDot } from "@/shared/ui/minimal-primitives"
-import { Badge } from "@/shared/ui/badge"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/shared/ui/badge"
+import { StatusDot } from "@/shared/ui/minimal-primitives"
 
 import { formatOptionalRunDate } from "./date-format"
 

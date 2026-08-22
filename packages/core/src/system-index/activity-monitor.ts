@@ -38,7 +38,9 @@ export class ActivityMonitor {
       this.focusPaths.set(resolved, Date.now());
       // keep map bounded
       if (this.focusPaths.size > 100) {
-        const sorted = [...this.focusPaths.entries()].sort((a, b) => a[1] - b[1]);
+        const sorted = [...this.focusPaths.entries()].sort(
+          (a, b) => a[1] - b[1],
+        );
         for (const [k] of sorted.slice(0, this.focusPaths.size - 80)) {
           this.focusPaths.delete(k);
         }

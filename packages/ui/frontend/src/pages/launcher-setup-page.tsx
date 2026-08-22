@@ -1,6 +1,4 @@
-import {
-  IconLanguage,
-} from "@tabler/icons-react"
+import { IconLanguage } from "@tabler/icons-react"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
@@ -60,7 +58,7 @@ export function LauncherSetupPage() {
               <Button
                 variant="outline"
                 size="icon"
-                className="border-white/15 bg-black/40 text-white hover:border-white/30 hover:bg-black/60 hover:text-white focus-visible:ring-primary/70"
+                className="focus-visible:ring-primary/70 border-white/15 bg-black/40 text-white hover:border-white/30 hover:bg-black/60 hover:text-white"
                 aria-label={t("header.language")}
                 title={t("header.language")}
               >
@@ -81,7 +79,7 @@ export function LauncherSetupPage() {
     >
       <Card
         data-launcher-auth-card="true"
-        className="shadow-2xl shadow-black/40 ring-1 ring-white/5"
+        className="shadow-2xl ring-1 shadow-black/40 ring-white/5"
         size="sm"
       >
         <CardHeader>

@@ -3,14 +3,16 @@ import {
   IconCopy,
   IconGitFork,
   IconInfoCircle,
-  IconSearch,
   IconPencil,
   IconRefresh,
+  IconSearch,
   IconTrash,
 } from "@tabler/icons-react"
 import { type ReactNode, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,8 +24,6 @@ import {
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog"
 import { Button } from "@/shared/ui/button"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { cn } from "@/lib/utils"
 
 interface MessageActionBarProps {
   content: string

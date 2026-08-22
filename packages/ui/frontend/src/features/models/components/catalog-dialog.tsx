@@ -16,6 +16,7 @@ import {
   deleteCatalog,
   getCatalogs,
 } from "@/api/models"
+import { formatDateOnly } from "@/lib/format"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,7 +37,6 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
-import { formatDateOnly } from "@/lib/format"
 import { refreshGatewayState } from "@/store/gateway"
 
 import {

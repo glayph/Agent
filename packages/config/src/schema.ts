@@ -219,17 +219,14 @@ const AgentBlockSchema = z
     memory: AgentMemorySchema.optional(),
     security: z
       .object({
-        // Safe-by-default: bypass_restrictions and sandbox_mode are explicitly
-        // defaulted here so that omitting them from agent.yaml is safe.
-        // This agent is designed for full-system access (not a
-        // workspace-sandboxed assistant), so the default here matches that
-        // intent: omitting security.* from agent.yaml still boots with full
-        // access rather than silently sandboxing the agent.
-        bypass_restrictions: z.boolean().default(true),
+        // Safe-by-default: omit security.* only when the runtime should
+        // remain workspace-scoped and sandboxed. Unrestricted access must be
+        // an explicit operator choice, never an implicit default.
+        bypass_restrictions: z.boolean().default(false),
         system_access: z
           .enum(["full", "workspace_only", "isolated"])
-          .default("full"),
-        sandbox_mode: z.boolean().default(false),
+          .default("workspace_only"),
+        sandbox_mode: z.boolean().default(true),
         risk_acceptance: z.boolean().optional(),
         privileged_account_required: z.boolean().optional(),
         audit_logging: z.boolean().optional(),
@@ -458,6 +455,7 @@ export function validateRuntimeConfig(
     allowedChannelNames,
   );
   validateMcpServers(config, errors);
+  validateMqttBrokerConfig(config, errors);
   validateWebSearchConfig(config, errors);
 
   return {
@@ -491,6 +489,61 @@ function validateChannelMap(
           `${pathPrefix}.${name}`,
           "Channel configuration must be an object.",
           "invalid_channel_config",
+        ),
+      );
+    }
+  }
+}
+
+function validateMqttBrokerConfig(
+  config: RuntimeConfig,
+  errors: ConfigValidationIssue[],
+): void {
+  const channelMaps = [config.channels, config.channel_list];
+  for (const channelMap of channelMaps) {
+    if (!isRecord(channelMap)) continue;
+    const rawChannel = channelMap.mqtt;
+    if (!isRecord(rawChannel)) continue;
+    const settings = isRecord(rawChannel.settings) ? rawChannel.settings : {};
+    const broker = stringValue(settings.broker ?? rawChannel.broker);
+    const enabled = rawChannel.enabled === true;
+    if (!broker) {
+      if (enabled) {
+        errors.push(
+          issue(
+            "channels.mqtt.broker",
+            "Enabled MQTT channels require a broker URL.",
+            "missing_mqtt_broker",
+          ),
+        );
+      }
+      continue;
+    }
+    try {
+      const parsed = new URL(broker);
+      const allowedProtocol = new Set(["mqtt:", "mqtts:", "ssl:", "tcp:"]).has(
+        parsed.protocol,
+      );
+      const validPort =
+        !parsed.port ||
+        (Number.isInteger(Number(parsed.port)) &&
+          Number(parsed.port) >= 1 &&
+          Number(parsed.port) <= 65_535);
+      if (!allowedProtocol || !parsed.hostname || !validPort) {
+        errors.push(
+          issue(
+            "channels.mqtt.broker",
+            "MQTT broker must use mqtt://, mqtts://, ssl://, or tcp:// with a valid host and port.",
+            "invalid_mqtt_broker",
+          ),
+        );
+      }
+    } catch {
+      errors.push(
+        issue(
+          "channels.mqtt.broker",
+          "MQTT broker must use mqtt://, mqtts://, ssl://, or tcp:// with a valid host and port.",
+          "invalid_mqtt_broker",
         ),
       );
     }

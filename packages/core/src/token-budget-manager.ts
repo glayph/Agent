@@ -175,14 +175,26 @@ export class TokenBudgetManager {
     return { contextWindowTokens: 128_000, maxOutputTokens: 4_096 };
   }
 
-  buildContextUsage(model: string, usedTokens: number): ContextUsageSnapshot {
+  buildContextUsage(
+    model: string,
+    usedTokens: number,
+    options: { contextWindowTokens?: number; compressPercent?: number } = {},
+  ): ContextUsageSnapshot {
     const limits = this.getModelLimits(model);
+    const configuredTotal = Number(options.contextWindowTokens);
+    const total =
+      Number.isFinite(configuredTotal) && configuredTotal > 0
+        ? Math.max(1_024, Math.min(1_000_000, Math.floor(configuredTotal)))
+        : limits.contextWindowTokens;
+    const configuredPercent = Number(options.compressPercent);
+    const compressPercent = Number.isFinite(configuredPercent)
+      ? Math.max(50, Math.min(95, configuredPercent))
+      : 85;
     const used = Math.max(0, Math.ceil(usedTokens));
-    const total = limits.contextWindowTokens;
     return {
       used_tokens: used,
       total_tokens: total,
-      compress_at_tokens: Math.floor(total * 0.85),
+      compress_at_tokens: Math.floor(total * (compressPercent / 100)),
       used_percent: Math.min(100, Math.round((used / total) * 100)),
     };
   }

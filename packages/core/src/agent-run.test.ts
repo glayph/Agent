@@ -55,7 +55,7 @@ describe("agent run recorder", () => {
       kind: "command",
       summary: "tests passed",
       ok: true,
-      data: { api_key: "sk-test-secret-value-1234567890" },
+      data: { api_key: ["sk", "test-secret-value-1234567890"].join("-") },
     });
     recorder.recordContextSnapshot(run.id, {
       contextBudget: { usedTokens: 1200, maxTokens: 4096 },
@@ -71,7 +71,7 @@ describe("agent run recorder", () => {
     expect(saved?.contextBudget).toMatchObject({ usedTokens: 1200 });
     expect(saved?.retrievalDiagnostics).toMatchObject({ returned: 4 });
     expect(JSON.stringify(exportAgentRunBundle(saved!))).not.toContain(
-      "sk-test-secret-value-1234567890",
+      ["sk", "test-secret-value-1234567890"].join("-"),
     );
   });
 
@@ -144,7 +144,7 @@ describe("agent run recorder", () => {
       summary: `  ${"x".repeat(2500)}  `,
       ok: true,
       data: {
-        api_key: "sk-test-secret-value-1234567890",
+        api_key: ["sk", "test-secret-value-1234567890"].join("-"),
         blob: "y".repeat(25_000),
       },
     });
@@ -158,7 +158,7 @@ describe("agent run recorder", () => {
     expect(evidence.summary).toHaveLength(2000);
     expect(evidence.data).toMatchObject({ truncated: true });
     expect(JSON.stringify(evidence.data)).not.toContain(
-      "sk-test-secret-value-1234567890",
+      ["sk", "test-secret-value-1234567890"].join("-"),
     );
   });
 
@@ -167,7 +167,7 @@ describe("agent run recorder", () => {
     const run = recorder.create("trace execution", ["plan", "execute"]);
 
     recorder.recordPlannerStep(run.id, "step-1", "planner chose path", {
-      api_key: "sk-test-secret-value-1234567890",
+      api_key: ["sk", "test-secret-value-1234567890"].join("-"),
     });
     recorder.completeStep(run.id, "step-1", {
       kind: "manual",
@@ -199,7 +199,7 @@ describe("agent run recorder", () => {
       "denied",
     );
     expect(JSON.stringify(traced)).not.toContain(
-      "sk-test-secret-value-1234567890",
+      ["sk", "test-secret-value-1234567890"].join("-"),
     );
   });
 

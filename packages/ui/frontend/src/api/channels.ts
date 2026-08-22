@@ -60,12 +60,7 @@ export interface ChannelRuntimeProbeResponse {
 
 export type QrBindingChannel = "weixin" | "wecom"
 export type QrBindingStatus =
-  | "wait"
-  | "scaned"
-  | "scanned"
-  | "confirmed"
-  | "expired"
-  | "error"
+  "wait" | "scaned" | "scanned" | "confirmed" | "expired" | "error"
 
 export interface QrBindingFlowResponse {
   flow_id: string
@@ -83,6 +78,10 @@ interface ChannelsCatalogResponse {
 interface ConfigActionResponse {
   status: string
   errors?: string[]
+  gateway_restart_required?: boolean
+  runtime_apply_status?: "applied" | "pending_restart" | "failed"
+  runtime_apply_error?: string
+  pending_restart_fields?: string[]
 }
 
 const BASE_URL = ""

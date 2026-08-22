@@ -1,48 +1,87 @@
 'use strict';
 
 /**
- * Functional regions matching the Agent brain diagram.
- * These are the top-level partitions of the knowledge graph.
+ * Canonical functional memory regions. Legacy aliases remain accepted so old
+ * databases and callers can migrate without losing existing records.
  */
 const REGIONS = Object.freeze({
-  LONG_TERM: 'long_term',       // Memory / Knowledge
-  DAILY: 'daily',               // Day to Day – Scheduling / Tasks
-  STATIC: 'static',             // Core / Stable Data
-  SKILL: 'skill',               // Abilities / Tools
-  RULE_EMOTION: 'rule_emotion', // Guidelines / Behaviour
-  TEMPORARY: 'temporary',       // Project-scoped transient work
+  LONG_TERM: 'long_term',
+  DAILY: 'daily',
+  DAY_TO_DAY: 'day_to_day',
+  STATIC: 'static',
+  SKILL: 'skill',
+  RULE_EMOTION: 'rule_emotion',
+  TEMPORARY: 'temporary',
 });
 
-const ALL_REGIONS = Object.freeze(Object.values(REGIONS));
+const CANONICAL_REGIONS = Object.freeze([
+  'long_term',
+  'day_to_day',
+  'static',
+  'skill',
+  'rule_emotion',
+]);
 
-/**
- * Human labels for docs / debug.
- */
+const ALL_REGIONS = Object.freeze([
+  ...CANONICAL_REGIONS,
+  REGIONS.DAILY,
+  REGIONS.TEMPORARY,
+]);
+
 const REGION_LABELS = Object.freeze({
-  [REGIONS.LONG_TERM]: 'Long-term (Memory / Knowledge)',
-  [REGIONS.DAILY]: 'Day to Day (Scheduling / Tasks)',
-  [REGIONS.STATIC]: 'Static (Core / Stable Data)',
-  [REGIONS.SKILL]: 'Skill (Abilities / Tools)',
-  [REGIONS.RULE_EMOTION]: 'Rule, Emotion (Guidelines / Behaviour)',
-  [REGIONS.TEMPORARY]: 'Temporary (Ongoing Project Work)',
+  long_term: 'Long-term (Memory / Knowledge)',
+  daily: 'Day to Day (legacy alias)',
+  day_to_day: 'Day to Day (Scheduling / Tasks)',
+  static: 'Static (Core / Stable Data)',
+  skill: 'Skill (Abilities / Tools)',
+  rule_emotion: 'Rule, Emotion (Guidelines / Behaviour)',
+  temporary: 'Temporary (Ongoing Project Work)',
 });
 
-/**
- * Which regions are durable (survive consolidation) vs ephemeral.
- */
-function isDurableRegion(region) {
-  return region !== REGIONS.TEMPORARY;
+const REGION_ALIASES = Object.freeze({
+  long_term: 'long_term',
+  knowledge: 'long_term',
+  memory: 'long_term',
+  daily: 'day_to_day',
+  day_to_day: 'day_to_day',
+  daytoday: 'day_to_day',
+  scheduling: 'day_to_day',
+  task: 'day_to_day',
+  tasks: 'day_to_day',
+  static: 'static',
+  core: 'static',
+  stable: 'static',
+  skill: 'skill',
+  skills: 'skill',
+  tool: 'skill',
+  tools: 'skill',
+  rule_emotion: 'rule_emotion',
+  rule: 'rule_emotion',
+  rules: 'rule_emotion',
+  emotion: 'rule_emotion',
+  behaviour: 'rule_emotion',
+  behavior: 'rule_emotion',
+  temporary: 'temporary',
+});
+
+function canonicalRegion(value, fallback = 'day_to_day') {
+  const key = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return REGION_ALIASES[key] || fallback;
 }
 
-/**
- * Default region when classification fails.
- */
-const DEFAULT_REGION = REGIONS.DAILY;
+function isDurableRegion(region) {
+  return canonicalRegion(region) !== REGIONS.TEMPORARY;
+}
+
+const DEFAULT_REGION = REGIONS.DAY_TO_DAY;
 
 module.exports = {
   REGIONS,
+  CANONICAL_REGIONS,
   ALL_REGIONS,
   REGION_LABELS,
+  REGION_ALIASES,
+  canonicalRegion,
   isDurableRegion,
   DEFAULT_REGION,
 };

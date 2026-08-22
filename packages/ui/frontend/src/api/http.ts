@@ -47,7 +47,9 @@ export async function launcherFetch(
         globalThis.location.assign("/launcher-login")
       }
     } else if (showErrorToast && (res.status >= 400 || res.status >= 500)) {
-      toast.error(`API Error (${res.status}): ${res.statusText || "Request failed"}`)
+      toast.error(
+        `API Error (${res.status}): ${res.statusText || "Request failed"}`,
+      )
     }
 
     return res

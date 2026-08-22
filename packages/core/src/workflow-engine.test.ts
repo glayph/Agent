@@ -1,7 +1,4 @@
-import {
-  AgentRunRecorder,
-  InMemoryAgentRunStore,
-} from "./agent-run.js";
+import { AgentRunRecorder, InMemoryAgentRunStore } from "./agent-run.js";
 import { WorkflowEngine } from "./workflow-engine.js";
 
 describe("WorkflowEngine", () => {
@@ -36,7 +33,9 @@ describe("WorkflowEngine", () => {
   });
 
   it("stops after failed verifier evidence", async () => {
-    const engine = new WorkflowEngine(new AgentRunRecorder(new InMemoryAgentRunStore()));
+    const engine = new WorkflowEngine(
+      new AgentRunRecorder(new InMemoryAgentRunStore()),
+    );
     const run = await engine.run({
       objective: "stop on failed verification",
       planner: {

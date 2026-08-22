@@ -23,7 +23,9 @@ describe("readMikiEnv", () => {
   });
 
   it("returns undefined when neither name is set", () => {
-    expect(readMikiEnv("MIKI_ALLOWED_ORIGINS", {} as NodeJS.ProcessEnv)).toBeUndefined();
+    expect(
+      readMikiEnv("MIKI_ALLOWED_ORIGINS", {} as NodeJS.ProcessEnv),
+    ).toBeUndefined();
   });
 
   it("defaults to process.env when no env object is passed", () => {

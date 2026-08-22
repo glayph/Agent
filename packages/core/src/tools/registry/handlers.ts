@@ -119,9 +119,14 @@ export async function handlePlatformConnectionStart(
   const provider = typeof args["provider"] === "string" ? args["provider"] : "";
   const store = requirePlatformConnectionStore(this);
   const scopes = Array.isArray(args["scopes"])
-    ? args["scopes"].filter((value): value is string => typeof value === "string")
+    ? args["scopes"].filter(
+        (value): value is string => typeof value === "string",
+      )
     : undefined;
-  const session = store.begin({ provider: provider as PlatformProvider, scopes });
+  const session = store.begin({
+    provider: provider as PlatformProvider,
+    scopes,
+  });
   let browserStatus = "official page opened";
   try {
     await this.browser.navigate(session.officialUrl);
@@ -145,7 +150,8 @@ export async function handlePlatformConnectionStatus(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const sessionId = typeof args["sessionId"] === "string" ? args["sessionId"] : "";
+  const sessionId =
+    typeof args["sessionId"] === "string" ? args["sessionId"] : "";
   if (!sessionId) throw new Error("sessionId is required");
   const session = requirePlatformConnectionStore(this).getSession(sessionId);
   if (!session) throw new Error("Browser connection session not found");
@@ -156,26 +162,50 @@ export async function handlePlatformConnectionComplete(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const sessionId = typeof args["sessionId"] === "string" ? args["sessionId"] : "";
-  const accountLabel = typeof args["accountLabel"] === "string" ? args["accountLabel"] : "";
+  const sessionId =
+    typeof args["sessionId"] === "string" ? args["sessionId"] : "";
+  const accountLabel =
+    typeof args["accountLabel"] === "string" ? args["accountLabel"] : "";
   if (!sessionId || !accountLabel.trim()) {
     throw new Error("sessionId and accountLabel are required");
   }
-  for (const key of ["token", "apiKey", "api_key", "secret", "password", "accessToken", "refreshToken"]) {
+  for (const key of [
+    "token",
+    "apiKey",
+    "api_key",
+    "secret",
+    "password",
+    "accessToken",
+    "refreshToken",
+  ]) {
     if (typeof args[key] === "string" && String(args[key]).trim()) {
-      throw new Error("Raw credentials are never accepted by Chat tools. Complete login in the official browser page.");
+      throw new Error(
+        "Raw credentials are never accepted by Chat tools. Complete login in the official browser page.",
+      );
     }
   }
   const input: CompleteConnectionInput = {
     accountLabel,
-    externalAccountId: typeof args["externalAccountId"] === "string" ? args["externalAccountId"] : undefined,
+    externalAccountId:
+      typeof args["externalAccountId"] === "string"
+        ? args["externalAccountId"]
+        : undefined,
     scopes: Array.isArray(args["scopes"])
-      ? args["scopes"].filter((value): value is string => typeof value === "string")
+      ? args["scopes"].filter(
+          (value): value is string => typeof value === "string",
+        )
       : undefined,
-    credentialRef: typeof args["credentialRef"] === "string" ? args["credentialRef"] : undefined,
-    expiresAt: typeof args["expiresAt"] === "string" ? args["expiresAt"] : undefined,
+    credentialRef:
+      typeof args["credentialRef"] === "string"
+        ? args["credentialRef"]
+        : undefined,
+    expiresAt:
+      typeof args["expiresAt"] === "string" ? args["expiresAt"] : undefined,
   };
-  const result = requirePlatformConnectionStore(this).complete(sessionId, input);
+  const result = requirePlatformConnectionStore(this).complete(
+    sessionId,
+    input,
+  );
   return JSON.stringify({ action: "platform_connection_recorded", ...result });
 }
 
@@ -183,18 +213,24 @@ export async function handlePlatformConnectionValidate(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const connectionId = typeof args["connectionId"] === "string" ? args["connectionId"] : "";
+  const connectionId =
+    typeof args["connectionId"] === "string" ? args["connectionId"] : "";
   if (!connectionId) throw new Error("connectionId is required");
-  return JSON.stringify({ connection: requirePlatformConnectionStore(this).validate(connectionId) });
+  return JSON.stringify({
+    connection: requirePlatformConnectionStore(this).validate(connectionId),
+  });
 }
 
 export async function handlePlatformConnectionRevoke(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const connectionId = typeof args["connectionId"] === "string" ? args["connectionId"] : "";
+  const connectionId =
+    typeof args["connectionId"] === "string" ? args["connectionId"] : "";
   if (!connectionId) throw new Error("connectionId is required");
-  return JSON.stringify({ connection: requirePlatformConnectionStore(this).revoke(connectionId) });
+  return JSON.stringify({
+    connection: requirePlatformConnectionStore(this).revoke(connectionId),
+  });
 }
 
 export async function handleBrowserClick(
@@ -471,6 +507,64 @@ export async function handleScrapeTable(
   return await this.crawler.extractTable(
     (args["selector"] as string) || "table",
   );
+}
+
+// Native Web Search Handler
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function handleWebSearch(
+  _this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const query = typeof args.query === "string" ? args.query.trim() : "";
+  const requested = Number(args.max_results);
+  const maxResults = Number.isFinite(requested)
+    ? Math.max(1, Math.min(10, Math.floor(requested)))
+    : 5;
+  if (!query) return "Error: query parameter is required";
+
+  const endpoint = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  try {
+    const response = await fetch(endpoint, {
+      headers: { "user-agent": "Agent-Miki/1.0 (+native-web-search)" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return `Web search failed with HTTP ${response.status}.`;
+    const html = await response.text();
+    const results: Array<{ title: string; url: string; snippet: string }> = [];
+    const resultPattern =
+      /<a[^>]+class=["']result__a["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class=["']result__snippet["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match: RegExpExecArray | null;
+    while (results.length < maxResults && (match = resultPattern.exec(html))) {
+      const rawUrl = decodeHtmlText(match[1]);
+      const title = decodeHtmlText(match[2]);
+      const snippet = decodeHtmlText(match[3]);
+      if (!title || !rawUrl) continue;
+      let url = rawUrl;
+      try {
+        const parsed = new URL(rawUrl, endpoint);
+        const redirect = parsed.searchParams.get("uddg");
+        url = redirect ? decodeURIComponent(redirect) : parsed.toString();
+      } catch {
+        continue;
+      }
+      results.push({ title, url, snippet });
+    }
+    return JSON.stringify({ query, provider: "duckduckgo", results }, null, 2);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Web search failed: ${message.slice(0, 240)}`;
+  }
 }
 
 // Direct Download Search Handler

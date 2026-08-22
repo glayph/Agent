@@ -9,9 +9,14 @@ function waitForIo(): Promise<void> {
 
 describe("RotatingWriteStream", () => {
   it("accounts for writes buffered while a rotation is in progress", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-log-rotation-"));
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-log-rotation-"),
+    );
     const logPath = path.join(tempDir, "core.log");
-    const stream = new RotatingWriteStream(logPath, { maxBytes: 3, maxFiles: 2 });
+    const stream = new RotatingWriteStream(logPath, {
+      maxBytes: 3,
+      maxFiles: 2,
+    });
 
     try {
       stream.write("abc");
@@ -19,7 +24,9 @@ describe("RotatingWriteStream", () => {
       await waitForIo();
 
       expect(fs.readFileSync(logPath, "utf8")).toBe("d");
-      expect((stream as unknown as { bytesWritten: number }).bytesWritten).toBe(1);
+      expect((stream as unknown as { bytesWritten: number }).bytesWritten).toBe(
+        1,
+      );
     } finally {
       stream.end();
       await waitForIo();
@@ -27,4 +34,3 @@ describe("RotatingWriteStream", () => {
     }
   });
 });
-

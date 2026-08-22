@@ -1,6 +1,9 @@
-import { IconLayoutSidebarLeftCollapse, IconMessageCircle } from "@tabler/icons-react"
-import { useTranslation } from "react-i18next"
+import {
+  IconLayoutSidebarLeftCollapse,
+  IconMessageCircle,
+} from "@tabler/icons-react"
 import type { RefObject } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { SessionSummary } from "@/api/sessions"
 import { Button } from "@/shared/ui/button"
@@ -54,13 +57,13 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
-      <div className="border-[#ecece8] flex h-12 shrink-0 items-center gap-3 border-b px-4">
+      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-[#ecece8] px-4">
         {onClose ? (
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="bg-[#242422] text-white hover:bg-[#3b3b37] size-7 shrink-0 rounded-full"
+            className="size-7 shrink-0 rounded-full bg-[#242422] text-white hover:bg-[#3b3b37]"
             onClick={handleToggleAppSidebar}
             aria-label={t("navigation.toggle_sidebar", {
               defaultValue: "Toggle sidebar",
@@ -72,25 +75,27 @@ export function Sidebar(props: SidebarProps) {
             <IconLayoutSidebarLeftCollapse className="size-4" />
           </Button>
         ) : (
-          <div className="bg-[#242422] text-white flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#242422] text-[11px] font-semibold text-white">
             O
           </div>
         )}
         <div className="min-w-0">
-          <div className="text-[#242422] truncate text-[13px] font-semibold">
+          <div className="truncate text-[13px] font-semibold text-[#242422]">
             Miki
           </div>
-          <div className="text-[#999992] truncate text-[10px] leading-none">
-            {t("chat.workspace.agentConsole", { defaultValue: "Agent console" })}
+          <div className="truncate text-[10px] leading-none text-[#999992]">
+            {t("chat.workspace.agentConsole", {
+              defaultValue: "Agent console",
+            })}
           </div>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 px-4 py-5">
-        <div className="border-[#ecece8] bg-white/70 flex items-start gap-2 rounded-xl border px-3 py-3 shadow-[0_1px_2px_rgba(30,30,25,0.03)]">
-          <IconMessageCircle className="text-[#777771] mt-0.5 size-4 shrink-0" />
+        <div className="flex items-start gap-2 rounded-xl border border-[#ecece8] bg-white/70 px-3 py-3 shadow-[0_1px_2px_rgba(30,30,25,0.03)]">
+          <IconMessageCircle className="mt-0.5 size-4 shrink-0 text-[#777771]" />
           <div className="min-w-0">
-            <div className="text-[#242422] text-xs font-semibold">
+            <div className="text-xs font-semibold text-[#242422]">
               {t("chat.workspace.singleChat", { defaultValue: "Single chat" })}
             </div>
             <p className="text-muted-foreground mt-1 text-[11px] leading-4">

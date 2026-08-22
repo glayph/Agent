@@ -1,6 +1,6 @@
 import {
-  IconAlertTriangle,
   IconActivity,
+  IconAlertTriangle,
   IconCheck,
   IconChevronRight,
   IconLoader2,
@@ -42,13 +42,14 @@ export function LiveActivityStrip({
       aria-label="Live agent activity"
       className="border-border/50 bg-card/65 mx-auto w-full max-w-[var(--chat-content-width)] rounded-xl border px-3 py-2 shadow-sm backdrop-blur-sm"
     >
-      <div className="flex items-center gap-2 px-1 pb-1.5 text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+      <div className="text-muted-foreground flex items-center gap-2 px-1 pb-1.5 text-[10px] font-semibold tracking-[0.14em] uppercase">
         <IconActivity className="text-primary size-3.5" aria-hidden="true" />
         <span>Live activity</span>
       </div>
       <div className="flex flex-col gap-1 sm:flex-row sm:items-stretch">
         {nodes.map((node) => {
-          const isActive = node.status === "running" || node.status === "retrying"
+          const isActive =
+            node.status === "running" || node.status === "retrying"
           const isSelected = node.id === selectedNodeId
           return (
             <button
@@ -57,7 +58,7 @@ export function LiveActivityStrip({
               onClick={() => onSelect(node)}
               className={cn(
                 "group flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
-                "border-transparent hover:border-primary/25 hover:bg-primary/[0.06]",
+                "hover:border-primary/25 hover:bg-primary/[0.06] border-transparent",
                 isSelected && "border-primary/35 bg-primary/[0.08]",
                 isActive && "text-foreground",
                 !isActive && "text-muted-foreground",

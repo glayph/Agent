@@ -4,10 +4,7 @@ export type {
   WorkspaceFolderRuleRef,
   FolderRulesPayload,
 } from "./types.js";
-export {
-  DEFAULT_RULES_FILES,
-  defaultWorkspaceFoldersConfig,
-} from "./types.js";
+export { DEFAULT_RULES_FILES, defaultWorkspaceFoldersConfig } from "./types.js";
 export {
   loadWorkspaceFolders,
   saveWorkspaceFolders,

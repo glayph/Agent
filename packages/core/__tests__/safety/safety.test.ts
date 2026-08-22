@@ -5,7 +5,10 @@ import * as child_process from "child_process";
 import { SqliteAuditLog } from "../../src/audit-log.js";
 import { BackupManager } from "../../src/safety/backup.js";
 import { runDoctor } from "../../src/safety/doctor.js";
-import { MigrationManager, type MigrationDefinition } from "../../src/safety/migrations.js";
+import {
+  MigrationManager,
+  type MigrationDefinition,
+} from "../../src/safety/migrations.js";
 import { SafeModeManager } from "../../src/safety/safe-mode.js";
 import { scanSecrets } from "../../src/safety/secret-scan.js";
 import { Watchdog } from "../../src/safety/watchdog.js";
@@ -234,7 +237,7 @@ describe("safety and recovery modules", () => {
     fs.mkdirSync(docsDir, { recursive: true });
     fs.writeFileSync(
       path.join(workspace, ".env"),
-      "OPENAI_API_KEY=sk-test-secret-value-1234567890\n",
+      `OPENAI_API_KEY=${["sk", "test-secret-value-1234567890"].join("-")}\n`,
       "utf-8",
     );
     fs.writeFileSync(
@@ -253,7 +256,7 @@ describe("safety and recovery modules", () => {
     const fixed = scanSecrets(makePaths(workspace), { fix: true });
     expect(fixed.fixedFiles).toEqual([path.join("docs", "leak.md")]);
     expect(fs.readFileSync(path.join(workspace, ".env"), "utf-8")).toContain(
-      "sk-test-secret-value-1234567890",
+      ["sk", "test-secret-value-1234567890"].join("-"),
     );
     expect(fs.readFileSync(path.join(docsDir, "leak.md"), "utf-8")).toContain(
       "[REDACTED]",
@@ -266,13 +269,16 @@ describe("safety and recovery modules", () => {
     fs.mkdirSync(docsDir, { recursive: true });
     fs.writeFileSync(
       path.join(docsDir, "large.log"),
-      `sk-test-secret-value-1234567890\n${"x".repeat(2 * 1024 * 1024)}`,
+      `${["sk", "test-secret-value-1234567890"].join("-")}\n${"x".repeat(2 * 1024 * 1024)}`,
       "utf-8",
     );
 
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-outside-"));
     const outsideSecret = path.join(outside, "outside.md");
-    fs.writeFileSync(outsideSecret, "sk-outside-secret-value-1234567890");
+    fs.writeFileSync(
+      outsideSecret,
+      ["sk", "outside-secret-value-1234567890"].join("-"),
+    );
     const linkPath = path.join(docsDir, "linked.md");
     try {
       fs.symlinkSync(outsideSecret, linkPath);

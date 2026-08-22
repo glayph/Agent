@@ -39,9 +39,14 @@ import { scanSecrets } from "../safety/secret-scan.js";
 import { Watchdog } from "../safety/watchdog.js";
 import { parseCronToNextRun } from "../scheduler.js";
 import {
-  PursueGoalStore,
-  type PursueGoalStatus,
-} from "./pursue-goal-store.js";
+  ApprovalBoundMockDelivery,
+  publishDeliveryOutcome,
+} from "../approval-delivery.js";
+import {
+  ApprovalInbox,
+  requiresHumanApproval,
+  type ApprovalAction,
+} from "../security/approval-inbox.js";
 
 interface EnhancementRouterOptions {
   runtimePaths: RuntimePaths;
@@ -50,7 +55,10 @@ interface EnhancementRouterOptions {
     run: AgentRun,
     hooks: {
       startStep: (stepId: string) => AgentRun;
-      completeStep: (stepId: string, evidence: VerificationEvidence) => AgentRun;
+      completeStep: (
+        stepId: string,
+        evidence: VerificationEvidence,
+      ) => AgentRun;
       failStep: (stepId: string, error: unknown) => AgentRun;
     },
   ) => Promise<void>;
@@ -58,6 +66,8 @@ interface EnhancementRouterOptions {
   jobQueue?: PersistentJobQueue;
   /** Optional worker status source for the runtime dashboard. */
   jobRunner?: PersistentJobRunner;
+  /** Shared approval state used to prevent unsafe replay from the dashboard. */
+  approvalInbox?: ApprovalInbox;
   /** @deprecated */
   workspaceDir?: string;
 }
@@ -78,6 +88,17 @@ function errorMessage(err: unknown): string {
 function sendJsonError(res: Response, err: unknown, status = 500): void {
   res.status(status).json({ error: errorMessage(err) });
 }
+
+const MOCK_APPROVAL_ACTIONS = new Set<ApprovalAction>([
+  "login",
+  "mfa_takeover",
+  "payment",
+  "publish",
+  "delete",
+  "external_write",
+  "browser_navigation",
+]);
+const MOCK_APPROVAL_RISKS = new Set(["low", "medium", "high", "critical"]);
 
 const AUDIT_EVENT_TYPES = new Set<AuditEventType>([
   "auth.login",
@@ -120,6 +141,58 @@ function recordJobLifecycle(
     subject: action,
     details: { action, ...details },
   });
+}
+
+function jobObservability(
+  job: import("../persistent-job-queue.js").PersistentJob,
+  approvalInbox?: ApprovalInbox,
+): {
+  recovery: import("../persistent-job-queue.js").PersistentJobRecovery;
+  approval: {
+    required: boolean;
+    action?: ApprovalAction;
+    requestId?: string;
+    status?: string;
+    replayAllowed: boolean;
+  };
+} {
+  const payload = job.payload;
+  const actionValue =
+    typeof payload.approvalAction === "string"
+      ? payload.approvalAction
+      : typeof payload.action === "string"
+        ? payload.action
+        : undefined;
+  const action = [
+    "login",
+    "mfa_takeover",
+    "payment",
+    "publish",
+    "delete",
+    "external_write",
+    "browser_navigation",
+  ].includes(actionValue ?? "")
+    ? (actionValue as ApprovalAction)
+    : undefined;
+  const requestId =
+    typeof payload.approvalRequestId === "string"
+      ? payload.approvalRequestId
+      : undefined;
+  const request = requestId ? approvalInbox?.get(requestId) : undefined;
+  const required =
+    payload.requiresApproval === true ||
+    Boolean(action && requiresHumanApproval(action));
+  const status = request?.status;
+  return {
+    recovery: job.recovery,
+    approval: {
+      required,
+      ...(action ? { action } : {}),
+      ...(requestId ? { requestId } : {}),
+      ...(status ? { status } : {}),
+      replayAllowed: !required || status === "approved",
+    },
+  };
 }
 
 function parseEvidence(value: unknown): VerificationEvidence | null {
@@ -165,6 +238,7 @@ export function createEnhancementRouter({
   jobQueue,
   jobRunner,
   executeAgentRun,
+  approvalInbox,
 }: EnhancementRouterOptions): Router {
   const router = Router();
   const audit = new SqliteAuditLog(path.join(runtimePaths.dataDir, "audit.db"));
@@ -180,6 +254,18 @@ export function createEnhancementRouter({
   const deliveries = new DeliveryQueue(
     path.join(runtimePaths.dataDir, "delivery-receipts.json"),
   );
+  const deliveryApprovals =
+    approvalInbox ??
+    new ApprovalInbox(
+      path.join(runtimePaths.dataDir, "delivery-approvals.json"),
+      {
+        audit,
+      },
+    );
+  const mockDelivery = new ApprovalBoundMockDelivery(
+    deliveryApprovals,
+    deliveries,
+  );
   const watchers = new WatcherRegistry(
     path.join(runtimePaths.dataDir, "watcher-state.json"),
   );
@@ -192,88 +278,6 @@ export function createEnhancementRouter({
   const migrations = createMigrationManager(runtimePaths);
   const safeMode = createSafeModeManager(runtimePaths);
   const watchdog = new Watchdog(safeMode, audit);
-  const pursueGoals = new PursueGoalStore(runtimePaths.dataDir);
-
-  // Compatibility surface for the chat-level Pursue Goal panel. The state is
-  // persisted separately from agent-run evidence because a goal can outlive a
-  // single run and must survive gateway/core restarts.
-  router.get("/goals", (_req: Request, res: Response) => {
-    res.json(pursueGoals.snapshot());
-  });
-
-  router.post("/goals", (req: Request, res: Response) => {
-    if (!isRecord(req.body) || typeof req.body.objective !== "string" || !req.body.objective.trim()) {
-      res.status(400).json({ error: "objective is required" });
-      return;
-    }
-    const rawSteps = req.body.steps;
-    const steps = Array.isArray(rawSteps)
-      ? rawSteps.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
-      : undefined;
-    if (Array.isArray(rawSteps) && steps?.length === 0) {
-      res.status(400).json({ error: "at least one step is required" });
-      return;
-    }
-    try {
-      const snapshot = pursueGoals.create({
-        objective: req.body.objective,
-        description: typeof req.body.description === "string" ? req.body.description : undefined,
-        steps,
-        replaceExisting: req.body.replaceExisting === true,
-      });
-      audit.record({
-        type: "agent.run",
-        actor: "dashboard",
-        subject: req.body.objective,
-        details: { action: "pursue_goal.created", goalId: snapshot.summary.activeGoalId },
-      });
-      res.status(201).json(snapshot);
-    } catch (error) {
-      sendJsonError(res, error, 400);
-    }
-  });
-
-  router.patch("/goals/:goalId", (req: Request, res: Response) => {
-    const goalId = Number(req.params.goalId);
-    if (!Number.isInteger(goalId) || goalId < 1 || !isRecord(req.body)) {
-      res.status(400).json({ error: "valid goal id and JSON object are required" });
-      return;
-    }
-    const allowedStatuses = new Set<PursueGoalStatus>([
-      "pending",
-      "active",
-      "completed",
-      "blocked",
-      "cancelled",
-    ]);
-    const status = req.body.status === undefined
-      ? undefined
-      : typeof req.body.status === "string" && allowedStatuses.has(req.body.status as PursueGoalStatus)
-        ? (req.body.status as PursueGoalStatus)
-        : null;
-    if (status === null) {
-      res.status(400).json({ error: "invalid goal status" });
-      return;
-    }
-    try {
-      const snapshot = pursueGoals.update(goalId, {
-        status,
-        statusReason: typeof req.body.statusReason === "string" ? req.body.statusReason : undefined,
-        completedSteps: typeof req.body.completedSteps === "number" ? req.body.completedSteps : undefined,
-        totalSteps: typeof req.body.totalSteps === "number" ? req.body.totalSteps : undefined,
-        progress: typeof req.body.progress === "number" ? req.body.progress : undefined,
-      });
-      audit.record({
-        type: "agent.run",
-        actor: "dashboard",
-        subject: `goal:${goalId}`,
-        details: { action: "pursue_goal.updated", status: status || "progress", goalId },
-      });
-      res.json(snapshot);
-    } catch (error) {
-      sendJsonError(res, error, 404);
-    }
-  });
 
   router.post("/config/validate", (req: Request, res: Response) => {
     if (!isRecord(req.body)) {
@@ -331,7 +335,8 @@ export function createEnhancementRouter({
       ? Math.max(0, Math.min(1_000_000, Math.floor(rawOffset)))
       : 0;
     const queryValue = req.query["query"] ?? req.query["q"];
-    const query = typeof queryValue === "string" ? queryValue.trim() : undefined;
+    const query =
+      typeof queryValue === "string" ? queryValue.trim() : undefined;
     const rawStatus = req.query["status"];
     const status: TaskGraphStepStatus | undefined =
       typeof rawStatus === "string" && rawStatus !== "all"
@@ -389,10 +394,13 @@ export function createEnhancementRouter({
         startStep: (stepId) => runRecorder.startStep(run.id, stepId),
         completeStep: (stepId, evidence) =>
           runRecorder.completeStep(run.id, stepId, evidence),
-        failStep: (stepId, error) => runRecorder.failStep(run.id, stepId, error),
+        failStep: (stepId, error) =>
+          runRecorder.failStep(run.id, stepId, error),
       }).catch((err) => {
         const current = runRecorder.get(run.id);
-        const activeStep = current?.steps.find((step) => step.status === "running");
+        const activeStep = current?.steps.find(
+          (step) => step.status === "running",
+        );
         if (activeStep) {
           try {
             runRecorder.failStep(run.id, activeStep.id, err);
@@ -592,7 +600,8 @@ export function createEnhancementRouter({
         ? { ...req.body, idempotencyKey }
         : req.body;
       const event = channels.normalize(req.body.channel, normalizedInput, {
-        senderId: typeof req.body.senderId === "string" ? req.body.senderId : undefined,
+        senderId:
+          typeof req.body.senderId === "string" ? req.body.senderId : undefined,
       });
       const payload = event.payload;
       const message =
@@ -626,12 +635,176 @@ export function createEnhancementRouter({
   });
 
   router.get("/runtime/deliveries", (req: Request, res: Response) => {
-    const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+    const status =
+      typeof req.query["status"] === "string" ? req.query["status"] : undefined;
     res.json({
       receipts: deliveries.list(status as Parameters<DeliveryQueue["list"]>[0]),
       stats: deliveries.stats(),
     });
   });
+
+  router.get(
+    "/runtime/deliveries/:deliveryId",
+    (req: Request, res: Response) => {
+      const receipt = deliveries.get(req.params.deliveryId);
+      if (!receipt) {
+        res.status(404).json({ error: "Delivery receipt not found" });
+        return;
+      }
+      res.json({
+        receipt,
+        approval: receipt.approvalRequestId
+          ? deliveryApprovals.get(receipt.approvalRequestId)
+          : null,
+        replayEligible:
+          ["failed", "dead_letter"].includes(receipt.status) &&
+          receipt.replayAllowed !== false,
+      });
+    },
+  );
+
+  router.post("/runtime/deliveries/mock", (req: Request, res: Response) => {
+    if (
+      !isRecord(req.body) ||
+      typeof req.body.runId !== "string" ||
+      typeof req.body.stepId !== "string" ||
+      typeof req.body.action !== "string" ||
+      typeof req.body.risk !== "string" ||
+      typeof req.body.target !== "string" ||
+      typeof req.body.body !== "string" ||
+      typeof req.body.channel !== "string" ||
+      typeof req.body.destination !== "string" ||
+      typeof req.body.idempotencyKey !== "string" ||
+      typeof req.body.correlationId !== "string"
+    ) {
+      res.status(400).json({
+        error:
+          "runId, stepId, action, risk, target, body, channel, destination, idempotencyKey and correlationId are required",
+      });
+      return;
+    }
+    try {
+      if (!MOCK_APPROVAL_ACTIONS.has(req.body.action as ApprovalAction)) {
+        throw new Error("Unsupported mock approval action");
+      }
+      if (!MOCK_APPROVAL_RISKS.has(req.body.risk)) {
+        throw new Error("Unsupported mock approval risk");
+      }
+      if (!channels.has(req.body.channel as ChannelName)) {
+        throw new Error(`Unsupported channel: ${req.body.channel}`);
+      }
+      const result = mockDelivery.create({
+        runId: req.body.runId,
+        stepId: req.body.stepId,
+        action: req.body.action as Parameters<
+          ApprovalBoundMockDelivery["create"]
+        >[0]["action"],
+        risk: req.body.risk as Parameters<
+          ApprovalBoundMockDelivery["create"]
+        >[0]["risk"],
+        target: req.body.target,
+        body: req.body.body,
+        channel: req.body.channel as ChannelName,
+        destination: req.body.destination,
+        idempotencyKey: req.body.idempotencyKey,
+        correlationId: req.body.correlationId,
+        maxAttempts:
+          typeof req.body.maxAttempts === "number"
+            ? req.body.maxAttempts
+            : undefined,
+      });
+      recordJobLifecycle(audit, "delivery.mock.created", {
+        deliveryId: result.receipt.id,
+        approvalRequestId: result.approval.id,
+        runId: result.receipt.runId,
+        stepId: result.receipt.stepId,
+        correlationId: result.receipt.correlationId,
+      });
+      res.status(201).json({
+        preview: result.preview,
+        receipt: result.receipt,
+        approval: { ...result.approval, tokenIssued: true },
+      });
+    } catch (error: unknown) {
+      res.status(400).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.post(
+    "/runtime/deliveries/:deliveryId/approve",
+    (req: Request, res: Response) => {
+      try {
+        const decidedBy =
+          isRecord(req.body) && typeof req.body.decidedBy === "string"
+            ? req.body.decidedBy
+            : "mock-operator";
+        const result = mockDelivery.approve(req.params.deliveryId, decidedBy);
+        recordJobLifecycle(audit, "delivery.mock.approved", {
+          deliveryId: result.receipt.id,
+          approvalRequestId: result.receipt.approvalRequestId,
+          runId: result.receipt.runId,
+          stepId: result.receipt.stepId,
+        });
+        res.json({ receipt: result.receipt, approval: result.approval });
+      } catch (error: unknown) {
+        res.status(409).json({ error: errorMessage(error) });
+      }
+    },
+  );
+
+  router.post(
+    "/runtime/deliveries/:deliveryId/mock-dispatch",
+    async (req: Request, res: Response) => {
+      const outcome = isRecord(req.body) ? req.body.outcome : undefined;
+      if (!["sent", "failed", "unknown_outcome"].includes(String(outcome))) {
+        res.status(400).json({
+          error: "outcome must be sent, failed or unknown_outcome",
+        });
+        return;
+      }
+      try {
+        const result = await mockDelivery.dispatch(
+          req.params.deliveryId,
+          outcome as "sent" | "failed" | "unknown_outcome",
+        );
+        publishDeliveryOutcome(result.event);
+        recordJobLifecycle(audit, "delivery.mock.settled", {
+          deliveryId: result.receipt.id,
+          runId: result.receipt.runId,
+          status: result.receipt.status,
+          normalizedStatus: result.outcome.status,
+          correlationId: result.receipt.correlationId,
+        });
+        res.json(result);
+      } catch (error: unknown) {
+        res.status(409).json({ error: errorMessage(error) });
+      }
+    },
+  );
+
+  router.post(
+    "/runtime/deliveries/:deliveryId/replay",
+    (req: Request, res: Response) => {
+      const key = isRecord(req.body) ? req.body.idempotencyKey : undefined;
+      if (typeof key !== "string" || !key.trim()) {
+        res.status(400).json({ error: "idempotencyKey is required" });
+        return;
+      }
+      try {
+        const result = mockDelivery.replay(req.params.deliveryId, key.trim());
+        recordJobLifecycle(audit, "delivery.replay", {
+          deliveryId: result.receipt.id,
+          replayOf: result.receipt.replayOf,
+          status: result.receipt.status,
+          approvalRequired: result.receipt.approvalRequired,
+          approvalRequestId: result.approval.id,
+        });
+        res.status(202).json(result);
+      } catch (error: unknown) {
+        res.status(409).json({ error: errorMessage(error) });
+      }
+    },
+  );
 
   router.post("/runtime/deliveries", (req: Request, res: Response) => {
     if (
@@ -648,15 +821,20 @@ export function createEnhancementRouter({
     }
     try {
       const channel = req.body.channel as ChannelName;
-      if (!channels.has(channel)) throw new Error(`Unsupported channel: ${channel}`);
+      if (!channels.has(channel))
+        throw new Error(`Unsupported channel: ${channel}`);
       const receipt = deliveries.enqueue({
         channel,
         destination: req.body.destination,
         body: req.body.body,
         idempotencyKey: req.body.idempotencyKey,
         runId: typeof req.body.runId === "string" ? req.body.runId : undefined,
-        eventId: typeof req.body.eventId === "string" ? req.body.eventId : undefined,
-        maxAttempts: typeof req.body.maxAttempts === "number" ? req.body.maxAttempts : undefined,
+        eventId:
+          typeof req.body.eventId === "string" ? req.body.eventId : undefined,
+        maxAttempts:
+          typeof req.body.maxAttempts === "number"
+            ? req.body.maxAttempts
+            : undefined,
       });
       recordJobLifecycle(audit, "delivery.enqueue", {
         deliveryId: receipt.id,
@@ -685,7 +863,9 @@ export function createEnhancementRouter({
       typeof req.body.message !== "string" ||
       typeof req.body.schedule !== "string"
     ) {
-      res.status(400).json({ error: "sessionId, message and schedule are required" });
+      res
+        .status(400)
+        .json({ error: "sessionId, message and schedule are required" });
       return;
     }
     try {
@@ -731,7 +911,20 @@ export function createEnhancementRouter({
 
   router.get("/runtime/jobs/dead-letter", (_req: Request, res: Response) => {
     const items = jobs.deadLetters();
-    res.json({ jobs: items, count: items.length });
+    res.json({
+      jobs: items,
+      count: items.length,
+      observability: items.map((job) => jobObservability(job, approvalInbox)),
+    });
+  });
+
+  router.get("/runtime/jobs/:jobId", (req: Request, res: Response) => {
+    const job = jobs.get(req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    res.json({ job, observability: jobObservability(job, approvalInbox) });
   });
 
   router.post("/runtime/jobs", (req: Request, res: Response) => {
@@ -749,10 +942,8 @@ export function createEnhancementRouter({
           typeof req.body.maxAttempts === "number"
             ? req.body.maxAttempts
             : undefined,
-                delayMs:
-          typeof req.body.delayMs === "number"
-            ? req.body.delayMs
-            : undefined,
+        delayMs:
+          typeof req.body.delayMs === "number" ? req.body.delayMs : undefined,
         idempotencyKey:
           typeof req.body.idempotencyKey === "string"
             ? req.body.idempotencyKey
@@ -827,6 +1018,22 @@ export function createEnhancementRouter({
   );
   router.post("/runtime/jobs/:jobId/retry", (req: Request, res: Response) => {
     const body = isRecord(req.body) ? req.body : {};
+    const current = jobs.get(req.params.jobId);
+    if (!current) {
+      res.status(404).json({ error: "Job not found or not retryable" });
+      return;
+    }
+    const observability = jobObservability(current, approvalInbox);
+    if (
+      observability.approval.required &&
+      observability.approval.status !== "approved"
+    ) {
+      res.status(409).json({
+        error: "Human approval is required before replaying this job",
+        approval: observability.approval,
+      });
+      return;
+    }
     const job = jobs.retry(
       req.params.jobId,
       typeof body.delayMs === "number" ? body.delayMs : 0,
@@ -844,7 +1051,10 @@ export function createEnhancementRouter({
       status: job.status,
       runAfter: job.runAfter,
     });
-    res.json({ job });
+    res.json({
+      job,
+      observability: job ? jobObservability(job, approvalInbox) : undefined,
+    });
   });
 
   router.delete("/runtime/jobs/:jobId", (req: Request, res: Response) => {

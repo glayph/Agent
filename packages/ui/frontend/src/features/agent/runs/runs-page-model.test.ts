@@ -113,7 +113,9 @@ describe("agent runs page model", () => {
             dependsOn: [],
             status: "running",
             attempts: 1,
-            evidence: [{ kind: "command", summary: "websocket passed", ok: true }],
+            evidence: [
+              { kind: "command", summary: "websocket passed", ok: true },
+            ],
           },
         ],
       }),
@@ -191,9 +193,11 @@ describe("agent runs page model", () => {
     expect(validateRunDraft("  ", "Plan").errors).toMatchObject({
       objective: "Objective is required.",
     })
-    expect(validateRunDraft("Investigate queue", "\n \n").errors).toMatchObject({
-      steps: "At least one step is required.",
-    })
+    expect(validateRunDraft("Investigate queue", "\n \n").errors).toMatchObject(
+      {
+        steps: "At least one step is required.",
+      },
+    )
     expect(validateRunDraft(" Investigate queue ", " Plan \nVerify ")).toEqual({
       objective: "Investigate queue",
       steps: ["Plan", "Verify"],

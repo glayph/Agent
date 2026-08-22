@@ -1,8 +1,9 @@
 import WebSocket from "ws";
 import HttpsProxyAgent from "https-proxy-agent";
+import type { Agent as HttpAgent } from "node:http";
 import { ProxyAgent } from "undici";
 import type { AgentOrchestrator } from "../agent.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
@@ -216,7 +217,9 @@ export class DiscordBot {
       const ws = new WebSocket(
         DISCORD_GATEWAY_URL,
         config.proxy
-          ? { agent: new (HttpsProxyAgent as any)(config.proxy) }
+          ? {
+              agent: HttpsProxyAgent(config.proxy) as unknown as HttpAgent,
+            }
           : undefined,
       );
       this.ws = ws;
@@ -379,10 +382,19 @@ export class DiscordBot {
     await this.postTyping(message.channel_id);
     const response = await collectAgentResponse(
       this.orchestrator,
-      UNIVERSAL_SESSION_ID,
+      resolveChannelSessionId(
+        this.orchestrator.config,
+        "discord",
+        message.author?.id || message.channel_id,
+        message.channel_id,
+      ),
       prompt,
     );
-    for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, DISCORD_MESSAGE_LIMIT)) {
+    for (const part of splitOutboundMessageForOrchestrator(
+      this.orchestrator,
+      response,
+      DISCORD_MESSAGE_LIMIT,
+    )) {
       await this.postMessage(message.channel_id, part);
     }
   }

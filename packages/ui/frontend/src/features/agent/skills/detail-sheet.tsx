@@ -16,6 +16,7 @@ import {
   MarkdownCodeBlock,
   MessageCodeBlock,
 } from "@/features/chat/components/message-code-block"
+import { cn } from "@/lib/utils"
 import {
   Sheet,
   SheetContent,
@@ -24,7 +25,6 @@ import {
   SheetTitle,
 } from "@/shared/ui/sheet"
 import { Skeleton } from "@/shared/ui/skeleton"
-import { cn } from "@/lib/utils"
 
 import { OriginBadge } from "./origin-badge"
 import { getOriginLabel, getSkillOriginKind } from "./origin-utils"

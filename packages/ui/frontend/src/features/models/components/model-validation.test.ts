@@ -16,7 +16,10 @@ const providerOptions = [
 
 describe("model validation", () => {
   it("accepts empty values and provider-local model names", () => {
-    expect(validateModelField("   ")).toEqual({ level: "success", messageKey: "" })
+    expect(validateModelField("   ")).toEqual({
+      level: "success",
+      messageKey: "",
+    })
     expect(validateModelField("gpt-4.1-mini", "openai")).toMatchObject({
       level: "success",
       messageKey: "models.validation.parsed",
@@ -51,7 +54,9 @@ describe("model validation", () => {
   })
 
   it("accepts known provider-prefixed model identifiers", () => {
-    expect(validateModelField("openai/gpt-4.1-mini", undefined, providerOptions)).toMatchObject({
+    expect(
+      validateModelField("openai/gpt-4.1-mini", undefined, providerOptions),
+    ).toMatchObject({
       level: "success",
       messageKey: "models.validation.parsed",
       messageParams: { provider: "openai", model: "gpt-4.1-mini" },

@@ -51,7 +51,10 @@ interface PursueGoalPanelProps {
   onAutoOpenConsumed?: () => void
 }
 
-export function PursueGoalPanel({ autoOpen, onAutoOpenConsumed }: PursueGoalPanelProps) {
+export function PursueGoalPanel({
+  autoOpen,
+  onAutoOpenConsumed,
+}: PursueGoalPanelProps) {
   const { t } = useTranslation()
   const [snapshot, setSnapshot] = useState<PursueGoalSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -85,7 +88,7 @@ export function PursueGoalPanel({ autoOpen, onAutoOpenConsumed }: PursueGoalPane
   }, [loadGoal])
 
   useEffect(() => {
-    if (autoOpen && !loading && !activeGoal) {
+    if (autoOpen && !loading) {
       setOpen(true)
       onAutoOpenConsumed?.()
     }

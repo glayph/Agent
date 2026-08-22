@@ -27,6 +27,8 @@ type Config struct {
 	NodePath      string
 	Host          string
 	Port          int
+	CorePort      int
+	LiteLLMPort   int
 	Debug         bool
 	Plain         bool
 	Version       string
@@ -44,6 +46,8 @@ func parseConfig(args []string) (Config, error) {
 		NodePath:      firstNonEmpty(os.Getenv("MIKI_NODE"), os.Getenv("Miki_NODE"), "node"),
 		Host:          firstNonEmpty(os.Getenv("GATEWAY_HOST"), "127.0.0.1"),
 		Port:          intFromEnv("GATEWAY_PORT", 18800),
+		CorePort:      intFromEnv("CORE_PORT", 8000),
+		LiteLLMPort:   intFromEnv("LITELLM_PORT", 4000),
 		Version:       firstNonEmpty(os.Getenv("MIKI_PACKAGE_VERSION"), os.Getenv("Miki_PACKAGE_VERSION"), packageVersion(workspaceDir)),
 	}
 
@@ -93,7 +97,13 @@ func parseConfig(args []string) (Config, error) {
 		cfg.Host = "127.0.0.1"
 	}
 	if cfg.Port <= 0 || cfg.Port > 65535 {
-		return cfg, fmt.Errorf("invalid port: %d", cfg.Port)
+		return cfg, fmt.Errorf("invalid gateway port: %d", cfg.Port)
+	}
+	if cfg.CorePort <= 0 || cfg.CorePort > 65535 {
+		return cfg, fmt.Errorf("invalid core port: %d", cfg.CorePort)
+	}
+	if cfg.LiteLLMPort <= 0 || cfg.LiteLLMPort > 65535 {
+		return cfg, fmt.Errorf("invalid LiteLLM port: %d", cfg.LiteLLMPort)
 	}
 	return cfg, nil
 }

@@ -56,9 +56,14 @@ function runtimePath(relativePath) {
 }
 
 function cliPath() {
-  return runtimeRoot === PROJECT_ROOT
-    ? path.join(PROJECT_ROOT, "packages", "cli", "dist", "bin", CLI_EXE)
-    : runtimePath(path.join("bin", CLI_EXE));
+  if (runtimeRoot !== PROJECT_ROOT) {
+    return runtimePath(path.join("bin", CLI_EXE));
+  }
+  const compiled = path.join(PROJECT_ROOT, "packages", "cli", "dist", "bin", CLI_EXE);
+  if (exists(compiled)) return compiled;
+  // The repository ships a Node CLI source entrypoint; use it directly when
+  // the optional Go CLI artifact has not been built.
+  return path.join(PROJECT_ROOT, "packages", "cli", "agent.js");
 }
 
 function missingRuntimeFiles() {

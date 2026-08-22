@@ -485,13 +485,15 @@ export function createFeishuWebhookRouter(
       UNIVERSAL_SESSION_ID,
       prompt,
     );
-    void replyToFeishu(orchestrator, config, event.messageId, reply).catch((err) => {
-      console.warn(
-        `Feishu outbound failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    });
+    void replyToFeishu(orchestrator, config, event.messageId, reply).catch(
+      (err) => {
+        console.warn(
+          `Feishu outbound failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      },
+    );
 
     return res.json({
       status: "ok",

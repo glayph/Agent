@@ -4,7 +4,8 @@ import { AutomationCreatePage } from "@/features/agent/automations/automation-cr
 
 export const Route = createFileRoute("/agent/automations/create")({
   validateSearch: (search) => ({
-    automationId: typeof search.automationId === "string" ? search.automationId : undefined,
+    automationId:
+      typeof search.automationId === "string" ? search.automationId : undefined,
   }),
   component: AutomationCreateRoute,
 })

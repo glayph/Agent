@@ -2,8 +2,8 @@ import { IconFiles, IconInfoCircle, IconX } from "@tabler/icons-react"
 import { type KeyboardEvent, type ReactNode, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { Button } from "@/shared/ui/button"
 import { cn } from "@/lib/utils"
+import { Button } from "@/shared/ui/button"
 
 import { AssetRow } from "./asset-row"
 import type { WorkspaceAsset } from "./types"

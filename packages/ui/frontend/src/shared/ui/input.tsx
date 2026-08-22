@@ -1,7 +1,7 @@
 import * as React from "react"
 
-import { useFieldControl } from "@/shared/ui/field"
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/shared/ui/field"
 
 // Material Design input styles
 const materialInputStyles = `
@@ -47,8 +47,8 @@ function Input({
         data-slot="input"
         aria-describedby={fieldControlProps["aria-describedby"]}
         className={cn(
-          "material-input h-10 w-full min-w-0 border px-3 py-2 text-base shadow-none transition-all duration-200 outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground/75 disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/25 md:text-sm",
-          className
+          "material-input file:text-foreground placeholder:text-muted-foreground/75 aria-invalid:border-destructive aria-invalid:ring-destructive/25 h-10 w-full min-w-0 border px-3 py-2 text-base shadow-none transition-all duration-200 outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:ring-2 md:text-sm",
+          className,
         )}
         {...props}
       />

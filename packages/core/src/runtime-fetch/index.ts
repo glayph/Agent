@@ -44,7 +44,8 @@ export class RuntimeFetcher {
   private consentStore: RuntimeInstallConsentStore;
   private sandboxPaths: RuntimeSandboxPaths;
   private allowedLanguages: Set<string>;
-  private approvalLevel: "REQUIRE_APPROVAL" | "TRUSTED_FULL_ACCESS" | "DISABLED";
+  private approvalLevel:
+    "REQUIRE_APPROVAL" | "TRUSTED_FULL_ACCESS" | "DISABLED";
 
   constructor(options: {
     dataDir: string;
@@ -59,14 +60,9 @@ export class RuntimeFetcher {
     this.consentStore = new RuntimeInstallConsentStore(db);
     this.sandboxPaths = new RuntimeSandboxPaths(options.dataDir);
     this.allowedLanguages = new Set(
-      (
-        options.allowedLanguages ?? [
-          "python",
-          "ruby",
-          "rust",
-          "node",
-        ]
-      ).map((l) => l.toLowerCase()),
+      (options.allowedLanguages ?? ["python", "ruby", "rust", "node"]).map(
+        (l) => l.toLowerCase(),
+      ),
     );
     this.approvalLevel = options.approvalLevel ?? "REQUIRE_APPROVAL";
 
@@ -190,7 +186,10 @@ export class RuntimeFetcher {
     }
 
     this.consentStore.markReady(requestId, result.sandboxPath || sandboxPath);
-    return { outcome: "installed", sandboxPath: result.sandboxPath || sandboxPath };
+    return {
+      outcome: "installed",
+      sandboxPath: result.sandboxPath || sandboxPath,
+    };
   }
 
   /**

@@ -93,29 +93,24 @@ export async function pollOAuthFlow(flowID: string): Promise<OAuthFlowState> {
   )
 }
 
-export async function logoutOAuth(
-  provider: OAuthProvider,
-): Promise<{ 
-  status: string; 
-  provider: OAuthProvider;
-  gateway_restart_required?: boolean;
-  runtime_apply_status?: string;
-  runtime_apply_error?: string;
+export async function logoutOAuth(provider: OAuthProvider): Promise<{
+  status: string
+  provider: OAuthProvider
+  gateway_restart_required?: boolean
+  runtime_apply_status?: string
+  runtime_apply_error?: string
 }> {
-  return request<{ 
-    status: string; 
-    provider: OAuthProvider;
-    gateway_restart_required?: boolean;
-    runtime_apply_status?: string;
-    runtime_apply_error?: string;
-  }>(
-    "/api/oauth/logout",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider }),
-    },
-  )
+  return request<{
+    status: string
+    provider: OAuthProvider
+    gateway_restart_required?: boolean
+    runtime_apply_status?: string
+    runtime_apply_error?: string
+  }>("/api/oauth/logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  })
 }
 
 export async function getOAuthToken(
@@ -125,4 +120,3 @@ export async function getOAuthToken(
     `/api/oauth/token/${encodeURIComponent(provider)}`,
   )
 }
-

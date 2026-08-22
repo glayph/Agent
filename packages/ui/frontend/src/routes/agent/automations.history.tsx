@@ -4,7 +4,8 @@ import { AutomationHistoryPage } from "@/features/agent/automations/automation-h
 
 export const Route = createFileRoute("/agent/automations/history")({
   validateSearch: (search) => ({
-    automationId: typeof search.automationId === "string" ? search.automationId : undefined,
+    automationId:
+      typeof search.automationId === "string" ? search.automationId : undefined,
   }),
   component: AutomationHistoryRoute,
 })

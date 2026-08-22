@@ -79,7 +79,8 @@ export class RuntimeInstallConsentStore {
       )
       .all(skillId, language) as RuntimeInstallRequestRow[];
     const match = rows.find(
-      (row) => this.packageFingerprint(JSON.parse(row.packages)) === fingerprint,
+      (row) =>
+        this.packageFingerprint(JSON.parse(row.packages)) === fingerprint,
     );
     return match ? this._fromRow(match) : undefined;
   }

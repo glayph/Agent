@@ -96,7 +96,7 @@ function AgentNodeInner({ data }: NodeProps) {
                   className="truncate text-[11px] font-semibold tracking-wide text-white/90"
                   title={activityTitle(node)}
                 >
-                      {activityTitle(node)}
+                  {activityTitle(node)}
                 </span>
                 <span className="ml-auto shrink-0">
                   <StatusIcon status={node.status} size={13} />
@@ -131,8 +131,10 @@ function AgentNodeInner({ data }: NodeProps) {
                 )}
                 <p
                   className={cn(
-                    "mt-1 line-clamp-3 break-words text-[11px] leading-4",
-                    node.status === "failed" ? "text-red-300/80" : "text-white/50",
+                    "mt-1 line-clamp-3 text-[11px] leading-4 break-words",
+                    node.status === "failed"
+                      ? "text-red-300/80"
+                      : "text-white/50",
                   )}
                 >
                   {activitySummary(node)}

@@ -11,11 +11,7 @@ export type AutomationStatus = "active" | "paused" | "disabled";
 export type AutomationTarget = "internal" | "research" | "facebook" | "youtube";
 export type AutomationApprovalMode = "none" | "review" | "publish";
 export type AutomationExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "pending" | "running" | "completed" | "failed" | "cancelled";
 
 export interface AutomationDefinition {
   id: string;
@@ -240,9 +236,7 @@ export class SqliteAutomationStore {
 
   list(limit = 100): AutomationDefinition[] {
     const rows = this.db
-      .prepare(
-        `SELECT * FROM automations ORDER BY updated_at DESC LIMIT ?`,
-      )
+      .prepare(`SELECT * FROM automations ORDER BY updated_at DESC LIMIT ?`)
       .all(Math.max(1, Math.min(500, limit))) as AutomationRow[];
     return rows.map((row) => this.fromRow(row));
   }
@@ -316,13 +310,21 @@ export class SqliteAutomationStore {
         `SELECT * FROM automation_executions
          WHERE automation_id = ? ORDER BY created_at DESC LIMIT ?`,
       )
-      .all(automationId, Math.max(1, Math.min(500, limit))) as AutomationExecutionRow[];
+      .all(
+        automationId,
+        Math.max(1, Math.min(500, limit)),
+      ) as AutomationExecutionRow[];
     return rows.map((row) => this.executionFromRow(row));
   }
 
   updateExecution(
     id: string,
-    patch: Partial<Pick<AutomationExecution, "scheduledTaskId" | "status" | "startedAt" | "completedAt" | "error">>,
+    patch: Partial<
+      Pick<
+        AutomationExecution,
+        "scheduledTaskId" | "status" | "startedAt" | "completedAt" | "error"
+      >
+    >,
   ): AutomationExecution | null {
     const current = this.getExecution(id);
     if (!current) return null;
@@ -348,7 +350,10 @@ export class SqliteAutomationStore {
     return next;
   }
 
-  updateAutomation(id: string, patch: Partial<AutomationDefinition>): AutomationDefinition | null {
+  updateAutomation(
+    id: string,
+    patch: Partial<AutomationDefinition>,
+  ): AutomationDefinition | null {
     const current = this.get(id);
     if (!current) return null;
     const next = { ...current, ...patch, updatedAt: Date.now() };
@@ -361,7 +366,9 @@ export class SqliteAutomationStore {
     try {
       const parsed = JSON.parse(row.steps_json);
       if (Array.isArray(parsed)) {
-        steps = parsed.filter((value): value is string => typeof value === "string");
+        steps = parsed.filter(
+          (value): value is string => typeof value === "string",
+        );
       }
     } catch {
       steps = [];
@@ -417,7 +424,9 @@ export function parseAutomationMessage(message: string): {
   executionId: string;
   prompt: string;
 } | null {
-  const match = message.match(/^\[\[miki-automation:([^:]+):([^\]]+)\]\]\s*\n?([\s\S]*)$/);
+  const match = message.match(
+    /^\[\[miki-automation:([^:]+):([^\]]+)\]\]\s*\n?([\s\S]*)$/,
+  );
   if (!match) return null;
   return {
     automationId: match[1],
@@ -434,7 +443,9 @@ export class AutomationManager {
     private readonly scheduler: AutomationScheduler,
     agentRunDbPath: string,
   ) {
-    this.runRecorder = new AgentRunRecorder(new SqliteAgentRunStore(agentRunDbPath));
+    this.runRecorder = new AgentRunRecorder(
+      new SqliteAgentRunStore(agentRunDbPath),
+    );
   }
 
   list(limit?: number): AutomationDefinition[] {
@@ -469,7 +480,10 @@ export class AutomationManager {
       cronExpression: input.cronExpression?.trim() || undefined,
       runAt: input.runAt,
       timezone: input.timezone?.trim() || "UTC",
-      maxAttempts: Math.max(1, Math.min(10, Math.floor(input.maxAttempts ?? 3))),
+      maxAttempts: Math.max(
+        1,
+        Math.min(10, Math.floor(input.maxAttempts ?? 3)),
+      ),
     });
     return this.scheduleDefinition(automation);
   }
@@ -477,30 +491,50 @@ export class AutomationManager {
   update(id: string, input: UpdateAutomationInput): AutomationDefinition {
     const current = this.store.get(id);
     if (!current) throw new Error("Automation not found");
-    const effectiveCron = input.cronExpression !== undefined
-      ? input.cronExpression?.trim() || undefined
-      : current.cronExpression;
-    const effectiveRunAt = input.runAt !== undefined
-      ? input.runAt ?? undefined
-      : current.runAt;
+    const effectiveCron =
+      input.cronExpression !== undefined
+        ? input.cronExpression?.trim() || undefined
+        : current.cronExpression;
+    const effectiveRunAt =
+      input.runAt !== undefined ? (input.runAt ?? undefined) : current.runAt;
     const effectiveTarget = input.target ?? current.target;
     this.validateTarget(effectiveTarget);
     this.validateSchedule(effectiveCron, effectiveRunAt);
-    const nextSteps = input.steps === undefined
-      ? current.steps
-      : input.steps.map((step) => step.trim()).filter(Boolean);
-    if (nextSteps.length === 0) throw new Error("at least one step is required");
-    if (current.scheduledTaskId) this.scheduler.cancelScheduledTask(current.scheduledTaskId);
+    const nextSteps =
+      input.steps === undefined
+        ? current.steps
+        : input.steps.map((step) => step.trim()).filter(Boolean);
+    if (nextSteps.length === 0)
+      throw new Error("at least one step is required");
+    if (current.scheduledTaskId)
+      this.scheduler.cancelScheduledTask(current.scheduledTaskId);
     const next = this.store.updateAutomation(id, {
-      ...(input.name !== undefined ? { name: input.name.trim() || current.name } : {}),
-      ...(input.objective !== undefined ? { objective: input.objective.trim() || current.objective } : {}),
+      ...(input.name !== undefined
+        ? { name: input.name.trim() || current.name }
+        : {}),
+      ...(input.objective !== undefined
+        ? { objective: input.objective.trim() || current.objective }
+        : {}),
       ...(input.steps !== undefined ? { steps: nextSteps } : {}),
       ...(input.target !== undefined ? { target: input.target } : {}),
-      ...(input.approvalMode !== undefined ? { approvalMode: input.approvalMode } : {}),
-      ...(input.cronExpression !== undefined ? { cronExpression: input.cronExpression?.trim() || undefined } : {}),
+      ...(input.approvalMode !== undefined
+        ? { approvalMode: input.approvalMode }
+        : {}),
+      ...(input.cronExpression !== undefined
+        ? { cronExpression: input.cronExpression?.trim() || undefined }
+        : {}),
       ...(input.runAt !== undefined ? { runAt: input.runAt ?? undefined } : {}),
-      ...(input.timezone !== undefined ? { timezone: input.timezone.trim() || current.timezone } : {}),
-      ...(input.maxAttempts !== undefined ? { maxAttempts: Math.max(1, Math.min(10, Math.floor(input.maxAttempts))) } : {}),
+      ...(input.timezone !== undefined
+        ? { timezone: input.timezone.trim() || current.timezone }
+        : {}),
+      ...(input.maxAttempts !== undefined
+        ? {
+            maxAttempts: Math.max(
+              1,
+              Math.min(10, Math.floor(input.maxAttempts)),
+            ),
+          }
+        : {}),
       scheduledTaskId: undefined,
       nextRunAt: input.runAt ?? current.runAt,
       status: current.status === "disabled" ? "disabled" : "active",
@@ -512,7 +546,8 @@ export class AutomationManager {
   pause(id: string): AutomationDefinition {
     const current = this.store.get(id);
     if (!current) throw new Error("Automation not found");
-    if (current.scheduledTaskId) this.scheduler.cancelScheduledTask(current.scheduledTaskId);
+    if (current.scheduledTaskId)
+      this.scheduler.cancelScheduledTask(current.scheduledTaskId);
     return this.store.updateAutomation(id, {
       status: "paused",
       scheduledTaskId: undefined,
@@ -531,9 +566,11 @@ export class AutomationManager {
   cancel(id: string): AutomationDefinition {
     const current = this.store.get(id);
     if (!current) throw new Error("Automation not found");
-    if (current.scheduledTaskId) this.scheduler.cancelScheduledTask(current.scheduledTaskId);
+    if (current.scheduledTaskId)
+      this.scheduler.cancelScheduledTask(current.scheduledTaskId);
     for (const execution of this.store.listExecutions(id, 500)) {
-      if (execution.scheduledTaskId) this.scheduler.cancelScheduledTask(execution.scheduledTaskId);
+      if (execution.scheduledTaskId)
+        this.scheduler.cancelScheduledTask(execution.scheduledTaskId);
       if (execution.status === "pending" || execution.status === "running") {
         this.store.updateExecution(execution.id, {
           status: "cancelled",
@@ -562,9 +599,14 @@ export class AutomationManager {
   prepareExecution(executionId: string): string {
     const current = this.store.getExecution(executionId);
     if (!current) return executionId;
-    if (current.status === "pending" || current.status === "running") return executionId;
+    if (current.status === "pending" || current.status === "running")
+      return executionId;
     const automation = this.store.get(current.automationId);
-    if (!automation || automation.status !== "active" || !automation.cronExpression) {
+    if (
+      !automation ||
+      automation.status !== "active" ||
+      !automation.cronExpression
+    ) {
       return executionId;
     }
     return this.createExecutionRecord(automation, "scheduled").id;
@@ -572,7 +614,8 @@ export class AutomationManager {
 
   onExecutionStarted(executionId: string): void {
     const before = this.store.getExecution(executionId);
-    if (!before || ["completed", "failed", "cancelled"].includes(before.status)) return;
+    if (!before || ["completed", "failed", "cancelled"].includes(before.status))
+      return;
     this.store.updateExecution(executionId, {
       status: "running",
       startedAt: Date.now(),
@@ -587,7 +630,8 @@ export class AutomationManager {
 
   onExecutionCompleted(executionId: string): void {
     const before = this.store.getExecution(executionId);
-    if (!before || ["completed", "failed", "cancelled"].includes(before.status)) return;
+    if (!before || ["completed", "failed", "cancelled"].includes(before.status))
+      return;
     this.store.updateExecution(executionId, {
       status: "completed",
       completedAt: Date.now(),
@@ -600,7 +644,8 @@ export class AutomationManager {
       const latest = this.runRecorder.get(run.id);
       const current = latest?.steps.find((item) => item.id === step.id);
       if (!current || current.status === "completed") continue;
-      if (current.status === "pending") this.runRecorder.startStep(run.id, current.id);
+      if (current.status === "pending")
+        this.runRecorder.startStep(run.id, current.id);
       const evidence: VerificationEvidence = {
         kind: "manual",
         summary: "Automation task completed successfully",
@@ -615,7 +660,8 @@ export class AutomationManager {
 
   onExecutionFailed(executionId: string, error: unknown): void {
     const before = this.store.getExecution(executionId);
-    if (!before || ["completed", "failed", "cancelled"].includes(before.status)) return;
+    if (!before || ["completed", "failed", "cancelled"].includes(before.status))
+      return;
     this.store.updateExecution(executionId, {
       status: "failed",
       completedAt: Date.now(),
@@ -625,7 +671,9 @@ export class AutomationManager {
     if (!execution) return;
     const run = this.runRecorder.get(execution.runId);
     if (!run) return;
-    const step = run.steps.find((item) => item.status === "pending" || item.status === "running");
+    const step = run.steps.find(
+      (item) => item.status === "pending" || item.status === "running",
+    );
     if (!step) return;
     if (step.status === "pending") this.runRecorder.startStep(run.id, step.id);
     this.runRecorder.failStep(run.id, step.id, error);
@@ -633,7 +681,9 @@ export class AutomationManager {
 
   private validateTarget(target: AutomationTarget): void {
     if (target === "facebook" || target === "youtube") {
-      throw new Error(`${target} automation adapter is not configured yet; use internal or research target`);
+      throw new Error(
+        `${target} automation adapter is not configured yet; use internal or research target`,
+      );
     }
   }
 
@@ -641,8 +691,13 @@ export class AutomationManager {
     if (cronExpression === undefined && runAt === undefined) {
       throw new Error("cronExpression or runAt is required");
     }
-    if (cronExpression !== undefined && parseCronToNextRun(cronExpression.trim()) === null) {
-      throw new Error(`Unsupported schedule expression: ${cronExpression.trim()}`);
+    if (
+      cronExpression !== undefined &&
+      parseCronToNextRun(cronExpression.trim()) === null
+    ) {
+      throw new Error(
+        `Unsupported schedule expression: ${cronExpression.trim()}`,
+      );
     }
     if (runAt !== undefined && (!Number.isSafeInteger(runAt) || runAt < 0)) {
       throw new Error("runAt must be a non-negative safe integer timestamp.");
@@ -652,7 +707,9 @@ export class AutomationManager {
     }
   }
 
-  private scheduleDefinition(automation: AutomationDefinition): AutomationDefinition {
+  private scheduleDefinition(
+    automation: AutomationDefinition,
+  ): AutomationDefinition {
     this.validateTarget(automation.target);
     if (!automation.cronExpression && automation.runAt === undefined) {
       return automation;

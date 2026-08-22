@@ -58,9 +58,10 @@ export function useToolsPage() {
   const toggleToolMutation = useMutation({
     mutationFn: async ({ name, enabled }: { name: string; enabled: boolean }) =>
       setToolEnabled(name, enabled),
-    onSuccess: async (_, variables) => {
+    onSuccess: async (response, variables) => {
       const gateway = await refreshGatewayState({ force: true })
-      const restartRequired = gateway?.restartRequired === true
+      const restartRequired =
+        response.gateway_restart_required ?? gateway?.restartRequired === true
       const message = variables.enabled
         ? t("pages.agent.tools.enable_success")
         : t("pages.agent.tools.disable_success")
@@ -75,6 +76,8 @@ export function useToolsPage() {
         message,
         t("navigation.tools"),
         restartRequired,
+        response.runtime_apply_status,
+        response.runtime_apply_error,
       )
       void queryClient.invalidateQueries({ queryKey: ["tools"] })
     },
@@ -94,7 +97,9 @@ export function useToolsPage() {
       queryClient.setQueryData(["tools", "web-search-config"], updatedConfig)
       setWebSearchDraftOverride(null)
       const gateway = await refreshGatewayState({ force: true })
-      const restartRequired = gateway?.restartRequired === true
+      const restartRequired =
+        updatedConfig.gateway_restart_required ??
+        gateway?.restartRequired === true
       const message = t("pages.agent.tools.web_search.save_success")
       setStatusMessage({
         kind: "success",
@@ -109,6 +114,8 @@ export function useToolsPage() {
         message,
         t("pages.agent.tools.web_search.title"),
         restartRequired,
+        updatedConfig.runtime_apply_status,
+        updatedConfig.runtime_apply_error,
       )
       void queryClient.invalidateQueries({
         queryKey: ["tools", "web-search-config"],

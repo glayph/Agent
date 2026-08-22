@@ -1,5 +1,5 @@
-import { Card, CardContent } from "@/shared/ui/card"
 import { cn } from "@/lib/utils"
+import { Card, CardContent } from "@/shared/ui/card"
 
 import { OriginIcon } from "./origin-badge"
 import { getOriginAccentClasses } from "./origin-utils"

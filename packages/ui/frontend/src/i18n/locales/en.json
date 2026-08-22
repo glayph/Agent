@@ -4,6 +4,7 @@
     "chat": "Chat",
     "model_group": "Models",
     "models": "Models",
+    "memory": "Memory",
     "credentials": "Credentials",
     "agent_group": "Agent",
     "hub": "Hub",
@@ -139,6 +140,7 @@
       "newConversation": "New chat",
       "notSelected": "Not selected",
       "paused": "Paused",
+      "ready": "Ready",
       "running": "Running",
       "session": "Session",
       "title": "Agent Workspace",
@@ -301,7 +303,7 @@
         "description": "Supports browser OAuth, device code, and token login."
       },
       "antigravity": {
-        "description": "Uses browser OAuth for Google Cloud Code Assist."
+        "description": "Uses a Gemini API key for Google Cloud Code Assist."
       }
     },
     "status": {
@@ -513,9 +515,16 @@
       "identifierLabel": "Identifier:",
       "endpointLabel": "Endpoint:",
       "testConnection": "Test Connection",
+      "testAgentReadiness": "Test Agent Readiness",
+      "testAgentAgain": "Test Agent Again",
+      "toolDryRun": "Tool dry run executed: {{executed}}",
       "testing": "Testing connection…",
       "success": "Connection successful",
       "responseTime": "Response time: {{ms}}ms",
+      "verificationLevel": "Verification level: {{level}}",
+      "readinessStatus": "Readiness status: {{status}}",
+      "correlationId": "Correlation: {{id}}",
+      "completionNotTested": "Catalog/runtime readiness was checked; real completion was not tested.",
       "failed": "Connection failed",
       "status": "Status: {{status}}",
       "testFailed": "Test failed",
@@ -994,6 +1003,20 @@
     }
   },
   "pages": {
+    "memory": {
+      "title": "Memory",
+      "reindex": "Reindex",
+      "load_error": "Unable to load memory diagnostics.",
+      "search_title": "Selective memory search",
+      "search_description": "Search is scoped to the active runtime and returns only bounded, scored chunks.",
+      "search_placeholder": "Search remembered facts, tasks, rules, or skills…",
+      "chunks_title": "Memory chunks",
+      "chunks_description": "Recent active chunks grouped by functional region.",
+      "inspect_title": "Chunk inspector",
+      "inspect_empty": "Select a chunk to inspect provenance and graph links.",
+      "forget_confirm": "Forget this memory chunk? It will be excluded from future retrieval.",
+      "forgotten": "Memory chunk forgotten."
+    },
     "health": {
       "title": "Health",
       "refresh": "Refresh",
@@ -1032,7 +1055,8 @@
         "doctor_checks": "Doctor Checks",
         "backups": "Backups",
         "watchdog": "Watchdog",
-        "queue_scan": "Queue And Scan"
+        "queue_scan": "Queue And Scan",
+        "delivery_recovery": "Delivery Recovery"
       },
       "backups_description": "Config + DB snapshots",
       "checks_count": "{{count}} checks",
@@ -1044,7 +1068,9 @@
       "rollback_confirm": "Rollback to {{id}}?",
       "rollback_confirm_desc": "This will restore the selected backup and may overwrite current runtime state.",
       "backup_entries": "{{count}} entries - {{date}}",
-      "scan_summary": "Scanned {{files}} files, found {{findings}} possible leaks."
+      "scan_summary": "Scanned {{files}} files, found {{findings}} possible leaks.",
+      "delivery_summary": "{{count}} persisted delivery receipt(s)",
+      "no_deliveries": "No persisted deliveries recorded."
     },
     "agent": {
       "load_error": "Failed to load agent support information.",

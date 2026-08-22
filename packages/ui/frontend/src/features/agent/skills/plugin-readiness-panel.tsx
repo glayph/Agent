@@ -16,6 +16,8 @@ import type {
   PluginMarketplaceReadinessResponse,
   PluginMarketplaceReadinessStatus,
 } from "@/api/skills"
+import { formatDateTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/shared/ui/badge"
 import {
   Card,
@@ -24,8 +26,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card"
-import { formatDateTime } from "@/lib/format"
-import { cn } from "@/lib/utils"
 
 interface PluginReadinessPanelProps {
   readiness?: PluginMarketplaceReadinessResponse

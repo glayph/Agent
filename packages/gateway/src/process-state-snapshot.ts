@@ -129,7 +129,9 @@ export class ProcessStateStore {
   }
 }
 
-export function createProcessStateStore(workspaceDir: string): ProcessStateStore {
+export function createProcessStateStore(
+  workspaceDir: string,
+): ProcessStateStore {
   return new ProcessStateStore(
     path.join(workspaceDir, "data", "process-state.json"),
   );

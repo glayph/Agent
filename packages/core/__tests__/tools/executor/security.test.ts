@@ -196,9 +196,11 @@ describe("runtime.exec.allow_remote enforcement (#94)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-shell-default-"));
     const configPath = writeConfig(
       dir,
-      ["permissions:", "  shell_execute:", "    level: TRUSTED_FULL_ACCESS"].join(
-        "\n",
-      ),
+      [
+        "permissions:",
+        "  shell_execute:",
+        "    level: TRUSTED_FULL_ACCESS",
+      ].join("\n"),
     );
     const executor = new ShellExecutor(configPath);
 

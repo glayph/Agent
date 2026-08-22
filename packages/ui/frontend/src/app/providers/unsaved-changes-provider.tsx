@@ -2,6 +2,10 @@ import { type ReactNode, useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
+  type ConfirmUnsavedChanges,
+  UnsavedChangesContext,
+} from "@/hooks/use-unsaved-changes-confirmation"
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -11,10 +15,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog"
-import {
-  type ConfirmUnsavedChanges,
-  UnsavedChangesContext,
-} from "@/hooks/use-unsaved-changes-confirmation"
 
 interface ConfirmationRequest {
   resolve: (confirmed: boolean) => void

@@ -3,7 +3,7 @@ import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { UNIVERSAL_SESSION_ID } from "../universal-session.js";
+import { resolveChannelSessionId } from "./session-scope.js";
 
 const MATRIX_MESSAGE_LIMIT = 4000;
 const MATRIX_SYNC_TIMEOUT_MS = 30_000;
@@ -283,10 +283,19 @@ export class MatrixBot {
     if (!prompt) return;
     const response = await collectAgentResponse(
       this.orchestrator,
-      UNIVERSAL_SESSION_ID,
+      resolveChannelSessionId(
+        this.orchestrator.config,
+        "matrix",
+        event.sender || roomId,
+        roomId,
+      ),
       prompt,
     );
-    for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, MATRIX_MESSAGE_LIMIT)) {
+    for (const part of splitOutboundMessageForOrchestrator(
+      this.orchestrator,
+      response,
+      MATRIX_MESSAGE_LIMIT,
+    )) {
       await this.sendMessage(roomId, part, config);
     }
   }

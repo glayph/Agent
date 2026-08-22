@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { SkillRegistry, type PluginContracts } from "@miki/installer";
-import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../../src/paths";
+import {
+  normalizeRuntimePaths,
+  resolveDownloadedSkillsDir,
+} from "../../src/paths";
 import {
   listRuntimePluginProviderMetadata,
   probeRuntimePluginProvider,

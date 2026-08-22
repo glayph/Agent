@@ -3,6 +3,44 @@ import { refreshGatewayState } from "@/store/gateway"
 
 // API client for model list management.
 
+export interface LocalLlamaModelConfig {
+  runtime: "llama.cpp"
+  model_path?: string
+  model_format: "gguf"
+  context_size?: number
+  gpu_layers?: number | "auto"
+  batch_size?: number
+  ubatch_size?: number
+  threads?: number
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  min_p?: number
+  seed?: number
+  chat_template?: string
+  use_mmap?: boolean
+  use_mlock?: boolean
+  flash_attention?: boolean
+  enabled: boolean
+  auto_start?: boolean
+  executable_path?: string
+  port?: number
+  allowed_model_dirs?: string[]
+}
+
+export interface LocalRuntimeHealth {
+  provider: "llama.cpp"
+  ready: boolean
+  configured: boolean
+  executable_available: boolean
+  pid?: number
+  port?: number
+  base_url?: string
+  model?: string
+  model_path?: string
+  last_error?: string
+}
+
 export interface ModelInfo {
   index: number
   model_name: string
@@ -26,6 +64,9 @@ export interface ModelInfo {
   }
   extra_body?: Record<string, unknown>
   custom_headers?: Record<string, string>
+  local?: LocalLlamaModelConfig
+  local_runtime?: LocalRuntimeHealth
+  capability_warning?: string
   // Meta
   enabled: boolean
   available: boolean
@@ -33,6 +74,25 @@ export interface ModelInfo {
   is_default: boolean
   is_virtual: boolean
   default_model_allowed?: boolean
+}
+
+export interface ModelProviderPluginInfo {
+  id: string
+  api_version: string
+  version: string
+  display_name: string
+  source: "builtin" | "external"
+  readiness: "ready" | "metadata_only" | "incompatible" | "rejected"
+  reason?: string
+  auth_mode: string
+  model_prefixes: string[]
+  capabilities: {
+    chat: boolean
+    tools: boolean
+    streaming: boolean
+    vision: boolean
+    local: boolean
+  }
 }
 
 export interface ModelProviderOption {
@@ -51,6 +111,7 @@ export interface ModelProviderOption {
   priority?: number
   common_models?: string[]
   aliases?: string[]
+  plugin?: ModelProviderPluginInfo
 }
 
 interface ModelsListResponse {
@@ -139,8 +200,25 @@ export interface TestModelResponse {
   success: boolean
   latency_ms: number
   status: string
+  readiness_status?: string
+  verification_level?: "catalog" | "runtime_ready" | "completion" | "tools"
+  completion_tested?: boolean
+  tools_tested?: boolean
+  dry_run_executed?: boolean
+  final_response_received?: boolean
+  provider?: string
+  model?: string
+  tool_name?: string
+  response_shape?: {
+    choiceCount: number
+    contentPresent: boolean
+    finishReason?: string | null
+  }
+  correlation_id?: string
   error?: string
 }
+
+export type ToolHealthResponse = TestModelResponse
 
 export async function testModel(index: number): Promise<TestModelResponse> {
   return request<TestModelResponse>(`/api/models/${index}/test`, {
@@ -161,6 +239,24 @@ export async function testModelInline(
   params: TestModelInlineRequest,
 ): Promise<TestModelResponse> {
   return request<TestModelResponse>("/api/models/test-inline", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+}
+
+export async function testModelTools(
+  index: number,
+): Promise<ToolHealthResponse> {
+  return request<ToolHealthResponse>(`/api/models/${index}/test-tools`, {
+    method: "POST",
+  })
+}
+
+export async function testModelToolsInline(
+  params: TestModelInlineRequest,
+): Promise<ToolHealthResponse> {
+  return request<ToolHealthResponse>("/api/models/test-tools-inline", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),

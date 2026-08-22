@@ -3,12 +3,7 @@ import * as path from "path";
 import { normalizeAgentError, type NormalizedAgentError } from "./errors.js";
 
 export type JobStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "dead_letter";
+  "queued" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
 
 export interface PersistentJobCheckpoint {
   id: string;
@@ -16,6 +11,13 @@ export interface PersistentJobCheckpoint {
   status: "started" | "completed" | "failed";
   updatedAt: string;
   data?: Record<string, unknown>;
+}
+
+export interface PersistentJobRecovery {
+  retryCount: number;
+  deadLetteredAt?: string;
+  lastRetryAt?: string;
+  lastFailure?: NormalizedAgentError;
 }
 
 export interface PersistentJob {
@@ -36,6 +38,7 @@ export interface PersistentJob {
   checkpoint?: PersistentJobCheckpoint;
   error?: NormalizedAgentError;
   result?: unknown;
+  recovery: PersistentJobRecovery;
 }
 
 export interface EnqueueJobOptions {
@@ -93,6 +96,7 @@ export class PersistentJobQueue {
       runAfter: Date.now() + normalizeNonNegativeInt(options.delayMs, 0),
       progress: 0,
       ...(idempotencyKey ? { idempotencyKey } : {}),
+      recovery: { retryCount: 0 },
     };
     this.jobs.set(job.id, job);
     this.save();
@@ -151,7 +155,15 @@ export class PersistentJobQueue {
   ): PersistentJob | null {
     const job = this.jobs.get(jobId);
     if (!job || !this.ownsLease(job, workerId)) return null;
-    job.error = normalizeAgentError(error);
+    const normalizedError = normalizeAgentError(error);
+    job.error = normalizedError;
+    job.recovery = {
+      ...job.recovery,
+      lastFailure: normalizedError,
+      ...(job.attempts >= job.maxAttempts
+        ? { deadLetteredAt: new Date().toISOString() }
+        : {}),
+    };
     job.status = job.attempts >= job.maxAttempts ? "dead_letter" : "queued";
     job.runAfter = Date.now() + normalizeNonNegativeInt(retryDelayMs, 0);
     job.leaseOwner = undefined;
@@ -195,6 +207,8 @@ export class PersistentJobQueue {
     if (!["failed", "cancelled", "dead_letter"].includes(job.status)) {
       return null;
     }
+    const previousError = job.error;
+    const retriedAt = new Date().toISOString();
     job.status = "queued";
     job.attempts = 0;
     job.progress = 0;
@@ -202,7 +216,13 @@ export class PersistentJobQueue {
     job.leaseOwner = undefined;
     job.leaseUntil = undefined;
     job.error = undefined;
-    job.updatedAt = new Date().toISOString();
+    job.recovery = {
+      ...job.recovery,
+      retryCount: job.recovery.retryCount + 1,
+      lastRetryAt: retriedAt,
+      ...(previousError ? { lastFailure: previousError } : {}),
+    };
+    job.updatedAt = retriedAt;
     this.save();
     return { ...job };
   }
@@ -234,6 +254,11 @@ export class PersistentJobQueue {
       .map((job) => ({ ...job }));
   }
 
+  get(jobId: string): PersistentJob | null {
+    const job = this.jobs.get(jobId);
+    return job ? { ...job } : null;
+  }
+
   deadLetters(): PersistentJob[] {
     return this.list({ status: "dead_letter" });
   }
@@ -259,12 +284,15 @@ export class PersistentJobQueue {
       this.jobs = new Map(
         (Array.isArray(parsed.jobs) ? parsed.jobs : [])
           .filter((job): job is PersistentJob => isPersistentJob(job))
-          .map((job) => [job.id, job]),
+          .map((job) => [job.id, normalizeLoadedJob(job)]),
       );
       let recovered = false;
       const now = Date.now();
       for (const job of this.jobs.values()) {
-        if (job.status === "running" && (!job.leaseUntil || job.leaseUntil <= now)) {
+        if (
+          job.status === "running" &&
+          (!job.leaseUntil || job.leaseUntil <= now)
+        ) {
           job.status = "queued";
           job.leaseOwner = undefined;
           job.leaseUntil = undefined;
@@ -333,6 +361,20 @@ function isPersistentJob(value: unknown): value is PersistentJob {
     typeof job.createdAt === "string" &&
     typeof job.updatedAt === "string" &&
     typeof job.runAfter === "number" &&
-    typeof job.progress === "number"
+    typeof job.progress === "number" &&
+    (job.recovery === undefined || isRecovery(job.recovery))
   );
+}
+
+function isRecovery(value: unknown): value is PersistentJobRecovery {
+  if (!value || typeof value !== "object") return false;
+  const recovery = value as Record<string, unknown>;
+  return typeof recovery.retryCount === "number";
+}
+
+function normalizeLoadedJob(job: PersistentJob): PersistentJob {
+  return {
+    ...job,
+    recovery: isRecovery(job.recovery) ? job.recovery : { retryCount: 0 },
+  };
 }

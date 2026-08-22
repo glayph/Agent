@@ -8,6 +8,7 @@ import { createFileRoute } from "@tanstack/react-router"
 // import/component below back to ChatDisabledPage (and flip
 // WEB_UI_CHAT_DISABLED to true in packages/core/src/api/index.ts).
 import { ChatPage } from "@/pages/chat-page"
+
 // import { ChatDisabledPage } from "@/pages/chat-disabled-page"
 
 export const Route = createFileRoute("/")({

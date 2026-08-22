@@ -18,20 +18,49 @@ class AgentMemoryIntegration {
   preExecutionHook(userMessage, systemState = {}) {
     const anchor = this.tkg.getWorkingAnchor();
     const query = typeof userMessage === 'string' ? userMessage : (userMessage?.content || '');
-    const graphContext = this.graphMemory
-      ? this.graphMemory.getContext(query, { scope: this._scope(systemState), limit: 12, maxTokens: 1200, taskReference: systemState.taskId || systemState.runId || null })
+    const graphContextRaw = this.graphMemory
+      ? this.graphMemory.getContext(query, { scope: this._scope(systemState), limit: 4, maxTokens: 400, taskReference: systemState.taskId || systemState.runId || null })
       : { items: [], text: '' };
     const specialEvents = this.tkg.getSpecialEvents(5, true);
 
-    const context = this.tkg.getContextWindow(
-      typeof userMessage === 'string' ? userMessage : (userMessage?.content || ''),
-      25
+    const selectiveContext = typeof this.tkg.getSelectiveContext === 'function'
+      ? this.tkg.getSelectiveContext(query, {
+        scope: this._scope(systemState),
+        maxSelected: 8,
+        maxDepth: 1,
+        maxTokens: 800,
+        taskReference: systemState.taskId || systemState.runId || null,
+      })
+      : null;
+
+    const selectiveTexts = new Set(
+      (selectiveContext?.items || [])
+        .map((item) => this._normalizeMemoryText(item.text))
+        .filter(Boolean),
     );
+    const graphItems = (graphContextRaw.items || [])
+      .filter((item) => !selectiveTexts.has(this._normalizeMemoryText(item.text)))
+      .slice(0, 4);
+    const graphContext = {
+      ...graphContextRaw,
+      items: graphItems,
+      text: graphItems
+        .map((item) => `[${item.category || 'memory'}/${item.memoryType || 'graph'}] ${item.text}`)
+        .join('\n'),
+    };
+
+    // The legacy broad context window is used only when an older TKG does not
+    // expose selective retrieval. New runtimes never replay the full history
+    // as part of the default agent prompt.
+    const context = selectiveContext && typeof selectiveContext.text === 'string'
+      ? (selectiveContext.text || this._formatAnchor(anchor))
+      : this.tkg.getContextWindow(query, 25);
 
     return {
       anchor,
       specialEvents,
       contextWindow: context,
+      selectiveContext,
       graphContext,
       formattedGraphContext: graphContext.text || '',
       formattedAnchor: this._formatAnchor(anchor),
@@ -145,15 +174,22 @@ class AgentMemoryIntegration {
       parts.push('');
     }
 
-    const contextLines = hook.contextWindow.split('\n').filter(l => l.trim()).slice(0, 40);
+    const contextLines = hook.contextWindow
+      .split('\\n')
+      .filter(l => l.trim())
+      .slice(0, hook.selectiveContext ? 8 : 16);
     if (contextLines.length > 0) {
       parts.push(contextLines.join('\n'));
     }
 
     parts.push('');
-    parts.push('Use the above temporal memory context to inform your responses. Past events, active entities, and highlighted special events are provided for continuity.');
+    parts.push('Use the above selective memory context to inform your responses. Retrieved chunks are bounded, scoped, and may be incomplete; follow provenance and confidence, and ask for clarification when facts conflict.');
 
     return parts.join('\n');
+  }
+
+  _normalizeMemoryText(text) {
+    return String(text || '').toLowerCase().replace(/\\s+/g, ' ').trim().slice(0, 1200);
   }
 
   _formatAnchor(anchor) {

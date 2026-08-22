@@ -9,9 +9,9 @@ import {
 } from "react"
 import { useTranslation } from "react-i18next"
 
-import { Button } from "@/shared/ui/button"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { cn } from "@/lib/utils"
+import { Button } from "@/shared/ui/button"
 import { codeBlockWrapAtom } from "@/store/code-block"
 
 import {

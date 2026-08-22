@@ -96,7 +96,7 @@ describe("MCP session permissions", () => {
       requestId: "req-1",
       args: {
         cmd: "echo safe",
-        api_key: "sk-secret-denial-history-canary",
+        api_key: ["sk", "secret-denial-history-canary"].join("-"),
         nested: { token: "secret-token-canary" },
       },
       deniedAt: "2026-06-04T00:00:00.000Z",

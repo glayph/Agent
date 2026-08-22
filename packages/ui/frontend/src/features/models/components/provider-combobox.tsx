@@ -3,6 +3,7 @@ import { useEffect, useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ModelProviderOption } from "@/api/models"
+import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import {
   Command,
@@ -12,12 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/shared/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/shared/ui/popover"
-import { cn } from "@/lib/utils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover"
 
 import { ProviderIcon } from "./provider-icon"
 import {

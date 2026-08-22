@@ -1,18 +1,10 @@
 import { launcherFetch } from "@/api/http"
 
 export type AgentRunStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped"
+  "pending" | "running" | "completed" | "failed" | "skipped"
 
 export type VerificationEvidenceKind =
-  | "command"
-  | "file"
-  | "api"
-  | "manual"
-  | "metric"
+  "command" | "file" | "api" | "manual" | "metric"
 
 export interface VerificationEvidence {
   kind: VerificationEvidenceKind
@@ -99,8 +91,14 @@ export interface CreateAgentRunPayload {
   steps?: string[]
 }
 
-interface AgentRunsResponse {
+export interface AgentRunsResponse {
   runs: AgentRun[]
+  total: number
+  offset: number
+  limit: number
+  hasMore: boolean
+  query: string
+  status: AgentRunStatus | "all"
 }
 
 interface AgentRunResponse {
@@ -122,9 +120,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function listAgentRuns(limit = 100): Promise<AgentRunsResponse> {
+export async function listAgentRuns(
+  options: {
+    limit?: number
+    offset?: number
+    query?: string
+    status?: AgentRunStatus | "all"
+  } = {},
+): Promise<AgentRunsResponse> {
+  const params = new URLSearchParams()
+  params.set("limit", String(options.limit ?? 50))
+  params.set("offset", String(options.offset ?? 0))
+  if (options.query?.trim()) params.set("query", options.query.trim())
+  if (options.status && options.status !== "all") {
+    params.set("status", options.status)
+  }
   return request<AgentRunsResponse>(
-    `/api/enhancements/agent/runs?limit=${encodeURIComponent(String(limit))}`,
+    `/api/enhancements/agent/runs?${params.toString()}`,
   )
 }
 

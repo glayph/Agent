@@ -12,6 +12,7 @@ import {
   type TurnProfileForm,
   type TurnProfileMode,
 } from "@/features/config/components/form-model"
+import { cn } from "@/lib/utils"
 import { Field, SwitchCardField } from "@/shared/forms/shared-form"
 import { Button } from "@/shared/ui/button"
 import {
@@ -35,7 +36,6 @@ import {
   SelectValue,
 } from "@/shared/ui/select"
 import { Textarea } from "@/shared/ui/textarea"
-import { cn } from "@/lib/utils"
 
 type UpdateCoreField = <K extends keyof CoreConfigForm>(
   key: K,
@@ -348,7 +348,7 @@ export function AgentDefaultsSection({
                 </span>
                 <IconChevronDown
                   className={cn(
-                    "size-4 shrink-0 text-muted-foreground transition-transform",
+                    "text-muted-foreground size-4 shrink-0 transition-transform",
                     contextOptionsOpen && "rotate-180",
                   )}
                 />

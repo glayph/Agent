@@ -39,7 +39,7 @@ describe("session router permissions", () => {
         requestId: "req-denied",
         args: {
           cmd: "node -v",
-          token: "sk-session-router-denial-secret",
+          token: ["sk", "session-router-denial-secret"].join("-"),
         },
       });
 

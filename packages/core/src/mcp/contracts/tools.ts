@@ -451,23 +451,41 @@ export class ToolRegistrySchemas {
         risk: {
           level: "medium",
           label: "Open official provider connection page",
-          reason: "Opens an official provider page and may begin an OAuth or developer-console setup flow; the user must complete login and consent in the browser.",
+          reason:
+            "Opens an official provider page and may begin an OAuth or developer-console setup flow; the user must complete login and consent in the browser.",
         },
         function: {
           name: "platform_connection_start",
-          description: "Start a browser-first connection for a supported platform. Opens only the official provider page. Never pass passwords, OTPs, access tokens, API keys, or secrets to this tool.",
+          description:
+            "Start a browser-first connection for a supported platform. Opens only the official provider page. Never pass passwords, OTPs, access tokens, API keys, or secrets to this tool.",
           parameters: {
             type: "object",
             properties: {
               provider: {
                 type: "string",
-                enum: ["facebook", "youtube", "x", "telegram", "whatsapp", "discord", "slack", "linkedin", "tiktok", "instagram", "feishu", "dingtalk", "qq", "line"],
+                enum: [
+                  "facebook",
+                  "youtube",
+                  "x",
+                  "telegram",
+                  "whatsapp",
+                  "discord",
+                  "slack",
+                  "linkedin",
+                  "tiktok",
+                  "instagram",
+                  "feishu",
+                  "dingtalk",
+                  "qq",
+                  "line",
+                ],
                 description: "Provider to connect.",
               },
               scopes: {
                 type: "array",
                 items: { type: "string" },
-                description: "Optional least-privilege scopes. Omit to use provider defaults.",
+                description:
+                  "Optional least-privilege scopes. Omit to use provider defaults.",
               },
             },
             required: ["provider"],
@@ -478,10 +496,16 @@ export class ToolRegistrySchemas {
         type: "function",
         function: {
           name: "platform_connection_status",
-          description: "Read the status of a browser-first connection session. Returns only non-secret session metadata.",
+          description:
+            "Read the status of a browser-first connection session. Returns only non-secret session metadata.",
           parameters: {
             type: "object",
-            properties: { sessionId: { type: "string", description: "Browser connection session ID." } },
+            properties: {
+              sessionId: {
+                type: "string",
+                description: "Browser connection session ID.",
+              },
+            },
             required: ["sessionId"],
           },
         },
@@ -491,20 +515,43 @@ export class ToolRegistrySchemas {
         risk: {
           level: "high",
           label: "Record an external platform connection",
-          reason: "Persists a connection reference after the user has completed provider authentication and consent in the official browser page.",
+          reason:
+            "Persists a connection reference after the user has completed provider authentication and consent in the official browser page.",
         },
         function: {
           name: "platform_connection_complete",
-          description: "Record a completed browser connection using an account label and optional opaque vault reference. Never accept or transmit raw credentials.",
+          description:
+            "Record a completed browser connection using an account label and optional opaque vault reference. Never accept or transmit raw credentials.",
           parameters: {
             type: "object",
             properties: {
-              sessionId: { type: "string", description: "Browser connection session ID." },
-              accountLabel: { type: "string", description: "Human-readable account or page label." },
-              externalAccountId: { type: "string", description: "Optional provider account, page, channel, workspace, or bot ID." },
-              credentialRef: { type: "string", description: "Optional opaque secret-vault reference only; never a token or API key." },
-              scopes: { type: "array", items: { type: "string" }, description: "Optional granted scopes." },
-              expiresAt: { type: "string", description: "Optional ISO-8601 credential expiry." },
+              sessionId: {
+                type: "string",
+                description: "Browser connection session ID.",
+              },
+              accountLabel: {
+                type: "string",
+                description: "Human-readable account or page label.",
+              },
+              externalAccountId: {
+                type: "string",
+                description:
+                  "Optional provider account, page, channel, workspace, or bot ID.",
+              },
+              credentialRef: {
+                type: "string",
+                description:
+                  "Optional opaque secret-vault reference only; never a token or API key.",
+              },
+              scopes: {
+                type: "array",
+                items: { type: "string" },
+                description: "Optional granted scopes.",
+              },
+              expiresAt: {
+                type: "string",
+                description: "Optional ISO-8601 credential expiry.",
+              },
             },
             required: ["sessionId", "accountLabel"],
           },
@@ -514,10 +561,16 @@ export class ToolRegistrySchemas {
         type: "function",
         function: {
           name: "platform_connection_validate",
-          description: "Run a read-only connection health and adapter-capability check. This does not publish or send anything.",
+          description:
+            "Run a read-only connection health and adapter-capability check. This does not publish or send anything.",
           parameters: {
             type: "object",
-            properties: { connectionId: { type: "string", description: "Stored platform connection ID." } },
+            properties: {
+              connectionId: {
+                type: "string",
+                description: "Stored platform connection ID.",
+              },
+            },
             required: ["connectionId"],
           },
         },
@@ -527,14 +580,21 @@ export class ToolRegistrySchemas {
         risk: {
           level: "high",
           label: "Revoke a platform connection",
-          reason: "Removes the local connection reference and prevents future use; provider-side access may also need to be revoked in the official console.",
+          reason:
+            "Removes the local connection reference and prevents future use; provider-side access may also need to be revoked in the official console.",
         },
         function: {
           name: "platform_connection_revoke",
-          description: "Revoke a stored platform connection locally. Ask for explicit user confirmation before using this tool.",
+          description:
+            "Revoke a stored platform connection locally. Ask for explicit user confirmation before using this tool.",
           parameters: {
             type: "object",
-            properties: { connectionId: { type: "string", description: "Stored platform connection ID." } },
+            properties: {
+              connectionId: {
+                type: "string",
+                description: "Stored platform connection ID.",
+              },
+            },
             required: ["connectionId"],
           },
         },
@@ -985,6 +1045,36 @@ export class ToolRegistrySchemas {
               },
             },
             required: ["query", "fileType"],
+          },
+        },
+      },
+    ];
+  }
+
+  static webSearchSchema(): ToolDefinition[] {
+    return [
+      {
+        type: "function",
+        function: {
+          name: "web_search",
+          description:
+            "Search the public web using the configured native provider and return concise structured results with titles, URLs, and snippets.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "The web search query.",
+              },
+              max_results: {
+                type: "integer",
+                minimum: 1,
+                maximum: 10,
+                description:
+                  "Maximum number of results to return; defaults to 5.",
+              },
+            },
+            required: ["query"],
           },
         },
       },

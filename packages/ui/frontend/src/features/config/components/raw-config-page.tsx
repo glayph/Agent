@@ -8,6 +8,8 @@ import { toast } from "sonner"
 import { launcherFetch } from "@/api/http"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
 import { PageHeader } from "@/app/layout/page-header"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,8 +23,6 @@ import {
 } from "@/shared/ui/alert-dialog"
 import { Button } from "@/shared/ui/button"
 import { Textarea } from "@/shared/ui/textarea"
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
-import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
 async function readConfigSaveError(
@@ -83,8 +83,13 @@ export function RawConfigPage() {
           await readConfigSaveError(res, t("pages.config.save_error")),
         )
       }
+      return (await res.json()) as {
+        gateway_restart_required?: boolean
+        runtime_apply_status?: "applied" | "pending_restart" | "failed"
+        runtime_apply_error?: string
+      }
     },
-    onSuccess: (_, submittedConfig) => {
+    onSuccess: (apply, submittedConfig) => {
       try {
         const savedConfig = JSON.parse(submittedConfig)
         setLastSavedConfig(savedConfig)
@@ -105,7 +110,9 @@ export function RawConfigPage() {
           t,
           t("pages.config.save_success"),
           t("navigation.config"),
-          restartRequired,
+          apply.gateway_restart_required ?? restartRequired,
+          apply.runtime_apply_status,
+          apply.runtime_apply_error,
         )
       })
     },

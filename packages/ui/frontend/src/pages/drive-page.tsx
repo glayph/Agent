@@ -94,6 +94,9 @@ import {
   writeFile,
 } from "@/api/files"
 import { launcherFetch } from "@/api/http"
+import { useIncrementalList } from "@/hooks/use-incremental-list"
+import { formatFileSize } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -123,9 +126,6 @@ import {
 } from "@/shared/ui/dropdown-menu"
 import { Input } from "@/shared/ui/input"
 import { SidebarTrigger } from "@/shared/ui/sidebar"
-import { useIncrementalList } from "@/hooks/use-incremental-list"
-import { formatFileSize } from "@/lib/format"
-import { cn } from "@/lib/utils"
 
 type ExplorerPage =
   | { kind: "system" }
@@ -139,14 +139,7 @@ type RootGroup = {
 }
 
 type FilePreviewKind =
-  | "audio"
-  | "csv"
-  | "image"
-  | "json"
-  | "markdown"
-  | "pdf"
-  | "text"
-  | "video"
+  "audio" | "csv" | "image" | "json" | "markdown" | "pdf" | "text" | "video"
 
 type ExplorerOperation =
   | { kind: "create"; path: string; itemType: "file" | "directory" }
@@ -992,6 +985,26 @@ function samePage(a: ExplorerPage, b: ExplorerPage): boolean {
   )
 }
 
+function pathWithinRoot(targetPath: string, rootPath: string): boolean {
+  const target = targetPath
+    .replaceAll("\\", "/")
+    .replace(/\/$/, "")
+    .toLowerCase()
+  const root = rootPath.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase()
+  return target === root || target.startsWith(`${root}/`)
+}
+
+function activeRootForPath(
+  roots: FileRoot[],
+  targetPath: string,
+): FileRoot | null {
+  return (
+    roots
+      .filter((root) => pathWithinRoot(targetPath, root.path))
+      .sort((a, b) => b.path.length - a.path.length)[0] ?? null
+  )
+}
+
 function rootGroups(
   roots: FileRoot[],
   t: (key: string, options?: Record<string, unknown>) => string,
@@ -1184,6 +1197,8 @@ function DirectoryPage({
   onCopy,
   onMove,
   onRun,
+  canWrite,
+  canRun,
   onPinToggle,
   onRename,
   onDelete,
@@ -1200,6 +1215,8 @@ function DirectoryPage({
   onCopy: (entries: FileEntry[]) => void
   onMove: (entries: FileEntry[]) => void
   onRun: (entry: FileEntry) => void
+  canWrite: boolean
+  canRun: boolean
   onPinToggle: (path: string) => void
   onRename: (entry: FileEntry) => void
   onDelete: (entry: FileEntry) => void
@@ -1320,6 +1337,7 @@ function DirectoryPage({
                   {entry.type === "file" && (
                     <DropdownMenuItem
                       onSelect={() => onRun(entry)}
+                      disabled={!canRun}
                       className="h-7 gap-2 rounded-sm px-1.5 py-1 text-xs"
                     >
                       <IconPlayerPlay className="size-3.5" />
@@ -1328,6 +1346,7 @@ function DirectoryPage({
                   )}
                   <DropdownMenuItem
                     onSelect={() => onCopy([entry])}
+                    disabled={!canWrite}
                     className="h-7 gap-2 rounded-sm px-1.5 py-1 text-xs"
                   >
                     <IconCopy className="size-3.5" />
@@ -1335,6 +1354,7 @@ function DirectoryPage({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() => onMove([entry])}
+                    disabled={!canWrite}
                     className="h-7 gap-2 rounded-sm px-1.5 py-1 text-xs"
                   >
                     <IconScissors className="size-3.5" />
@@ -1360,6 +1380,7 @@ function DirectoryPage({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() => onRename(entry)}
+                    disabled={!canWrite}
                     className="h-7 gap-2 rounded-sm px-1.5 py-1 text-xs"
                   >
                     <IconPencil className="size-3.5" />
@@ -1368,6 +1389,7 @@ function DirectoryPage({
                   <DropdownMenuItem
                     variant="destructive"
                     onSelect={() => onDelete(entry)}
+                    disabled={!canWrite}
                     className="h-7 gap-2 rounded-sm px-1.5 py-1 text-xs"
                   >
                     <IconTrash className="size-3.5" />
@@ -1469,6 +1491,7 @@ function FilePage({
   loading,
   saving,
   error,
+  canWrite,
   onDraftChange,
   onSave,
 }: {
@@ -1478,6 +1501,7 @@ function FilePage({
   loading: boolean
   saving: boolean
   error: string
+  canWrite: boolean
   onDraftChange: (value: string) => void
   onSave: () => void
 }) {
@@ -1588,7 +1612,7 @@ function FilePage({
           <Button
             type="button"
             size="sm"
-            disabled={saving || file.readonly}
+            disabled={saving || file.readonly || !canWrite}
             onClick={onSave}
           >
             <IconDeviceFloppy className="size-4" />
@@ -1666,6 +1690,12 @@ export function DrivePage() {
     () => rootGroups([...pinnedRoots, ...roots], t),
     [pinnedRoots, roots, t],
   )
+  const activeRoot = React.useMemo(
+    () => (page.kind === "system" ? null : activeRootForPath(roots, page.path)),
+    [page, roots],
+  )
+  const canWrite = page.kind !== "system" && activeRoot?.canWrite === true
+  const canRun = page.kind !== "system" && activeRoot?.canRun === true
 
   const pushOperation = React.useCallback((operation: ExplorerOperation) => {
     setUndoStack((current) => [...current, operation].slice(-50))
@@ -2417,15 +2447,22 @@ export function DrivePage() {
             <DropdownMenuSeparator />
             {page.kind === "directory" && (
               <>
-                <DropdownMenuItem onSelect={() => void createItem("file")}>
+                <DropdownMenuItem
+                  disabled={!canWrite}
+                  onSelect={() => void createItem("file")}
+                >
                   <IconFilePlus className="size-4" />
                   {t("drive.actions.createFile")}
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void createItem("directory")}>
+                <DropdownMenuItem
+                  disabled={!canWrite}
+                  onSelect={() => void createItem("directory")}
+                >
                   <IconFolderPlus className="size-4" />
                   {t("drive.actions.createFolder")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={!canWrite}
                   onSelect={() => fileInputRef.current?.click()}
                 >
                   <IconUpload className="size-4" />
@@ -2467,21 +2504,21 @@ export function DrivePage() {
                   {t("drive.actions.downloadSelected")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={selectedEntries.length === 0}
+                  disabled={!canWrite || selectedEntries.length === 0}
                   onSelect={() => void copyEntries(selectedEntries)}
                 >
                   <IconCopy className="size-4" />
                   {t("drive.actions.copySelected")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={selectedEntries.length === 0}
+                  disabled={!canWrite || selectedEntries.length === 0}
                   onSelect={() => void moveEntries(selectedEntries)}
                 >
                   <IconScissors className="size-4" />
                   {t("drive.actions.moveSelected")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={selectedEntries.length === 0}
+                  disabled={!canWrite || selectedEntries.length === 0}
                   variant="destructive"
                   onSelect={() => {
                     void deleteEntries(selectedEntries)
@@ -2495,6 +2532,7 @@ export function DrivePage() {
             {page.kind === "file" && (
               <>
                 <DropdownMenuItem
+                  disabled={!canRun}
                   onSelect={() =>
                     void runEntry({
                       name: basename(page.path),
@@ -2576,6 +2614,8 @@ export function DrivePage() {
         <DirectoryPage
           listing={listing}
           loading={loadingDirectory}
+          canWrite={canWrite}
+          canRun={canRun}
           selectionMode={selectionMode}
           selectedPaths={selectedPaths}
           pinnedPaths={pinnedPaths}
@@ -2606,6 +2646,7 @@ export function DrivePage() {
           loading={loadingFile}
           saving={saving}
           error={fileError}
+          canWrite={canWrite}
           onDraftChange={setDraft}
           onSave={() => void saveActiveFile()}
         />

@@ -23,6 +23,9 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_COPY_TREE_DEPTH = 32;
 const MAX_COPY_TREE_ENTRIES = 50_000;
 const MAX_COPY_TREE_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_ARCHIVE_TREE_DEPTH = 32;
+const MAX_ARCHIVE_TREE_ENTRIES = 50_000;
+const MAX_ARCHIVE_TREE_BYTES = 2 * 1024 * 1024 * 1024;
 
 const PREVIEW_MIME_TYPES: Record<string, string> = {
   ".avif": "image/avif",
@@ -62,6 +65,10 @@ interface FileRoot {
   path: string;
   kind: "home" | "workspace" | "drive" | "root" | "quickAccess";
   protected: boolean;
+  /** Whether mutating file operations are permitted under the current runtime policy. */
+  canWrite: boolean;
+  /** Whether the run action is permitted under the current runtime policy. */
+  canRun: boolean;
   storage?: FileRootStorage;
 }
 
@@ -457,17 +464,34 @@ function sortEntries(a: FileEntry, b: FileEntry): number {
   });
 }
 
-async function listDirectory(targetPath: string): Promise<FileEntry[]> {
+async function listDirectory(
+  targetPath: string,
+  offset = 0,
+  limit = MAX_LIST_ENTRIES,
+): Promise<{
+  entries: FileEntry[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}> {
   await assertDirectory(targetPath);
-  const dirents = (
-    await fsp.readdir(targetPath, { withFileTypes: true })
-  ).slice(0, MAX_LIST_ENTRIES);
-  const entries = await Promise.all(
-    dirents.map((dirent) => entryFromDirent(targetPath, dirent)),
-  );
-  return entries
+  const dirents = await fsp.readdir(targetPath, { withFileTypes: true });
+  const entries = (
+    await Promise.all(
+      dirents.map((dirent) => entryFromDirent(targetPath, dirent)),
+    )
+  )
     .filter((entry): entry is FileEntry => entry !== null)
     .sort(sortEntries);
+  const page = entries.slice(offset, offset + limit);
+  return {
+    entries: page,
+    total: entries.length,
+    offset,
+    limit,
+    hasMore: offset + page.length < entries.length,
+  };
 }
 
 function detectBinary(buffer: Buffer): boolean {
@@ -744,6 +768,79 @@ async function sendPreviewFile(
   });
 }
 
+interface ArchiveBudget {
+  entries: number;
+  totalBytes: number;
+  seenRealPaths: Set<string>;
+}
+
+async function assertArchiveTreeWithinBudget(
+  rootPath: string,
+  budget: ArchiveBudget,
+  depth = 0,
+): Promise<void> {
+  if (depth > MAX_ARCHIVE_TREE_DEPTH) {
+    throw new FileManagerError(413, "archive directory tree is too deep");
+  }
+
+  const stat = await fsp.lstat(rootPath);
+  if (stat.isSymbolicLink()) {
+    throw new FileManagerError(
+      400,
+      "symbolic links are not supported inside archives",
+    );
+  }
+  if (!stat.isFile() && !stat.isDirectory()) {
+    throw new FileManagerError(
+      400,
+      "special filesystem nodes are not supported inside archives",
+    );
+  }
+
+  // De-duplicate overlapping selections and protect the preflight walk from
+  // junction aliases without ever following a symlink entry.
+  const realPath = await fsp.realpath(rootPath);
+  const realKey = normalizeKey(realPath);
+  if (budget.seenRealPaths.has(realKey)) return;
+  budget.seenRealPaths.add(realKey);
+
+  budget.entries += 1;
+  if (budget.entries > MAX_ARCHIVE_TREE_ENTRIES) {
+    throw new FileManagerError(
+      413,
+      "archive contains too many files and directories",
+    );
+  }
+
+  if (stat.isFile()) {
+    budget.totalBytes += stat.size;
+    if (budget.totalBytes > MAX_ARCHIVE_TREE_BYTES) {
+      throw new FileManagerError(413, "archive exceeds the size limit");
+    }
+    return;
+  }
+
+  const children = await fsp.readdir(rootPath, { withFileTypes: true });
+  for (const child of children) {
+    await assertArchiveTreeWithinBudget(
+      path.join(rootPath, child.name),
+      budget,
+      depth + 1,
+    );
+  }
+}
+
+async function assertArchiveWithinBudget(sourcePaths: string[]): Promise<void> {
+  const budget: ArchiveBudget = {
+    entries: 0,
+    totalBytes: 0,
+    seenRealPaths: new Set(),
+  };
+  for (const sourcePath of sourcePaths) {
+    await assertArchiveTreeWithinBudget(sourcePath, budget);
+  }
+}
+
 function archiveDownloadName(paths: string[]): string {
   if (paths.length === 1) {
     const name = path.basename(paths[0]) || "download";
@@ -778,6 +875,11 @@ async function sendArchiveDownload(
     }
     relativePaths.push(relativePath);
   }
+
+  // Admission-control the complete selection before sending headers. This
+  // prevents an unbounded tar walk from turning a download into a memory,
+  // disk, or CPU denial-of-service request.
+  await assertArchiveWithinBudget(sourcePaths);
 
   res.setHeader("Content-Type", "application/gzip");
   res.setHeader(
@@ -937,7 +1039,18 @@ $items | ConvertTo-Json -Compress
   }
 }
 
-function rootEntries(runtimePaths: RuntimePaths): FileRoot[] {
+function rootCanWrite(
+  rootPath: string,
+  workspacePath: string,
+  allowSystemWrite: boolean,
+): boolean {
+  return allowSystemWrite || isPathInside(workspacePath, rootPath);
+}
+
+function rootEntries(
+  runtimePaths: RuntimePaths,
+  allowSystemWrite: boolean,
+): FileRoot[] {
   const roots: FileRoot[] = [];
   const seen = new Set<string>();
   const resolvedWorkspace = path.resolve(
@@ -945,12 +1058,19 @@ function rootEntries(runtimePaths: RuntimePaths): FileRoot[] {
   );
 
   windowsQuickAccessFolders().forEach((folder, index) => {
+    const canWrite = rootCanWrite(
+      folder.path,
+      resolvedWorkspace,
+      allowSystemWrite,
+    );
     pushRoot(roots, seen, {
       id: `quick-access-${index}`,
       label: folder.label,
       path: folder.path,
       kind: "quickAccess",
       protected: false,
+      canWrite,
+      canRun: canWrite,
     });
   });
 
@@ -960,14 +1080,23 @@ function rootEntries(runtimePaths: RuntimePaths): FileRoot[] {
     path: resolvedWorkspace,
     kind: "workspace",
     protected: true,
+    canWrite: true,
+    canRun: true,
   });
 
+  const homeCanWrite = rootCanWrite(
+    os.homedir(),
+    resolvedWorkspace,
+    allowSystemWrite,
+  );
   pushRoot(roots, seen, {
     id: "home",
     label: "Home",
     path: os.homedir(),
     kind: "home",
     protected: false,
+    canWrite: homeCanWrite,
+    canRun: homeCanWrite,
   });
 
   if (process.platform === "win32") {
@@ -978,6 +1107,8 @@ function rootEntries(runtimePaths: RuntimePaths): FileRoot[] {
         path: drive,
         kind: "drive",
         protected: true,
+        canWrite: allowSystemWrite,
+        canRun: allowSystemWrite,
         storage: statfsStorage(drive),
       });
     }
@@ -988,6 +1119,8 @@ function rootEntries(runtimePaths: RuntimePaths): FileRoot[] {
       path: "/",
       kind: "root",
       protected: true,
+      canWrite: allowSystemWrite,
+      canRun: allowSystemWrite,
       storage: statfsStorage("/"),
     });
   }
@@ -1125,7 +1258,7 @@ export function createFileManagerRouter({
     assertMutableTarget(targetPath, runtimePaths, currentAllowSystemWrite());
 
   router.get("/roots", (_req, res) => {
-    res.json({ roots: rootEntries(runtimePaths) });
+    res.json({ roots: rootEntries(runtimePaths, currentAllowSystemWrite()) });
   });
 
   router.get(
@@ -1137,11 +1270,19 @@ export function createFileManagerRouter({
       if (!stat.isDirectory()) {
         throw new FileManagerError(400, "path is not a directory");
       }
+      const rawOffset = Number(req.query.offset ?? 0);
+      const rawLimit = Number(req.query.limit ?? MAX_LIST_ENTRIES);
+      const offset = Number.isFinite(rawOffset)
+        ? Math.max(0, Math.floor(rawOffset))
+        : 0;
+      const limit = Number.isFinite(rawLimit)
+        ? Math.min(MAX_LIST_ENTRIES, Math.max(1, Math.floor(rawLimit)))
+        : MAX_LIST_ENTRIES;
+      const listing = await listDirectory(targetPath, offset, limit);
       res.json({
         path: targetPath,
         parentPath: parentPathFor(targetPath),
-        entries: await listDirectory(targetPath),
-        limit: MAX_LIST_ENTRIES,
+        ...listing,
       });
     }),
   );
@@ -1313,7 +1454,9 @@ export function createFileManagerRouter({
         if (err instanceof FileManagerError) {
           res.status(err.status).json({ error: err.message });
         } else {
-          res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+          res
+            .status(500)
+            .json({ error: err instanceof Error ? err.message : String(err) });
         }
       }
     }),

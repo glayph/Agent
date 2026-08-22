@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { handlemikiMessage } from "./protocol"
 import { getChatState, updateChatStore } from "@/store/chat"
+
+import { handlemikiMessage } from "./protocol"
 
 const { toastError } = vi.hoisted(() => ({
   toastError: vi.fn(),
@@ -21,6 +22,9 @@ function resetChatState() {
     activeSessionId: "session-1",
     hasHydratedActiveSession: true,
     contextUsage: undefined,
+    activeRunId: undefined,
+    runStatus: undefined,
+    runError: undefined,
   })
   toastError.mockClear()
 }
@@ -143,6 +147,91 @@ describe("chat protocol flow", () => {
     ])
   })
 
+  it("persists run lifecycle status and warning outcomes from WebSocket events", () => {
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-1" },
+      },
+      "session-1",
+    )
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-1",
+      runStatus: "running",
+    })
+
+    handlemikiMessage(
+      {
+        type: "node.run_end",
+        session_id: "session-1",
+        payload: { run_id: "run-1", status: "completed_with_warning" },
+      },
+      "session-1",
+    )
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-1",
+      runStatus: "completed_with_warning",
+      runError: undefined,
+    })
+
+    handlemikiMessage(
+      {
+        type: "node.run_end",
+        session_id: "session-1",
+        payload: {
+          run_id: "run-2",
+          status: "failed",
+          error: "artifact verification failed",
+        },
+      },
+      "session-1",
+    )
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-2",
+      runStatus: "failed",
+      runError: "artifact verification failed",
+    })
+  })
+
+  it("stores normalized delivery outcomes and keeps unknown side effects non-successful", () => {
+    handlemikiMessage(
+      {
+        type: "delivery.outcome",
+        session_id: "session-1",
+        payload: {
+          runId: "run-delivery",
+          stepId: "step-1",
+          deliveryId: "delivery-1",
+          status: "reconciliation_required",
+          artifactRefs: ["workspace/result.md"],
+          warnings: ["provider outcome is unknown"],
+          nextAction: "reconcile provider outcome before replay",
+          correlationId: "corr-delivery",
+          approval: {
+            required: true,
+            requestId: "approval-1",
+            consumed: true,
+          },
+        },
+      },
+      "session-1",
+    )
+
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-delivery",
+      runStatus: "failed",
+      runError: "reconcile provider outcome before replay",
+      deliveryOutcome: {
+        status: "reconciliation_required",
+        deliveryId: "delivery-1",
+        correlationId: "corr-delivery",
+        artifactRefs: ["workspace/result.md"],
+        approval: { required: true, consumed: true },
+      },
+    })
+  })
+
   it("handles typing and error messages by clearing pending request state", () => {
     updateChatStore({
       messages: [
@@ -155,7 +244,10 @@ describe("chat protocol flow", () => {
       ],
     })
 
-    handlemikiMessage({ type: "typing.start", session_id: "session-1" }, "session-1")
+    handlemikiMessage(
+      { type: "typing.start", session_id: "session-1" },
+      "session-1",
+    )
     expect(getChatState().isTyping).toBe(true)
 
     handlemikiMessage(

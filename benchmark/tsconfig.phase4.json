@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "../packages/core/src/security/approval-inbox.ts",
+    "../packages/core/src/tools/isolated-browser-worker.ts",
+    "../packages/core/src/tools/leased-browser-runner.ts"
+  ]
+}

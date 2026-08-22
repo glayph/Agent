@@ -141,8 +141,12 @@ export function relayWs(
     }
     cleanup();
   };
-  coreWs.on("close", () => closeClientAfterUpstreamGone("Upstream connection closed"));
-  coreWs.on("error", () => closeClientAfterUpstreamGone("Upstream connection error"));
+  coreWs.on("close", () =>
+    closeClientAfterUpstreamGone("Upstream connection closed"),
+  );
+  coreWs.on("error", () =>
+    closeClientAfterUpstreamGone("Upstream connection error"),
+  );
 }
 
 export function closeWebSocketServer(wss: WebSocketServer): Promise<void> {

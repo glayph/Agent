@@ -123,8 +123,7 @@ export class PythonResolver implements LanguageResolver {
         success: false,
         installedPackages: [],
         error: `pip install failed${versionSuffix}: ${installResult.error || installResult.stderr}`,
-        manualInstructions:
-          `Manual fallback: \`${venvPython} -m pip install ${packages.join(" ")}\``,
+        manualInstructions: `Manual fallback: \`${venvPython} -m pip install ${packages.join(" ")}\``,
       };
     }
 

@@ -7,10 +7,10 @@ import {
   type OAuthProviderStatus,
   getOAuthFlow,
   getOAuthProviders,
+  getOAuthToken,
   loginOAuth,
   logoutOAuth,
   pollOAuthFlow,
-  getOAuthToken,
 } from "@/api/oauth"
 
 type FlowWatchMode = "" | "status" | "poll"
@@ -147,8 +147,7 @@ export function useCredentialsPage() {
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const data = event.data as
-        | { type?: string; flowId?: string; status?: string }
-        | undefined
+        { type?: string; flowId?: string; status?: string } | undefined
       if (!data || data.type !== "Miki-oauth-result" || !data.flowId) {
         return
       }
@@ -423,7 +422,9 @@ export function useCredentialsPage() {
     setActiveFlow((prev) => (prev?.status === "pending" ? null : prev))
   }, [bumpActionToken])
 
-  const [revealedTokens, setRevealedTokens] = useState<Record<string, string>>({})
+  const [revealedTokens, setRevealedTokens] = useState<Record<string, string>>(
+    {},
+  )
 
   const revealToken = useCallback(async (provider: OAuthProvider) => {
     try {
@@ -480,6 +481,7 @@ export function useCredentialsPage() {
   return {
     loading,
     error,
+    loadProviders,
     activeAction,
     activeFlow,
     flowHint,

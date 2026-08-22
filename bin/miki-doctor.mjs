@@ -12,7 +12,12 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 // Register runtime loader for @miki/* package resolution
-const loaderPath = path.join(PROJECT_ROOT, "dist", "runtime", "runtime-loader.mjs");
+const loaderPath = path.join(
+  PROJECT_ROOT,
+  "dist",
+  "runtime",
+  "runtime-loader.mjs",
+);
 if (fs.existsSync(loaderPath)) {
   try {
     register(pathToFileURL(loaderPath).href, pathToFileURL(PROJECT_ROOT + "/"));
@@ -30,12 +35,30 @@ if (fs.existsSync(loaderPath)) {
 const args = new Set(process.argv.slice(2));
 
 const RUNTIME_FILE_CANDIDATES = [
-  ["packages/gateway/dist/index.js", "dist/runtime/packages/gateway/dist/index.js"],
-  ["packages/core/dist/api/index.js", "dist/runtime/packages/core/dist/api/index.js"],
-  ["packages/config/dist/index.js", "dist/runtime/packages/config/dist/index.js"],
-  ["packages/installer/dist/index.js", "dist/runtime/packages/installer/dist/index.js"],
-  ["packages/skills/dist/index.js", "dist/runtime/packages/skills/dist/index.js"],
-  ["packages/ui/frontend/dist/index.html", "dist/runtime/packages/ui/frontend/dist/index.html"],
+  [
+    "packages/gateway/dist/index.js",
+    "dist/runtime/packages/gateway/dist/index.js",
+  ],
+  [
+    "packages/core/dist/api/index.js",
+    "dist/runtime/packages/core/dist/api/index.js",
+  ],
+  [
+    "packages/config/dist/index.js",
+    "dist/runtime/packages/config/dist/index.js",
+  ],
+  [
+    "packages/installer/dist/index.js",
+    "dist/runtime/packages/installer/dist/index.js",
+  ],
+  [
+    "packages/skills/dist/index.js",
+    "dist/runtime/packages/skills/dist/index.js",
+  ],
+  [
+    "packages/ui/frontend/dist/index.html",
+    "dist/runtime/packages/ui/frontend/dist/index.html",
+  ],
 ];
 
 const SECRET_PATTERNS = [
@@ -62,7 +85,9 @@ function commandVersion(command, commandArgs) {
     shell: process.platform === "win32",
     timeout: 10000,
   });
-  return result.status === 0 ? String(result.stdout || result.stderr).trim() : null;
+  return result.status === 0
+    ? String(result.stdout || result.stderr).trim()
+    : null;
 }
 
 function npmCommand() {
@@ -178,7 +203,9 @@ async function configValidationCheck() {
       result.valid ? (result.warnings.length ? "warn" : "pass") : "fail",
       result.valid
         ? "Runtime config is valid."
-        : result.errors.map((item) => `${item.path}: ${item.message}`).join("; "),
+        : result.errors
+            .map((item) => `${item.path}: ${item.message}`)
+            .join("; "),
       { warnings: result.warnings },
     );
   } catch (err) {
@@ -193,11 +220,11 @@ async function configValidationCheck() {
 
 async function secretVaultCheck() {
   try {
-    const { inspectEnvSecretStatus } = await import(
-      "@miki/config/secret-vault"
-    );
+    const { inspectEnvSecretStatus } = await import("@miki/config");
     const secretStatus = inspectEnvSecretStatus({ workspaceDir: PROJECT_ROOT });
-    const envOnly = secretStatus.filter((item) => item.envOnly).map((item) => item.key);
+    const envOnly = secretStatus
+      .filter((item) => item.envOnly)
+      .map((item) => item.key);
     return check(
       "secret_vault",
       "Secret vault",
@@ -217,7 +244,9 @@ async function secretVaultCheck() {
 
 async function runDoctor() {
   const checks = [];
-  checks.push(check("node_version", "Node.js", "pass", `Node ${process.versions.node}`));
+  checks.push(
+    check("node_version", "Node.js", "pass", `Node ${process.versions.node}`),
+  );
 
   const npm = npmCommand();
   const npmVersion = commandVersion(npm.command, [...npm.args, "--version"]);
@@ -258,9 +287,18 @@ async function runDoctor() {
   for (const dir of ["config", "data"]) {
     try {
       writableDir(path.join(PROJECT_ROOT, dir));
-      checks.push(check(`writable_${dir}`, `${dir}/ writable`, "pass", `${dir}/ is writable.`));
+      checks.push(
+        check(
+          `writable_${dir}`,
+          `${dir}/ writable`,
+          "pass",
+          `${dir}/ is writable.`,
+        ),
+      );
     } catch (err) {
-      checks.push(check(`writable_${dir}`, `${dir}/ writable`, "fail", err.message));
+      checks.push(
+        check(`writable_${dir}`, `${dir}/ writable`, "fail", err.message),
+      );
     }
   }
 
@@ -268,7 +306,14 @@ async function runDoctor() {
 
   try {
     sqliteWritable();
-    checks.push(check("sqlite_access", "SQLite access", "pass", "SQLite data directory is writable."));
+    checks.push(
+      check(
+        "sqlite_access",
+        "SQLite access",
+        "pass",
+        "SQLite data directory is writable.",
+      ),
+    );
   } catch (err) {
     checks.push(check("sqlite_access", "SQLite access", "fail", err.message));
   }
@@ -285,27 +330,51 @@ async function runDoctor() {
     ([envKey]) => process.env[envKey] && process.env[envKey].trim() !== "",
   );
   if (configuredProviders.length > 0) {
-    checks.push(check(
-      "provider_keys",
-      "LLM provider keys",
-      "pass",
-      `Configured: ${configuredProviders.map(([, label]) => label).join(", ")}.`,
-    ));
+    checks.push(
+      check(
+        "provider_keys",
+        "LLM provider keys",
+        "pass",
+        `Configured: ${configuredProviders.map(([, label]) => label).join(", ")}.`,
+      ),
+    );
   } else {
-    checks.push(check(
-      "provider_keys",
-      "LLM provider keys",
-      "warn",
-      "No provider API key found in the environment. Add a Gemini / OpenRouter / OpenAI key before using the agent.",
-    ));
+    checks.push(
+      check(
+        "provider_keys",
+        "LLM provider keys",
+        "warn",
+        "No provider API key found in the environment. Add a Gemini / OpenRouter / OpenAI key before using the agent.",
+      ),
+    );
   }
 
   // Package js-yaml hoisting check
-  const staleJsYaml = path.join(PROJECT_ROOT, "packages", "config", "node_modules", "js-yaml");
+  const staleJsYaml = path.join(
+    PROJECT_ROOT,
+    "packages",
+    "config",
+    "node_modules",
+    "js-yaml",
+  );
   if (fs.existsSync(staleJsYaml)) {
-    checks.push(check("js_yaml_hoisting", "js-yaml ESM resolution", "fail", "Stale packages/config/node_modules/js-yaml found. Remove it to fix ESM resolution."));
+    checks.push(
+      check(
+        "js_yaml_hoisting",
+        "js-yaml ESM resolution",
+        "fail",
+        "Stale packages/config/node_modules/js-yaml found. Remove it to fix ESM resolution.",
+      ),
+    );
   } else {
-    checks.push(check("js_yaml_hoisting", "js-yaml ESM resolution", "pass", "js-yaml resolution clean."));
+    checks.push(
+      check(
+        "js_yaml_hoisting",
+        "js-yaml ESM resolution",
+        "pass",
+        "js-yaml resolution clean.",
+      ),
+    );
   }
 
   if (args.has("--migrations")) {
@@ -313,7 +382,9 @@ async function runDoctor() {
       check(
         "migrations",
         "Migrations",
-        fs.existsSync(path.join(PROJECT_ROOT, "config", "agent.yaml")) ? "pass" : "warn",
+        fs.existsSync(path.join(PROJECT_ROOT, "config", "agent.yaml"))
+          ? "pass"
+          : "warn",
         "Migration dry-run preconditions checked.",
       ),
     );
@@ -368,7 +439,8 @@ async function runDoctor() {
 function printHuman(report) {
   console.log(`Miki doctor: ${report.status.toUpperCase()}`);
   for (const item of report.checks) {
-    const symbol = item.status === "pass" ? "OK" : item.status === "warn" ? "WARN" : "FAIL";
+    const symbol =
+      item.status === "pass" ? "OK" : item.status === "warn" ? "WARN" : "FAIL";
     console.log(`[${symbol}] ${item.label}: ${item.message}`);
   }
 }

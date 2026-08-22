@@ -3,7 +3,10 @@ import * as path from "path";
 
 import { normalizeRuntimePaths, resolveRuntimePaths } from "./paths.js";
 
-function withEnv<T>(values: Record<string, string | undefined>, fn: () => T): T {
+function withEnv<T>(
+  values: Record<string, string | undefined>,
+  fn: () => T,
+): T {
   const previous = new Map<string, string | undefined>();
   for (const [key, value] of Object.entries(values)) {
     previous.set(key, process.env[key]);
@@ -51,4 +54,3 @@ describe("runtime path isolation", () => {
 });
 
 export {};
-

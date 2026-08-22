@@ -4,11 +4,7 @@ export type AutomationStatus = "active" | "paused" | "disabled"
 export type AutomationTarget = "internal" | "research" | "facebook" | "youtube"
 export type AutomationApprovalMode = "none" | "review" | "publish"
 export type AutomationExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
+  "pending" | "running" | "completed" | "failed" | "cancelled"
 
 export interface AutomationDefinition {
   id: string
@@ -109,12 +105,18 @@ export async function createAutomation(payload: CreateAutomationPayload) {
   })
 }
 
-export async function updateAutomation(id: string, payload: UpdateAutomationPayload) {
-  return request<{ automation: AutomationDefinition }>(`/api/automations/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
+export async function updateAutomation(
+  id: string,
+  payload: UpdateAutomationPayload,
+) {
+  return request<{ automation: AutomationDefinition }>(
+    `/api/automations/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  )
 }
 
 export async function automationAction(
@@ -133,7 +135,6 @@ export async function runAutomationNow(id: string) {
     { method: "POST" },
   )
 }
-
 
 export type PlatformProvider =
   | "facebook"
@@ -196,7 +197,14 @@ export interface PlatformConnection {
 export interface BrowserConnectionSession {
   id: string
   provider: PlatformProvider
-  status: "created" | "browser_opened" | "awaiting_user" | "completed" | "expired" | "cancelled" | "failed"
+  status:
+    | "created"
+    | "browser_opened"
+    | "awaiting_user"
+    | "completed"
+    | "expired"
+    | "cancelled"
+    | "failed"
   requestedScopes: string[]
   officialUrl: string
   expectedDomain: string
@@ -211,11 +219,25 @@ export async function listPlatforms() {
 }
 
 export async function listConnections(limit = 100) {
-  return request<{ connections: PlatformConnection[] }>(`/api/connections?limit=${encodeURIComponent(String(limit))}`)
+  return request<{ connections: PlatformConnection[] }>(
+    `/api/connections?limit=${encodeURIComponent(String(limit))}`,
+  )
 }
 
-export async function beginBrowserConnection(provider: PlatformProvider, scopes?: string[]) {
-  return request<{ session: BrowserConnectionSession; browser: { action: string; url: string; expectedDomain: string; requiresUserHandoff: boolean; message: string } }>("/api/connections/browser/start", {
+export async function beginBrowserConnection(
+  provider: PlatformProvider,
+  scopes?: string[],
+) {
+  return request<{
+    session: BrowserConnectionSession
+    browser: {
+      action: string
+      url: string
+      expectedDomain: string
+      requiresUserHandoff: boolean
+      message: string
+    }
+  }>("/api/connections/browser/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider, scopes }),
@@ -223,11 +245,26 @@ export async function beginBrowserConnection(provider: PlatformProvider, scopes?
 }
 
 export async function markBrowserConnectionOpened(sessionId: string) {
-  return request<{ session: BrowserConnectionSession }>(`/api/connections/browser/${encodeURIComponent(sessionId)}/opened`, { method: "POST" })
+  return request<{ session: BrowserConnectionSession }>(
+    `/api/connections/browser/${encodeURIComponent(sessionId)}/opened`,
+    { method: "POST" },
+  )
 }
 
-export async function completeBrowserConnection(sessionId: string, payload: { accountLabel: string; externalAccountId?: string; scopes?: string[]; credentialRef?: string; expiresAt?: string }) {
-  return request<{ session: BrowserConnectionSession; connection: PlatformConnection }>(`/api/connections/browser/${encodeURIComponent(sessionId)}/complete`, {
+export async function completeBrowserConnection(
+  sessionId: string,
+  payload: {
+    accountLabel: string
+    externalAccountId?: string
+    scopes?: string[]
+    credentialRef?: string
+    expiresAt?: string
+  },
+) {
+  return request<{
+    session: BrowserConnectionSession
+    connection: PlatformConnection
+  }>(`/api/connections/browser/${encodeURIComponent(sessionId)}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -235,11 +272,17 @@ export async function completeBrowserConnection(sessionId: string, payload: { ac
 }
 
 export async function validateConnection(id: string) {
-  return request<{ connection: PlatformConnection }>(`/api/connections/${encodeURIComponent(id)}/validate`, { method: "POST" })
+  return request<{ connection: PlatformConnection }>(
+    `/api/connections/${encodeURIComponent(id)}/validate`,
+    { method: "POST" },
+  )
 }
 
 export async function revokeConnection(id: string) {
-  return request<{ connection: PlatformConnection }>(`/api/connections/${encodeURIComponent(id)}/revoke`, { method: "POST" })
+  return request<{ connection: PlatformConnection }>(
+    `/api/connections/${encodeURIComponent(id)}/revoke`,
+    { method: "POST" },
+  )
 }
 
 export async function storePlatformToken(payload: {
@@ -261,7 +304,10 @@ export async function storePlatformToken(payload: {
   })
 }
 
-export async function startBrowserPlatformConnection(provider: PlatformProvider, scopes?: string[]) {
+export async function startBrowserPlatformConnection(
+  provider: PlatformProvider,
+  scopes?: string[],
+) {
   return beginBrowserConnection(provider, scopes)
 }
 

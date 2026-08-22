@@ -73,8 +73,26 @@ func (r *Runtime) startRuntime() error {
 	if !fileExists(r.cfg.GatewayEntry) {
 		return r.failStart(fmt.Errorf("gateway entrypoint not found: %s", r.cfg.GatewayEntry))
 	}
-	if err := ensurePortAvailable(r.cfg.Host, r.cfg.Port); err != nil {
-		return r.failStart(err)
+	ports := []struct {
+		name string
+		port int
+	}{
+		{name: "gateway", port: r.cfg.Port},
+		{name: "core", port: r.cfg.CorePort},
+		{name: "LiteLLM", port: r.cfg.LiteLLMPort},
+	}
+	seenPorts := make(map[int]string, len(ports))
+	for _, service := range ports {
+		if service.port <= 0 {
+			continue
+		}
+		if previous, exists := seenPorts[service.port]; exists {
+			return r.failStart(fmt.Errorf("%s port %d conflicts with %s port", service.name, service.port, previous))
+		}
+		seenPorts[service.port] = service.name
+		if err := ensurePortAvailable(r.cfg.Host, service.port); err != nil {
+			return r.failStart(fmt.Errorf("%s: %w", service.name, err))
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -440,6 +458,12 @@ func runtimeEnv(base []string, cfg Config) []string {
 	env = setEnv(env, "Miki_WORKSPACE_DIR", cfg.WorkspaceDir)
 	env = setEnv(env, "GATEWAY_HOST", cfg.Host)
 	env = setEnv(env, "GATEWAY_PORT", fmt.Sprintf("%d", cfg.Port))
+	if cfg.CorePort > 0 {
+		env = setEnv(env, "CORE_PORT", fmt.Sprintf("%d", cfg.CorePort))
+	}
+	if cfg.LiteLLMPort > 0 {
+		env = setEnv(env, "LITELLM_PORT", fmt.Sprintf("%d", cfg.LiteLLMPort))
+	}
 	if cfg.Debug {
 		env = setEnv(env, "LOG_LEVEL", "debug")
 	}
