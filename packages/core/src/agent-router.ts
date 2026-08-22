@@ -506,8 +506,8 @@ export function routeAgentTask(
   // Determine routing mode: use multi_agent when a non-default specialist is
   // selected with a strong enough score and multiple specialists are available.
   const isMultiAgentCapable = specialists.length > 1;
-  const nonDefaultSelected =
-    selected.id !== (routeConfig.default_agent ?? "miki");
+  const defaultAgentId = normalizeId(routeConfig.default_agent ?? "miki");
+  const nonDefaultSelected = selected.id !== defaultAgentId;
   const mode: "single_orchestrator" | "multi_agent" =
     isMultiAgentCapable &&
     nonDefaultSelected &&

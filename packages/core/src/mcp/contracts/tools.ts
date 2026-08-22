@@ -1058,7 +1058,7 @@ export class ToolRegistrySchemas {
         function: {
           name: "web_search",
           description:
-            "Search the public web using the configured native provider and return concise structured results with titles, URLs, and snippets.",
+            "Search the public web in local, explicit API/cloud, or auto-fallback mode. Use it for current or changing facts, news, leaks, recent events, or when the user explicitly asks to search; do not call it unnecessarily for stable general knowledge. Returns normalized results and numbered citations without exposing provider credentials.",
           parameters: {
             type: "object",
             properties: {
@@ -1072,6 +1072,17 @@ export class ToolRegistrySchemas {
                 maximum: 10,
                 description:
                   "Maximum number of results to return; defaults to 5.",
+              },
+              mode: {
+                type: "string",
+                enum: ["local", "cloud", "api", "auto"],
+                description:
+                  "Optional per-request mode. Local uses the host's native search; API/cloud uses an enabled search API provider; auto uses local first and falls back to API only when permitted.",
+              },
+              provider: {
+                type: "string",
+                description:
+                  "Optional provider override such as native, duckduckgo, searxng, brave, tavily, serper, serpapi, or bing.",
               },
             },
             required: ["query"],

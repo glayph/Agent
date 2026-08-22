@@ -13,6 +13,7 @@ import type { RuntimeFetcher } from "../../runtime-fetch/index.js";
 import type { RuntimePaths } from "../../paths.js";
 import type { ApprovalInbox } from "../../security/approval-inbox.js";
 import type { LauncherAdminController } from "../../api/launcher-compat.js";
+import { loadWebSearchConfig, searchWeb } from "../../web-search-service.js";
 import type {
   CompleteConnectionInput,
   PlatformProvider,
@@ -515,58 +516,20 @@ export async function handleScrapeTable(
   );
 }
 
-// Native Web Search Handler
-function decodeHtmlText(value: string): string {
-  return value
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
+// Dual-mode Web Search Handler
 export async function handleWebSearch(
-  _this: ToolHandlerContext,
+  this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const query = typeof args.query === "string" ? args.query.trim() : "";
-  const requested = Number(args.max_results);
-  const maxResults = Number.isFinite(requested)
-    ? Math.max(1, Math.min(10, Math.floor(requested)))
-    : 5;
-  if (!query) return "Error: query parameter is required";
-
-  const endpoint = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const query = typeof args.query === "string" ? args.query : "";
+  const config = loadWebSearchConfig(this.runtimePaths.configDir);
   try {
-    const response = await fetch(endpoint, {
-      headers: { "user-agent": "Agent-Miki/1.0 (+native-web-search)" },
-      signal: AbortSignal.timeout(15_000),
+    const result = await searchWeb(this.runtimePaths.configDir, config, query, {
+      maxResults: args.max_results,
+      mode: args.mode,
+      provider: args.provider,
     });
-    if (!response.ok) return `Web search failed with HTTP ${response.status}.`;
-    const html = await response.text();
-    const results: Array<{ title: string; url: string; snippet: string }> = [];
-    const resultPattern =
-      /<a[^>]+class=["']result__a["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class=["']result__snippet["'][^>]*>([\s\S]*?)<\/a>/gi;
-    let match: RegExpExecArray | null;
-    while (results.length < maxResults && (match = resultPattern.exec(html))) {
-      const rawUrl = decodeHtmlText(match[1]);
-      const title = decodeHtmlText(match[2]);
-      const snippet = decodeHtmlText(match[3]);
-      if (!title || !rawUrl) continue;
-      let url = rawUrl;
-      try {
-        const parsed = new URL(rawUrl, endpoint);
-        const redirect = parsed.searchParams.get("uddg");
-        url = redirect ? decodeURIComponent(redirect) : parsed.toString();
-      } catch {
-        continue;
-      }
-      results.push({ title, url, snippet });
-    }
-    return JSON.stringify({ query, provider: "duckduckgo", results }, null, 2);
+    return JSON.stringify(result, null, 2);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return `Web search failed: ${message.slice(0, 240)}`;

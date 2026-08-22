@@ -64,17 +64,33 @@ runtime:
       use_regex: true
     servers: {}
 web_search:
+  execution_mode: local
   provider: native
   current_service: native
   prefer_native: true
   providers:
     - id: native
-      label: Native Web Search
+      label: Native Web Search (DuckDuckGo)
       configured: true
       current: true
       requires_auth: false
+    - id: duckduckgo
+      label: DuckDuckGo
+      configured: true
+      current: false
+      requires_auth: false
+    - id: searxng
+      label: SearXNG (local instance)
+      configured: false
+      current: false
+      requires_auth: false
+    - id: brave
+      label: Brave Search API
+      configured: false
+      current: false
+      requires_auth: true
     - id: tavily
-      label: Tavily
+      label: Tavily API
       configured: false
       current: false
       requires_auth: true
@@ -83,15 +99,44 @@ web_search:
       configured: false
       current: false
       requires_auth: true
+    - id: serper
+      label: Serper API
+      configured: false
+      current: false
+      requires_auth: true
+    - id: bing
+      label: Bing Web Search API
+      configured: false
+      current: false
+      requires_auth: true
   settings:
     native:
       enabled: true
       max_results: 5
+    duckduckgo:
+      enabled: true
+      max_results: 5
+    searxng:
+      enabled: false
+      max_results: 5
+      base_url: ""
+    brave:
+      enabled: false
+      max_results: 5
+      api_key_set: false
     tavily:
       enabled: false
       max_results: 5
       api_key_set: false
     serpapi:
+      enabled: false
+      max_results: 5
+      api_key_set: false
+    serper:
+      enabled: false
+      max_results: 5
+      api_key_set: false
+    bing:
       enabled: false
       max_results: 5
       api_key_set: false

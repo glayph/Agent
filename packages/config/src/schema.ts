@@ -149,6 +149,7 @@ const WebSearchProviderSettingsSchema = z
 
 const WebSearchSchema = z
   .object({
+    execution_mode: z.enum(["local", "cloud", "api", "auto"]).optional(),
     provider: z.string().min(1).optional(),
     current_service: z.string().min(1).optional(),
     prefer_native: z.boolean().optional(),

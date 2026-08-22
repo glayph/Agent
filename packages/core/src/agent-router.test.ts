@@ -17,6 +17,18 @@ describe("agent router", () => {
     );
   });
 
+  it("treats a case-variant configured default agent as the same default", () => {
+    const decision = routeAgentTask(
+      "what is the GTA 6 NEW LEAKS INFO? Search the web first",
+      {
+        agents: { router: { default_agent: "Miki", min_score: 2 } },
+      },
+    );
+
+    expect(decision.selected.id).toBe("miki");
+    expect(decision.mode).toBe("single_orchestrator");
+  });
+
   it("uses config-defined  profile details when routing evidence is stronger", () => {
     const decision = routeAgentTask("Design a marketplace onboarding flow", {
       agents: {

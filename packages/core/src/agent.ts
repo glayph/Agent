@@ -104,6 +104,7 @@ import { globalAgentPlanner } from "./agent-planner.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 12;
+const MAX_WEB_SEARCH_CALLS_PER_TURN = 3;
 const DEFAULT_MESSAGE_HISTORY_LIMIT = 15;
 
 // Bug #9 fix: Add approximate token/character cap to message history
@@ -122,6 +123,62 @@ function isLocalModelName(model: string): boolean {
     /^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i.test(model) ||
     /(?:^|[-_/])local(?:$|[-_/])/i.test(model)
   );
+}
+
+function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
+  const results: Array<{ title: string; url: string; snippet?: string }> = [];
+  const seen = new Set<string>();
+  let query = "the requested topic";
+
+  for (const message of messages) {
+    if (message.role !== "tool" || message.name !== "web_search") continue;
+    if (typeof message.content !== "string") continue;
+    try {
+      const payload = JSON.parse(message.content) as {
+        query?: unknown;
+        results?: unknown;
+      };
+      if (typeof payload.query === "string" && payload.query.trim()) {
+        query = payload.query.trim();
+      }
+      if (!Array.isArray(payload.results)) continue;
+      for (const item of payload.results) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        const title =
+          typeof record.title === "string" ? record.title.trim() : "";
+        const url = typeof record.url === "string" ? record.url.trim() : "";
+        if (!title || !/^https?:\/\//i.test(url) || seen.has(url)) continue;
+        seen.add(url);
+        results.push({
+          title,
+          url,
+          ...(typeof record.snippet === "string"
+            ? { snippet: record.snippet.trim().slice(0, 500) }
+            : {}),
+        });
+      }
+    } catch {
+      // Ignore non-JSON or failed tool output; another search result may exist.
+    }
+  }
+
+  if (results.length === 0) return "";
+  const lines = [
+    `I searched the web for “${query}”, but the selected model did not return a final synthesis.`,
+    "These are source leads, not independently verified claims:",
+    "",
+  ];
+  results.slice(0, 8).forEach((result, index) => {
+    lines.push(`${index + 1}. ${result.title}`);
+    lines.push(`   ${result.url}`);
+    if (result.snippet) lines.push(`   ${result.snippet}`);
+  });
+  lines.push(
+    "",
+    "Open and cross-check the cited sources before treating leak reports as confirmed information.",
+  );
+  return lines.join("\n");
 }
 
 function withTimeout<T>(
@@ -1543,6 +1600,7 @@ export class AgentOrchestrator {
     let consecutiveToolOnly = 0;
     let turn = 0;
     let completionRepairAttempts = 0;
+    let webSearchCallsUsed = 0;
     let response: LLMResponse | null = null;
     let latestContextUsage: ContextUsageSnapshot | undefined;
     const streamDoneEvent = (tokens: number) =>
@@ -1807,6 +1865,34 @@ export class AgentOrchestrator {
         | undefined;
 
       if (toolCalls && toolCalls.length > 0) {
+        const requestedWebSearchCalls = toolCalls.filter(
+          (toolCall) => toolCall.function?.name === "web_search",
+        ).length;
+        if (
+          requestedWebSearchCalls > 0 &&
+          webSearchCallsUsed >= MAX_WEB_SEARCH_CALLS_PER_TURN
+        ) {
+          const fallbackContent =
+            buildToolOnlyFallbackResponse(llmMessages) ||
+            "I reached the web-search safety limit for this turn before a final synthesis was returned. Please ask me to continue the research in a new turn.";
+          this._saveAssistantHistoryMessage(
+            sessionId,
+            fallbackContent,
+            options.responseMessageId,
+          );
+          this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
+          yield JSON.stringify({
+            type: "stream_chunk",
+            content: fallbackContent,
+            model_name: this.modelName,
+            ...(latestContextUsage
+              ? { context_usage: latestContextUsage }
+              : {}),
+          });
+          yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
+          return;
+        }
+        webSearchCallsUsed += requestedWebSearchCalls;
         if (!content) consecutiveToolOnly++;
 
         if (consecutiveToolOnly >= MAX_AGENT_TURNS_NO_OUTPUT) {
@@ -1887,7 +1973,24 @@ export class AgentOrchestrator {
       break;
     }
 
-    const finalContent = response?.choices?.[0]?.message?.content || "";
+    let finalContent = response?.choices?.[0]?.message?.content || "";
+    if (!finalContent.trim()) {
+      const fallbackContent = buildToolOnlyFallbackResponse(llmMessages);
+      if (fallbackContent) {
+        finalContent = fallbackContent;
+        this._saveAssistantHistoryMessage(
+          sessionId,
+          fallbackContent,
+          options.responseMessageId,
+        );
+        yield JSON.stringify({
+          type: "stream_chunk",
+          content: fallbackContent,
+          model_name: this.modelName,
+          ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+        });
+      }
+    }
     this._logMemoryInteraction(sessionId, userMessage, finalContent);
     yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
   }

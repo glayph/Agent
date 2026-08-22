@@ -13,32 +13,32 @@ Agent Miki is a monorepo. The main `npm start` command launches the Node launche
 
 The repository keeps the complete llama.cpp source under `packages/core/src/llm/local/vendor/llama.cpp/`. The project build compiles only the headless server component and disables the upstream web UI before copying the resulting executable into the local runtime area. Agent Miki's own dashboard is the user interface for model management and chat.
 
-| Component | Location | Purpose |
-|---|---|---|
-| Node launcher | `bin/miki.js` | Starts Miki, delegates setup/doctor commands, and manages child processes. |
-| Gateway | `packages/gateway/` | Serves the dashboard, API, authentication, WebSocket connection, and runtime controls. |
-| Core agent | `packages/core/` | Agent orchestration, providers, tools, channels, safety, memory bridge, and local LLM lifecycle. |
-| Local LLM integration | `packages/core/src/llm/local/` | Local provider code, executable locations, metadata, and vendored llama.cpp source. |
-| llama.cpp source | `packages/core/src/llm/local/vendor/llama.cpp/` | Vendored upstream source used to build `llama-server`. |
-| Frontend | `packages/ui/frontend/` | React dashboard and chat interface. |
-| Memory package | `packages/memory/` | Memory service and persistence support. |
-| Go CLI | `packages/cli/` | Optional native terminal interface and managed runtime controls. |
-| Runtime data | `data/` | Workspace databases, audit data, memory data, logs, backups, and runtime state. |
+| Component             | Location                                        | Purpose                                                                                          |
+| --------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Node launcher         | `bin/miki.js`                                   | Starts Miki, delegates setup/doctor commands, and manages child processes.                       |
+| Gateway               | `packages/gateway/`                             | Serves the dashboard, API, authentication, WebSocket connection, and runtime controls.           |
+| Core agent            | `packages/core/`                                | Agent orchestration, providers, tools, channels, safety, memory bridge, and local LLM lifecycle. |
+| Local LLM integration | `packages/core/src/llm/local/`                  | Local provider code, executable locations, metadata, and vendored llama.cpp source.              |
+| llama.cpp source      | `packages/core/src/llm/local/vendor/llama.cpp/` | Vendored upstream source used to build `llama-server`.                                           |
+| Frontend              | `packages/ui/frontend/`                         | React dashboard and chat interface.                                                              |
+| Memory package        | `packages/memory/`                              | Memory service and persistence support.                                                          |
+| Go CLI                | `packages/cli/`                                 | Optional native terminal interface and managed runtime controls.                                 |
+| Runtime data          | `data/`                                         | Workspace databases, audit data, memory data, logs, backups, and runtime state.                  |
 
 ## 2. Requirements
 
 A clean installation requires a supported Node.js runtime, npm, Git, a C/C++ build toolchain for platforms where a bundled llama.cpp binary is not already available, and Go only if the Go terminal interface is required. The root package requires Node.js 20 or newer; the CLI package declares support for Node.js `^20.19.0 || ^22.13.0 || >=24`. Go tests and the native terminal interface require Go 1.25 or newer as declared by `packages/cli/go.mod`.
 
-| Requirement | Linux | Windows | Required for |
-|---|---|---|---|
-| Git | Recommended | Recommended | Cloning and updating the repository. |
-| Node.js | 20+ | 20+ | All Agent Miki commands. |
-| npm | Bundled with Node.js | Bundled with Node.js | Dependency installation and scripts. |
-| CMake | Required when `npm run build:llama` must compile llama.cpp | Required when Windows llama.cpp must be compiled locally | Building the vendored llama.cpp server. |
-| C/C++ compiler | GCC/G++ or Clang | Visual Studio Build Tools or another CMake-compatible compiler | llama.cpp compilation. |
-| Go | 1.25+ | 1.25+ | Go CLI build/test/use. |
-| GGUF model | Only for local-model use | Only for local-model use | Running a local model. |
-| Cloud API key | Only for cloud-model use | Only for cloud-model use | Using a remote provider. |
+| Requirement    | Linux                                                      | Windows                                                        | Required for                            |
+| -------------- | ---------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------- |
+| Git            | Recommended                                                | Recommended                                                    | Cloning and updating the repository.    |
+| Node.js        | 20+                                                        | 20+                                                            | All Agent Miki commands.                |
+| npm            | Bundled with Node.js                                       | Bundled with Node.js                                           | Dependency installation and scripts.    |
+| CMake          | Required when `npm run build:llama` must compile llama.cpp | Required when Windows llama.cpp must be compiled locally       | Building the vendored llama.cpp server. |
+| C/C++ compiler | GCC/G++ or Clang                                           | Visual Studio Build Tools or another CMake-compatible compiler | llama.cpp compilation.                  |
+| Go             | 1.25+                                                      | 1.25+                                                          | Go CLI build/test/use.                  |
+| GGUF model     | Only for local-model use                                   | Only for local-model use                                       | Running a local model.                  |
+| Cloud API key  | Only for cloud-model use                                   | Only for cloud-model use                                       | Using a remote provider.                |
 
 Official installation references are listed at the end of this guide: Node.js [1], CMake [2], Go [3], Git [4], and llama.cpp [5].
 
@@ -110,17 +110,17 @@ MIKI_LLAMA_BUILD_JOBS=4 npm run build:all
 
 The llama.cpp build script uses the vendored source and applies these important build choices:
 
-| Build setting | Value | Meaning |
-|---|---:|---|
-| `LLAMA_BUILD_SERVER` | `ON` | Build the `llama-server` executable. |
-| `LLAMA_BUILD_UI` | `OFF` | Do not build llama.cpp's separate web UI. |
-| `LLAMA_USE_PREBUILT_UI` | `OFF` | Do not package the upstream prebuilt UI. |
-| `LLAMA_BUILD_TESTS` | `OFF` | Omit llama.cpp tests from the application artifact. |
-| `LLAMA_BUILD_EXAMPLES` | `OFF` | Omit upstream examples. |
-| `LLAMA_BUILD_TOOLS` | `ON` | Keep the tools needed by the project build. |
-| `LLAMA_BUILD_APP` | `OFF` | Do not build the upstream standalone app. |
-| `LLAMA_OPENSSL` | `OFF` | Keep this embedded server build independent of OpenSSL. |
-| `GGML_NATIVE` | `OFF` | Produce a more portable CPU artifact rather than a host-specific native build. |
+| Build setting           | Value | Meaning                                                                        |
+| ----------------------- | ----: | ------------------------------------------------------------------------------ |
+| `LLAMA_BUILD_SERVER`    |  `ON` | Build the `llama-server` executable.                                           |
+| `LLAMA_BUILD_UI`        | `OFF` | Do not build llama.cpp's separate web UI.                                      |
+| `LLAMA_USE_PREBUILT_UI` | `OFF` | Do not package the upstream prebuilt UI.                                       |
+| `LLAMA_BUILD_TESTS`     | `OFF` | Omit llama.cpp tests from the application artifact.                            |
+| `LLAMA_BUILD_EXAMPLES`  | `OFF` | Omit upstream examples.                                                        |
+| `LLAMA_BUILD_TOOLS`     |  `ON` | Keep the tools needed by the project build.                                    |
+| `LLAMA_BUILD_APP`       | `OFF` | Do not build the upstream standalone app.                                      |
+| `LLAMA_OPENSSL`         | `OFF` | Keep this embedded server build independent of OpenSSL.                        |
+| `GGML_NATIVE`           | `OFF` | Produce a more portable CPU artifact rather than a host-specific native build. |
 
 The compiled executable is copied into `packages/core/src/llm/local/native/<platform>-<architecture>/` and into the core distribution during the build. Do not move the vendored llama.cpp source outside `packages/core/src/llm/local/`.
 
@@ -283,11 +283,11 @@ The local model form may also accept an explicit executable path. Normally this 
 
 The intended runtime behavior is:
 
-| Selected default model | llama-server behavior | API key behavior |
-|---|---|---|
-| Cloud/API model | Local llama-server is not required for the selected request path. | The selected provider key must be configured and valid. |
-| Local llama.cpp model | Agent Miki starts the local llama-server automatically when the model is selected/configured for automatic startup. | No cloud API key is required. |
-| Local model with an existing endpoint | Agent Miki uses the configured loopback-compatible endpoint according to the model configuration. | No cloud API key is required unless the endpoint itself requires one. |
+| Selected default model                | llama-server behavior                                                                                               | API key behavior                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Cloud/API model                       | Local llama-server is not required for the selected request path.                                                   | The selected provider key must be configured and valid.               |
+| Local llama.cpp model                 | Agent Miki starts the local llama-server automatically when the model is selected/configured for automatic startup. | No cloud API key is required.                                         |
+| Local model with an existing endpoint | Agent Miki uses the configured loopback-compatible endpoint according to the model configuration.                   | No cloud API key is required unless the endpoint itself requires one. |
 
 After changing the default model, wait for the model status to settle before sending a message. If the local model cannot start, inspect the **Logs** and **Health** pages first. The user-facing Chat response should remain concise, while runtime details are available in the Inspector/log surfaces.
 
@@ -316,24 +316,42 @@ npm run build:llama
 
 Do not delete the vendored source to fix a build problem. Confirm that `packages/core/src/llm/local/vendor/llama.cpp/` exists, confirm that CMake and the compiler are available, and read the first compiler error rather than only the final CMake summary.
 
-## 6. Cloud/API provider setup
+## 6. Dual-mode web-search setup
 
-Cloud providers require credentials supplied through the dashboard or through the runtime environment used by the deployment. Never commit an API key, place it in this guide, or include it in a source ZIP. Use the dashboard's Models/Credentials controls where available, or configure the documented environment variable in the deployment environment.
+Web search is independent from the model used to write the final answer. In **Local** mode, Miki performs retrieval from the machine running the Agent using the native DuckDuckGo adapter and falls back to public Bing HTML if the native endpoint is unavailable. You can also point Local mode at a private SearXNG instance by selecting `searxng` and entering its base URL. In **API / Cloud** mode, Miki calls an enabled search API provider. In **Auto** mode, Miki tries Local first and uses an enabled API provider only when the local path returns no results. Sensitive credential-like queries are blocked from cloud fallback.
+
+Open **Tools → Web Search** in the dashboard and choose the execution mode. The default is Local. Enable the provider you want before choosing API / Cloud or Auto. API keys are entered through the secret-aware provider field and are stored in the workspace vault; they are not returned by the settings API or included in search results. Each successful search returns normalized results and numbered citations with the title and URL.
+
+| Mode        | Retrieval path                                          | Requires a search API key | Internet behavior                                         |
+| ----------- | ------------------------------------------------------- | ------------------------: | --------------------------------------------------------- |
+| Local       | Native DuckDuckGo, public Bing HTML fallback, or configured local SearXNG | No | The Miki host makes the web request. |
+| API / Cloud | Enabled Brave, Tavily, SerpAPI, Serper, or Bing adapter |                       Yes | The query is sent to the selected API provider.           |
+| Auto        | Local first, API fallback if permitted                  |         Only for fallback | Sensitive credential-like queries never use API fallback. |
+
+The active answer model is configured separately under **Models**. A local llama.cpp/Ollama model can synthesize the returned citations without using a cloud model; a cloud/API model can also synthesize them when selected. This gives two independent choices: **where Miki retrieves web data** and **where Miki generates the final answer**. Miki normally searches only when the request requires current or externally verifiable information. A per-turn limit of three `web_search` calls prevents low-cost models from looping; if no final synthesis is returned, Miki provides a source-lead summary explicitly marked as unverified.
+
+### API provider credentials
+
+Cloud providers require credentials supplied through the dashboard or through the runtime environment used by the deployment. Never commit an API key, place it in this guide, or include it in a source ZIP. Use the dashboard's Tools → Web Search secret-aware fields where available, or configure the documented environment variable in the deployment environment.
 
 Common environment variables used by the project include the following. The exact provider/model name must match the model catalog entry selected in the dashboard.
 
-| Variable | Use |
-|---|---|
-| `OPENAI_API_KEY` | OpenAI-compatible provider credential. |
-| `GEMINI_API_KEY` | Google/Gemini-compatible provider credential where supported by the configured provider path. |
-| `GROQ_API_KEY` | Groq-compatible provider credential where supported. |
-| `ANTHROPIC_API_KEY` | Anthropic-compatible provider credential where supported. |
-| `OPENROUTER_API_KEY` | OpenRouter-compatible provider credential where supported. |
-| `GATEWAY_HOST` | Gateway bind host. |
-| `GATEWAY_PORT` | Gateway port. |
-| `MIKI_WORKSPACE_DIR` | Directory for runtime data, configuration, and logs. |
+| Variable             | Use                                                                                           |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`     | OpenAI-compatible provider credential.                                                        |
+| `GEMINI_API_KEY`     | Google/Gemini-compatible provider credential where supported by the configured provider path. |
+| `GROQ_API_KEY`       | Groq-compatible provider credential where supported.                                          |
+| `ANTHROPIC_API_KEY`  | Anthropic-compatible provider credential where supported.                                     |
+| `OPENROUTER_API_KEY` | OpenRouter-compatible provider credential where supported.                                    |
+| `GATEWAY_HOST`       | Gateway bind host.                                                                            |
+| `GATEWAY_PORT`       | Gateway port.                                                                                 |
+| `MIKI_WORKSPACE_DIR` | Directory for runtime data, configuration, and logs.                                          |
 
 A provider test returning HTTP 401 or a message that credentials were rejected means the application reached the provider path but the credential was missing, invalid, expired, or incompatible. Do not interpret `available: true` in a model catalog as proof that a completion will succeed; run the model test and then a short Chat smoke test.
+
+### Search-necessity smoke test
+
+After configuring a model, use two separate chat turns. Ask a current-information question such as `what is the GTA 6 NEW LEAKS INFO?` and confirm in the Inspector that `web_search` runs and the answer contains source links or a clearly marked source-lead fallback. Then ask a stable question such as `What is 2+2? Answer in one sentence.` and confirm that Miki answers without a `web_search` event. Search-result snippets are evidence leads; confirm important claims by opening and cross-checking the cited sources.
 
 ## 7. Provider-plugin setup
 
@@ -349,17 +367,17 @@ When adding a provider, keep credentials in the dashboard secret vault or deploy
 
 Start Agent Miki, open the local URL, and complete the dashboard setup. Then use this order for the first verification:
 
-| Step | Action | Expected result |
-|---:|---|---|
-| 1 | Open the dashboard URL. | Setup or login page appears. |
-| 2 | Sign in with the local dashboard password. | Agent Workspace opens. |
-| 3 | Open **Health**. | Doctor checks and runtime status render. |
-| 4 | Open **Models**. | Model catalog and credential controls render. |
-| 5 | Configure one cloud or local model. | The model can be selected and tested. |
-| 6 | Open **Chat**. | Composer and Inspector entry point render. |
-| 7 | Send `Reply with exactly: runtime smoke test`. | The run enters Running and completes or shows a specific actionable provider error. |
-| 8 | Open **Logs**. | Current gateway/core log lines are visible. |
-| 9 | Open **Channels**, **Drive**, **Skills**, **Tools**, **Runs**, and **Automations**. | Each route renders without Not Found or unhandled runtime errors. |
+| Step | Action                                                                              | Expected result                                                                     |
+| ---: | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+|    1 | Open the dashboard URL.                                                             | Setup or login page appears.                                                        |
+|    2 | Sign in with the local dashboard password.                                          | Agent Workspace opens.                                                              |
+|    3 | Open **Health**.                                                                    | Doctor checks and runtime status render.                                            |
+|    4 | Open **Models**.                                                                    | Model catalog and credential controls render.                                       |
+|    5 | Configure one cloud or local model.                                                 | The model can be selected and tested.                                               |
+|    6 | Open **Chat**.                                                                      | Composer and Inspector entry point render.                                          |
+|    7 | Send `Reply with exactly: runtime smoke test`.                                      | The run enters Running and completes or shows a specific actionable provider error. |
+|    8 | Open **Logs**.                                                                      | Current gateway/core log lines are visible.                                         |
+|    9 | Open **Channels**, **Drive**, **Skills**, **Tools**, **Runs**, and **Automations**. | Each route renders without Not Found or unhandled runtime errors.                   |
 
 A fresh installation may correctly show empty states for installed Skills, Agent Runs, Automations, and local workspace files. Empty state is not itself a failure unless an action that should create data fails.
 
@@ -367,14 +385,14 @@ A fresh installation may correctly show empty states for installed Skills, Agent
 
 Agent Miki exposes a dedicated tool layer for controlled self-extension and administration. These operations are not equivalent to unrestricted shell access: each operation is validated, recorded, and subject to the caller’s origin and permission policy.[6]
 
-| Tool | Function | Remote behavior |
-|---|---|---|
-| `skill_search` | Searches the online `skills.sh` registry and returns candidate metadata. | Read-only; it does not install anything. |
-| `skill_create` | Creates an Agent-authored skill package with `SKILL.md`, metadata, and an entrypoint under the isolated downloaded-skills area. | High-risk; an authenticated owner must approve the persistent request before the write. |
-| `skill_install` | Installs a manifest-validated skill/plugin from `npm:`, `git:`, `clawhub:`, or a local directory. | High-risk; third-party acquisition is never silently activated and requires owner approval for remote callers. |
-| `admin_config_get` | Reads sanitized runtime configuration. | Read-only; secrets are not returned as raw values. |
-| `admin_config_patch` | Applies a validated partial patch and reloads the runtime. | High-risk; remote patches are restricted to `tools.mcp` and `tools.tool_state`, then require owner approval. |
-| `admin_tool_state` | Enables or disables one named Agent tool. | High-risk; remote callers require owner approval and one-time consumption. |
+| Tool                 | Function                                                                                                                        | Remote behavior                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `skill_search`       | Searches the online `skills.sh` registry and returns candidate metadata.                                                        | Read-only; it does not install anything.                                                                       |
+| `skill_create`       | Creates an Agent-authored skill package with `SKILL.md`, metadata, and an entrypoint under the isolated downloaded-skills area. | High-risk; an authenticated owner must approve the persistent request before the write.                        |
+| `skill_install`      | Installs a manifest-validated skill/plugin from `npm:`, `git:`, `clawhub:`, or a local directory.                               | High-risk; third-party acquisition is never silently activated and requires owner approval for remote callers. |
+| `admin_config_get`   | Reads sanitized runtime configuration.                                                                                          | Read-only; secrets are not returned as raw values.                                                             |
+| `admin_config_patch` | Applies a validated partial patch and reloads the runtime.                                                                      | High-risk; remote patches are restricted to `tools.mcp` and `tools.tool_state`, then require owner approval.   |
+| `admin_tool_state`   | Enables or disables one named Agent tool.                                                                                       | High-risk; remote callers require owner approval and one-time consumption.                                     |
 
 The safe approval sequence is deterministic. A remote Agent or MCP/Telegram turn first returns an `approval_required` response containing a request id and a human-readable preview. The owner reviews and approves the request in the authenticated Web UI approval surface, or uses the allow-listed Telegram command described below. The original operation is then retried with the same arguments and the approved request id. The implementation does not return or accept a raw approval token in chat, binds the request to the original actor and preview hash, and consumes it once.[7]
 
@@ -411,32 +429,48 @@ Enable MCP and its discovery methods through the configuration or Web UI. MCP se
 
 External MCP servers and third-party skills are untrusted inputs. Search and inspect first, approve only the exact request you intend to execute, keep permissions minimal, and use the Web UI or local configuration for credential entry. The repository’s baseline verification does not execute an external MCP server or install an untrusted online package.
 
-## 9. Node.js commands and runtime operations
+## 9. Hourly project-health review schedule
 
-| Command | Purpose |
-|---|---|
-| `npm install` | Install root and workspace dependencies. |
-| `npm run build:llama` | Build or reuse the platform llama.cpp server artifact. |
-| `npm run build:all` | Build llama.cpp plus all TypeScript packages and the gateway. |
-| `npm run build` | Alias for `npm run build:all`. |
-| `npm run dev` | Start the development launcher. |
-| `npm start` | Start the normal Agent Miki runtime. |
-| `npm test` | Run workspace tests where defined. |
-| `npm run verify` | Run the repository verification script. |
-| `npm run runtime:24-7` | Run the long-running runtime helper when a persistent process is intentionally required. |
-| `npm run runtime:24-7:check` | Check the persistent runtime helper state. |
-| `npm run clean` | Run workspace clean scripts where defined. |
-| `node bin/miki.js doctor` | Run runtime/CLI diagnostic checks. |
-| `node bin/miki.js help` | Display launcher help. |
-| `node bin/miki.js version` | Display the package version. |
+The project review schedule is configured as an active recurring interval of **3,600 seconds (one hour)** with `runAsNewTask: true`. Each firing starts as a separate fresh task instead of appending to the previous task’s conversation. Its self-contained playbook checks incomplete or failing capabilities, dual-mode search, model/provider and local-runtime readiness, MCP and Telegram/Web UI safety boundaries, tests, logs, and 24/7 readiness. It applies only safe reversible fixes, keeps credentials out of logs and commits, and reports issues that require owner input.
+
+To inspect the schedule from the Manus environment:
+
+```bash
+manus-config schedule status --limit 1000 --offset 0
+```
+
+The schedule is project/task-scoped and is not the same as Agent Miki’s internal `self_improvement.reflection_interval_minutes` setting. Pause it only when explicitly needed:
+
+```bash
+manus-config schedule update --enabled=false
+```
+
+## 10. Node.js commands and runtime operations
+
+| Command                      | Purpose                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------- |
+| `npm install`                | Install root and workspace dependencies.                                                 |
+| `npm run build:llama`        | Build or reuse the platform llama.cpp server artifact.                                   |
+| `npm run build:all`          | Build llama.cpp plus all TypeScript packages and the gateway.                            |
+| `npm run build`              | Alias for `npm run build:all`.                                                           |
+| `npm run dev`                | Start the development launcher.                                                          |
+| `npm start`                  | Start the normal Agent Miki runtime.                                                     |
+| `npm test`                   | Run workspace tests where defined.                                                       |
+| `npm run verify`             | Run the repository verification script.                                                  |
+| `npm run runtime:24-7`       | Run the long-running runtime helper when a persistent process is intentionally required. |
+| `npm run runtime:24-7:check` | Check the persistent runtime helper state.                                               |
+| `npm run clean`              | Run workspace clean scripts where defined.                                               |
+| `node bin/miki.js doctor`    | Run runtime/CLI diagnostic checks.                                                       |
+| `node bin/miki.js help`      | Display launcher help.                                                                   |
+| `node bin/miki.js version`   | Display the package version.                                                             |
 
 Stop the process with `Ctrl+C`. The launcher manages its gateway/core children and performs shutdown cleanup. If a process remains after an abnormal termination, inspect the process list and the current log before starting a second copy on the same port.
 
-## 10. Go CLI setup and usage
+## 11. Go CLI setup and usage
 
 The Go CLI is optional. The JavaScript launcher is the normal cross-platform dashboard entrypoint, while the Go companion provides a native terminal dashboard and managed runtime controls.
 
-### 9.1 Build and test the Go CLI
+### 11.1 Build and test the Go CLI
 
 From the repository root:
 
@@ -464,7 +498,7 @@ node packages/cli/agent.js doctor
 go test ./packages/cli/...
 ```
 
-### 9.2 Go CLI commands
+### 11.2 Go CLI commands
 
 The CLI exposes the following lifecycle commands:
 
@@ -488,23 +522,23 @@ Miki version
 
 In a terminal, `Miki start` opens the Bubble Tea dashboard. In a non-terminal environment, plain mode is used automatically. Stop, Shutdown, and Restart control the managed gateway process tree rather than merely detaching from it.
 
-### 9.3 Go CLI environment variables
+### 11.3 Go CLI environment variables
 
-| Variable | Meaning |
-|---|---|
-| `MIKI_INSTALLER=1` | Enables Windows installer mode when the native wrapper exists. |
-| `MIKI_WORKSPACE_DIR` | Selects the data, logs, and configuration workspace. |
-| `MIKI_GATEWAY_PATH` | Explicit built gateway entrypoint for the Node launcher. |
-| `MIKI_GATEWAY_ENTRY` | Explicit gateway entrypoint for the Go terminal interface. |
-| `MIKI_RUNTIME_ROOT` | Runtime distribution root for the Go interface. |
-| `MIKI_RUNTIME_LOADER` | Optional Node runtime loader. |
-| `MIKI_NODE` | Node executable used by the Go interface. |
-| `GATEWAY_HOST` | Gateway bind host. |
-| `GATEWAY_PORT` | Gateway bind port. |
+| Variable              | Meaning                                                        |
+| --------------------- | -------------------------------------------------------------- |
+| `MIKI_INSTALLER=1`    | Enables Windows installer mode when the native wrapper exists. |
+| `MIKI_WORKSPACE_DIR`  | Selects the data, logs, and configuration workspace.           |
+| `MIKI_GATEWAY_PATH`   | Explicit built gateway entrypoint for the Node launcher.       |
+| `MIKI_GATEWAY_ENTRY`  | Explicit gateway entrypoint for the Go terminal interface.     |
+| `MIKI_RUNTIME_ROOT`   | Runtime distribution root for the Go interface.                |
+| `MIKI_RUNTIME_LOADER` | Optional Node runtime loader.                                  |
+| `MIKI_NODE`           | Node executable used by the Go interface.                      |
+| `GATEWAY_HOST`        | Gateway bind host.                                             |
+| `GATEWAY_PORT`        | Gateway bind port.                                             |
 
 Canonical `MIKI_*` variables take precedence over legacy mixed-case variables that may still be accepted during the transition period.
 
-## 11. Relocated or packaged runtime
+## 12. Relocated or packaged runtime
 
 When Agent Miki is installed into a different directory or distributed as a packaged runtime, set the runtime paths explicitly if automatic discovery cannot find the build:
 
@@ -530,24 +564,24 @@ npm start
 
 For a relocated distribution whose gateway is already built, `MIKI_GATEWAY_PATH` may be used by the Node CLI to point directly to the built gateway entry file.
 
-## 12. Configuration, workspace, logs, and backups
+## 13. Configuration, workspace, logs, and backups
 
 Runtime configuration belongs in the selected workspace and should not be confused with source-controlled defaults. `MIKI_WORKSPACE_DIR` changes where Miki stores data and runtime state. The dashboard Config page is the preferred place to inspect and save runtime settings. Channels are disabled by default in the safe fresh-install configuration; enable an integration only after its required credentials and endpoint settings are present.
 
 Important runtime locations include:
 
-| Path | Purpose |
-|---|---|
-| `data/` | Runtime databases, memory, audit data, schedules, and state. |
-| `data/core_backend.log` | Core/gateway runtime log stream exposed by the Logs page. |
-| `data/backups/` | Runtime backups created by the safety/backup subsystem. |
-| `config/agent.yaml` | Checked-in project configuration template/defaults. |
-| `packages/core/src/llm/local/native/` | Platform-specific local llama-server artifacts generated during builds. |
-| `.miki-build/` | Temporary llama.cpp build directory; generated and not source-controlled. |
+| Path                                  | Purpose                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `data/`                               | Runtime databases, memory, audit data, schedules, and state.              |
+| `data/core_backend.log`               | Core/gateway runtime log stream exposed by the Logs page.                 |
+| `data/backups/`                       | Runtime backups created by the safety/backup subsystem.                   |
+| `config/agent.yaml`                   | Checked-in project configuration template/defaults.                       |
+| `packages/core/src/llm/local/native/` | Platform-specific local llama-server artifacts generated during builds.   |
+| `.miki-build/`                        | Temporary llama.cpp build directory; generated and not source-controlled. |
 
 Do not commit `.env` files, API keys, local databases, runtime logs, GGUF model files, compiled executables, or private keys. Keep model files and credentials outside the Git repository.
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### `npm run build:all` fails while building llama.cpp
 
@@ -606,13 +640,13 @@ Run the complete build first, then run `node bin/miki.js doctor`. For a relocate
 
 Use a Developer PowerShell for Visual Studio, confirm that CMake can locate the MSVC compiler, and allow the local executable through the Windows security prompt only when you trust the source. Do not download and execute an unrelated `llama-server` binary when the repository's own build can produce the required artifact.
 
-## 14. Production and persistent operation notes
+## 15. Production and persistent operation notes
 
 The default setup is intended for a local machine. For a persistent service, keep the workspace on durable storage, configure a process supervisor appropriate for the operating system, restrict the bind address and firewall exposure, and store credentials in the supervisor's secret/environment mechanism. Do not expose a password-only local dashboard directly to the public internet without adding an appropriate reverse proxy, TLS, access control, and operational monitoring.
 
 A local GGUF model can require substantial memory and sustained CPU/GPU resources. Begin with a small model, verify a short prompt, and only then increase context length, concurrency, or model size. The project-level `MIKI_LLAMA_BUILD_JOBS` controls compilation parallelism; it does not determine model inference performance.
 
-## 15. Clean-install verification checklist
+## 16. Clean-install verification checklist
 
 A clean installation is ready when all of the following are true:
 
@@ -632,21 +666,12 @@ A clean installation is ready when all of the following are true:
 ## References
 
 [1]: https://nodejs.org/en/download/ "Node.js official downloads"
-
 [2]: https://cmake.org/download/ "CMake official downloads"
-
 [3]: https://go.dev/dl/ "Go official downloads"
-
 [4]: https://git-scm.com/downloads "Git official downloads"
-
 [5]: https://github.com/ggml-org/llama.cpp "llama.cpp official repository"
-
 [6]: packages/core/src/tools/registry/executor.ts "Agent tool registration and execution surface"
-
 [7]: packages/core/src/security/approval-inbox.ts "Persistent owner approval and one-time context-bound consumption"
-
 [8]: packages/core/src/channels/telegram.ts "Telegram configuration, allow-lists, and deterministic admin commands"
-
 [9]: packages/core/src/mcp/server.ts "Authenticated MCP session and tool execution"
-
 [10]: packages/core/src/tools/registry/admin-control-handlers.ts "Restricted remote administration patch policy"

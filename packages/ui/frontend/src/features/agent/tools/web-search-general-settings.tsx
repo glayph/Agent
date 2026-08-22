@@ -39,7 +39,7 @@ export function WebSearchGeneralSettings({
           )}
           description={t(
             "pages.agent.tools.web_search.execution_mode_description",
-            "Local is the default and keeps web retrieval on this Miki host. Cloud is explicit; Auto tries local first and falls back only when allowed.",
+            "Local is the default and performs retrieval from this Miki host. API uses an enabled web-search API provider. Auto tries local first and falls back to API only when allowed.",
           )}
         >
           <Select
@@ -65,13 +65,13 @@ export function WebSearchGeneralSettings({
               <SelectItem value="cloud" className="rounded-lg">
                 {t(
                   "pages.agent.tools.web_search.execution_cloud",
-                  "Cloud (explicit)",
+                  "API / Cloud (explicit)",
                 )}
               </SelectItem>
               <SelectItem value="auto" className="rounded-lg">
                 {t(
                   "pages.agent.tools.web_search.execution_auto",
-                  "Auto (local then cloud)",
+                  "Auto (local then API)",
                 )}
               </SelectItem>
             </SelectContent>

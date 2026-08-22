@@ -20,18 +20,18 @@ After startup, open the local dashboard address printed by the launcher. The ver
 
 ## Verified in the Local Runtime
 
-| Area | Observed behavior |
-|---|---|
-| **Dashboard and authentication** | The React dashboard served successfully. The first-run/login surface accepted the configured local password and opened the authenticated workspace. |
-| **Chat surface** | The composer, model selector, running/ready state, context indicator, message actions, and provider-error display rendered. A successful cloud-model answer was not obtained in the tested environment because the provider credential request was rejected. |
-| **Models and credentials** | The catalog returned 7 models, including Gemini and OpenAI entries. The dashboard exposed model selection and credential-management pages. |
-| **Memory** | Selective memory search, region filters, reindex, chunk inspection, retrieval traces, postings, and graph-edge status rendered. |
-| **Tools** | The authenticated API returned 50 tool entries. The catalog included filesystem, shell, browser, computer, model, runtime, workflow, web-search, and skill-discovery/install surfaces. |
-| **Channels** | The channel catalog returned 15 entries. The Web channel page exposed enable, token, type, streaming, runtime probe, reset, and save controls. |
-| **Drive** | The workspace and home-directory locations rendered with path, refresh, and file-action controls. |
-| **Runs and automations** | Runs and Automation Center pages rendered with refresh/export/replay/manual-run, workflow, schedule, connection, and execution-history controls. The disposable workspace had no recorded runs or configured workflows. |
-| **Config, Health, and Logs** | Configuration, health, and logs pages rendered. The command-pattern test correctly marked `rm -rf /tmp/demo` as blocked by the configured deny pattern. |
-| **Inspector** | The Inspector opened from an assistant message, exposed Overview, Response, Thoughts, Work, Artifacts, Evidence, and Events, and its expand/shrink and close controls worked. |
+| Area                             | Observed behavior                                                                                                                                                                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Dashboard and authentication** | The React dashboard served successfully. The first-run/login surface accepted the configured local password and opened the authenticated workspace.                                                                                                          |
+| **Chat surface**                 | The composer, model selector, running/ready state, context indicator, message actions, and provider-error display rendered. A successful cloud-model answer was not obtained in the tested environment because the provider credential request was rejected. |
+| **Models and credentials**       | The catalog returned 7 models, including Gemini and OpenAI entries. The dashboard exposed model selection and credential-management pages.                                                                                                                   |
+| **Memory**                       | Selective memory search, region filters, reindex, chunk inspection, retrieval traces, postings, and graph-edge status rendered.                                                                                                                              |
+| **Tools**                        | The authenticated API returned 50 tool entries. The catalog included filesystem, shell, browser, computer, model, runtime, workflow, web-search, and skill-discovery/install surfaces.                                                                       |
+| **Channels**                     | The channel catalog returned 15 entries. The Web channel page exposed enable, token, type, streaming, runtime probe, reset, and save controls.                                                                                                               |
+| **Drive**                        | The workspace and home-directory locations rendered with path, refresh, and file-action controls.                                                                                                                                                            |
+| **Runs and automations**         | Runs and Automation Center pages rendered with refresh/export/replay/manual-run, workflow, schedule, connection, and execution-history controls. The disposable workspace had no recorded runs or configured workflows.                                      |
+| **Config, Health, and Logs**     | Configuration, health, and logs pages rendered. The command-pattern test correctly marked `rm -rf /tmp/demo` as blocked by the configured deny pattern.                                                                                                      |
+| **Inspector**                    | The Inspector opened from an assistant message, exposed Overview, Response, Thoughts, Work, Artifacts, Evidence, and Events, and its expand/shrink and close controls worked.                                                                                |
 
 ## Plugins and Skills
 
@@ -42,6 +42,18 @@ The implementation exposes skill search, validated installation from `npm:`, `gi
 The Agent tool surface now includes `skill_search`, `skill_create`, and `skill_install`. `skill_create` was verified through the ToolRegistry in a disposable workspace: it created `SKILL.md`, metadata, an entrypoint, and a registry record. Remote skill creation and installation first create a persistent high-risk approval request and perform no write until an authenticated owner approves it. The retry uses only the approved request ID, is bound to the original caller and canonical preview hash, and is consumed once. The installer validates the downloaded manifest and refreshes runtime plugin tools; it does not silently activate arbitrary unvalidated code.[3]
 
 Manual import accepts a Markdown file or a ZIP containing `SKILL.md`, rejects oversized files and unsafe archive paths, and stores imported content in an isolated downloaded-skills area.[3] Online installation remains intentionally unverified in this repository test because it would execute the acquisition of third-party code; use an authenticated owner approval after inspecting the request and source.
+
+## Dual-Mode Web Search
+
+The `web_search` tool now supports two explicit retrieval paths plus a controlled hybrid path. **Local mode** performs retrieval from the Miki host using the native DuckDuckGo adapter, falls back to public Bing HTML when the native endpoint is unavailable, or uses an explicitly configured local SearXNG endpoint. **API/Cloud mode** uses an enabled provider with a key stored in the workspace secret vault, currently supporting Brave Search, Tavily, SerpAPI, Serper, and Bing API adapters. **Auto mode** tries local retrieval first and uses an enabled API provider only when local retrieval returns no results; sensitive credential-like queries never use that fallback.
+
+Each successful response includes normalized result records, the selected mode/provider, a fallback flag, and numbered `citations` containing title and direct source URL. The Agent’s active model—local llama.cpp/Ollama or a configured cloud/API model—can then synthesize an answer from those results. This separates **where web data is retrieved** from **where the final answer is generated**. API credentials are never included in tool output. A per-turn budget stops repeated search-only loops after three `web_search` calls; if the model still returns no synthesis, Miki emits a clearly marked source-lead summary rather than presenting leak or rumor claims as facts. Unit tests cover local/API responses, Bing redirect decoding, fallback behavior, sensitive-query blocking, and citation generation; live API provider credentials were not exercised in this environment.
+
+Use the Tools → Web Search page to choose Local, API/Cloud, or Auto, enable a provider, configure its endpoint where applicable, and enter its key through the secret-aware field. The default remains local/native retrieval. In the live Agent test, `what is the GTA 6 NEW LEAKS INFO?` triggered `web_search` in Local mode, while `What is 2+2?` completed without any web-search call; the current-news test used a bounded three-search budget and produced safe citations when the low-cost model did not return a final synthesis.
+
+## Hourly Project Review
+
+An active project-health schedule runs every **3,600 seconds** with `runAsNewTask: true`, so every run starts as a separate fresh task. Its playbook checks dual-mode web search, model/provider and local-runtime readiness, MCP and Telegram/Web UI safety, tests, logs, and 24/7 readiness. It applies only safe reversible fixes and keeps credentials out of reports and commits. Schedule state is inspected with `manus-config schedule status --limit 1000 --offset 0`.
 
 ## MCP
 
@@ -57,12 +69,12 @@ The Telegram adapter routes accepted ordinary text messages into the normal Agen
 
 The Web UI exposes authenticated settings and control APIs for configuration read/validate/update/reset, tool enable/disable, channel configuration/probes, runtime reload/restart, skills, models, memory, runs, automations, health, and logs.[3] The Agent tool surface additionally exposes sanitized `admin_config_get`, validated `admin_config_patch`, and approval-gated `admin_tool_state` operations. The Web UI approval endpoints are mounted behind the required API-key middleware; the code-level approval lifecycle was verified with an owner approval followed by one-time context-bound consumption. Free-form chat is not an unrestricted dashboard macro.
 
-| Request source | Verified control boundary |
-|---|---|
-| **Authenticated Web UI/API** | Can reach the implemented configuration and control surfaces, subject to validation, authentication, runtime-apply behavior, and tool permissions. Owner approval requests can be approved without exposing worker tokens. |
-| **Telegram** | Ordinary allow-listed text reaches the Agent orchestrator; only an explicit `admin_allow_from` identity can list/approve/deny pending requests through deterministic commands. Live delivery remains untested. |
-| **Authenticated MCP** | Can list/call exposed tools and read exposed resources/prompts when MCP is enabled. MCP calls are explicitly remote for policy decisions; external-server execution was not tested. |
-| **Remote shell or destructive actions** | Not unrestricted. Shell execution and generic file writes/deletes default-deny for remote callers. Restricted skill/admin mutations require owner approval, validation, context binding, and one-time consumption.[7] [9] |
+| Request source                          | Verified control boundary                                                                                                                                                                                                  |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Authenticated Web UI/API**            | Can reach the implemented configuration and control surfaces, subject to validation, authentication, runtime-apply behavior, and tool permissions. Owner approval requests can be approved without exposing worker tokens. |
+| **Telegram**                            | Ordinary allow-listed text reaches the Agent orchestrator; only an explicit `admin_allow_from` identity can list/approve/deny pending requests through deterministic commands. Live delivery remains untested.             |
+| **Authenticated MCP**                   | Can list/call exposed tools and read exposed resources/prompts when MCP is enabled. MCP calls are explicitly remote for policy decisions; external-server execution was not tested.                                        |
+| **Remote shell or destructive actions** | Not unrestricted. Shell execution and generic file writes/deletes default-deny for remote callers. Restricted skill/admin mutations require owner approval, validation, context binding, and one-time consumption.[7] [9]  |
 
 The current code establishes local/remote call origin for HTTP chat/tool routes, Telegram turns, and MCP tool execution. This does not make free-form remote chat an unrestricted control plane: only the dedicated validated administration tools are exposed for Agent-driven settings changes, and the restricted patch policy intentionally excludes arbitrary commands, credentials, factory reset, and destructive filesystem access.
 
@@ -70,32 +82,32 @@ The current code establishes local/remote call origin for HTTP chat/tool routes,
 
 The Inspector opens from **Inspect agent** on an assistant message. Its verified pages are:
 
-| Page | Observed purpose |
-|---|---|
-| **Overview** | Message count, live-node count, selected message, and recent activity. |
-| **Response** | Short human-facing answer separate from detailed execution information. |
-| **Thoughts** | Concise categorized execution summaries; private hidden chain-of-thought is not shown. |
-| **Work** | Execution nodes and tool-call summaries when available. |
-| **Artifacts** | Generated files and attachments when available. |
-| **Evidence** | Checkpoints and verifier evidence when available. |
-| **Events** | Timestamped realtime summaries and execution/error events. |
+| Page          | Observed purpose                                                                       |
+| ------------- | -------------------------------------------------------------------------------------- |
+| **Overview**  | Message count, live-node count, selected message, and recent activity.                 |
+| **Response**  | Short human-facing answer separate from detailed execution information.                |
+| **Thoughts**  | Concise categorized execution summaries; private hidden chain-of-thought is not shown. |
+| **Work**      | Execution nodes and tool-call summaries when available.                                |
+| **Artifacts** | Generated files and attachments when available.                                        |
+| **Evidence**  | Checkpoints and verifier evidence when available.                                      |
+| **Events**    | Timestamped realtime summaries and execution/error events.                             |
 
 ## Verification Record
 
-| Check | Result |
-|---|---|
-| Focused capability tests | Passed: ToolRegistry skill/admin approval flows (5 tests), approval inbox including tokenless context binding (7 tests), and Telegram admin parsing/allow-list tests (2 tests). |
-| Workspace tests | The prior workspace suite passed for the frontend (**13 test files and 52 tests**) and memory integration/selective-memory tests. The current legacy core scan is not a clean baseline: it contains pre-existing Jest/global-harness incompatibilities and a test file with a stray `EOF`; the focused changed-surface suite passed 97/98, with the remaining failure in an unrelated legacy Jest-based launcher test. |
-| Workspace builds | Config, installer, skills, memory, core, gateway, and frontend production builds passed after the implementation changes. |
-| Backend lint | Passed with `--max-warnings=0` for the backend scope after formatting the implementation. |
-| Launcher doctor | Exit 0 with `WARN`: Node/npm, configuration, data, SQLite, secret vault, provider audit, and migrations were available; Go and native runtime artifacts were incomplete in the sandbox. |
-| 24/7 readiness | Passed with `ok: true` and a valid gateway entrypoint.[8] |
-| Gateway | `/health` returned HTTP 200. |
-| Skill discovery | Passed: 5 online `skills.sh` results returned; no untrusted online installation was performed. Local Agent-authored creation and remote approval/one-time consumption passed. |
-| MCP | Passed after the internal authentication fix: initialize, tools/list, resources/list, prompts/list, and read-only discovery call all returned successful protocol responses; remote-origin propagation is covered by the ToolRegistry path. |
-| Telegram | Deterministic admin parser and explicit `admin_allow_from` boundary passed unit tests; live delivery was not tested because no approved bot token/test identity was available. |
-| Provider response | Not passed in the available provider setup: Gemini returned a credential rejection/HTTP 401 in the previous live test. |
-| Full `npm run verify` | Not completed within the bounded test window; it reached the test phase before timing out. |
+| Check                    | Result                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Focused capability tests | Passed: ToolRegistry skill/admin approval flows (5 tests), approval inbox including tokenless context binding (7 tests), and Telegram admin parsing/allow-list tests (2 tests).                                                                                                                                                                                                                                        |
+| Workspace tests          | The prior workspace suite passed for the frontend (**13 test files and 52 tests**) and memory integration/selective-memory tests. The current legacy core scan is not a clean baseline: it contains pre-existing Jest/global-harness incompatibilities and a test file with a stray `EOF`; the focused changed-surface suite passed 97/98, with the remaining failure in an unrelated legacy Jest-based launcher test. |
+| Workspace builds         | Config, installer, skills, memory, core, gateway, and frontend production builds passed after the implementation changes.                                                                                                                                                                                                                                                                                              |
+| Backend lint             | Passed with `--max-warnings=0` for the backend scope after formatting the implementation.                                                                                                                                                                                                                                                                                                                              |
+| Launcher doctor          | Exit 0 with `WARN`: Node/npm, configuration, data, SQLite, secret vault, provider audit, and migrations were available; Go and native runtime artifacts were incomplete in the sandbox.                                                                                                                                                                                                                                |
+| 24/7 readiness           | Passed with `ok: true` and a valid gateway entrypoint.[8]                                                                                                                                                                                                                                                                                                                                                              |
+| Gateway                  | `/health` returned HTTP 200.                                                                                                                                                                                                                                                                                                                                                                                           |
+| Skill discovery          | Passed: 5 online `skills.sh` results returned; no untrusted online installation was performed. Local Agent-authored creation and remote approval/one-time consumption passed.                                                                                                                                                                                                                                          |
+| MCP                      | Passed after the internal authentication fix: initialize, tools/list, resources/list, prompts/list, and read-only discovery call all returned successful protocol responses; remote-origin propagation is covered by the ToolRegistry path.                                                                                                                                                                            |
+| Telegram                 | Deterministic admin parser and explicit `admin_allow_from` boundary passed unit tests; live delivery was not tested because no approved bot token/test identity was available.                                                                                                                                                                                                                                         |
+| Provider response        | Not passed in the available provider setup: Gemini returned a credential rejection/HTTP 401 in the previous live test.                                                                                                                                                                                                                                                                                                 |
+| Full `npm run verify`    | Not completed within the bounded test window; it reached the test phase before timing out.                                                                                                                                                                                                                                                                                                                             |
 
 ## Runtime and Security Boundaries
 
@@ -106,19 +118,11 @@ Keep API keys, Telegram bot tokens, MCP secrets, local databases, runtime logs, 
 ## References
 
 [1]: package.json "Agent Miki package manifest and supported commands"
-
 [2]: SETUP.md "Agent Miki complete setup guide"
-
 [3]: packages/core/src/api/launcher-compat.ts "Launcher control, skill, tool, channel, and configuration APIs"
-
 [4]: packages/core/src/mcp/server.ts "MCP server registration, discovery, and tool execution"
-
 [5]: packages/config/src/schema.ts "MCP configuration and safety validation"
-
 [6]: packages/core/src/channels/telegram.ts "Telegram channel configuration and Agent routing"
-
 [7]: packages/core/src/tools/executor/shell.ts "Shell execution permissions and remote/workspace guardrails"
-
 [8]: scripts/miki-24-7.mjs "24/7 runtime readiness check"
-
 [9]: packages/core/src/security/approval-inbox.ts "Persistent owner-approval lifecycle and context-bound one-time consumption"
