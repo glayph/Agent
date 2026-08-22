@@ -1,6 +1,7 @@
 import http from "http";
 
 const CORE_PORT = parseInt(process.env["CORE_PORT"] || "8000", 10);
+const CORE_API_KEY = process.env["API_KEY_SECRET"]?.trim();
 const MAX_RETRY_ATTEMPTS = 3;
 
 const keepAliveAgent = new http.Agent({
@@ -89,6 +90,7 @@ export async function callCoreApi<T>(
           agent: keepAliveAgent,
           headers: {
             "Content-Type": "application/json",
+            ...(CORE_API_KEY ? { "X-API-Key": CORE_API_KEY } : {}),
             ...(bodyStr
               ? { "Content-Length": Buffer.byteLength(bodyStr) }
               : {}),
