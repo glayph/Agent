@@ -15,6 +15,8 @@ const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: node scripts/run-verify.mjs [options]
@@ -62,7 +64,7 @@ function main() {
   // Step 1: TypeScript lint
   log("Step 1/5: Linting backend packages...");
   run(
-    "npx",
+    npxCommand,
     [
       "eslint",
       "packages/config/src/**/*.ts",
@@ -82,24 +84,24 @@ function main() {
 
   // Step 2: Strict typechecking
   log("Step 2/5: Running strict typechecks...");
-  run("npm", ["run", "typecheck", "--workspaces", "--if-present"], {
+  run(npmCommand, ["run", "typecheck", "--workspaces", "--if-present"], {
     cwd: root,
   });
   run(
-    "npm",
+    npmCommand,
     ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "build"],
     { cwd: root },
   );
 
   // Step 3: Production builds
   log("Step 3/5: Running production builds...");
-  run("npm", ["run", "build:all"], { cwd: root });
+  run(npmCommand, ["run", "build:all"], { cwd: root });
 
   // Step 4: Tests
   log("Step 4/5: Running tests...");
-  run("npm", ["test", "--workspaces", "--if-present"], { cwd: root });
+  run(npmCommand, ["test", "--workspaces", "--if-present"], { cwd: root });
   run(
-    "npm",
+    npmCommand,
     ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "test"],
     { cwd: root },
   );

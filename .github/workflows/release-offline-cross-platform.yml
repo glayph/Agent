@@ -188,7 +188,7 @@ jobs:
           set -euo pipefail
           test ! -d "$MIKI_RELEASE_DIR/package/runtime/models"
           ! find "$MIKI_RELEASE_DIR/package/runtime" -type f -iname '*.gguf' -print -quit | grep -q .
-          sha256sum -c "$MIKI_RELEASE_DIR/SHA256SUMS"
+          (cd "$MIKI_RELEASE_DIR" && sha256sum -c SHA256SUMS)
           cp "$MIKI_RELEASE_DIR/SHA256SUMS" "$MIKI_RELEASE_DIR/SHA256SUMS-linux-x64"
 
       - name: Assert no answer model is bundled (Windows)
@@ -199,6 +199,9 @@ jobs:
           if (Test-Path $modelDir) { throw "Answer-model directory was bundled" }
           $gguf = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Filter *.gguf -Recurse -ErrorAction SilentlyContinue
           if ($gguf) { throw "Answer-model GGUF was bundled: $($gguf.FullName)" }
+          Push-Location $env:MIKI_RELEASE_DIR
+          try { Get-Content .\SHA256SUMS | ForEach-Object { if ($_ -match '^([a-f0-9]{64})\s+(.+)$') { if ((Get-FileHash $Matches[2] -Algorithm SHA256).Hash.ToLower() -ne $Matches[1]) { throw "Checksum mismatch: $($Matches[2])" } } } }
+          finally { Pop-Location }
           Copy-Item (Join-Path $env:MIKI_RELEASE_DIR "SHA256SUMS") (Join-Path $env:MIKI_RELEASE_DIR "SHA256SUMS-windows-x64")
 
       - name: Upload Linux artifacts
