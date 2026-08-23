@@ -6,6 +6,7 @@ import {
 } from "@/features/chat/assistant-message-state"
 import { normalizeUnixTimestamp } from "@/features/chat/state"
 import {
+  type AssistantThoughtCategory,
   type ChatAttachment,
   type ContextUsage,
   type DeliveryOutcome,
@@ -86,6 +87,31 @@ function parseContextUsage(
   }
 }
 
+function parseRunId(payload: Record<string, unknown>): string | undefined {
+  if (typeof payload.run_id !== "string") return undefined
+  const runId = payload.run_id.trim()
+  return runId || undefined
+}
+
+function parseThoughtCategory(
+  payload: Record<string, unknown>,
+): AssistantThoughtCategory | undefined {
+  const value =
+    typeof payload.thought_category === "string"
+      ? payload.thought_category.trim()
+      : ""
+  return [
+    "Plan",
+    "Action",
+    "Verification",
+    "Progress",
+    "Decision",
+    "Thought",
+  ].includes(value)
+    ? (value as AssistantThoughtCategory)
+    : undefined
+}
+
 function parseModelName(payload: Record<string, unknown>): string | undefined {
   if (typeof payload.model_name !== "string") {
     return undefined
@@ -114,6 +140,9 @@ export function handlemikiMessage(
       const contextUsage = parseContextUsage(payload)
       const isPlaceholder = payload.placeholder === true
       const modelName = parseModelName(payload)
+      const runId = parseRunId(payload)
+      const thoughtCategory = parseThoughtCategory(payload)
+      const inspectorOnly = payload.inspector_only === true
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -127,6 +156,9 @@ export function handlemikiMessage(
           content,
           kind,
           ...(modelName ? { modelName } : {}),
+          ...(runId ? { runId } : {}),
+          ...(thoughtCategory ? { thoughtCategory } : {}),
+          ...(inspectorOnly ? { inspectorOnly } : {}),
           ...(toolCalls ? { toolCalls } : {}),
           attachments,
           timestamp,
@@ -160,6 +192,9 @@ export function handlemikiMessage(
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
       const modelName = parseModelName(payload)
+      const runId = parseRunId(payload)
+      const thoughtCategory = parseThoughtCategory(payload)
+      const inspectorOnly = payload.inspector_only === true
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -186,6 +221,9 @@ export function handlemikiMessage(
               kind,
               toolCalls,
               ...(modelName ? { modelName } : {}),
+              ...(runId ? { runId } : {}),
+              ...(thoughtCategory ? { thoughtCategory } : {}),
+              ...(inspectorOnly ? { inspectorOnly } : {}),
               ...(attachments ? { attachments } : {}),
             }
           })
@@ -205,6 +243,9 @@ export function handlemikiMessage(
               kind,
               toolCalls,
               ...(modelName ? { modelName } : {}),
+              ...(runId ? { runId } : {}),
+              ...(thoughtCategory ? { thoughtCategory } : {}),
+              ...(inspectorOnly ? { inspectorOnly } : {}),
               ...(attachments ? { attachments } : {}),
               timestamp,
             },

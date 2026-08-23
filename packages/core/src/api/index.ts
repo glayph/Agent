@@ -1725,6 +1725,7 @@ mikiWss.on("connection", (ws, req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
+              run_id: assistantMessageId,
               content: "",
               placeholder: true,
               model_name: orchestrator.modelName,
@@ -1806,6 +1807,7 @@ mikiWss.on("connection", (ws, req) => {
                   timestamp: now,
                   payload: {
                     message_id: assistantMessageId,
+                    run_id: assistantMessageId,
                     content: fullResponse,
                     kind: "normal",
                     model_name: orchestrator.modelName,
@@ -1954,8 +1956,10 @@ mikiWss.on("connection", (ws, req) => {
                   timestamp: Date.now(),
                   payload: {
                     message_id: toolMessageId,
+                    run_id: assistantMessageId,
                     content: "",
                     kind: "tool_calls",
+
                     tool_calls: [toolCallPayload],
                     model_name: orchestrator.modelName,
                   },
@@ -1968,6 +1972,7 @@ mikiWss.on("connection", (ws, req) => {
                   timestamp: Date.now(),
                   payload: {
                     message_id: assistantMessageId,
+                    run_id: assistantMessageId,
                     content: fullResponse,
                     kind: "tool_calls",
                     tool_calls: [toolCallPayload],
@@ -2053,6 +2058,7 @@ mikiWss.on("connection", (ws, req) => {
                     timestamp: Date.now(),
                     payload: {
                       message_id: messageId,
+                      run_id: assistantMessageId,
                       content: _toolResultDescription(
                         event.tool,
                         toolInput,
@@ -2158,6 +2164,7 @@ mikiWss.on("connection", (ws, req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
+              run_id: assistantMessageId,
               content: fullResponse,
               kind: "normal",
               model_name: orchestrator.modelName,
@@ -2199,6 +2206,7 @@ mikiWss.on("connection", (ws, req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
+              run_id: assistantMessageId,
               content:
                 fullResponse.trim() ||
                 "I couldn’t complete that request this time.",

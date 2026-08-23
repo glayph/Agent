@@ -39,6 +39,9 @@ export interface ChatToolCall {
 
 export type AssistantMessageKind = "normal" | "thought" | "tool_calls"
 
+export type AssistantThoughtCategory =
+  "Plan" | "Action" | "Verification" | "Progress" | "Decision" | "Thought"
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant"
@@ -46,6 +49,9 @@ export interface ChatMessage {
   timestamp: number | string
   kind?: AssistantMessageKind
   modelName?: string
+  runId?: string
+  thoughtCategory?: AssistantThoughtCategory
+  inspectorOnly?: boolean
   attachments?: ChatAttachment[]
   toolCalls?: ChatToolCall[]
 }

@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react"
 
+import type { AssistantBubbleDetails } from "@/features/chat/components/assistant-message"
 import { UserMessage } from "@/features/chat/components/user-message"
 import { cn } from "@/lib/utils"
 import type { ChatMessage as ChatMessageModel } from "@/store/chat"
@@ -12,6 +13,7 @@ const AssistantMessage = lazy(() =>
 
 interface ChatMessageProps {
   message: ChatMessageModel
+  bubbleDetails?: AssistantBubbleDetails
   canRetry: boolean
   onEdit: (message: ChatMessageModel) => void
   onDelete: (messageId: string) => void
@@ -22,6 +24,7 @@ interface ChatMessageProps {
 
 export function ChatMessage({
   message,
+  bubbleDetails,
   canRetry,
   onEdit,
   onDelete,
@@ -53,6 +56,7 @@ export function ChatMessage({
             kind={message.kind}
             modelName={message.modelName}
             toolCalls={message.toolCalls}
+            bubbleDetails={bubbleDetails}
             timestamp={message.timestamp}
             canRetry={canRetry}
             onEdit={() => onEdit(message)}

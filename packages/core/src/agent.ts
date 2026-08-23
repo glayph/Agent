@@ -128,19 +128,14 @@ function isLocalModelName(model: string): boolean {
 function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
   const results: Array<{ title: string; url: string; snippet?: string }> = [];
   const seen = new Set<string>();
-  let query = "the requested topic";
 
   for (const message of messages) {
     if (message.role !== "tool" || message.name !== "web_search") continue;
     if (typeof message.content !== "string") continue;
     try {
       const payload = JSON.parse(message.content) as {
-        query?: unknown;
         results?: unknown;
       };
-      if (typeof payload.query === "string" && payload.query.trim()) {
-        query = payload.query.trim();
-      }
       if (!Array.isArray(payload.results)) continue;
       for (const item of payload.results) {
         if (!item || typeof item !== "object") continue;
@@ -164,21 +159,8 @@ function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
   }
 
   if (results.length === 0) return "";
-  const lines = [
-    `I searched the web for “${query}”, but the selected model did not return a final synthesis.`,
-    "These are source leads, not independently verified claims:",
-    "",
-  ];
-  results.slice(0, 8).forEach((result, index) => {
-    lines.push(`${index + 1}. ${result.title}`);
-    lines.push(`   ${result.url}`);
-    if (result.snippet) lines.push(`   ${result.snippet}`);
-  });
-  lines.push(
-    "",
-    "Open and cross-check the cited sources before treating leak reports as confirmed information.",
-  );
-  return lines.join("\n");
+  const sourceCount = results.length;
+  return `আমি বিষয়টি খুঁজে দেখেছি, তবে এখনই নিশ্চিত synthesis দিতে পারছি না। ${sourceCount}টি source lead Inspector-এর Work/Thoughts-এ রাখা আছে—সেগুলো cross-check না করে কোনো leak বা rumor-কে confirmed তথ্য হিসেবে ধরবেন না।`;
 }
 
 function withTimeout<T>(
@@ -2615,7 +2597,7 @@ export class AgentOrchestrator {
       `${systemIndexBlock}` +
       `${dynamicStateBlock}` +
       `CONVERSATION STYLE:\n` +
-      `The main chat is a live human conversation, not an execution log. Reply only with the user-facing answer: usually one or two short sentences, or at most one brief paragraph when the question truly needs context. Use the user’s language when practical. Do not repeat the same status in multiple forms, do not restate the user’s request, and do not narrate plans, routing, tools, files, checks, timestamps, or completion evidence in the visible reply. Never include headings such as Plan, Status, Work, Verification, or Summary unless the user explicitly asks for a detailed report. For a completed task, say it simply (for example, “হ্যাঁ, কাজটি সম্পন্ন হয়েছে।”); put the detailed how/what/verification record into Inspector-only summaries emitted by the runtime. Never claim a task is complete without checking the result.\n\n` +
+      `The main chat is a live human conversation, not an execution log. Write like one person sending a normal message to another: natural, direct, warm when appropriate, and concise. Give the answer first in one or two short sentences; use at most one short paragraph unless the user explicitly asks for a detailed explanation, a report, code, or a step-by-step guide. Do not repeat the same status in multiple forms, restate the request, or narrate plans, routing, tools, files, checks, timestamps, token usage, or completion evidence in the visible reply. Do not put headings such as Plan, Status, Work, Verification, Report, or Summary in an ordinary reply. Put implementation details, reasoning summaries, tool activity, source-research notes, verification results, and long explanations into the Inspector-only runtime summaries emitted by the runtime. If the user asks for a detailed report, provide the requested report, but keep routine progress conversational. Never claim a task is complete without checking the result.\n\n` +
       `You operate as a computer-based agent with full system access. Use absolute paths for any file operation outside the project workspace. You can launch applications, control windows, send keyboard shortcuts, read/write the clipboard, and execute shell commands anywhere on the system. Keep tool use purposeful, auditable, and verification-driven.\n\n` +
       `${screenshotNote}`
     );

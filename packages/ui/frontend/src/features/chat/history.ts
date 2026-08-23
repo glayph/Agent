@@ -48,6 +48,9 @@ export async function loadSessionMessages(
     role: message.role,
     content: message.content,
     kind: message.role === "assistant" ? (message.kind ?? "normal") : undefined,
+    runId: message.run_id,
+    thoughtCategory: message.thought_category,
+    inspectorOnly: message.inspector_only,
     modelName: message.model_name,
     toolCalls:
       message.role === "assistant"

@@ -28,6 +28,10 @@ export interface SessionDetail {
     content: string
     created_at?: string
     kind?: "normal" | "thought" | "tool_calls"
+    run_id?: string
+    thought_category?:
+      "Plan" | "Action" | "Verification" | "Progress" | "Decision" | "Thought"
+    inspector_only?: boolean
     model_name?: string
     media?: string[]
     image_urls?: string[]

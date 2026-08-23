@@ -78,6 +78,12 @@ The Web UI exposes authenticated settings and control APIs for configuration rea
 
 The current code establishes local/remote call origin for HTTP chat/tool routes, Telegram turns, and MCP tool execution. This does not make free-form remote chat an unrestricted control plane: only the dedicated validated administration tools are exposed for Agent-driven settings changes, and the restricted patch policy intentionally excludes arbitrary commands, credentials, factory reset, and destructive filesystem access.
 
+## Conversational Chat and Inspector Details
+
+The normal chat transcript is intentionally conversational: routine assistant replies stay short and direct instead of repeating plans, tool activity, timestamps, verification, or report-style headings. Detailed execution information is emitted as concise, categorized runtime summaries for the Inspector. When a response has linked summaries, its bubble shows a collapsible **Thoughts…** control. Expanding it reveals only a brief execution summary and an **Open Inspector** action; the full run record remains in Inspector.
+
+The UI groups thought summaries and hidden tool-feedback messages by `run_id`, so the details shown beside a response belong to that response rather than to an unrelated turn. The Inspector’s Thoughts page explicitly labels its content as summaries and redacts private hidden chain-of-thought. This keeps ordinary chat readable while preserving auditability, source leads, tool activity, and verification evidence.
+
 ## Inspector
 
 The Inspector opens from **Inspect agent** on an assistant message. Its verified pages are:

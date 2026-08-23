@@ -91,6 +91,48 @@ describe("chat protocol flow", () => {
     })
   })
 
+  it("retains run links and safe thought metadata for Inspector grouping", () => {
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "assistant-run-1",
+          run_id: "assistant-run-1",
+          content: "I checked that.",
+          kind: "normal",
+        },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "assistant-run-1-thought-1",
+          run_id: "assistant-run-1",
+          content: "Verified the result before replying.",
+          kind: "thought",
+          thought_category: "Verification",
+          inspector_only: true,
+        },
+      },
+      "session-1",
+    )
+
+    expect(getChatState().messages).toMatchObject([
+      { id: "assistant-run-1", runId: "assistant-run-1", kind: "normal" },
+      {
+        id: "assistant-run-1-thought-1",
+        runId: "assistant-run-1",
+        kind: "thought",
+        thoughtCategory: "Verification",
+        inspectorOnly: true,
+      },
+    ])
+  })
+
   it("updates, creates missing updates, deletes, and ignores other sessions", () => {
     handlemikiMessage(
       {

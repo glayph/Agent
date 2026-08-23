@@ -351,6 +351,12 @@ Common environment variables used by the project include the following. The exac
 
 A provider test returning HTTP 401 or a message that credentials were rejected means the application reached the provider path but the credential was missing, invalid, expired, or incompatible. Do not interpret `available: true` in a model catalog as proof that a completion will succeed; run the model test and then a short Chat smoke test.
 
+### Conversational chat and Inspector details
+
+Normal Chat is designed to read like a person-to-person conversation. Routine replies should be short and direct; plans, tool activity, source-research notes, verification, reports, and long explanations are kept in Inspector runtime summaries. If a response has linked details, its bubble displays **Thoughts…**. Click it to expand a concise summary, then use **Open Inspector** for the full run record.
+
+The Inspector’s **Thoughts** page shows categorized summaries such as Plan, Action, Progress, Decision, and Verification. It does not display private hidden chain-of-thought. Thought and hidden tool-feedback events are linked to the matching assistant response through `run_id`, so details remain attached to the correct chat bubble. This behavior is independent of whether the selected answer model is local or cloud-based.
+
 ### Search-necessity smoke test
 
 After configuring a model, use two separate chat turns. Ask a current-information question such as `what is the GTA 6 NEW LEAKS INFO?` and confirm in the Inspector that `web_search` runs and the answer contains source links or a clearly marked source-lead fallback. Then ask a stable question such as `What is 2+2? Answer in one sentence.` and confirm that Miki answers without a `web_search` event. Search-result snippets are evidence leads; confirm important claims by opening and cross-checking the cited sources.

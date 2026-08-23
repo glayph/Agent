@@ -18,10 +18,16 @@ import { Button } from "@/shared/ui/button"
 import {
   type AssistantMessageKind,
   type ChatAttachment,
+  type ChatMessage,
   type ChatToolCall,
 } from "@/store/chat"
 
 const MarkdownRenderer = lazy(() => import("./markdown-renderer"))
+
+export interface AssistantBubbleDetails {
+  thoughts: ChatMessage[]
+  toolMessages: ChatMessage[]
+}
 
 interface AssistantMessageProps {
   id: string
@@ -30,6 +36,7 @@ interface AssistantMessageProps {
   kind?: AssistantMessageKind
   modelName?: string
   toolCalls?: ChatToolCall[]
+  bubbleDetails?: AssistantBubbleDetails
   timestamp?: string | number
   canRetry?: boolean
   onEdit?: () => void
@@ -81,6 +88,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   kind = "normal",
   modelName,
   toolCalls = EMPTY_TOOL_CALLS,
+  bubbleDetails,
   timestamp = "",
   canRetry = true,
   onEdit,
@@ -106,6 +114,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   )
   const [isExpanded, setIsExpanded] = useState(true)
   const [isBodyExpanded, setIsBodyExpanded] = useState(false)
+  const [areBubbleDetailsExpanded, setAreBubbleDetailsExpanded] =
+    useState(false)
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
   const collapsedLabel = isThought
@@ -135,6 +145,14 @@ export const AssistantMessage = memo(function AssistantMessage({
   const bodyToggleLabel = isBodyExpanded
     ? t("chat.showLess", { defaultValue: "Show less" })
     : t("chat.showMore", { defaultValue: "Show more" })
+  const thoughtSummaries = bubbleDetails?.thoughts ?? []
+  const toolMessages = bubbleDetails?.toolMessages ?? []
+  const hasBubbleDetails =
+    thoughtSummaries.length > 0 || toolMessages.length > 0
+  const bubbleDetailsLabel =
+    thoughtSummaries.length > 0
+      ? t("chat.thoughtsToggle", { defaultValue: "Thoughts…" })
+      : t("chat.detailsToggle", { defaultValue: "Details…" })
   return (
     <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-2 px-1">
       {(hasText || isCollapsedBlock || hasToolCalls) && (
@@ -434,6 +452,98 @@ export const AssistantMessage = memo(function AssistantMessage({
                   : undefined
               }
             />
+          )}
+
+          {!isCollapsedBlock && hasBubbleDetails && (
+            <div className="mt-1 flex flex-col items-start gap-1">
+              <button
+                type="button"
+                className="text-muted-foreground/75 hover:text-foreground focus-visible:ring-ring/25 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                onClick={() =>
+                  setAreBubbleDetailsExpanded((expanded) => !expanded)
+                }
+                aria-expanded={areBubbleDetailsExpanded}
+                aria-label={t("chat.toggleBubbleDetails", {
+                  defaultValue: "Show or hide assistant thoughts and details",
+                })}
+              >
+                <IconBrain className="size-3.5" aria-hidden="true" />
+                <span>{bubbleDetailsLabel}</span>
+                <IconChevronDown
+                  className={cn(
+                    "size-3 transition-transform duration-200",
+                    areBubbleDetailsExpanded && "rotate-180",
+                  )}
+                  aria-hidden="true"
+                />
+              </button>
+
+              {areBubbleDetailsExpanded && (
+                <div className="border-border/50 bg-muted/20 flex w-full max-w-xl flex-col gap-2 rounded-lg border px-3 py-2.5 text-[12px] leading-5">
+                  <div className="text-muted-foreground/75 text-[10px] font-semibold tracking-wide uppercase">
+                    {t("chat.bubbleDetailsSummary", {
+                      defaultValue: "Concise execution summary",
+                    })}
+                  </div>
+                  {thoughtSummaries.map((thought) => (
+                    <button
+                      key={thought.id}
+                      type="button"
+                      className="hover:bg-muted/50 flex items-start gap-2 rounded-md px-1.5 py-1 text-left transition-colors"
+                      onClick={onInspect}
+                      title={t("chat.openInspectorDetails", {
+                        defaultValue: "Open full details in Inspector",
+                      })}
+                    >
+                      <IconBrain
+                        className="text-primary mt-0.5 size-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span className="text-foreground/75 min-w-0 flex-1">
+                        {thought.thoughtCategory && (
+                          <span className="text-muted-foreground mr-1 font-medium">
+                            {thought.thoughtCategory}:
+                          </span>
+                        )}
+                        {thought.content}
+                      </span>
+                    </button>
+                  ))}
+                  {toolMessages.map((toolMessage) => (
+                    <button
+                      key={toolMessage.id}
+                      type="button"
+                      className="hover:bg-muted/50 flex items-start gap-2 rounded-md px-1.5 py-1 text-left transition-colors"
+                      onClick={onInspect}
+                      title={t("chat.openInspectorDetails", {
+                        defaultValue: "Open full details in Inspector",
+                      })}
+                    >
+                      <IconTool
+                        className="text-muted-foreground mt-0.5 size-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span className="text-foreground/75 min-w-0 flex-1">
+                        {toolMessage.content ||
+                          t("chat.toolActivity", {
+                            defaultValue:
+                              "Tool activity recorded in Inspector.",
+                          })}
+                      </span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="text-primary hover:text-primary/80 mt-1 self-start px-1.5 text-[11px] font-medium"
+                    onClick={onInspect}
+                  >
+                    {t("chat.openInspector", {
+                      defaultValue: "Open Inspector",
+                    })}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
