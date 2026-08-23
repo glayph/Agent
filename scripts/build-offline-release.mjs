@@ -71,9 +71,13 @@ function copyRecursive(source, destination, { skipMaps = true } = {}) {
   if (stat.isDirectory()) {
     fs.mkdirSync(destination, { recursive: true });
     for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-      copyRecursive(path.join(source, entry.name), path.join(destination, entry.name), {
-        skipMaps,
-      });
+      copyRecursive(
+        path.join(source, entry.name),
+        path.join(destination, entry.name),
+        {
+          skipMaps,
+        },
+      );
     }
     return true;
   }
@@ -107,9 +111,13 @@ function chmodExecutable(file) {
 function download(url, destination) {
   if (fs.existsSync(destination)) return;
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  run("curl", ["-fL", "--retry", "3", "--retry-delay", "2", url, "-o", destination], {
-    cwd: root,
-  });
+  run(
+    "curl",
+    ["-fL", "--retry", "3", "--retry-delay", "2", url, "-o", destination],
+    {
+      cwd: root,
+    },
+  );
 }
 
 function readPackage(dir) {
@@ -161,22 +169,60 @@ function collectProductionPackages() {
     }
     const manifest = readPackage(source);
     packages.set(current.name, { source, manifest });
-    for (const [dependency, spec] of Object.entries(manifest.dependencies || {})) {
-      if (String(spec).startsWith("workspace:") || String(spec).startsWith("file:")) {
+    for (const [dependency, spec] of Object.entries(
+      manifest.dependencies || {},
+    )) {
+      if (
+        String(spec).startsWith("workspace:") ||
+        String(spec).startsWith("file:")
+      ) {
         const localName = dependency;
-        const localDir = path.join(root, "packages", localName.replace(/^@miki\//, ""));
-        queue.push({ name: localName, dir: localDir, local: true, optional: false });
+        const localDir = path.join(
+          root,
+          "packages",
+          localName.replace(/^@miki\//, ""),
+        );
+        queue.push({
+          name: localName,
+          dir: localDir,
+          local: true,
+          optional: false,
+        });
       } else {
-        queue.push({ name: dependency, fromDir: source, local: false, optional: false });
+        queue.push({
+          name: dependency,
+          fromDir: source,
+          local: false,
+          optional: false,
+        });
       }
     }
-    for (const [dependency, spec] of Object.entries(manifest.optionalDependencies || {})) {
-      if (String(spec).startsWith("workspace:") || String(spec).startsWith("file:")) {
+    for (const [dependency, spec] of Object.entries(
+      manifest.optionalDependencies || {},
+    )) {
+      if (
+        String(spec).startsWith("workspace:") ||
+        String(spec).startsWith("file:")
+      ) {
         const localName = dependency;
-        const localDir = path.join(root, "packages", localName.replace(/^@miki\//, ""));
-        queue.push({ name: localName, dir: localDir, local: true, optional: true });
+        const localDir = path.join(
+          root,
+          "packages",
+          localName.replace(/^@miki\//, ""),
+        );
+        queue.push({
+          name: localName,
+          dir: localDir,
+          local: true,
+          optional: true,
+        });
       } else {
-        queue.push({ name: dependency, fromDir: source, local: false, optional: true });
+        queue.push({
+          name: dependency,
+          fromDir: source,
+          local: false,
+          optional: true,
+        });
       }
     }
   }
@@ -201,18 +247,41 @@ function stageProductionNodeModules() {
 }
 
 function stageRuntimeTree() {
-  const packageNames = ["config", "installer", "skills", "memory", "core", "gateway"];
+  const packageNames = [
+    "config",
+    "installer",
+    "skills",
+    "memory",
+    "core",
+    "gateway",
+  ];
   for (const name of packageNames) {
     const source = path.join(root, "packages", name);
     const destination = path.join(runtimeDir, "packages", name);
     if (name === "memory") {
-      copyRequired(path.join(source, "src"), path.join(destination, "src"), "memory source");
+      copyRequired(
+        path.join(source, "src"),
+        path.join(destination, "src"),
+        "memory source",
+      );
     } else {
-      copyRequired(path.join(source, "dist"), path.join(destination, "dist"), `${name} dist`);
+      copyRequired(
+        path.join(source, "dist"),
+        path.join(destination, "dist"),
+        `${name} dist`,
+      );
     }
-    copyRequired(path.join(source, "package.json"), path.join(destination, "package.json"), `${name} package.json`);
+    copyRequired(
+      path.join(source, "package.json"),
+      path.join(destination, "package.json"),
+      `${name} package.json`,
+    );
     if (name === "skills")
-      copyRequired(path.join(source, "src"), path.join(destination, "src"), "skills catalog");
+      copyRequired(
+        path.join(source, "src"),
+        path.join(destination, "src"),
+        "skills catalog",
+      );
   }
   copyRequired(
     path.join(root, "packages", "ui", "frontend", "dist"),
@@ -220,14 +289,22 @@ function stageRuntimeTree() {
     "frontend build",
   );
   for (const name of ["agent.yaml", "tools.yaml"]) {
-    copyRequired(path.join(root, "config", name), path.join(runtimeDir, "config", name), `${name} template`);
+    copyRequired(
+      path.join(root, "config", name),
+      path.join(runtimeDir, "config", name),
+      `${name} template`,
+    );
   }
   copyRequired(
     path.join(root, "config", ".env.example"),
     path.join(runtimeDir, "config", ".env.example"),
     "safe environment template",
   );
-  copyRequired(path.join(root, "LICENSE"), path.join(stageDir, "LICENSE"), "Agent Miki license");
+  copyRequired(
+    path.join(root, "LICENSE"),
+    path.join(stageDir, "LICENSE"),
+    "Agent Miki license",
+  );
 }
 
 function writeRuntimeLoader() {
@@ -278,17 +355,19 @@ export async function resolve(specifier, context, nextResolve) {
 }
 
 function stageNativeAndModels() {
-  const llamaSource = process.env.MIKI_LLAMA_SERVER_BIN || path.join(
-    root,
-    "packages",
-    "core",
-    "src",
-    "llm",
-    "local",
-    "native",
-    platformKey,
-    llamaExecutableName,
-  );
+  const llamaSource =
+    process.env.MIKI_LLAMA_SERVER_BIN ||
+    path.join(
+      root,
+      "packages",
+      "core",
+      "src",
+      "llm",
+      "local",
+      "native",
+      platformKey,
+      llamaExecutableName,
+    );
   const llamaDestination = path.join(runtimeDir, "native", llamaExecutableName);
   copyRequired(llamaSource, llamaDestination, `${platformKey} llama-server`);
   chmodExecutable(llamaDestination);
@@ -302,7 +381,11 @@ function stageNativeAndModels() {
   }
   const voiceDir = path.join(runtimeDir, "voice");
   const whisperDestination = path.join(voiceDir, whisperExecutableName);
-  copyRequired(whisperSource, whisperDestination, `${platformKey} Whisper.cpp CLI`);
+  copyRequired(
+    whisperSource,
+    whisperDestination,
+    `${platformKey} Whisper.cpp CLI`,
+  );
   chmodExecutable(whisperDestination);
   const whisperLibraryDir = path.dirname(whisperSource);
   for (const entry of fs.readdirSync(whisperLibraryDir)) {
@@ -317,7 +400,11 @@ function stageNativeAndModels() {
       );
     }
   }
-  copyRequired(whisperModel, path.join(voiceDir, "ggml-tiny.en.bin"), "Whisper tiny.en model");
+  copyRequired(
+    whisperModel,
+    path.join(voiceDir, "ggml-tiny.en.bin"),
+    "Whisper tiny.en model",
+  );
 }
 
 function assertAnswerModelNotBundled() {
@@ -331,7 +418,8 @@ function assertAnswerModelNotBundled() {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) scan(target);
-      else if (entry.name.toLowerCase().endsWith(".gguf")) bundledGgufs.push(target);
+      else if (entry.name.toLowerCase().endsWith(".gguf"))
+        bundledGgufs.push(target);
     }
   }
   scan(runtimeDir);
@@ -341,7 +429,8 @@ function assertAnswerModelNotBundled() {
 }
 
 function stageNodeRuntime() {
-  const archive = process.env.MIKI_NODE_TARBALL || path.join(releaseDir, nodeArchiveName);
+  const archive =
+    process.env.MIKI_NODE_TARBALL || path.join(releaseDir, nodeArchiveName);
   download(nodeArchiveUrl, archive);
   const extracted = path.join(releaseDir, "node-extracted");
   fs.rmSync(extracted, { recursive: true, force: true });
@@ -349,7 +438,9 @@ function stageNodeRuntime() {
   if (isWindows) {
     run("tar", ["-xf", archive, "-C", extracted], { cwd: root });
   } else {
-    run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], { cwd: root });
+    run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], {
+      cwd: root,
+    });
   }
   const nodeRoot = isWindows
     ? path.join(extracted, `node-${nodeVersion}-win-x64`)
@@ -360,8 +451,16 @@ function stageNodeRuntime() {
     ? path.join(nodeRoot, nodeName)
     : path.join(nodeRoot, "bin", nodeName);
   copyRequired(nodeSource, nodeDestination, `${platformKey} Node binary`);
-  copyRequired(path.join(nodeRoot, "LICENSE"), path.join(runtimeDir, "node", "LICENSE"), "Node license");
-  copyRequired(path.join(nodeRoot, "README.md"), path.join(runtimeDir, "node", "README.md"), "Node notice");
+  copyRequired(
+    path.join(nodeRoot, "LICENSE"),
+    path.join(runtimeDir, "node", "LICENSE"),
+    "Node license",
+  );
+  copyRequired(
+    path.join(nodeRoot, "README.md"),
+    path.join(runtimeDir, "node", "README.md"),
+    "Node notice",
+  );
   chmodExecutable(nodeDestination);
 }
 
@@ -370,18 +469,36 @@ function stageNotices() {
   const ffmpegLicense =
     process.env.MIKI_FFMPEG_LICENSE ||
     (isLinux
-      ? path.join("/tmp", "miki-ffmpeg-clean", `ffmpeg-${ffmpegVersion}`, "LICENSE.md")
+      ? path.join(
+          "/tmp",
+          "miki-ffmpeg-clean",
+          `ffmpeg-${ffmpegVersion}`,
+          "LICENSE.md",
+        )
       : "");
   const whisperLicense =
     process.env.MIKI_WHISPER_CPP_LICENSE ||
     (isLinux ? path.join("/tmp", "miki-whisper.cpp", "LICENSE") : "");
   copyRequired(
-    path.join(root, "packages", "core", "src", "llm", "local", "miki-native-runtime (keep it Always for windows build)", "LICENSE"),
+    path.join(
+      root,
+      "packages",
+      "core",
+      "src",
+      "llm",
+      "local",
+      "miki-native-runtime (keep it Always for windows build)",
+      "LICENSE",
+    ),
     path.join(licensesDir, "LLAMA_CPP_AND_GGML_LICENSE"),
     "llama.cpp/GGML license",
   );
   if (whisperLicense) {
-    copyRequired(whisperLicense, path.join(licensesDir, "WHISPER_CPP_LICENSE"), "whisper.cpp license");
+    copyRequired(
+      whisperLicense,
+      path.join(licensesDir, "WHISPER_CPP_LICENSE"),
+      "whisper.cpp license",
+    );
   } else {
     writeText(
       path.join(licensesDir, "WHISPER_CPP_LICENSE"),
@@ -389,7 +506,11 @@ function stageNotices() {
     );
   }
   if (ffmpegLicense) {
-    copyRequired(ffmpegLicense, path.join(licensesDir, "FFMPEG_LICENSE.md"), "FFmpeg license");
+    copyRequired(
+      ffmpegLicense,
+      path.join(licensesDir, "FFMPEG_LICENSE.md"),
+      "FFmpeg license",
+    );
   } else {
     writeText(
       path.join(licensesDir, "FFMPEG_LICENSE.md"),
@@ -479,7 +600,10 @@ function writePackageMetadata(productionPackages) {
     dependencies,
     bundledDependencies: Object.keys(dependencies),
   };
-  writeText(path.join(stageDir, "package.json"), JSON.stringify(packageJson, null, 2));
+  writeText(
+    path.join(stageDir, "package.json"),
+    JSON.stringify(packageJson, null, 2),
+  );
 }
 
 function writeReadme() {
@@ -541,7 +665,10 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the complete license fi
 }
 
 function sha256(file) {
-  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(file))
+    .digest("hex");
 }
 
 function writeManifest() {
@@ -556,7 +683,8 @@ function writeManifest() {
   ];
   const components = important.map(([relative, description]) => {
     const absolute = path.join(stageDir, relative);
-    if (!fs.existsSync(absolute)) fail(`Manifest component is missing: ${relative}`);
+    if (!fs.existsSync(absolute))
+      fail(`Manifest component is missing: ${relative}`);
     return {
       path: relative,
       description,
@@ -575,10 +703,17 @@ function writeManifest() {
         built_at: new Date().toISOString(),
         node: { version: nodeVersion, archive: nodeArchiveName },
         whisper_cpp: { source: whisperSourceUrl, commit: whisperCommit },
-        ffmpeg: { version: ffmpegVersion, source: ffmpegSourceUrl, license: "LGPL-2.1-or-later" },
+        ffmpeg: {
+          version: ffmpegVersion,
+          source: ffmpegSourceUrl,
+          license: "LGPL-2.1-or-later",
+        },
         models: {
           answer_model: "not bundled; configure separately",
-          whisper: { source: whisperModelSourceUrl, file: "runtime/voice/ggml-tiny.en.bin" },
+          whisper: {
+            source: whisperModelSourceUrl,
+            file: "runtime/voice/ggml-tiny.en.bin",
+          },
         },
         components,
       },
@@ -601,13 +736,31 @@ function packageAndArchive() {
   run("tar", ["-czf", tgz, "-C", releaseDir, "package"], { cwd: root });
   if (!fs.existsSync(tgz)) fail(`Expected npm package was not created: ${tgz}`);
   const archiveExtension = isWindows ? "zip" : "tar.gz";
-  const namedArchive = path.join(releaseDir, `${releaseName}.${archiveExtension}`);
+  const namedArchive = path.join(
+    releaseDir,
+    `${releaseName}.${archiveExtension}`,
+  );
   if (isWindows) {
-    run("tar", ["-a", "-cf", namedArchive, "-C", releaseDir, "package"], { cwd: root });
+    run("tar", ["-a", "-cf", namedArchive, "-C", releaseDir, "package"], {
+      cwd: root,
+    });
   } else {
-    run("tar", ["-czf", namedArchive, "--transform", `s,^package,${releaseName},`, "-C", releaseDir, "package"], { cwd: root });
+    run(
+      "tar",
+      [
+        "-czf",
+        namedArchive,
+        "--transform",
+        `s,^package,${releaseName},`,
+        "-C",
+        releaseDir,
+        "package",
+      ],
+      { cwd: root },
+    );
   }
-  if (!fs.existsSync(namedArchive)) fail(`Expected archive was not created: ${namedArchive}`);
+  if (!fs.existsSync(namedArchive))
+    fail(`Expected archive was not created: ${namedArchive}`);
   const checksumFiles = [tgz, namedArchive];
   const sums = checksumFiles
     .map((file) => `${sha256(file)}  ${path.basename(file)}`)
@@ -623,7 +776,10 @@ function main() {
   fs.rmSync(releaseDir, { recursive: true, force: true });
   fs.mkdirSync(stageDir, { recursive: true });
   log(`Building ${packageName}@${version} into ${releaseDir}`);
-  run(npmCommand, ["run", "build:all"], { cwd: root });
+  run(npmCommand, ["run", "build:all"], {
+    cwd: root,
+    shell: isWindows,
+  });
   stageRuntimeTree();
   writeRuntimeLoader();
   stageNativeAndModels();
