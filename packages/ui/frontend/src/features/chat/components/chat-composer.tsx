@@ -155,6 +155,8 @@ export function ChatComposer({
   const resolvedVoiceState = voiceState ?? "idle"
   const isRecording = resolvedVoiceState === "recording"
   const isTranscribing = resolvedVoiceState === "transcribing"
+  const hasMessageInput = input.trim().length > 0 || attachments.length > 0
+  const showVoiceAction = !hasMessageInput && Boolean(onStartVoice)
   const composingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const sendHintId = useId()
@@ -281,53 +283,88 @@ export function ChatComposer({
             <span id={sendHintId} className="sr-only">
               {t("chat.sendHint")}
             </span>
-            {onStartVoice && (
-              <div className="flex shrink-0 items-center gap-1 pb-0.5">
-                {isRecording && (
-                  <span
-                    className="text-destructive hidden text-xs tabular-nums sm:inline"
-                    aria-live="polite"
-                  >
-                    {t("chat.voiceRecording", {
-                      defaultValue: "Recording {{seconds}}s",
-                      seconds: Math.max(0, Math.floor(voiceElapsedMs / 1000)),
-                    })}
-                  </span>
-                )}
-                <Tooltip delayDuration={700}>
-                  <TooltipTrigger asChild>
+            <div className="flex shrink-0 items-center gap-1 pb-0.5">
+              {showVoiceAction && isRecording && (
+                <span
+                  className="text-destructive hidden text-xs tabular-nums sm:inline"
+                  aria-live="polite"
+                >
+                  {t("chat.voiceRecording", {
+                    defaultValue: "Recording {{seconds}}s",
+                    seconds: Math.max(0, Math.floor(voiceElapsedMs / 1000)),
+                  })}
+                </span>
+              )}
+              {contextUsage && (
+                <ContextUsageRing
+                  usage={contextUsage}
+                  onDetailClick={onContextDetail}
+                />
+              )}
+              <Tooltip delayDuration={700}>
+                <TooltipTrigger asChild>
+                  <span tabIndex={!showVoiceAction && !canSend ? 0 : undefined}>
                     <Button
                       type="button"
                       size="icon"
-                      variant={isRecording ? "destructive" : "ghost"}
-                      className={cn(
-                        "size-8 rounded-full transition-colors",
-                        !isRecording &&
-                          "text-muted-foreground hover:bg-primary/10 hover:text-primary",
-                      )}
-                      onClick={isRecording ? onStopVoice : onStartVoice}
-                      disabled={isTranscribing}
-                      aria-label={
-                        isRecording
-                          ? t("chat.stopVoice", {
-                              defaultValue: "Stop recording",
-                            })
-                          : t("chat.startVoice", {
-                              defaultValue: "Record voice message",
-                            })
+                      variant={
+                        showVoiceAction && isRecording ? "destructive" : "ghost"
                       }
+                      className={cn(
+                        "size-8 rounded-full transition-transform hover:scale-105 active:scale-95",
+                        showVoiceAction
+                          ? "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                          : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_4px_14px_color-mix(in_srgb,var(--primary)_32%,transparent)]",
+                      )}
+                      onClick={
+                        showVoiceAction
+                          ? isRecording
+                            ? onStopVoice
+                            : onStartVoice
+                          : onSend
+                      }
+                      disabled={
+                        showVoiceAction
+                          ? isTranscribing || !onStartVoice
+                          : !canSend
+                      }
+                      aria-label={
+                        showVoiceAction
+                          ? isTranscribing
+                            ? t("chat.transcribingVoice", {
+                                defaultValue: "Transcribing…",
+                              })
+                            : isRecording
+                              ? t("chat.stopVoice", {
+                                  defaultValue: "Stop recording",
+                                })
+                              : t("chat.startVoice", {
+                                  defaultValue: "Record voice message",
+                                })
+                          : t("chat.sendMessage")
+                      }
+                      aria-describedby={sendHintId}
                     >
-                      {isTranscribing ? (
-                        <IconLoader2 className="size-4 animate-spin" />
-                      ) : isRecording ? (
-                        <IconPlayerStop className="size-4" />
+                      {showVoiceAction ? (
+                        isTranscribing ? (
+                          <IconLoader2 className="size-4 animate-spin" />
+                        ) : isRecording ? (
+                          <IconPlayerStop className="size-4" />
+                        ) : (
+                          <IconMicrophone className="size-4" />
+                        )
                       ) : (
-                        <IconMicrophone className="size-4" />
+                        <IconArrowUp className="size-3.5" />
                       )}
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {isTranscribing
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent
+                  className="bg-muted text-foreground border-transparent text-center whitespace-pre-line shadow-none"
+                  arrowClassName="bg-muted fill-muted"
+                >
+                  {showVoiceAction
+                    ? isTranscribing
                       ? t("chat.transcribingVoice", {
                           defaultValue: "Transcribing…",
                         })
@@ -337,39 +374,8 @@ export function ChatComposer({
                           })
                         : t("chat.startVoice", {
                             defaultValue: "Record voice message",
-                          })}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            )}
-            <div className="flex shrink-0 items-center gap-1 pb-0.5">
-              {contextUsage && (
-                <ContextUsageRing
-                  usage={contextUsage}
-                  onDetailClick={onContextDetail}
-                />
-              )}
-              <Tooltip delayDuration={700}>
-                <TooltipTrigger asChild>
-                  <span tabIndex={!canSend ? 0 : undefined}>
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="bg-primary text-primary-foreground hover:bg-primary/90 size-8 rounded-full shadow-[0_4px_14px_color-mix(in_srgb,var(--primary)_32%,transparent)] transition-transform hover:scale-105 active:scale-95"
-                      onClick={onSend}
-                      disabled={!canSend}
-                      aria-label={t("chat.sendMessage")}
-                      aria-describedby={sendHintId}
-                    >
-                      <IconArrowUp className="size-3.5" />
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent
-                  className="bg-muted text-foreground border-transparent text-center whitespace-pre-line shadow-none"
-                  arrowClassName="bg-muted fill-muted"
-                >
-                  {t("chat.sendHint")}
+                          })
+                    : t("chat.sendHint")}
                 </TooltipContent>
               </Tooltip>
             </div>
