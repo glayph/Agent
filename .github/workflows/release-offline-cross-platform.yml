@@ -186,9 +186,18 @@ jobs:
             echo "Release already exists: $RELEASE_TAG" >&2
             exit 1
           fi
-          mapfile -t assets < <(find release-assets -type f \( -name '*.tgz' -o -name '*.tar.gz' -o -name '*.zip' -o -name 'SHA256SUMS-*' \) -print | sort)
+          mapfile -t assets < <(
+            find release-assets -type f \( \
+              -name 'SHA256SUMS-linux-x64' -o \
+              -name 'agent-miki-linux-x64-offline-*.tar.gz' -o \
+              -name 'agent-miki-linux-x64-offline-*.tgz' -o \
+              -name 'SHA256SUMS-windows-x64' -o \
+              -name 'agent-miki-windows-x64-offline-*.zip' -o \
+              -name 'agent-miki-windows-x64-offline-*.tgz' \
+            \) -print | sort
+          )
           if [ "${#assets[@]}" -ne 6 ]; then
-            printf 'Expected 6 release assets, found %s:\n' "${#assets[@]}" >&2
+            printf 'Expected exactly 6 allow-listed release assets, found %s:\n' "${#assets[@]}" >&2
             printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
