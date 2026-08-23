@@ -1395,6 +1395,13 @@ describe("launcher compatibility runtime apply", () => {
   it("preserves provider prefixes for runtime model identities", () => {
     expect(
       runtimeModelName({
+        model_name: "openai/gpt-4o-mini",
+        provider: "openai",
+        model: "gpt-4o-mini",
+      }),
+    ).toBe("openai/gpt-4o-mini");
+    expect(
+      runtimeModelName({
         model_name: "opencode/mimo-v2.5-free",
         provider: "opencode",
         model: "mimo-v2.5-free",

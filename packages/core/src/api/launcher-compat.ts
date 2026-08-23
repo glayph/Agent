@@ -2563,6 +2563,7 @@ export function runtimeModelName(stored: StoredModel): string {
   // identifier, so dropping a provider prefix can silently route a request to
   // the wrong adapter after model selection or restart.
   const preservePrefix = new Set([
+    "openai",
     "opencode",
     "omniroute",
     "llama.cpp",
