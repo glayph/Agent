@@ -26,7 +26,17 @@ const localRoot = path.join(
   "llm",
   "local",
 );
-const sourceRoot = path.join(localRoot, "miki-native-runtime");
+const sourceCandidates = [
+  process.env.MIKI_LLAMA_SOURCE_DIR,
+  path.join(localRoot, "miki-native-runtime"),
+  path.join(
+    localRoot,
+    "miki-native-runtime (keep it Always for windows build)",
+  ),
+].filter(Boolean);
+const sourceRoot =
+  sourceCandidates.find((candidate) => existsSync(candidate)) ||
+  sourceCandidates[0];
 const platformKey = `${process.platform}-${process.arch}`;
 const executableName =
   process.platform === "win32" ? "llama-server.exe" : "llama-server";
