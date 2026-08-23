@@ -91,7 +91,10 @@ import {
 } from "./launcher-compat.js";
 import { AgentControlService, createControlRouter } from "../control/index.js";
 import type { ControlApprovalRequest } from "../control/index.js";
-import { createLlamaCppAdapter } from "../control/model-adapters.js";
+import {
+  createLlamaCppAdapter,
+  createVoiceRuntimeAdapter,
+} from "../control/model-adapters.js";
 import {
   getPlatformDescriptor,
   isSupportedPlatformProvider,
@@ -107,6 +110,7 @@ import {
 import { createMemoryRouter } from "./memory-router.js";
 import { createVoiceRouter } from "./voice-router.js";
 import { normalizeChatSessionId } from "./chat-session.js";
+import { supportsAudioModel } from "../llm.js";
 import {
   subscribeDeliveryOutcome,
   type DeliveryOutcomeEvent,
@@ -474,12 +478,16 @@ const launcherCompatRouter = createLauncherCompatRouter({
   registerRuntimeAuth: (runtimeAuth) => {
     launcherRuntimeAuth = runtimeAuth;
   },
+  getAgentControlService: () => agentControlService,
   registerAdminController: (controller) => {
     orchestrator.tools.setAdminController(controller);
     agentControlService = new AgentControlService({
       controller,
       runtimePaths,
-      modelAdapters: [createLlamaCppAdapter()],
+      modelAdapters: [
+        createLlamaCppAdapter(),
+        createVoiceRuntimeAdapter(runtimePaths),
+      ],
       approvals: {
         requestApproval: async (request: ControlApprovalRequest) => {
           const previewHash = JSON.stringify({
@@ -1525,6 +1533,37 @@ function _asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function _decodeEphemeralAudio(
+  value: unknown,
+): { data: Buffer; mimeType: string; filename?: string } | undefined {
+  const audio = _asRecord(value);
+  const encoded = typeof audio.data === "string" ? audio.data.trim() : "";
+  const mimeType =
+    typeof audio.mimeType === "string"
+      ? audio.mimeType.split(";", 1)[0].trim().toLowerCase()
+      : "";
+  if (!encoded) return undefined;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || encoded.length > 36_000_000) {
+    throw new Error("Voice audio payload is invalid or too large.");
+  }
+  const data = Buffer.from(encoded, "base64");
+  if (data.length === 0 || data.length > 25 * 1024 * 1024) {
+    throw new Error("Voice audio payload exceeds the 25 MB limit.");
+  }
+  if (
+    !/^audio\/(wav|x-wav|wave|mpeg|mp3|mp4|x-m4a|ogg|webm|flac|x-flac)$/.test(
+      mimeType,
+    )
+  ) {
+    throw new Error("Voice audio format is not supported.");
+  }
+  const filename =
+    typeof audio.filename === "string"
+      ? path.basename(audio.filename).slice(0, 120)
+      : undefined;
+  return { data, mimeType, ...(filename ? { filename } : {}) };
+}
+
 interface ToolFeedbackConfig {
   enabled: boolean;
   maxArgsLength: number;
@@ -1777,27 +1816,53 @@ mikiWss.on("connection", (ws, req) => {
     const media = Array.isArray(payload.media)
       ? payload.media.filter((item): item is string => typeof item === "string")
       : [];
+    let ephemeralAudio:
+      { data: Buffer; mimeType: string; filename?: string } | undefined;
+    try {
+      ephemeralAudio = _decodeEphemeralAudio(payload.audio);
+    } catch (error) {
+      _sendmiki(ws, {
+        type: "error",
+        session_id: sessionId,
+        payload: {
+          request_id: requestId,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return;
+    }
     const rawVoice = _asRecord(payload.voice);
     const voiceProvider =
-      rawVoice.provider === "whisper.cpp" ? "whisper.cpp" : undefined;
+      rawVoice.provider === "whisper.cpp" || rawVoice.provider === "cloud"
+        ? rawVoice.provider
+        : undefined;
     const voiceLanguage =
       typeof rawVoice.language === "string"
         ? rawVoice.language.trim().slice(0, 20)
         : undefined;
     const voiceTransport =
-      rawVoice.transport === "endpoint" || rawVoice.transport === "cli"
+      rawVoice.transport === "endpoint" ||
+      rawVoice.transport === "cli" ||
+      rawVoice.transport === "cloud"
         ? rawVoice.transport
         : undefined;
     const voiceDurationMs = Number(rawVoice.durationMs);
     const voiceLatencyMs = Number(rawVoice.latencyMs);
+    const voiceModel =
+      typeof rawVoice.model === "string"
+        ? rawVoice.model.trim().slice(0, 160)
+        : undefined;
     const voiceMetadata: VoiceMessageMetadata | undefined =
       voiceProvider &&
-      (rawVoice.source === "microphone" || rawVoice.source === "upload")
+      (rawVoice.source === "microphone" ||
+        rawVoice.source === "upload" ||
+        rawVoice.source === "channel")
         ? {
             source: rawVoice.source,
             provider: voiceProvider,
             language: voiceLanguage || "auto",
             transcript: content,
+            ...(voiceModel ? { model: voiceModel } : {}),
             ...(Number.isFinite(voiceDurationMs) && voiceDurationMs >= 0
               ? { duration_ms: Math.round(voiceDurationMs) }
               : {}),
@@ -1808,7 +1873,7 @@ mikiWss.on("connection", (ws, req) => {
           }
         : undefined;
 
-    if (!content && media.length === 0) {
+    if (!content && media.length === 0 && !ephemeralAudio) {
       _sendmiki(ws, {
         type: "error",
         session_id: sessionId,
@@ -1818,6 +1883,22 @@ mikiWss.on("connection", (ws, req) => {
         },
       });
       return;
+    }
+
+    if (ephemeralAudio && rawVoice.provider === "cloud") {
+      const audioSupport = await supportsAudioModel(orchestrator.modelName);
+      if (audioSupport === false) {
+        _sendmiki(ws, {
+          type: "error",
+          session_id: sessionId,
+          payload: {
+            request_id: requestId,
+            code: "cloud_audio_unsupported",
+            message: `The selected cloud model "${orchestrator.modelName}" does not support voice input. Install a local voice model or select an audio-capable cloud model.`,
+          },
+        });
+        return;
+      }
     }
 
     const activeRunId = activeRunIds.get(sessionId);
@@ -1917,10 +1998,12 @@ mikiWss.on("connection", (ws, req) => {
           );
         }
 
+        const effectiveContent =
+          content || "Please process the attached voice message.";
         const messageForAgent =
           media.length > 0
-            ? `${content}\n\nAttached media:\n${media.join("\n")}`.trim()
-            : content;
+            ? `${effectiveContent}\n\nAttached media:\n${media.join("\n")}`.trim()
+            : effectiveContent;
         artifactContract = _detectArtifactContract(
           messageForAgent,
           workspaceDir,
@@ -1940,6 +2023,9 @@ mikiWss.on("connection", (ws, req) => {
               imageUrls: media,
               messageId: requestId,
               ...(voiceMetadata ? { voice: voiceMetadata } : {}),
+              ...(ephemeralAudio && rawVoice.provider === "cloud"
+                ? { audio: ephemeralAudio }
+                : {}),
               responseMessageId: assistantMessageId,
               completionGuard: () =>
                 artifactContract

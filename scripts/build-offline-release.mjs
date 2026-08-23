@@ -21,7 +21,6 @@ const artifactPlatform = isWindows ? "windows-x64" : "linux-x64";
 const packageName = `agent-miki-${artifactPlatform}-offline`;
 const releaseName = `${packageName}-${version}`;
 const llamaExecutableName = isWindows ? "llama-server.exe" : "llama-server";
-const whisperExecutableName = isWindows ? "whisper-cli.exe" : "whisper-cli";
 const releaseDir = path.resolve(
   process.env.MIKI_RELEASE_DIR || path.join(os.tmpdir(), releaseName),
 );
@@ -33,11 +32,6 @@ const nodeArchiveName = isWindows
   : `node-${nodeVersion}-linux-x64.tar.xz`;
 const nodeArchiveUrl = `https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName}`;
 const npmCommand = isWindows ? "npm.cmd" : "npm";
-const whisperCommit = "233fe1fc9b48a09e361d3594520838ca266537fe";
-const whisperSourceUrl = "https://github.com/ggml-org/whisper.cpp";
-const ffmpegVersion = "7.1.1";
-const ffmpegSourceUrl = `https://ffmpeg.org/releases/ffmpeg-${ffmpegVersion}.tar.xz`;
-const whisperModelSourceUrl = "https://huggingface.co/ggerganov/whisper.cpp";
 
 function log(message) {
   console.log(`[offline-release] ${message}`);
@@ -71,9 +65,13 @@ function copyRecursive(source, destination, { skipMaps = true } = {}) {
   if (stat.isDirectory()) {
     fs.mkdirSync(destination, { recursive: true });
     for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-      copyRecursive(path.join(source, entry.name), path.join(destination, entry.name), {
-        skipMaps,
-      });
+      copyRecursive(
+        path.join(source, entry.name),
+        path.join(destination, entry.name),
+        {
+          skipMaps,
+        },
+      );
     }
     return true;
   }
@@ -107,9 +105,13 @@ function chmodExecutable(file) {
 function download(url, destination) {
   if (fs.existsSync(destination)) return;
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  run("curl", ["-fL", "--retry", "3", "--retry-delay", "2", url, "-o", destination], {
-    cwd: root,
-  });
+  run(
+    "curl",
+    ["-fL", "--retry", "3", "--retry-delay", "2", url, "-o", destination],
+    {
+      cwd: root,
+    },
+  );
 }
 
 function readPackage(dir) {
@@ -161,22 +163,60 @@ function collectProductionPackages() {
     }
     const manifest = readPackage(source);
     packages.set(current.name, { source, manifest });
-    for (const [dependency, spec] of Object.entries(manifest.dependencies || {})) {
-      if (String(spec).startsWith("workspace:") || String(spec).startsWith("file:")) {
+    for (const [dependency, spec] of Object.entries(
+      manifest.dependencies || {},
+    )) {
+      if (
+        String(spec).startsWith("workspace:") ||
+        String(spec).startsWith("file:")
+      ) {
         const localName = dependency;
-        const localDir = path.join(root, "packages", localName.replace(/^@miki\//, ""));
-        queue.push({ name: localName, dir: localDir, local: true, optional: false });
+        const localDir = path.join(
+          root,
+          "packages",
+          localName.replace(/^@miki\//, ""),
+        );
+        queue.push({
+          name: localName,
+          dir: localDir,
+          local: true,
+          optional: false,
+        });
       } else {
-        queue.push({ name: dependency, fromDir: source, local: false, optional: false });
+        queue.push({
+          name: dependency,
+          fromDir: source,
+          local: false,
+          optional: false,
+        });
       }
     }
-    for (const [dependency, spec] of Object.entries(manifest.optionalDependencies || {})) {
-      if (String(spec).startsWith("workspace:") || String(spec).startsWith("file:")) {
+    for (const [dependency, spec] of Object.entries(
+      manifest.optionalDependencies || {},
+    )) {
+      if (
+        String(spec).startsWith("workspace:") ||
+        String(spec).startsWith("file:")
+      ) {
         const localName = dependency;
-        const localDir = path.join(root, "packages", localName.replace(/^@miki\//, ""));
-        queue.push({ name: localName, dir: localDir, local: true, optional: true });
+        const localDir = path.join(
+          root,
+          "packages",
+          localName.replace(/^@miki\//, ""),
+        );
+        queue.push({
+          name: localName,
+          dir: localDir,
+          local: true,
+          optional: true,
+        });
       } else {
-        queue.push({ name: dependency, fromDir: source, local: false, optional: true });
+        queue.push({
+          name: dependency,
+          fromDir: source,
+          local: false,
+          optional: true,
+        });
       }
     }
   }
@@ -201,18 +241,41 @@ function stageProductionNodeModules() {
 }
 
 function stageRuntimeTree() {
-  const packageNames = ["config", "installer", "skills", "memory", "core", "gateway"];
+  const packageNames = [
+    "config",
+    "installer",
+    "skills",
+    "memory",
+    "core",
+    "gateway",
+  ];
   for (const name of packageNames) {
     const source = path.join(root, "packages", name);
     const destination = path.join(runtimeDir, "packages", name);
     if (name === "memory") {
-      copyRequired(path.join(source, "src"), path.join(destination, "src"), "memory source");
+      copyRequired(
+        path.join(source, "src"),
+        path.join(destination, "src"),
+        "memory source",
+      );
     } else {
-      copyRequired(path.join(source, "dist"), path.join(destination, "dist"), `${name} dist`);
+      copyRequired(
+        path.join(source, "dist"),
+        path.join(destination, "dist"),
+        `${name} dist`,
+      );
     }
-    copyRequired(path.join(source, "package.json"), path.join(destination, "package.json"), `${name} package.json`);
+    copyRequired(
+      path.join(source, "package.json"),
+      path.join(destination, "package.json"),
+      `${name} package.json`,
+    );
     if (name === "skills")
-      copyRequired(path.join(source, "src"), path.join(destination, "src"), "skills catalog");
+      copyRequired(
+        path.join(source, "src"),
+        path.join(destination, "src"),
+        "skills catalog",
+      );
   }
   copyRequired(
     path.join(root, "packages", "ui", "frontend", "dist"),
@@ -220,14 +283,22 @@ function stageRuntimeTree() {
     "frontend build",
   );
   for (const name of ["agent.yaml", "tools.yaml"]) {
-    copyRequired(path.join(root, "config", name), path.join(runtimeDir, "config", name), `${name} template`);
+    copyRequired(
+      path.join(root, "config", name),
+      path.join(runtimeDir, "config", name),
+      `${name} template`,
+    );
   }
   copyRequired(
     path.join(root, "config", ".env.example"),
     path.join(runtimeDir, "config", ".env.example"),
     "safe environment template",
   );
-  copyRequired(path.join(root, "LICENSE"), path.join(stageDir, "LICENSE"), "Agent Miki license");
+  copyRequired(
+    path.join(root, "LICENSE"),
+    path.join(stageDir, "LICENSE"),
+    "Agent Miki license",
+  );
 }
 
 function writeRuntimeLoader() {
@@ -278,46 +349,48 @@ export async function resolve(specifier, context, nextResolve) {
 }
 
 function stageNativeAndModels() {
-  const llamaSource = process.env.MIKI_LLAMA_SERVER_BIN || path.join(
-    root,
-    "packages",
-    "core",
-    "src",
-    "llm",
-    "local",
-    "native",
-    platformKey,
-    llamaExecutableName,
-  );
+  const llamaSource =
+    process.env.MIKI_LLAMA_SERVER_BIN ||
+    path.join(
+      root,
+      "packages",
+      "core",
+      "src",
+      "llm",
+      "local",
+      "native",
+      platformKey,
+      llamaExecutableName,
+    );
   const llamaDestination = path.join(runtimeDir, "native", llamaExecutableName);
   copyRequired(llamaSource, llamaDestination, `${platformKey} llama-server`);
   chmodExecutable(llamaDestination);
+}
 
-  const whisperSource = process.env.MIKI_WHISPER_CPP_BIN;
-  const whisperModel = process.env.MIKI_WHISPER_CPP_MODEL;
-  if (!whisperSource || !whisperModel) {
-    fail(
-      "Set MIKI_WHISPER_CPP_BIN and MIKI_WHISPER_CPP_MODEL to official, verified release inputs before building.",
-    );
+function assertNoBundledVoiceAssets() {
+  const voiceDirectory = path.join(runtimeDir, "voice");
+  if (fs.existsSync(voiceDirectory)) {
+    fail(`Voice runtime/model assets must not be bundled: ${voiceDirectory}`);
   }
-  const voiceDir = path.join(runtimeDir, "voice");
-  const whisperDestination = path.join(voiceDir, whisperExecutableName);
-  copyRequired(whisperSource, whisperDestination, `${platformKey} Whisper.cpp CLI`);
-  chmodExecutable(whisperDestination);
-  const whisperLibraryDir = path.dirname(whisperSource);
-  for (const entry of fs.readdirSync(whisperLibraryDir)) {
-    const isRuntimeLibrary = isWindows
-      ? entry.toLowerCase().endsWith(".dll")
-      : /^lib.*\.so(?:\.|$)/.test(entry);
-    if (isRuntimeLibrary) {
-      copyRequired(
-        path.join(whisperLibraryDir, entry),
-        path.join(voiceDir, entry),
-        `Whisper runtime library ${entry}`,
-      );
+  const forbidden = [];
+  function scan(directory) {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) scan(target);
+      else if (
+        /whisper|ggml-(tiny|base|small)|speech.?to.?text/i.test(entry.name)
+      ) {
+        forbidden.push(target);
+      }
     }
   }
-  copyRequired(whisperModel, path.join(voiceDir, "ggml-tiny.en.bin"), "Whisper tiny.en model");
+  scan(runtimeDir);
+  if (forbidden.length > 0) {
+    fail(
+      `Voice runtime/model artifacts must not be bundled: ${forbidden.join(", ")}`,
+    );
+  }
 }
 
 function assertAnswerModelNotBundled() {
@@ -331,7 +404,8 @@ function assertAnswerModelNotBundled() {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) scan(target);
-      else if (entry.name.toLowerCase().endsWith(".gguf")) bundledGgufs.push(target);
+      else if (entry.name.toLowerCase().endsWith(".gguf"))
+        bundledGgufs.push(target);
     }
   }
   scan(runtimeDir);
@@ -341,7 +415,8 @@ function assertAnswerModelNotBundled() {
 }
 
 function stageNodeRuntime() {
-  const archive = process.env.MIKI_NODE_TARBALL || path.join(releaseDir, nodeArchiveName);
+  const archive =
+    process.env.MIKI_NODE_TARBALL || path.join(releaseDir, nodeArchiveName);
   download(nodeArchiveUrl, archive);
   const extracted = path.join(releaseDir, "node-extracted");
   fs.rmSync(extracted, { recursive: true, force: true });
@@ -361,7 +436,9 @@ function stageNodeRuntime() {
       { cwd: root },
     );
   } else {
-    run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], { cwd: root });
+    run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], {
+      cwd: root,
+    });
   }
   const nodeRoot = isWindows
     ? path.join(extracted, `node-${nodeVersion}-win-x64`)
@@ -372,45 +449,34 @@ function stageNodeRuntime() {
     ? path.join(nodeRoot, nodeName)
     : path.join(nodeRoot, "bin", nodeName);
   copyRequired(nodeSource, nodeDestination, `${platformKey} Node binary`);
-  copyRequired(path.join(nodeRoot, "LICENSE"), path.join(runtimeDir, "node", "LICENSE"), "Node license");
-  copyRequired(path.join(nodeRoot, "README.md"), path.join(runtimeDir, "node", "README.md"), "Node notice");
+  copyRequired(
+    path.join(nodeRoot, "LICENSE"),
+    path.join(runtimeDir, "node", "LICENSE"),
+    "Node license",
+  );
+  copyRequired(
+    path.join(nodeRoot, "README.md"),
+    path.join(runtimeDir, "node", "README.md"),
+    "Node notice",
+  );
   chmodExecutable(nodeDestination);
 }
 
 function stageNotices() {
   const licensesDir = path.join(stageDir, "licenses");
-  const ffmpegLicense =
-    process.env.MIKI_FFMPEG_LICENSE ||
-    (isLinux
-      ? path.join("/tmp", "miki-ffmpeg-clean", `ffmpeg-${ffmpegVersion}`, "LICENSE.md")
-      : "");
-  const whisperLicense =
-    process.env.MIKI_WHISPER_CPP_LICENSE ||
-    (isLinux ? path.join("/tmp", "miki-whisper.cpp", "LICENSE") : "");
   copyRequired(
-    path.join(root, "packages", "core", "src", "llm", "local", "miki-native-runtime (keep it Always for windows build)", "LICENSE"),
+    path.join(
+      root,
+      "packages",
+      "core",
+      "src",
+      "llm",
+      "local",
+      "miki-native-runtime (keep it Always for windows build)",
+      "LICENSE",
+    ),
     path.join(licensesDir, "LLAMA_CPP_AND_GGML_LICENSE"),
     "llama.cpp/GGML license",
-  );
-  if (whisperLicense) {
-    copyRequired(whisperLicense, path.join(licensesDir, "WHISPER_CPP_LICENSE"), "whisper.cpp license");
-  } else {
-    writeText(
-      path.join(licensesDir, "WHISPER_CPP_LICENSE"),
-      `whisper.cpp license: ${whisperSourceUrl} at commit ${whisperCommit}`,
-    );
-  }
-  if (ffmpegLicense) {
-    copyRequired(ffmpegLicense, path.join(licensesDir, "FFMPEG_LICENSE.md"), "FFmpeg license");
-  } else {
-    writeText(
-      path.join(licensesDir, "FFMPEG_LICENSE.md"),
-      `FFmpeg ${ffmpegVersion} licensing information: https://ffmpeg.org/legal.html`,
-    );
-  }
-  download(
-    "https://raw.githubusercontent.com/openai/whisper/main/LICENSE",
-    path.join(licensesDir, "OPENAI_WHISPER_LICENSE"),
   );
   const notices = `# Agent Miki ${isWindows ? "Windows x64" : "Linux x64"} offline release notices
 
@@ -420,9 +486,6 @@ This package ships the following third-party artifacts. Their licenses are inclu
 | --- | --- | --- | --- |
 | Node.js | \`runtime/node/bin/${isWindows ? "node.exe" : "node"}\` (${nodeVersion}) | Node.js license and bundled-runtime notice | https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName} |
 | llama.cpp / GGML | \`runtime/native/${llamaExecutableName}\` | MIT license | https://github.com/ggml-org/llama.cpp |
-| whisper.cpp | \`runtime/voice/${whisperExecutableName}\` and its shared runtime libraries | MIT license | ${whisperSourceUrl} at commit ${whisperCommit} |
-| FFmpeg decoder support | License notice for the voice conversion dependency | LGPL 2.1-or-later | ${ffmpegSourceUrl} |
-| OpenAI Whisper tiny.en | \`runtime/voice/ggml-tiny.en.bin\` | Upstream Whisper model attribution/license | ${whisperModelSourceUrl} |
 `;
   writeText(path.join(stageDir, "THIRD_PARTY_NOTICES.md"), notices);
 }
@@ -491,7 +554,10 @@ function writePackageMetadata(productionPackages) {
     dependencies,
     bundledDependencies: Object.keys(dependencies),
   };
-  writeText(path.join(stageDir, "package.json"), JSON.stringify(packageJson, null, 2));
+  writeText(
+    path.join(stageDir, "package.json"),
+    JSON.stringify(packageJson, null, 2),
+  );
 }
 
 function writeReadme() {
@@ -513,7 +579,7 @@ cd ${releaseName}
     : `npm install --offline --ignore-scripts --prefix "$HOME/.local/share/miki/npm-install" \\\n  ./${packageName}-${version}.tgz`;
   const readme = `# Agent Miki ${version}: ${platformLabel} offline package
 
-This is the **self-contained ${platformLabel} release artifact** for Agent Miki. It contains the production dashboard, gateway, core, memory package, skills catalog, prebundled production Node dependencies, an embedded Node ${nodeVersion} runtime, the llama.cpp server executable, Whisper.cpp voice recognition, and an FFmpeg-enabled Whisper build for WAV, MP3, M4A, OGG, WebM, and FLAC inputs. No answer-model GGUF is bundled; choose and configure a local model separately or use a configured cloud provider.
+This is the **self-contained ${platformLabel} release artifact** for Agent Miki. It contains the production dashboard, gateway, core, memory package, skills catalog, prebundled production Node dependencies, an embedded Node ${nodeVersion} runtime, and the llama.cpp server executable. No answer-model GGUF or voice-to-text runtime/model is bundled; configure a compatible local runtime/model separately or use an approved audio-capable cloud model.
 
 The package is intended for ${isWindows ? "Windows x64" : "Linux x86_64"} systems. The embedded native components still use the host operating system; this is not a virtual machine or a full operating-system image.
 
@@ -535,7 +601,7 @@ ${extractedInstallMessage}
 ${extractedCommands}
 \`\`\`
 
-On first start the launcher creates user-writable state below \`$XDG_DATA_HOME/miki\` or \`~/.local/share/miki\`, keeps the immutable package tree untouched, enables local Whisper.cpp transcription, and writes a randomly generated dashboard password to \`runtime/data/first-run-credentials.txt\` with mode 600. Save the printed password and delete that file after saving it. To choose a password before first start, set \`MIKI_DASHBOARD_PASSWORD\` to a value of at least eight characters.
+On first start the launcher creates user-writable state below \`$XDG_DATA_HOME/miki\` or \`~/.local/share/miki\`, keeps the immutable package tree untouched, leaves local voice-to-text Off until a user-provided or approval-gated runtime/model passes health checks, and writes a randomly generated dashboard password to \`runtime/data/first-run-credentials.txt\` with mode 600. Save the printed password and delete that file after saving it. To choose a password before first start, set \`MIKI_DASHBOARD_PASSWORD\` to a value of at least eight characters.
 
 The dashboard defaults to \`http://127.0.0.1:18800\`. No answer-model GGUF is pre-installed. To use the bundled llama.cpp executable with a separate local model, set \`MIKI_MODEL_PATH=/absolute/path/to/model.gguf\` before \`start\`; optionally set \`MIKI_LOCAL_MODEL_NAME\` and \`MIKI_MODEL_ID\`. The launcher registers that external model in user state and restricts its model allowlist to the model directory. You can also add a model from the dashboard Models page. If no model is configured, the gateway still starts and the dashboard remains available for cloud-provider or later model configuration.
 
@@ -543,7 +609,7 @@ No cloud API key, online registry, model download, or plugin download is used by
 
 ## Diagnostics and limitations
 
-Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable but not an answer-model GGUF; model quality, context length, latency, and RAM use depend on the separately selected model and host CPU/memory. This archive targets ${platformLabel}.
+Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable but not an answer-model GGUF or voice-to-text assets; model quality, context length, latency, and RAM use depend on separately selected models and host CPU/memory. This archive targets ${platformLabel}.
 
 The dashboard’s existing conversational chat/Inspector behavior, local/API/Auto web-search controls, memory system, skills, MCP surfaces, and voice transcript routing are included from the source commit used to create this release. External online acquisitions remain approval-gated by the application’s safety controls and are not silently performed by this package.
 
@@ -553,22 +619,30 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the complete license fi
 }
 
 function sha256(file) {
-  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(file))
+    .digest("hex");
 }
 
 function writeManifest() {
   const important = [
-    [`runtime/node/bin/${isWindows ? "node.exe" : "node"}`, "Embedded Node.js runtime"],
-    [`runtime/native/${llamaExecutableName}`, "Bundled llama.cpp server executable"],
-    [`runtime/voice/${whisperExecutableName}`, "Whisper.cpp CLI"],
-    ["runtime/voice/ggml-tiny.en.bin", "Whisper tiny.en model"],
+    [
+      `runtime/node/bin/${isWindows ? "node.exe" : "node"}`,
+      "Embedded Node.js runtime",
+    ],
+    [
+      `runtime/native/${llamaExecutableName}`,
+      "Bundled llama.cpp server executable",
+    ],
     ["bin/miki-offline.js", "Portable launcher"],
     ["runtime/packages/gateway/dist/index.js", "Gateway build"],
     ["runtime/packages/ui/frontend/dist/index.html", "Dashboard build"],
   ];
   const components = important.map(([relative, description]) => {
     const absolute = path.join(stageDir, relative);
-    if (!fs.existsSync(absolute)) fail(`Manifest component is missing: ${relative}`);
+    if (!fs.existsSync(absolute))
+      fail(`Manifest component is missing: ${relative}`);
     return {
       path: relative,
       description,
@@ -586,11 +660,10 @@ function writeManifest() {
         source_commit: runGit(["rev-parse", "HEAD"]),
         built_at: new Date().toISOString(),
         node: { version: nodeVersion, archive: nodeArchiveName },
-        whisper_cpp: { source: whisperSourceUrl, commit: whisperCommit },
-        ffmpeg: { version: ffmpegVersion, source: ffmpegSourceUrl, license: "LGPL-2.1-or-later" },
         models: {
           answer_model: "not bundled; configure separately",
-          whisper: { source: whisperModelSourceUrl, file: "runtime/voice/ggml-tiny.en.bin" },
+          voice_to_text:
+            "not bundled; configure a user-provided or approved local runtime/model",
         },
         components,
       },
@@ -619,15 +692,35 @@ function packageAndArchive() {
   }
   if (!fs.existsSync(tgz)) fail(`Expected npm package was not created: ${tgz}`);
   const archiveExtension = isWindows ? "zip" : "tar.gz";
-  const namedArchive = path.join(releaseDir, `${releaseName}.${archiveExtension}`);
+  const namedArchive = path.join(
+    releaseDir,
+    `${releaseName}.${archiveExtension}`,
+  );
   if (isWindows) {
-    run("tar", ["-a", "-cf", path.basename(namedArchive), "-C", ".", "package"], {
-      cwd: releaseDir,
-    });
+    run(
+      "tar",
+      ["-a", "-cf", path.basename(namedArchive), "-C", ".", "package"],
+      {
+        cwd: releaseDir,
+      },
+    );
   } else {
-    run("tar", ["-czf", namedArchive, "--transform", `s,^package,${releaseName},`, "-C", releaseDir, "package"], { cwd: root });
+    run(
+      "tar",
+      [
+        "-czf",
+        namedArchive,
+        "--transform",
+        `s,^package,${releaseName},`,
+        "-C",
+        releaseDir,
+        "package",
+      ],
+      { cwd: root },
+    );
   }
-  if (!fs.existsSync(namedArchive)) fail(`Expected archive was not created: ${namedArchive}`);
+  if (!fs.existsSync(namedArchive))
+    fail(`Expected archive was not created: ${namedArchive}`);
   const checksumFiles = [tgz, namedArchive];
   const sums = checksumFiles
     .map((file) => `${sha256(file)}  ${path.basename(file)}`)
@@ -648,6 +741,7 @@ function main() {
   writeRuntimeLoader();
   stageNativeAndModels();
   assertAnswerModelNotBundled();
+  assertNoBundledVoiceAssets();
   stageNodeRuntime();
   stageNotices();
   stageLauncher();

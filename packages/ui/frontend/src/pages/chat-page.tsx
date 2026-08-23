@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { SessionSummary } from "@/api/sessions"
-import { transcribeVoiceAudio } from "@/api/voice"
+import { type VoiceCloudAudioResult, transcribeVoiceAudio } from "@/api/voice"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
 import { openChatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
@@ -549,25 +549,52 @@ export function ChatPage() {
     ) => {
       setVoiceState("transcribing")
       try {
-        const result = await transcribeVoiceAudio(blob, filename, durationMs)
-        const transcript = result.transcript.trim()
-        if (!transcript) {
-          throw new Error("No speech was detected in the recording.")
+        const result = await transcribeVoiceAudio(
+          blob,
+          filename,
+          durationMs,
+          defaultModelName,
+        )
+        let sent: boolean
+        if (result.mode === "local") {
+          const transcript = result.transcript.trim()
+          if (!transcript) {
+            throw new Error("No speech was detected in the recording.")
+          }
+          sent = await sendMessage({
+            content: transcript,
+            voice: {
+              source,
+              provider: result.provider,
+              language: result.language,
+              transcript,
+              durationMs: result.duration_ms ?? durationMs,
+              latencyMs: result.latency_ms,
+              transport: result.transport,
+            },
+          })
+        } else {
+          const cloudResult = result as VoiceCloudAudioResult
+          sent = await sendMessage({
+            content: "",
+            voice: {
+              source,
+              provider: "cloud",
+              language: cloudResult.voice.language,
+              transcript: "",
+              durationMs: cloudResult.voice.durationMs ?? durationMs,
+              model: cloudResult.model,
+              transport: "cloud",
+            },
+            audio: {
+              data: cloudResult.audio.data,
+              mimeType: cloudResult.audio.mimeType,
+              filename: cloudResult.audio.filename,
+            },
+          })
         }
-        const sent = await sendMessage({
-          content: transcript,
-          voice: {
-            source,
-            provider: result.provider,
-            language: result.language,
-            transcript,
-            durationMs: result.duration_ms ?? durationMs,
-            latencyMs: result.latency_ms,
-            transport: result.transport,
-          },
-        })
         if (!sent) {
-          throw new Error("The transcript could not be sent to Agent Miki.")
+          throw new Error("The voice message could not be sent to Agent Miki.")
         }
       } catch (error) {
         toast.error(
@@ -582,7 +609,7 @@ export function ChatPage() {
         setVoiceElapsedMs(0)
       }
     },
-    [sendMessage, t],
+    [defaultModelName, sendMessage, t],
   )
 
   const handleStopVoice = useCallback(() => {

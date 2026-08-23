@@ -121,6 +121,12 @@ import {
   synchronizeLocalRuntimeForModel,
 } from "../llm/local/local-runtime.js";
 import { globalLogger, type LogLevel } from "../structured-logger.js";
+import type { AgentControlService } from "../control/service.js";
+import type { ControlOperationRequest, ControlPlan } from "../control/types.js";
+import {
+  VoiceRuntimeManager,
+  type VoiceRuntimeStatus,
+} from "../voice-runtime.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -319,6 +325,7 @@ interface LauncherCompatOptions {
   reloadRuntime?: (request?: RuntimeReloadRequest) => Promise<void> | void;
   registerRuntimeAuth?: (runtimeAuth: LauncherRuntimeAuthBridge) => void;
   registerAdminController?: (controller: LauncherAdminController) => void;
+  getAgentControlService?: () => AgentControlService | undefined;
 }
 
 export interface LauncherRuntimeAuthBridge {
@@ -3436,6 +3443,7 @@ export function createLauncherCompatRouter({
   reloadRuntime,
   registerRuntimeAuth,
   registerAdminController,
+  getAgentControlService,
 }: LauncherCompatOptions): Router {
   const paths = runtimePaths;
   const workspaceDir = _workspaceDir ?? paths.sourceDir ?? paths.configDir;
@@ -5333,6 +5341,42 @@ export function createLauncherCompatRouter({
     }
   });
 
+  const voiceRuntime = new VoiceRuntimeManager(paths);
+  const syncVoiceRuntimeConfig = (status: VoiceRuntimeStatus): void => {
+    const current = speechConfig();
+    const active = status.activeModelId
+      ? status.catalog.find((model) => model.id === status.activeModelId)
+      : undefined;
+    const runtime = voiceRuntime.getActiveRuntime();
+    const models = status.catalog
+      .filter((model) => model.installed)
+      .map((model) => ({
+        id: model.id,
+        name: model.name,
+        transport: model.transport,
+        enabled: model.installed,
+        ...(runtime.executable ? { executable: runtime.executable } : {}),
+        ...(active?.id === model.id && runtime.model
+          ? { model: runtime.model }
+          : {}),
+      }));
+    const next: JsonRecord = {
+      ...current,
+      enabled: status.healthy,
+      active_model_id: status.activeModelId,
+      models,
+      local_runtime: {
+        installed: status.installed,
+        healthy: status.healthy,
+        reason: status.reason,
+        model_directory: status.modelDirectory,
+        ...(status.executable ? { executable: status.executable } : {}),
+        ...(status.endpoint ? { endpoint: status.endpoint } : {}),
+      },
+      ...(active ? { model: active.id } : {}),
+    };
+    commitConfig({ ...(state.config || {}), speech_to_text: next });
+  };
   const speechConfig = (): JsonRecord =>
     recordOrEmpty(state.config?.speech_to_text);
   const speechModels = (): JsonRecord[] => {
@@ -5412,7 +5456,99 @@ export function createLauncherCompatRouter({
   };
 
   router.get("/speech-to-text/models", (_req, res) => {
-    res.json(speechResponse());
+    res.json({ ...speechResponse(), local_runtime: voiceRuntime.status() });
+  });
+
+  router.get("/speech-to-text/status", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(voiceRuntime.status());
+  });
+
+  router.get("/speech-to-text/catalog", (_req, res) => {
+    res.json({ catalog: voiceRuntime.catalog() });
+  });
+
+  router.post("/speech-to-text/install", async (req, res) => {
+    try {
+      const modelId = String(req.body?.model_id || "").trim();
+      if (!modelId)
+        return res.status(400).json({ error: "model_id is required." });
+      const control = getAgentControlService?.();
+      if (!control) {
+        return res.status(503).json({
+          error: "Agent Control is not ready; voice installation is blocked.",
+        });
+      }
+      const controlRequest: ControlOperationRequest = {
+        capability: "model_runtime",
+        action: "install",
+        input: {
+          adapter: "voice.local",
+          provider: "whisper.cpp",
+          model_id: modelId,
+        },
+        approvalRequestId:
+          typeof req.body?.approval_request_id === "string"
+            ? req.body.approval_request_id
+            : undefined,
+        context: { origin: "dashboard", actor: "dashboard-operator" },
+      };
+      const suppliedPlan = isRecord(req.body?.plan)
+        ? (req.body.plan as unknown as ControlPlan)
+        : undefined;
+      const plan = suppliedPlan || (await control.plan(controlRequest));
+      const outcome = await control.execute(controlRequest, plan);
+      const approvalEvidence = outcome.evidence.find(
+        (item) => item.id === "approval",
+      );
+      const approvalData = isRecord(approvalEvidence?.data)
+        ? approvalEvidence.data
+        : undefined;
+      if (outcome.status === "approval_required") {
+        return res.status(202).json({
+          status: "approval_required",
+          outcome,
+          plan,
+          approval_request_id:
+            typeof approvalData?.request_id === "string"
+              ? approvalData.request_id
+              : undefined,
+        });
+      }
+      if (!outcome.ok) {
+        return res.status(400).json({
+          error: outcome.error || "Voice model installation failed.",
+          outcome,
+        });
+      }
+      const status = voiceRuntime.status();
+      syncVoiceRuntimeConfig(status);
+      const applied = await speechApplyResponse("speech-to-text.install");
+      return res.status(201).json({
+        status: "ok",
+        outcome,
+        plan,
+        local_runtime: status,
+        ...applied,
+      });
+    } catch (err) {
+      return res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.post("/speech-to-text/health", async (_req, res) => {
+    try {
+      const status = await voiceRuntime.health();
+      syncVoiceRuntimeConfig(status);
+      const applied = await speechApplyResponse("speech-to-text.health");
+      res.json({ status: "ok", local_runtime: status, ...applied });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   router.put("/speech-to-text/config", async (req, res) => {
@@ -5533,6 +5669,23 @@ export function createLauncherCompatRouter({
   router.post("/speech-to-text/models/active", async (req, res) => {
     try {
       const id = String(req.body?.model_id || "").trim();
+      if (
+        voiceRuntime
+          .catalog()
+          .some((model) => model.id === id && model.installed)
+      ) {
+        const status = await voiceRuntime.activate(id);
+        syncVoiceRuntimeConfig(status);
+        const applied = await speechApplyResponse(
+          "speech-to-text.model.active",
+        );
+        return res.json({
+          status: "ok",
+          ...speechResponse(),
+          local_runtime: status,
+          ...applied,
+        });
+      }
       const selected = speechModels().find((item) => item.id === id);
       if (!selected)
         return res.status(404).json({ error: "Speech model not found." });

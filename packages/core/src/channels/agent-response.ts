@@ -1,6 +1,8 @@
 import type { AgentOrchestrator } from "../agent.js";
 import { sessionTurnLock } from "../session-turn-lock.js";
 
+type AgentLoopOptions = Parameters<AgentOrchestrator["runAgentLoop"]>[3];
+
 export function extractAgentChunkContent(chunk: string): string {
   try {
     const parsed = JSON.parse(chunk) as { type?: string; content?: unknown };
@@ -23,10 +25,16 @@ export async function streamAgentResponse(
   message: string,
   onText: (text: string) => Promise<void> | void,
   maxChars = 12000,
+  options?: AgentLoopOptions,
 ): Promise<string> {
   return sessionTurnLock.withLock(sessionId, async () => {
     let response = "";
-    for await (const chunk of orchestrator.runAgentLoop(sessionId, message)) {
+    for await (const chunk of orchestrator.runAgentLoop(
+      sessionId,
+      message,
+      undefined,
+      options,
+    )) {
       const content = extractAgentChunkContent(chunk);
       if (!content) continue;
       const remaining = maxChars - response.length;
@@ -45,10 +53,16 @@ export async function collectAgentResponse(
   sessionId: string,
   message: string,
   maxChars = 12000,
+  options?: AgentLoopOptions,
 ): Promise<string> {
   return sessionTurnLock.withLock(sessionId, async () => {
     let response = "";
-    for await (const chunk of orchestrator.runAgentLoop(sessionId, message)) {
+    for await (const chunk of orchestrator.runAgentLoop(
+      sessionId,
+      message,
+      undefined,
+      options,
+    )) {
       const content = extractAgentChunkContent(chunk);
       if (!content) continue;
       response += content;

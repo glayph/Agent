@@ -12,6 +12,7 @@ import {
 import type {
   MikiProviderCompletionRequest,
   MikiProviderContext,
+  ProviderInputKind,
   MikiProviderManifest,
   MikiProviderModel,
   MikiProviderPlugin,
@@ -24,11 +25,12 @@ const model = (
   contextWindow = 128_000,
   maxTokens = 8_192,
   reasoning = false,
+  input: ProviderInputKind[] = ["text", "image"],
 ): MikiProviderModel => ({
   id,
   name,
   reasoning,
-  input: ["text", "image"],
+  input,
   contextWindow,
   maxTokens,
   supportsTools: true,
@@ -182,6 +184,14 @@ export const openAIProviderPlugin = openAIPlugin({
   models: [
     model("gpt-4o", "GPT-4o"),
     model("gpt-4.1", "GPT-4.1", 1_047_576, 32_768, true),
+    model(
+      "gpt-4o-audio-preview",
+      "GPT-4o Audio Preview",
+      128_000,
+      4_096,
+      false,
+      ["text", "audio"],
+    ),
   ],
 });
 

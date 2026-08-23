@@ -404,10 +404,17 @@ export async function hydrateActiveSession() {
   return hydratePromise
 }
 
+interface EphemeralAudioPayload {
+  data: string
+  mimeType: string
+  filename?: string
+}
+
 interface SendChatMessageInput {
   content: string
   attachments?: ChatAttachment[]
   voice?: ChatVoiceMetadata
+  audio?: EphemeralAudioPayload
 }
 
 interface EditChatMessageInput {
@@ -430,6 +437,7 @@ function sendmikiMessage(
   content: string,
   attachments: ChatAttachment[],
   voice?: ChatVoiceMetadata,
+  audio?: EphemeralAudioPayload,
 ) {
   socket.send(
     JSON.stringify({
@@ -439,6 +447,7 @@ function sendmikiMessage(
         content,
         media: attachments.map((attachment) => attachment.url),
         ...(voice ? { voice } : {}),
+        ...(audio ? { audio } : {}),
       },
     }),
   )
@@ -554,6 +563,7 @@ export async function sendChatMessage({
   content,
   attachments = [],
   voice,
+  audio,
 }: SendChatMessageInput): Promise<boolean> {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
@@ -563,7 +573,7 @@ export async function sendChatMessage({
   const normalizedContent = content.trim()
   const normalizedAttachments = normalizeOutgoingAttachments(attachments)
 
-  if (!normalizedContent && normalizedAttachments.length === 0) {
+  if (!normalizedContent && normalizedAttachments.length === 0 && !audio) {
     return false
   }
 
@@ -597,7 +607,14 @@ export async function sendChatMessage({
   }))
 
   try {
-    sendmikiMessage(socket, id, normalizedContent, normalizedAttachments, voice)
+    sendmikiMessage(
+      socket,
+      id,
+      normalizedContent,
+      normalizedAttachments,
+      voice,
+      audio,
+    )
     return true
   } catch (error) {
     console.error("Failed to send miki message:", error)

@@ -17,7 +17,7 @@ import type {
   ProviderConnectionResult,
   ProviderModel,
 } from "./contracts.js";
-import { LLMMissingCredentialError } from "./errors.js";
+import { LLMMissingCredentialError, LLMAPIError } from "./errors.js";
 import { ensureLocalRuntime } from "../local/local-runtime.js";
 import { ProviderPluginRegistry } from "./sdk/registry.js";
 import { builtinProviderPlugins } from "./sdk/builtin.js";
@@ -100,6 +100,21 @@ export class ProviderRegistry {
     return directProviderForModel(model);
   }
 
+  async supportsAudio(model: string): Promise<boolean | undefined> {
+    const plugin = this.pluginRegistry.resolve(model);
+    if (!plugin) return false;
+    const catalog = await this.pluginRegistry.catalog(plugin.manifest.id);
+    if (!catalog?.models?.length) return undefined;
+    const normalized = normalizeDirectModelName(
+      plugin.manifest.id,
+      model,
+    ).toLowerCase();
+    const selected = catalog.models.find(
+      (item) => item.id.toLowerCase() === normalized,
+    );
+    return selected ? selected.input.includes("audio") : undefined;
+  }
+
   async complete(
     model: string,
     messages: MikiProviderMessage[],
@@ -110,6 +125,16 @@ export class ProviderRegistry {
       throw new LLMMissingCredentialError(
         `No supported provider matches model "${model}".`,
       );
+    }
+
+    if (messages.some((message) => message.audio)) {
+      const audioSupport = await this.supportsAudio(model);
+      if (audioSupport === false) {
+        throw new LLMAPIError(
+          `The selected cloud model "${model}" does not support audio input. Choose an audio-capable model or install a local voice model.`,
+          { providerId: provider.id },
+        );
+      }
     }
 
     const plugin = this.pluginRegistry.get(provider.id);

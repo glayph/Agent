@@ -9,8 +9,23 @@ import {
 } from "./agent-response.js";
 import { resolveChannelSessionId } from "./session-scope.js";
 import { runWithCallContext } from "../tools/executor/call-context.js";
+import { VoiceInputRouter } from "../voice-routing.js";
 
 const TELEGRAM_MESSAGE_LIMIT = 4000;
+const TELEGRAM_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const TELEGRAM_AUDIO_MIME_TYPES = new Set([
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/ogg",
+  "audio/webm",
+  "audio/flac",
+  "audio/x-flac",
+]);
 
 type JsonRecord = Record<string, unknown>;
 
@@ -72,8 +87,97 @@ function extractTelegramText(message: unknown): string {
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     return "";
   }
-  const candidate = (message as Record<string, unknown>).text;
+  const record = message as Record<string, unknown>;
+  const candidate = record.text ?? record.caption;
   return typeof candidate === "string" ? candidate.trim() : "";
+}
+
+interface TelegramAudioReference {
+  fileId: string;
+  filename: string;
+  mimeType: string;
+  durationMs?: number;
+}
+
+function extractTelegramAudio(message: unknown): TelegramAudioReference | null {
+  const record = recordOrEmpty(message);
+  const voice = recordOrEmpty(record.voice);
+  const audio = recordOrEmpty(record.audio);
+  const document = recordOrEmpty(record.document);
+  const candidate =
+    Object.keys(voice).length > 0
+      ? voice
+      : Object.keys(audio).length > 0
+        ? audio
+        : String(document.mime_type || "")
+              .toLowerCase()
+              .startsWith("audio/")
+          ? document
+          : null;
+  if (!candidate) return null;
+  const fileId = stringOrEmpty(candidate.file_id);
+  if (!fileId) return null;
+  const rawMime = stringOrEmpty(candidate.mime_type)
+    .split(";", 1)[0]
+    .toLowerCase();
+  const mimeType =
+    rawMime || (Object.keys(voice).length > 0 ? "audio/ogg" : "");
+  if (!TELEGRAM_AUDIO_MIME_TYPES.has(mimeType)) {
+    throw new Error("Telegram voice format is not supported.");
+  }
+  const duration = Number(candidate.duration);
+  const durationMs =
+    Number.isFinite(duration) && duration >= 0
+      ? Math.min(Math.round(duration * 1000), 5 * 60 * 1000)
+      : undefined;
+  const filename = stringOrEmpty(candidate.file_name) || `${fileId}.audio`;
+  return {
+    fileId,
+    filename,
+    mimeType,
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}
+
+async function downloadTelegramAudio(
+  ctx: TelegramContext,
+  reference: TelegramAudioReference,
+): Promise<Buffer> {
+  const link = await ctx.telegram.getFileLink(reference.fileId);
+  const response = await fetch(String(link), {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(
+      `Telegram audio download failed with HTTP ${response.status}.`,
+    );
+  }
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > TELEGRAM_MAX_AUDIO_BYTES
+  ) {
+    throw new Error("Telegram voice message exceeds the 25 MB limit.");
+  }
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > TELEGRAM_MAX_AUDIO_BYTES) {
+        throw new Error("Telegram voice message exceeds the 25 MB limit.");
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (total === 0) throw new Error("Telegram voice message was empty.");
+  return Buffer.concat(chunks, total);
 }
 
 export function resolveTelegramRuntimeConfig(
@@ -151,7 +255,8 @@ export function shouldHandleTelegramMessage(
 ): boolean {
   if (!ctx.chat || !ctx.from || ctx.from.is_bot === true) return false;
   const text = extractTelegramText(ctx.message);
-  if (!text || text.startsWith("/")) return false;
+  const hasAudio = Boolean(extractTelegramAudio(ctx.message));
+  if ((!text && !hasAudio) || (text && text.startsWith("/"))) return false;
 
   if (config.allowedIds.length > 0) {
     const allowed = new Set(config.allowedIds);
@@ -209,12 +314,14 @@ export class TelegramBot {
   private stopping = false;
   private started = false;
   private runtimeConfig: TelegramRuntimeConfig | null = null;
+  private readonly voiceRouter: VoiceInputRouter;
   private launchInProgress = false;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_BASE_MS = 2000;
 
   constructor(orchestrator: AgentOrchestrator) {
     this.orchestrator = orchestrator;
+    this.voiceRouter = new VoiceInputRouter(orchestrator.runtimePaths);
   }
 
   start(): void {
@@ -403,6 +510,81 @@ export class TelegramBot {
       } catch (err: unknown) {
         await ctx.reply(
           `Error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+
+    this.bot.on(["voice", "audio", "document"], async (ctx) => {
+      const config = this.runtimeConfig;
+      if (!config || !shouldHandleTelegramMessage(ctx, config)) return;
+      const reference = extractTelegramAudio(ctx.message);
+      if (!reference) return;
+      try {
+        if (config.typing) await ctx.sendChatAction("typing");
+        const data = await downloadTelegramAudio(ctx, reference);
+        const routed = await this.voiceRouter.route(
+          {
+            data,
+            filename: reference.filename,
+            mimeType: reference.mimeType,
+            ...(reference.durationMs !== undefined
+              ? { clientDurationMs: reference.durationMs }
+              : {}),
+          },
+          this.orchestrator.modelName,
+        );
+        const sessionId = resolveChannelSessionId(
+          this.orchestrator.config,
+          "telegram",
+          toStringId(ctx.from?.id),
+          toStringId(ctx.chat?.id),
+        );
+        const caption = extractTelegramText(ctx.message);
+        const message =
+          routed.mode === "local"
+            ? routed.transcript.transcript.trim()
+            : caption || "Please process this voice message.";
+        if (!message && routed.mode === "local") {
+          await ctx.reply("No speech was detected in the voice message.");
+          return;
+        }
+        const response = await collectAgentResponse(
+          this.orchestrator,
+          sessionId,
+          message,
+          TELEGRAM_MESSAGE_LIMIT * 3,
+          {
+            voice: {
+              source: "channel",
+              provider: routed.voice.provider,
+              language: routed.voice.language,
+              transcript: routed.mode === "local" ? message : "",
+              ...(routed.voice.durationMs !== undefined
+                ? { duration_ms: routed.voice.durationMs }
+                : {}),
+              ...(routed.mode === "local"
+                ? {
+                    latency_ms: routed.transcript.latency_ms,
+                    transport: routed.voice.transport,
+                  }
+                : {
+                    model: routed.model,
+                    transport: "cloud" as const,
+                  }),
+            },
+            ...(routed.mode === "cloud" ? { audio: routed.audio } : {}),
+          },
+        );
+        for (const part of splitOutboundMessageForOrchestrator(
+          this.orchestrator,
+          response,
+          TELEGRAM_MESSAGE_LIMIT,
+        )) {
+          if (part) await ctx.reply(part);
+        }
+      } catch (err: unknown) {
+        await ctx.reply(
+          `Voice message error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     });

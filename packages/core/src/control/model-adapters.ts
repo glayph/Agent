@@ -4,6 +4,8 @@ import {
   synchronizeLocalRuntimeForModel,
   type LocalRuntimeHealth,
 } from "../llm/local/local-runtime.js";
+import { VoiceRuntimeManager } from "../voice-runtime.js";
+import type { RuntimePaths } from "../paths.js";
 
 export interface ModelRuntimeDescriptor {
   [key: string]: unknown;
@@ -29,6 +31,53 @@ export interface ModelRuntimeAdapter {
   ): Promise<ModelRuntimeDescriptor> | ModelRuntimeDescriptor;
   install?: (input: Record<string, unknown>) => Promise<ModelRuntimeDescriptor>;
   remove?: (model: string) => Promise<{ removed: boolean; reason?: string }>;
+}
+
+export function createVoiceRuntimeAdapter(
+  runtimePaths: RuntimePaths,
+): ModelRuntimeAdapter {
+  const manager = new VoiceRuntimeManager(runtimePaths);
+  const inspect = (): ModelRuntimeDescriptor => {
+    const status = manager.status();
+    return {
+      id: "voice.local",
+      provider: "whisper.cpp",
+      model: status.activeModelId || undefined,
+      installed: status.installed,
+      active: status.healthy,
+      compatible: status.transport === "cli" || status.transport === "endpoint",
+      health: { ...status },
+      limitations:
+        status.reason === "Local voice-to-text model is installed and ready."
+          ? []
+          : [status.reason],
+    };
+  };
+  return {
+    id: "voice.local",
+    provider: "whisper.cpp",
+    inspect,
+    health: async () => {
+      await manager.health();
+      return inspect();
+    },
+    activate: async (model) => {
+      await manager.activate(model);
+      return inspect();
+    },
+    install: async (input) => {
+      const model =
+        typeof input.model_id === "string" ? input.model_id : input.model;
+      if (typeof model !== "string" || !model.trim())
+        throw new Error("Voice model_id is required.");
+      await manager.install(model);
+      return inspect();
+    },
+    remove: async (model) => {
+      await manager.remove(model);
+      return { removed: true };
+    },
+  };
 }
 
 export function createLlamaCppAdapter(): ModelRuntimeAdapter {

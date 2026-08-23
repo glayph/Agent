@@ -77,6 +77,12 @@ export interface MikiProviderCatalogResult {
   models: MikiProviderModel[];
 }
 
+export interface MikiProviderAudio {
+  data: string;
+  mimeType: string;
+  filename?: string;
+}
+
 export interface MikiProviderMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: unknown;
@@ -84,6 +90,7 @@ export interface MikiProviderMessage {
   tool_call_id?: string;
   tool_calls?: unknown[];
   image_urls?: string[];
+  audio?: MikiProviderAudio;
 }
 
 export interface MikiProviderCompletionRequest {

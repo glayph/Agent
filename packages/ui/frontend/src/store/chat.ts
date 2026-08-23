@@ -22,13 +22,14 @@ export interface ChatAttachment {
 }
 
 export interface ChatVoiceMetadata {
-  source: "microphone" | "upload"
-  provider: "whisper.cpp"
+  source: "microphone" | "upload" | "channel"
+  provider: "whisper.cpp" | "cloud"
   language: string
   transcript: string
   durationMs?: number
   latencyMs?: number
-  transport?: "endpoint" | "cli"
+  model?: string
+  transport?: "endpoint" | "cli" | "cloud"
 }
 
 export interface ChatToolCallFunction {

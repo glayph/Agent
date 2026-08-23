@@ -6,6 +6,7 @@ import {
   readRequestBuffer,
 } from "./file-manager-router.js";
 import { SpeechToTextError, WhisperCppService } from "../speech-to-text.js";
+import { VoiceInputRouter } from "../voice-routing.js";
 
 interface VoiceRouterOptions {
   configDir: string;
@@ -44,19 +45,24 @@ function sendError(res: Response, error: unknown): void {
 export function createVoiceRouter({ configDir }: VoiceRouterOptions): Router {
   const router = Router();
   const service = new WhisperCppService(configDir);
+  const voiceRouter = new VoiceInputRouter(configDir);
 
   router.get("/status", (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
     try {
       const settings = service.getSettings();
+      const localRuntime = voiceRouter.status();
       const configured = Boolean(
-        settings.enabled &&
-        (settings.endpoint || (settings.executable && settings.model)),
+        localRuntime.healthy ||
+        localRuntime.legacyConfigured ||
+        settings.endpoint ||
+        (settings.executable && settings.model),
       );
       res.json({
-        enabled: settings.enabled,
+        enabled: localRuntime.healthy,
         configured,
         provider: settings.provider,
+        local_runtime: localRuntime,
         language: settings.language,
         max_file_mb: settings.max_file_mb,
         max_audio_seconds: settings.max_audio_seconds,
@@ -114,13 +120,37 @@ export function createVoiceRouter({ configDir }: VoiceRouterOptions): Router {
           "Only one audio recording can be transcribed per request.",
         );
       }
-      const result = await service.transcribe({
-        data: file.data,
-        filename: file.filename,
-        mimeType: file.contentType || "",
-        clientDurationMs: positiveNumber(parsed.fields.duration_ms),
-      });
-      res.json({ ok: true, ...result });
+      const result = await voiceRouter.route(
+        {
+          data: file.data,
+          filename: file.filename,
+          mimeType: file.contentType || "",
+          clientDurationMs: positiveNumber(parsed.fields.duration_ms),
+        },
+        typeof parsed.fields.model === "string"
+          ? parsed.fields.model.trim().slice(0, 160) || undefined
+          : undefined,
+      );
+      if (result.mode === "local") {
+        res.json({
+          ok: true,
+          mode: "local",
+          ...result.transcript,
+          voice: result.voice,
+        });
+      } else {
+        res.json({
+          ok: true,
+          mode: "cloud",
+          model: result.model,
+          audio: {
+            data: result.audio.data.toString("base64"),
+            filename: result.audio.filename,
+            mimeType: result.audio.mimeType,
+          },
+          voice: result.voice,
+        });
+      }
     } catch (error) {
       sendError(res, error);
     }

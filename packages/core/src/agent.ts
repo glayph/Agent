@@ -107,6 +107,7 @@ import { createRunStrategy } from "./agent-run.js";
 import { globalAgentAggregator } from "./agent-aggregator.js";
 import { globalAgentPlanner } from "./agent-planner.js";
 import type { AgentControlService } from "./control/index.js";
+import type { MikiProviderAudio } from "./llm/provider/sdk/index.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 12;
@@ -1564,6 +1565,8 @@ export class AgentOrchestrator {
       messageId?: string;
       /** Safe voice transcription provenance; raw audio is never part of history. */
       voice?: VoiceMessageMetadata;
+      /** Ephemeral audio for a cloud model that explicitly accepts audio input. */
+      audio?: { data: Buffer; mimeType: string; filename?: string };
       /** Stable ID used for the completed assistant response. */
       responseMessageId?: string;
       completionGuard?: () => {
@@ -1780,11 +1783,20 @@ export class AgentOrchestrator {
           typeof url === "string" && url.trim().length > 0,
       )
       .slice(0, 4);
-    if (imageUrls.length > 0) {
-      const lastUserMessage = [...llmMessages]
-        .reverse()
-        .find((message) => message.role === "user");
-      if (lastUserMessage) lastUserMessage.image_urls = imageUrls;
+    const lastUserMessage = [...llmMessages]
+      .reverse()
+      .find((message) => message.role === "user");
+    if (imageUrls.length > 0 && lastUserMessage) {
+      lastUserMessage.image_urls = imageUrls;
+    }
+    if (options.audio && lastUserMessage) {
+      const audio: MikiProviderAudio = {
+        data: options.audio.data.toString("base64"),
+        mimeType: options.audio.mimeType,
+        ...(options.audio.filename ? { filename: options.audio.filename } : {}),
+      };
+      (lastUserMessage as ChatMessage & { audio: MikiProviderAudio }).audio =
+        audio;
     }
 
     llmMessages = AgentOrchestrator._compactMessagesIfNeeded(

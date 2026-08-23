@@ -384,21 +384,13 @@ channel_list:
   mqtt:
     enabled: false
     type: mqtt
-
-# Optional local voice transcription. Agent Miki never downloads the binary/model
-# automatically and never retains raw audio. Enable only after installing an
-# official whisper.cpp runtime on this machine.
 speech_to_text:
   enabled: false
   provider: whisper.cpp
+  models: []
   language: auto
   max_audio_seconds: 300
   max_file_mb: 25
   timeout_ms: 120000
   concurrency: 1
   retain_audio: false
-  # Option A: local whisper-server (recommended for repeated voice messages)
-  # endpoint: http://127.0.0.1:8080
-  # Option B: direct whisper-cli execution (provide both paths)
-  # executable: /absolute/path/to/whisper-cli
-  # model: /absolute/path/to/ggml-base.bin

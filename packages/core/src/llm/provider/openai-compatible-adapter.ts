@@ -198,6 +198,7 @@ function serializeMultimodalMessages(
     const candidate = message as unknown as {
       content?: unknown;
       image_urls?: unknown;
+      audio?: { data?: unknown; mimeType?: unknown; filename?: unknown };
     };
     const imageUrls = Array.isArray(candidate.image_urls)
       ? candidate.image_urls.filter(
@@ -205,15 +206,33 @@ function serializeMultimodalMessages(
             typeof url === "string" && url.trim().length > 0,
         )
       : [];
-    if (imageUrls.length === 0) return message;
+    const audioData =
+      typeof candidate.audio?.data === "string" && candidate.audio.data.trim()
+        ? candidate.audio.data.trim()
+        : undefined;
+    const audioMime =
+      typeof candidate.audio?.mimeType === "string"
+        ? candidate.audio.mimeType.split(";", 1)[0].trim().toLowerCase()
+        : "audio/wav";
+    if (imageUrls.length === 0 && !audioData) return message;
     const text = typeof candidate.content === "string" ? candidate.content : "";
+    const audioFormat = audioMime.split("/", 2)[1] || "wav";
     return {
       ...(message as object),
       content: [
         ...(text ? [{ type: "text", text }] : []),
         ...imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+        ...(audioData
+          ? [
+              {
+                type: "input_audio",
+                input_audio: { data: audioData, format: audioFormat },
+              },
+            ]
+          : []),
       ],
       image_urls: undefined,
+      audio: undefined,
     } as unknown as ProviderCompletionRequest["messages"][number];
   });
 }

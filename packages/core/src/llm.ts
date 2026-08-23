@@ -39,6 +39,12 @@ export async function achatCompletion(
   return providerRegistry.complete(model, messages, extra);
 }
 
+export async function supportsAudioModel(
+  model: string,
+): Promise<boolean | undefined> {
+  return providerRegistry.supportsAudio(model);
+}
+
 /** Clear all provider SDK client caches after credentials or endpoints change. */
 export function updateClient(): void {
   providerRegistry.clearCaches();

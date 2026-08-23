@@ -5,13 +5,15 @@ export interface ToolCall {
 }
 
 export interface VoiceMessageMetadata {
-  source: "microphone" | "upload";
-  provider: "whisper.cpp";
+  source: "microphone" | "upload" | "channel";
+  provider: "whisper.cpp" | "cloud";
   language: string;
   transcript: string;
   duration_ms?: number;
   latency_ms?: number;
-  transport?: "endpoint" | "cli";
+  transport?: "endpoint" | "cli" | "cloud";
+  channel?: string;
+  model?: string;
 }
 
 export interface ChatMessage {

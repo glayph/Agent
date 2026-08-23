@@ -10,26 +10,23 @@ const launcherDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(launcherDir, "..");
 const sourceRuntime = path.join(packageRoot, "runtime");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
-const embeddedNode = path.join(sourceRuntime, "node", "bin", `node${executableSuffix}`);
+const embeddedNode = path.join(
+  sourceRuntime,
+  "node",
+  "bin",
+  `node${executableSuffix}`,
+);
 const bundledLlama = path.join(
   sourceRuntime,
   "native",
   `llama-server${executableSuffix}`,
 );
-const bundledWhisper = path.join(
-  sourceRuntime,
-  "voice",
-  `whisper-cli${executableSuffix}`,
-);
-const bundledWhisperModel = path.join(
-  sourceRuntime,
-  "voice",
-  "ggml-tiny.en.bin",
-);
-const defaultDataRoot = path.join(
-  process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"),
-  "miki",
-);
+const dataBase =
+  process.env.XDG_DATA_HOME ||
+  (process.platform === "win32"
+    ? process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local")
+    : path.join(os.homedir(), ".local", "share"));
+const defaultDataRoot = path.join(dataBase, "miki");
 const runtimeRoot = path.resolve(
   process.env.MIKI_RUNTIME_ROOT || path.join(defaultDataRoot, "runtime"),
 );
@@ -37,7 +34,11 @@ const workspaceRoot = path.resolve(
   process.env.MIKI_WORKSPACE_DIR || path.join(defaultDataRoot, "workspace"),
 );
 const statePath = path.join(runtimeRoot, "data", "launcher-state.json");
-const credentialPath = path.join(runtimeRoot, "data", "first-run-credentials.txt");
+const credentialPath = path.join(
+  runtimeRoot,
+  "data",
+  "first-run-credentials.txt",
+);
 const defaultLocalPort = 19300;
 
 function fail(message, code = 1) {
@@ -96,20 +97,31 @@ function upsertEnvValues(file, values) {
   for (const [key, value] of Object.entries(values)) {
     const nextLine = `${key}=${value}`;
     const index = lines.findIndex((line) =>
-      new RegExp(`^${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*=`).test(line),
+      new RegExp(
+        `^${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*=`,
+      ).test(line),
     );
     if (index >= 0) lines[index] = nextLine;
     else lines.push(nextLine);
   }
-  fs.writeFileSync(file, `${lines.filter((line, index, all) => index < all.length - 1 || line).join("\n").replace(/\n+$/, "")}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  fs.writeFileSync(
+    file,
+    `${lines
+      .filter((line, index, all) => index < all.length - 1 || line)
+      .join("\n")
+      .replace(/\n+$/, "")}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
 }
 
 function validateExternalModelPath(modelPath) {
   if (!path.isAbsolute(modelPath)) {
-    throw new Error("MIKI_MODEL_PATH must be an absolute path to a .gguf file.");
+    throw new Error(
+      "MIKI_MODEL_PATH must be an absolute path to a .gguf file.",
+    );
   }
   if (!modelPath.toLowerCase().endsWith(".gguf")) {
     throw new Error("MIKI_MODEL_PATH must point to a .gguf file.");
@@ -123,7 +135,8 @@ function validateExternalModelPath(modelPath) {
 function removeStaleBundledModelDefaults(file) {
   if (!fs.existsSync(file)) return;
   const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
-  const stale = /^(?:MIKI_MODEL|DEFAULT_MODEL)\s*=\s*(?:llama\.cpp\/)?lfm2-local\s*$/i;
+  const stale =
+    /^(?:MIKI_MODEL|DEFAULT_MODEL)\s*=\s*(?:llama\.cpp\/)?lfm2-local\s*$/i;
   const filtered = lines.filter((line) => !stale.test(line));
   if (filtered.join("\n") !== lines.join("\n")) {
     fs.writeFileSync(file, `${filtered.join("\n").replace(/\n+$/, "")}\n`, {
@@ -238,7 +251,10 @@ function prepareRuntimeLayout() {
     ensureDir(directory);
   }
 
-  copyMissingTree(path.join(sourceRuntime, "config"), path.join(runtimeRoot, "config"));
+  copyMissingTree(
+    path.join(sourceRuntime, "config"),
+    path.join(runtimeRoot, "config"),
+  );
   const envPath = path.join(runtimeRoot, "config", ".env");
   if (!fs.existsSync(envPath)) {
     fs.writeFileSync(envPath, "# Agent Miki offline defaults\n", {
@@ -267,7 +283,9 @@ function prepareRuntimeLayout() {
     const modelId = String(record.model || "").toLowerCase();
     const modelPath = String(record.local?.model_path || "");
     return !(
-      (modelName === "lfm2-local" || modelName === "lfm2 local" || modelId === "lfm2-local") &&
+      (modelName === "lfm2-local" ||
+        modelName === "lfm2 local" ||
+        modelId === "lfm2-local") &&
       !fs.existsSync(modelPath)
     );
   });
@@ -301,9 +319,10 @@ function requiredAssets() {
   return [
     ["embedded Node", embeddedNode],
     ["llama.cpp server executable", bundledLlama],
-    ["Whisper.cpp CLI", bundledWhisper],
-    ["Whisper tiny.en model", bundledWhisperModel],
-    ["gateway build", path.join(sourceRuntime, "packages", "gateway", "dist", "index.js")],
+    [
+      "gateway build",
+      path.join(sourceRuntime, "packages", "gateway", "dist", "index.js"),
+    ],
     [
       "dashboard index",
       path.join(
@@ -321,7 +340,9 @@ function requiredAssets() {
 function printCredentials(auth) {
   if (!auth.created) return;
   if (auth.password) {
-    console.log(`[miki-offline] First-run dashboard password: ${auth.password}`);
+    console.log(
+      `[miki-offline] First-run dashboard password: ${auth.password}`,
+    );
   }
   console.log(
     `[miki-offline] Credentials are also stored at ${credentialPath} (mode 600); delete that file after saving the password.`,
@@ -330,7 +351,9 @@ function printCredentials(auth) {
 
 function doctor() {
   let failed = false;
-  console.log(`Agent Miki ${process.platform}-${process.arch} offline diagnostic\n`);
+  console.log(
+    `Agent Miki ${process.platform}-${process.arch} offline diagnostic\n`,
+  );
   console.log(`Package root: ${packageRoot}`);
   console.log(`Runtime data: ${runtimeRoot}`);
   console.log(`Workspace: ${workspaceRoot}`);
@@ -365,13 +388,23 @@ function doctor() {
       failed = true;
     }
   } else {
-    console.log("INFO answer-model GGUF is not bundled; configure MIKI_MODEL_PATH or use the Models page.");
+    console.log(
+      "INFO answer-model GGUF is not bundled; configure MIKI_MODEL_PATH or use the Models page.",
+    );
   }
+  console.log(
+    "INFO voice-to-text assets are not bundled; configure a local runtime/model or use an approved audio-capable cloud model.",
+  );
   if (failed) {
-    fail("Offline package is incomplete. Reinstall the matching Linux x64 release asset.", 1);
+    fail(
+      `Offline package is incomplete. Reinstall the matching ${process.platform}-${process.arch} release asset.`,
+      1,
+    );
   } else {
     console.log("\nPASS All bundled offline assets are present.");
-    console.log("The dashboard remains bound to 127.0.0.1 unless GATEWAY_HOST is explicitly changed.");
+    console.log(
+      "The dashboard remains bound to 127.0.0.1 unless GATEWAY_HOST is explicitly changed.",
+    );
   }
 }
 
@@ -381,7 +414,8 @@ function spawnSyncVersion(executable) {
     timeout: 5000,
   });
   if (child.error) throw child.error;
-  if (child.status !== 0) throw new Error(child.stderr || "version command failed");
+  if (child.status !== 0)
+    throw new Error(child.stderr || "version command failed");
   return child.stdout.trim();
 }
 
@@ -389,9 +423,16 @@ function startGateway(auth, argv) {
   for (const [label, target] of requiredAssets()) {
     if (!fs.existsSync(target)) throw new Error(`Missing ${label}: ${target}`);
   }
-  const gatewayEntry = path.join(sourceRuntime, "packages", "gateway", "dist", "index.js");
-  const nodeExecutable = fs.existsSync(embeddedNode) ? embeddedNode : process.execPath;
-  const voiceLibraryDir = path.join(sourceRuntime, "voice");
+  const gatewayEntry = path.join(
+    sourceRuntime,
+    "packages",
+    "gateway",
+    "dist",
+    "index.js",
+  );
+  const nodeExecutable = fs.existsSync(embeddedNode)
+    ? embeddedNode
+    : process.execPath;
   const nativeLibraryDir = path.join(sourceRuntime, "native", "lib");
   const oldPath = process.env.PATH || "";
   const oldLibraryPath = process.env.LD_LIBRARY_PATH || "";
@@ -403,21 +444,29 @@ function startGateway(auth, argv) {
     MIKI_RUNTIME_ROOT: runtimeRoot,
     MIKI_WORKSPACE_DIR: workspaceRoot,
     ...(process.env.MIKI_MODEL ? { MIKI_MODEL: process.env.MIKI_MODEL } : {}),
-    ...(process.env.DEFAULT_MODEL ? { DEFAULT_MODEL: process.env.DEFAULT_MODEL } : {}),
-    ...(process.env.MIKI_PROVIDER ? { MIKI_PROVIDER: process.env.MIKI_PROVIDER } : {}),
+    ...(process.env.DEFAULT_MODEL
+      ? { DEFAULT_MODEL: process.env.DEFAULT_MODEL }
+      : {}),
+    ...(process.env.MIKI_PROVIDER
+      ? { MIKI_PROVIDER: process.env.MIKI_PROVIDER }
+      : {}),
     MIKI_LLAMA_SERVER_BIN: process.env.MIKI_LLAMA_SERVER_BIN || bundledLlama,
-    MIKI_SPEECH_TO_TEXT_ENABLED: process.env.MIKI_SPEECH_TO_TEXT_ENABLED || "true",
-    MIKI_WHISPER_CPP_EXECUTABLE:
-      process.env.MIKI_WHISPER_CPP_EXECUTABLE || bundledWhisper,
-    MIKI_WHISPER_CPP_MODEL:
-      process.env.MIKI_WHISPER_CPP_MODEL || bundledWhisperModel,
+    ...(process.env.MIKI_SPEECH_TO_TEXT_ENABLED
+      ? { MIKI_SPEECH_TO_TEXT_ENABLED: process.env.MIKI_SPEECH_TO_TEXT_ENABLED }
+      : {}),
+    ...(process.env.MIKI_WHISPER_CPP_EXECUTABLE
+      ? { MIKI_WHISPER_CPP_EXECUTABLE: process.env.MIKI_WHISPER_CPP_EXECUTABLE }
+      : {}),
+    ...(process.env.MIKI_WHISPER_CPP_MODEL
+      ? { MIKI_WHISPER_CPP_MODEL: process.env.MIKI_WHISPER_CPP_MODEL }
+      : {}),
     MIKI_SPEECH_TO_TEXT_LANGUAGE:
-      process.env.MIKI_SPEECH_TO_TEXT_LANGUAGE || "en",
+      process.env.MIKI_SPEECH_TO_TEXT_LANGUAGE || "auto",
     MIKI_SPEECH_TO_TEXT_MAX_AUDIO_SECONDS:
       process.env.MIKI_SPEECH_TO_TEXT_MAX_AUDIO_SECONDS || "120",
     MIKI_SPEECH_TO_TEXT_MAX_FILE_MB:
       process.env.MIKI_SPEECH_TO_TEXT_MAX_FILE_MB || "25",
-    LD_LIBRARY_PATH: [voiceLibraryDir, nativeLibraryDir, oldLibraryPath]
+    LD_LIBRARY_PATH: [nativeLibraryDir, oldLibraryPath]
       .filter(Boolean)
       .join(path.delimiter),
   };
@@ -426,11 +475,15 @@ function startGateway(auth, argv) {
     env.GATEWAY_PORT = argv[portIndex + 1];
   }
   console.log("[miki-offline] Starting local Agent Miki gateway...");
-  console.log(`[miki-offline] Dashboard: http://${env.GATEWAY_HOST || "127.0.0.1"}:${env.GATEWAY_PORT || "18800"}`);
+  console.log(
+    `[miki-offline] Dashboard: http://${env.GATEWAY_HOST || "127.0.0.1"}:${env.GATEWAY_PORT || "18800"}`,
+  );
   console.log(
     `[miki-offline] Answer model: ${env.MIKI_MODEL || "not configured; set MIKI_MODEL_PATH or use the Models page"}`,
   );
-  console.log(`[miki-offline] Voice: bundled whisper.cpp CLI + tiny.en`);
+  console.log(
+    `[miki-offline] Voice: optional local runtime/model or audio-capable cloud fallback`,
+  );
   printCredentials(auth);
   const child = spawn(nodeExecutable, [gatewayEntry], {
     cwd: workspaceRoot,
@@ -453,13 +506,16 @@ function startGateway(auth, argv) {
   });
   child.once("exit", (code, signal) => {
     if (signal) console.log(`[miki-offline] Gateway stopped after ${signal}.`);
-    else if (code) console.error(`[miki-offline] Gateway exited with code ${code}.`);
+    else if (code)
+      console.error(`[miki-offline] Gateway exited with code ${code}.`);
     process.exitCode = code ?? 0;
   });
 }
 
 function usage() {
-  console.log(`Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and voice assets\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n`);
+  console.log(
+    `Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and optional voice configuration\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n`,
+  );
 }
 
 const command = process.argv[2] || "start";
@@ -479,14 +535,23 @@ try {
     doctor();
   } else if (command === "status") {
     prepareRuntimeLayout();
-    console.log(JSON.stringify({
-      package_root: packageRoot,
-      runtime_root: runtimeRoot,
-      workspace: workspaceRoot,
-      answer_model: process.env.MIKI_MODEL_PATH || "not configured",
-      whisper_model: bundledWhisperModel,
-      auth_initialized: Boolean(readJson(statePath, {}).auth?.password_hash),
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          package_root: packageRoot,
+          runtime_root: runtimeRoot,
+          workspace: workspaceRoot,
+          answer_model: process.env.MIKI_MODEL_PATH || "not configured",
+          voice_to_text:
+            "not bundled; configure a local runtime/model or use cloud audio",
+          auth_initialized: Boolean(
+            readJson(statePath, {}).auth?.password_hash,
+          ),
+        },
+        null,
+        2,
+      ),
+    );
   } else if (command === "start" || command === "run") {
     const auth = prepareRuntimeLayout();
     startGateway(auth, args);

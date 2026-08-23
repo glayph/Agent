@@ -16,6 +16,44 @@ export function parseControlIntent(message: string): ControlIntentResult {
   if (!text)
     return { matched: false, explanation: "Empty management request." };
 
+  const voiceInstall = lower.match(
+    /(?:install|download|setup|set up|ইনস্টল|ডাউনলোড|স্থাপন).*(?:voice|speech|vtt|whisper|ভয়েস|ভয়েস|স্পিচ).*(?:model|মডেল)\s*([a-z0-9._-]+)?/i,
+  );
+  if (voiceInstall) {
+    const model = voiceInstall[1] || "base";
+    if (!["base", "base.en", "small"].includes(model)) {
+      return {
+        matched: true,
+        explanation:
+          "Only the official voice model catalog entries base, base.en, and small can be installed.",
+        request: {
+          capability: "model_runtime",
+          action: "install",
+          input: {
+            adapter: "voice.local",
+            provider: "whisper.cpp",
+            model_id: model,
+          },
+          context: { origin: "local" },
+        },
+      };
+    }
+    return {
+      matched: true,
+      explanation: `Install the allow-listed official whisper.cpp voice model ${model} after owner approval.`,
+      request: {
+        capability: "model_runtime",
+        action: "install",
+        input: {
+          adapter: "voice.local",
+          provider: "whisper.cpp",
+          model_id: model,
+        },
+        context: { origin: "local" },
+      },
+    };
+  }
+
   if (
     /^(inspect|show|check)\s+(agent\s+)?(control\s+)?(state|configuration|config)$/i.test(
       text,
