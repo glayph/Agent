@@ -10,11 +10,6 @@ const launcherDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(launcherDir, "..");
 const sourceRuntime = path.join(packageRoot, "runtime");
 const embeddedNode = path.join(sourceRuntime, "node", "bin", "node");
-const bundledModel = path.join(
-  sourceRuntime,
-  "models",
-  "LFM2-1.2B-Q4_K_M.gguf",
-);
 const bundledLlama = path.join(
   sourceRuntime,
   "native",
@@ -38,8 +33,6 @@ const workspaceRoot = path.resolve(
 );
 const statePath = path.join(runtimeRoot, "data", "launcher-state.json");
 const credentialPath = path.join(runtimeRoot, "data", "first-run-credentials.txt");
-const defaultModelName = "LFM2-Local";
-const defaultModelId = "llama.cpp/lfm2-local";
 const defaultLocalPort = 19300;
 
 function fail(message, code = 1) {
@@ -91,12 +84,70 @@ function writeJson(file, value) {
   });
 }
 
-function localModelRecord() {
-  const modelDir = path.dirname(bundledModel);
+function upsertEnvValues(file, values) {
+  const lines = fs.existsSync(file)
+    ? fs.readFileSync(file, "utf8").split(/\r?\n/)
+    : ["# Agent Miki offline defaults"];
+  for (const [key, value] of Object.entries(values)) {
+    const nextLine = `${key}=${value}`;
+    const index = lines.findIndex((line) =>
+      new RegExp(`^${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*=`).test(line),
+    );
+    if (index >= 0) lines[index] = nextLine;
+    else lines.push(nextLine);
+  }
+  fs.writeFileSync(file, `${lines.filter((line, index, all) => index < all.length - 1 || line).join("\n").replace(/\n+$/, "")}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
+function validateExternalModelPath(modelPath) {
+  if (!path.isAbsolute(modelPath)) {
+    throw new Error("MIKI_MODEL_PATH must be an absolute path to a .gguf file.");
+  }
+  if (!modelPath.toLowerCase().endsWith(".gguf")) {
+    throw new Error("MIKI_MODEL_PATH must point to a .gguf file.");
+  }
+  if (!fs.existsSync(modelPath) || !fs.statSync(modelPath).isFile()) {
+    throw new Error(`External GGUF model not found: ${modelPath}`);
+  }
+  return path.resolve(modelPath);
+}
+
+function removeStaleBundledModelDefaults(file) {
+  if (!fs.existsSync(file)) return;
+  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  const stale = /^(?:MIKI_MODEL|DEFAULT_MODEL)\s*=\s*(?:llama\.cpp\/)?lfm2-local\s*$/i;
+  const filtered = lines.filter((line) => !stale.test(line));
+  if (filtered.join("\n") !== lines.join("\n")) {
+    fs.writeFileSync(file, `${filtered.join("\n").replace(/\n+$/, "")}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
+}
+
+function externalModelPath() {
+  return process.env.MIKI_MODEL_PATH?.trim() || "";
+}
+
+function externalModelId() {
+  return process.env.MIKI_MODEL_ID?.trim() || "external-local";
+}
+
+function externalModelName() {
+  return process.env.MIKI_LOCAL_MODEL_NAME?.trim() || "External Local Model";
+}
+
+function localModelRecord(modelPath) {
+  const modelDir = path.dirname(modelPath);
+  const modelId = externalModelId();
+  const modelName = externalModelName();
   return {
-    model_name: defaultModelName,
+    model_name: modelName,
     provider: "llama.cpp",
-    model: "lfm2-local",
+    model: modelId,
     api_base: `http://127.0.0.1:${defaultLocalPort}/v1`,
     auth_method: "none",
     enabled: true,
@@ -104,9 +155,9 @@ function localModelRecord() {
     custom_headers: {},
     local: {
       runtime: "llama.cpp",
-      model_path: bundledModel,
+      model_path: modelPath,
       model_format: "gguf",
-      display_name: "LiquidAI LFM2 1.2B (bundled local)",
+      display_name: `${modelName} (external GGUF)`,
       context_size: 4096,
       gpu_layers: 0,
       enabled: true,
@@ -185,11 +236,10 @@ function prepareRuntimeLayout() {
   copyMissingTree(path.join(sourceRuntime, "config"), path.join(runtimeRoot, "config"));
   const envPath = path.join(runtimeRoot, "config", ".env");
   if (!fs.existsSync(envPath)) {
-    fs.writeFileSync(
-      envPath,
-      `# Agent Miki offline defaults\nMIKI_MODEL=${defaultModelId}\nDEFAULT_MODEL=${defaultModelId}\nMIKI_PROVIDER=llama.cpp\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    fs.writeFileSync(envPath, "# Agent Miki offline defaults\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
   copyMissingTree(
     path.join(sourceRuntime, "packages", "ui", "frontend", "dist"),
@@ -202,16 +252,39 @@ function prepareRuntimeLayout() {
 
   const state = readJson(statePath, {});
   if (!Array.isArray(state.models)) state.models = [];
-  if (
-    !state.models.some(
-      (model) =>
-        model &&
-        typeof model === "object" &&
-        String(model.model_name || "").toLowerCase() ===
-          defaultModelName.toLowerCase(),
-    )
-  ) {
-    state.models.push(localModelRecord());
+  if (!externalModelPath()) removeStaleBundledModelDefaults(envPath);
+  // Remove the old release’s synthetic bundled-model record when upgrading to
+  // a model-free package. User-configured external models are preserved.
+  state.models = state.models.filter((model) => {
+    if (!model || typeof model !== "object") return false;
+    const record = model;
+    const modelName = String(record.model_name || "").toLowerCase();
+    const modelId = String(record.model || "").toLowerCase();
+    const modelPath = String(record.local?.model_path || "");
+    return !(
+      (modelName === "lfm2-local" || modelName === "lfm2 local" || modelId === "lfm2-local") &&
+      !fs.existsSync(modelPath)
+    );
+  });
+  const configuredModelPath = externalModelPath();
+  if (configuredModelPath) {
+    const modelPath = validateExternalModelPath(configuredModelPath);
+    const model = localModelRecord(modelPath);
+    const modelIndex = state.models.findIndex(
+      (candidate) =>
+        candidate &&
+        typeof candidate === "object" &&
+        (String(candidate.model || "") === model.model ||
+          String(candidate.model_name || "") === model.model_name),
+    );
+    if (modelIndex >= 0) state.models[modelIndex] = model;
+    else state.models.push(model);
+    const runtimeModel = `llama.cpp/${model.model}`;
+    upsertEnvValues(envPath, {
+      MIKI_MODEL: runtimeModel,
+      DEFAULT_MODEL: runtimeModel,
+      MIKI_PROVIDER: "llama.cpp",
+    });
   }
   state.miki_token ||= crypto.randomBytes(24).toString("base64url");
   const auth = ensureDashboardAuth(state);
@@ -222,8 +295,7 @@ function prepareRuntimeLayout() {
 function requiredAssets() {
   return [
     ["embedded Node", embeddedNode],
-    ["llama.cpp server", bundledLlama],
-    ["LFM2 GGUF model", bundledModel],
+    ["llama.cpp server executable", bundledLlama],
     ["Whisper.cpp CLI", bundledWhisper],
     ["Whisper tiny.en model", bundledWhisperModel],
     ["gateway build", path.join(sourceRuntime, "packages", "gateway", "dist", "index.js")],
@@ -278,6 +350,18 @@ function doctor() {
       failed = true;
     }
   }
+  const configuredModelPath = externalModelPath();
+  if (configuredModelPath) {
+    try {
+      const modelPath = validateExternalModelPath(configuredModelPath);
+      console.log(`PASS external answer GGUF: ${modelPath}`);
+    } catch (error) {
+      console.log(`FAIL external answer GGUF: ${error.message}`);
+      failed = true;
+    }
+  } else {
+    console.log("INFO answer-model GGUF is not bundled; configure MIKI_MODEL_PATH or use the Models page.");
+  }
   if (failed) {
     fail("Offline package is incomplete. Reinstall the matching Linux x64 release asset.", 1);
   } else {
@@ -313,9 +397,9 @@ function startGateway(auth, argv) {
     MIKI_SOURCE_ROOT: sourceRuntime,
     MIKI_RUNTIME_ROOT: runtimeRoot,
     MIKI_WORKSPACE_DIR: workspaceRoot,
-    MIKI_MODEL: process.env.MIKI_MODEL || defaultModelId,
-    DEFAULT_MODEL: process.env.DEFAULT_MODEL || defaultModelId,
-    MIKI_PROVIDER: process.env.MIKI_PROVIDER || "llama.cpp",
+    ...(process.env.MIKI_MODEL ? { MIKI_MODEL: process.env.MIKI_MODEL } : {}),
+    ...(process.env.DEFAULT_MODEL ? { DEFAULT_MODEL: process.env.DEFAULT_MODEL } : {}),
+    ...(process.env.MIKI_PROVIDER ? { MIKI_PROVIDER: process.env.MIKI_PROVIDER } : {}),
     MIKI_LLAMA_SERVER_BIN: process.env.MIKI_LLAMA_SERVER_BIN || bundledLlama,
     MIKI_SPEECH_TO_TEXT_ENABLED: process.env.MIKI_SPEECH_TO_TEXT_ENABLED || "true",
     MIKI_WHISPER_CPP_EXECUTABLE:
@@ -338,7 +422,9 @@ function startGateway(auth, argv) {
   }
   console.log("[miki-offline] Starting local Agent Miki gateway...");
   console.log(`[miki-offline] Dashboard: http://${env.GATEWAY_HOST || "127.0.0.1"}:${env.GATEWAY_PORT || "18800"}`);
-  console.log(`[miki-offline] Local model: ${env.MIKI_MODEL}`);
+  console.log(
+    `[miki-offline] Answer model: ${env.MIKI_MODEL || "not configured; set MIKI_MODEL_PATH or use the Models page"}`,
+  );
   console.log(`[miki-offline] Voice: bundled whisper.cpp CLI + tiny.en`);
   printCredentials(auth);
   const child = spawn(nodeExecutable, [gatewayEntry], {
@@ -368,7 +454,7 @@ function startGateway(auth, argv) {
 }
 
 function usage() {
-  console.log(`Agent Miki Linux x64 offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and bundled local model\n  doctor        Check all bundled runtime, model, voice, and dashboard assets\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_DASHBOARD_PASSWORD\n`);
+  console.log(`Agent Miki Linux x64 offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and voice assets\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n`);
 }
 
 const command = process.argv[2] || "start";
@@ -392,7 +478,7 @@ try {
       package_root: packageRoot,
       runtime_root: runtimeRoot,
       workspace: workspaceRoot,
-      model: bundledModel,
+      answer_model: process.env.MIKI_MODEL_PATH || "not configured",
       whisper_model: bundledWhisperModel,
       auth_initialized: Boolean(readJson(statePath, {}).auth?.password_hash),
     }, null, 2));

@@ -427,7 +427,8 @@ export class MqttBot {
     socket.on("connect", sendConnectPacket);
     socket.on("secureConnect", sendConnectPacket);
     socket.on("data", (chunk) => {
-      this.handleData(chunk).catch((err) => {
+      const packet = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      this.handleData(packet).catch((err) => {
         console.warn(
           `MQTT packet handling failed: ${
             err instanceof Error ? err.message : String(err)

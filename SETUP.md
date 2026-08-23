@@ -1,15 +1,15 @@
 # Agent Miki — Complete Setup Guide
 
-**Version:** 1.3.3  
+**Version:** 1.3.5
 **Project type:** Local-first autonomous AI agent  
 **Audience:** Users installing Agent Miki from a clean Linux or Windows machine  
 **Author:** Manus AI
 
-> This guide describes the complete Agent Miki runtime: the React dashboard, Node.js gateway, TypeScript core, vendored headless llama.cpp runtime, local GGUF model flow, cloud/API providers, memory services, and the optional Go terminal interface.
+> This guide describes the complete Agent Miki runtime: the React dashboard, Node.js gateway, TypeScript core, vendored headless llama.cpp executable flow, separately configured local GGUF models, cloud/API providers, memory services, and the optional Go terminal interface.
 
 ## 1. What is included
 
-Agent Miki is a monorepo. The main `npm start` command launches the Node launcher, which starts the gateway and its managed core runtime. The dashboard is served by the gateway. When a local model is selected and configured for automatic startup, Agent Miki starts the bundled platform-specific `llama-server` process automatically; when a cloud/API model is selected, the local llama-server process is not needed for that request path.
+Agent Miki is a monorepo. The main `npm start` command launches the Node launcher, which starts the gateway and its managed core runtime. The dashboard is served by the gateway. When a local model is selected and configured for automatic startup, Agent Miki starts the included platform-specific `llama-server` executable against the separately configured GGUF path; no answer-model GGUF is included in the release. When a cloud/API model is selected, the local llama-server process is not needed for that request path.
 
 The repository keeps the complete llama.cpp source under `packages/core/src/llm/local/vendor/llama.cpp/`. The project build compiles only the headless server component and disables the upstream web UI before copying the resulting executable into the local runtime area. Agent Miki's own dashboard is the user interface for model management and chat.
 
@@ -279,7 +279,7 @@ After `npm start` is running:
 8. Save the model and select it as the default model.
 9. Return to Chat and send a short prompt.
 
-The local model form may also accept an explicit executable path. Normally this should be left empty so Agent Miki uses the bundled artifact. Use an explicit path only when intentionally connecting to a compatible `llama-server` executable or an existing loopback OpenAI-compatible local endpoint. Changes to context size, threads, batching, GPU layers, mmap, mlock, or flash attention invalidate the managed runtime fingerprint; Agent Miki restarts the managed server automatically before the next request.
+The local model form may also accept an explicit executable path. Normally this should be left empty so Agent Miki uses the included llama-server executable. The model file itself is always supplied separately. Use an explicit path only when intentionally connecting to a compatible `llama-server` executable or an existing loopback OpenAI-compatible local endpoint. Changes to context size, threads, batching, GPU layers, mmap, mlock, or flash attention invalidate the managed runtime fingerprint; Agent Miki restarts the managed server automatically before the next request.
 
 ### 5.3 Switching between cloud and local models
 

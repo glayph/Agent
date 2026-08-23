@@ -27,7 +27,6 @@ const whisperCommit = "233fe1fc9b48a09e361d3594520838ca266537fe";
 const whisperSourceUrl = "https://github.com/ggml-org/whisper.cpp";
 const ffmpegVersion = "7.1.1";
 const ffmpegSourceUrl = `https://ffmpeg.org/releases/ffmpeg-${ffmpegVersion}.tar.xz`;
-const lfmSourceUrl = "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF";
 const whisperModelSourceUrl = "https://huggingface.co/ggerganov/whisper.cpp";
 
 function log(message) {
@@ -285,10 +284,9 @@ function stageNativeAndModels() {
 
   const whisperSource = process.env.MIKI_WHISPER_CPP_BIN;
   const whisperModel = process.env.MIKI_WHISPER_CPP_MODEL;
-  const lfmModel = process.env.MIKI_LFM2_MODEL;
-  if (!whisperSource || !whisperModel || !lfmModel) {
+  if (!whisperSource || !whisperModel) {
     fail(
-      "Set MIKI_WHISPER_CPP_BIN, MIKI_WHISPER_CPP_MODEL, and MIKI_LFM2_MODEL to official, verified release inputs before building.",
+      "Set MIKI_WHISPER_CPP_BIN and MIKI_WHISPER_CPP_MODEL to official, verified release inputs before building.",
     );
   }
   const voiceDir = path.join(runtimeDir, "voice");
@@ -301,7 +299,26 @@ function stageNativeAndModels() {
     }
   }
   copyRequired(whisperModel, path.join(voiceDir, "ggml-tiny.en.bin"), "Whisper tiny.en model");
-  copyRequired(lfmModel, path.join(runtimeDir, "models", "LFM2-1.2B-Q4_K_M.gguf"), "LiquidAI LFM2 GGUF model");
+}
+
+function assertAnswerModelNotBundled() {
+  const modelsDir = path.join(runtimeDir, "models");
+  if (fs.existsSync(modelsDir)) {
+    fail(`Answer-model directory must not be bundled: ${modelsDir}`);
+  }
+  const bundledGgufs = [];
+  function scan(directory) {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) scan(target);
+      else if (entry.name.toLowerCase().endsWith(".gguf")) bundledGgufs.push(target);
+    }
+  }
+  scan(runtimeDir);
+  if (bundledGgufs.length > 0) {
+    fail(`Answer-model GGUF must not be bundled: ${bundledGgufs.join(", ")}`);
+  }
 }
 
 function stageNodeRuntime() {
@@ -338,10 +355,6 @@ function stageNotices() {
     "https://raw.githubusercontent.com/openai/whisper/main/LICENSE",
     path.join(licensesDir, "OPENAI_WHISPER_LICENSE"),
   );
-  download(
-    `${lfmSourceUrl}/raw/main/LICENSE`,
-    path.join(licensesDir, "LFM_OPEN_LICENSE_v1.0"),
-  );
   const notices = `# Agent Miki Linux x64 offline release notices
 
 This package ships the following third-party artifacts. Their licenses are included in the \`licenses/\` directory and remain separate from the Agent Miki MIT license.
@@ -353,9 +366,6 @@ This package ships the following third-party artifacts. Their licenses are inclu
 | whisper.cpp | \`runtime/voice/whisper-cli\` and its shared runtime libraries | MIT license | ${whisperSourceUrl} at commit ${whisperCommit} |
 | FFmpeg decoder subset | Statically linked into the Whisper voice libraries | LGPL 2.1-or-later build | ${ffmpegSourceUrl} |
 | OpenAI Whisper tiny.en | \`runtime/voice/ggml-tiny.en.bin\` | Upstream Whisper model attribution/license | ${whisperModelSourceUrl} |
-| LiquidAI LFM2 1.2B Q4_K_M | \`runtime/models/LFM2-1.2B-Q4_K_M.gguf\` | LFM Open License v1.0 (includes a commercial-use threshold condition) | ${lfmSourceUrl} |
-
-The LFM2 model is not presented as unrestricted MIT software. Redistribution is made with the complete LFM Open License v1.0 in this package. Users and organizations remain responsible for checking that their use complies with that license.
 `;
   writeText(path.join(stageDir, "THIRD_PARTY_NOTICES.md"), notices);
 }
@@ -419,7 +429,7 @@ function writePackageMetadata(productionPackages) {
 function writeReadme() {
   const readme = `# Agent Miki ${version}: Linux x64 offline package
 
-This is the **self-contained Linux x64 release artifact** for Agent Miki. It contains the production dashboard, gateway, core, memory package, skills catalog, prebundled production Node dependencies, an embedded Node ${nodeVersion} runtime, the existing llama.cpp server, the LiquidAI LFM2 1.2B Q4_K_M GGUF model, Whisper.cpp voice recognition, and an FFmpeg-enabled Whisper build for WAV, MP3, M4A, OGG, WebM, and FLAC inputs.
+This is the **self-contained Linux x64 release artifact** for Agent Miki. It contains the production dashboard, gateway, core, memory package, skills catalog, prebundled production Node dependencies, an embedded Node ${nodeVersion} runtime, the llama.cpp server executable, Whisper.cpp voice recognition, and an FFmpeg-enabled Whisper build for WAV, MP3, M4A, OGG, WebM, and FLAC inputs. No answer-model GGUF is bundled; choose and configure a local model separately or use a configured cloud provider.
 
 The package is intended for Linux x86_64 systems with a compatible glibc and CPU. The embedded native components still use the host kernel and glibc; this is not a virtual machine or a full operating-system image.
 
@@ -446,17 +456,19 @@ cd ${releaseName}
 ./runtime/node/bin/node ./bin/miki-offline.js start
 \`\`\`
 
-On first start the launcher creates user-writable state below \`$XDG_DATA_HOME/miki\` or \`~/.local/share/miki\`, keeps the immutable package tree untouched, registers the bundled LFM2 model, enables local Whisper.cpp transcription, and writes a randomly generated dashboard password to \`runtime/data/first-run-credentials.txt\` with mode 600. Save the printed password and delete that file after saving it. To choose a password before first start, set \`MIKI_DASHBOARD_PASSWORD\` to a value of at least eight characters.
+On first start the launcher creates user-writable state below \`$XDG_DATA_HOME/miki\` or \`~/.local/share/miki\`, keeps the immutable package tree untouched, enables local Whisper.cpp transcription, and writes a randomly generated dashboard password to \`runtime/data/first-run-credentials.txt\` with mode 600. Save the printed password and delete that file after saving it. To choose a password before first start, set \`MIKI_DASHBOARD_PASSWORD\` to a value of at least eight characters.
 
-The dashboard defaults to \`http://127.0.0.1:18800\`. The default answer model is local LFM2 and the default voice path is local Whisper.cpp. No cloud API key, online registry, model download, or plugin download is used by the offline start path. Remote channels, cloud providers, external MCP servers, and online skill installation remain optional features that require explicit configuration and network access.
+The dashboard defaults to \`http://127.0.0.1:18800\`. No answer-model GGUF is pre-installed. To use the bundled llama.cpp executable with a separate local model, set \`MIKI_MODEL_PATH=/absolute/path/to/model.gguf\` before \`start\`; optionally set \`MIKI_LOCAL_MODEL_NAME\` and \`MIKI_MODEL_ID\`. The launcher registers that external model in user state and restricts its model allowlist to the model directory. You can also add a model from the dashboard Models page. If no model is configured, the gateway still starts and the dashboard remains available for cloud-provider or later model configuration.
+
+No cloud API key, online registry, model download, or plugin download is used by the offline start path. Remote channels, cloud providers, external MCP servers, and online skill installation remain optional features that require explicit configuration and network access.
 
 ## Diagnostics and limitations
 
-Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The bundled GGUF model is a compact local model intended for low-cost local responses; response quality, context length, latency, and RAM use depend on the host CPU and available memory. The release was built for Linux x86_64 and is not a Windows build.
+Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable but not an answer-model GGUF; model quality, context length, latency, and RAM use depend on the separately selected model and host CPU/memory. The release was built for Linux x86_64 and is not a Windows build.
 
 The dashboard’s existing conversational chat/Inspector behavior, local/API/Auto web-search controls, memory system, skills, MCP surfaces, and voice transcript routing are included from the source commit used to create this release. External online acquisitions remain approval-gated by the application’s safety controls and are not silently performed by this package.
 
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the complete license files under [licenses/](licenses/). The LFM2 model is distributed under the LFM Open License v1.0, not under the Agent Miki MIT license.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the complete license files under [licenses/](licenses/). Separately downloaded models retain their own licenses and are not covered by the Agent Miki MIT license.
 `;
   writeText(path.join(stageDir, "README.md"), readme);
 }
@@ -468,8 +480,7 @@ function sha256(file) {
 function writeManifest() {
   const important = [
     ["runtime/node/bin/node", "Embedded Node.js runtime"],
-    ["runtime/native/llama-server", "Bundled llama.cpp server"],
-    ["runtime/models/LFM2-1.2B-Q4_K_M.gguf", "LiquidAI LFM2 1.2B Q4_K_M GGUF model"],
+    ["runtime/native/llama-server", "Bundled llama.cpp server executable"],
     ["runtime/voice/whisper-cli", "Whisper.cpp CLI"],
     ["runtime/voice/ggml-tiny.en.bin", "Whisper tiny.en model"],
     ["bin/miki-offline.js", "Portable launcher"],
@@ -499,7 +510,7 @@ function writeManifest() {
         whisper_cpp: { source: whisperSourceUrl, commit: whisperCommit },
         ffmpeg: { version: ffmpegVersion, source: ffmpegSourceUrl, license: "LGPL-2.1-or-later" },
         models: {
-          lfm2: { source: lfmSourceUrl, file: "runtime/models/LFM2-1.2B-Q4_K_M.gguf" },
+          answer_model: "not bundled; configure separately",
           whisper: { source: whisperModelSourceUrl, file: "runtime/voice/ggml-tiny.en.bin" },
         },
         components,
@@ -546,6 +557,7 @@ function main() {
   stageRuntimeTree();
   writeRuntimeLoader();
   stageNativeAndModels();
+  assertAnswerModelNotBundled();
   stageNodeRuntime();
   stageNotices();
   stageLauncher();
