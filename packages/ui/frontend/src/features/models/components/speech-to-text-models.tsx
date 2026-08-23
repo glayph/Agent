@@ -12,13 +12,13 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import {
+  type SpeechModelTransport,
+  type SpeechModelsResponse,
+  type SpeechToTextModel,
   activateSpeechModel,
   addSpeechModel,
   deleteSpeechModel,
   getSpeechModels,
-  type SpeechModelTransport,
-  type SpeechModelsResponse,
-  type SpeechToTextModel,
   updateSpeechConfig,
   updateSpeechModel,
 } from "@/api/speech-models"
@@ -27,8 +27,19 @@ import { Button } from "@/shared/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
 import { Label } from "@/shared/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import { Switch } from "@/shared/ui/switch"
+
+import {
+  ModelFilePickerDialog,
+  type ModelFilePickerKind,
+} from "./model-file-picker-dialog"
 
 interface SpeechModelForm {
   id: string
@@ -69,13 +80,19 @@ export function SpeechToTextModels() {
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<SpeechModelForm>(EMPTY_FORM)
+  const [filePickerKind, setFilePickerKind] =
+    useState<ModelFilePickerKind | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       setData(await getSpeechModels())
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("models.speech.loadError", "Failed to load speech models"))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("models.speech.loadError", "Failed to load speech models"),
+      )
     } finally {
       setLoading(false)
     }
@@ -102,15 +119,27 @@ export function SpeechToTextModels() {
 
   const saveModel = async () => {
     if (!form.id.trim() || !form.name.trim()) {
-      toast.error(t("models.speech.required", "Model ID and name are required."))
+      toast.error(
+        t("models.speech.required", "Model ID and name are required."),
+      )
       return
     }
     if (form.transport === "endpoint" && !form.endpoint.trim()) {
-      toast.error(t("models.speech.endpointRequired", "An HTTP(S) endpoint is required."))
+      toast.error(
+        t("models.speech.endpointRequired", "An HTTP(S) endpoint is required."),
+      )
       return
     }
-    if (form.transport === "cli" && (!form.executable.trim() || !form.model.trim())) {
-      toast.error(t("models.speech.cliRequired", "CLI executable and model paths are required."))
+    if (
+      form.transport === "cli" &&
+      (!form.executable.trim() || !form.model.trim())
+    ) {
+      toast.error(
+        t(
+          "models.speech.cliRequired",
+          "CLI executable and model paths are required.",
+        ),
+      )
       return
     }
     setSaving(true)
@@ -126,24 +155,40 @@ export function SpeechToTextModels() {
       }
       const response = editingId
         ? await updateSpeechModel(editingId, payload)
-        : await addSpeechModel({ ...payload, set_active: data?.models.length === 0 })
+        : await addSpeechModel({
+            ...payload,
+            set_active: data?.models.length === 0,
+          })
       setData(response)
       cancelForm()
       toast.success(t("models.speech.saved", "Speech model saved."))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("models.speech.saveError", "Failed to save speech model"))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("models.speech.saveError", "Failed to save speech model"),
+      )
     } finally {
       setSaving(false)
     }
   }
 
   const removeModel = async (model: SpeechToTextModel) => {
-    if (!window.confirm(t("models.speech.deleteConfirm", `Delete "${model.name}"?`))) return
+    if (
+      !window.confirm(
+        t("models.speech.deleteConfirm", `Delete "${model.name}"?`),
+      )
+    )
+      return
     try {
       setData(await deleteSpeechModel(model.id))
       toast.success(t("models.speech.deleted", "Speech model deleted."))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("models.speech.deleteError", "Failed to delete speech model"))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("models.speech.deleteError", "Failed to delete speech model"),
+      )
     }
   }
 
@@ -152,16 +197,28 @@ export function SpeechToTextModels() {
       setData(await activateSpeechModel(model.id))
       toast.success(t("models.speech.active", "Active speech model updated."))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("models.speech.activateError", "Failed to activate speech model"))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("models.speech.activateError", "Failed to activate speech model"),
+      )
     }
   }
 
   const toggleEnabled = async (enabled: boolean) => {
     try {
       setData(await updateSpeechConfig({ enabled }))
-      toast.success(enabled ? t("models.speech.enabled", "Speech transcription enabled.") : t("models.speech.disabled", "Speech transcription disabled."))
+      toast.success(
+        enabled
+          ? t("models.speech.enabled", "Speech transcription enabled.")
+          : t("models.speech.disabled", "Speech transcription disabled."),
+      )
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("models.speech.configError", "Failed to update speech settings"))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("models.speech.configError", "Failed to update speech settings"),
+      )
     }
   }
 
@@ -178,13 +235,21 @@ export function SpeechToTextModels() {
                 {t("models.speech.title", "Speech-to-Text Models")}
               </CardTitle>
               <p className="text-muted-foreground mt-1 text-sm">
-                {t("models.speech.description", "Add or switch Whisper.cpp models for audio-to-text conversion. No model is downloaded automatically.")}
+                {t(
+                  "models.speech.description",
+                  "Add or switch Whisper.cpp models for audio-to-text conversion. No model is downloaded automatically.",
+                )}
               </p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Label htmlFor="speech-enabled" className="text-muted-foreground text-xs">
-              {data?.enabled ? t("models.speech.on", "On") : t("models.speech.off", "Off")}
+            <Label
+              htmlFor="speech-enabled"
+              className="text-muted-foreground text-xs"
+            >
+              {data?.enabled
+                ? t("models.speech.on", "On")
+                : t("models.speech.off", "Off")}
             </Label>
             <Switch
               id="speech-enabled"
@@ -193,9 +258,17 @@ export function SpeechToTextModels() {
               disabled={loading || saving}
               aria-label={t("models.speech.toggle", "Enable speech-to-text")}
             />
-            <Button type="button" size="sm" variant="outline" onClick={beginAdd} disabled={loading || editingId !== null}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={beginAdd}
+              disabled={loading || editingId !== null}
+            >
               <IconPlus className="size-4" />
-              <span className="hidden sm:inline">{t("models.speech.add", "Add audio model")}</span>
+              <span className="hidden sm:inline">
+                {t("models.speech.add", "Add audio model")}
+              </span>
             </Button>
           </div>
         </CardHeader>
@@ -210,31 +283,73 @@ export function SpeechToTextModels() {
               {data.models.map((model) => {
                 const active = data.active_model_id === model.id
                 return (
-                  <div key={model.id} className="border-border/60 bg-background/45 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => void selectModel(model)} disabled={model.enabled === false || active}>
+                  <div
+                    key={model.id}
+                    className="border-border/60 bg-background/45 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+                  >
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => void selectModel(model)}
+                      disabled={model.enabled === false || active}
+                    >
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-medium">{model.name}</span>
-                        {active && <Badge variant="secondary">{t("models.speech.activeBadge", "Active")}</Badge>}
-                        {model.enabled === false && <Badge variant="outline">{t("models.speech.disabledBadge", "Disabled")}</Badge>}
+                        <span className="truncate text-sm font-medium">
+                          {model.name}
+                        </span>
+                        {active && (
+                          <Badge variant="secondary">
+                            {t("models.speech.activeBadge", "Active")}
+                          </Badge>
+                        )}
+                        {model.enabled === false && (
+                          <Badge variant="outline">
+                            {t("models.speech.disabledBadge", "Disabled")}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-muted-foreground mt-1 truncate text-xs">
-                        {model.transport === "endpoint" ? model.endpoint : model.model}
+                        {model.transport === "endpoint"
+                          ? model.endpoint
+                          : model.model}
                       </p>
                     </button>
                     <div className="flex items-center gap-1">
                       {!active && model.enabled !== false && (
-                        <Button type="button" size="sm" variant="ghost" onClick={() => void selectModel(model)}>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void selectModel(model)}
+                        >
                           <IconCheck className="size-4" />
-                          <span className="sr-only">{t("models.speech.activate", "Activate")}</span>
+                          <span className="sr-only">
+                            {t("models.speech.activate", "Activate")}
+                          </span>
                         </Button>
                       )}
-                      <Button type="button" size="sm" variant="ghost" onClick={() => beginEdit(model)} disabled={editingId !== null}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => beginEdit(model)}
+                        disabled={editingId !== null}
+                      >
                         <IconEdit className="size-4" />
-                        <span className="sr-only">{t("models.speech.edit", "Edit")}</span>
+                        <span className="sr-only">
+                          {t("models.speech.edit", "Edit")}
+                        </span>
                       </Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => void removeModel(model)}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void removeModel(model)}
+                      >
                         <IconTrash className="text-destructive size-4" />
-                        <span className="sr-only">{t("models.speech.delete", "Delete")}</span>
+                        <span className="sr-only">
+                          {t("models.speech.delete", "Delete")}
+                        </span>
                       </Button>
                     </div>
                   </div>
@@ -243,7 +358,10 @@ export function SpeechToTextModels() {
             </div>
           ) : (
             <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-sm">
-              {t("models.speech.empty", "No speech model configured. Add a whisper.cpp server endpoint or a local CLI + model pair.")}
+              {t(
+                "models.speech.empty",
+                "No speech model configured. Add a whisper.cpp server endpoint or a local CLI + model pair.",
+              )}
             </p>
           )}
 
@@ -251,56 +369,166 @@ export function SpeechToTextModels() {
             <div className="border-border/60 bg-muted/20 mt-4 rounded-lg border p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">
-                  {editingId ? t("models.speech.editTitle", "Edit speech model") : t("models.speech.addTitle", "Add speech model")}
+                  {editingId
+                    ? t("models.speech.editTitle", "Edit speech model")
+                    : t("models.speech.addTitle", "Add speech model")}
                 </h3>
-                <Button type="button" size="sm" variant="ghost" onClick={cancelForm} aria-label={t("models.speech.cancel", "Cancel")}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={cancelForm}
+                  aria-label={t("models.speech.cancel", "Cancel")}
+                >
                   <IconX className="size-4" />
                 </Button>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <Label htmlFor="speech-model-id">{t("models.speech.id", "Model ID")}</Label>
-                  <Input id="speech-model-id" value={form.id} onChange={(event) => setForm({ ...form, id: event.target.value })} disabled={Boolean(editingId)} placeholder="whisper-base" />
+                  <Label htmlFor="speech-model-id">
+                    {t("models.speech.id", "Model ID")}
+                  </Label>
+                  <Input
+                    id="speech-model-id"
+                    value={form.id}
+                    onChange={(event) =>
+                      setForm({ ...form, id: event.target.value })
+                    }
+                    disabled={Boolean(editingId)}
+                    placeholder="whisper-base"
+                  />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="speech-model-name">{t("models.speech.name", "Display name")}</Label>
-                  <Input id="speech-model-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Whisper Base" />
+                  <Label htmlFor="speech-model-name">
+                    {t("models.speech.name", "Display name")}
+                  </Label>
+                  <Input
+                    id="speech-model-name"
+                    value={form.name}
+                    onChange={(event) =>
+                      setForm({ ...form, name: event.target.value })
+                    }
+                    placeholder="Whisper Base"
+                  />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="speech-model-transport">{t("models.speech.transport", "Transport")}</Label>
-                  <Select value={form.transport} onValueChange={(value: SpeechModelTransport) => setForm({ ...form, transport: value })}>
-                    <SelectTrigger id="speech-model-transport" className="w-full"><SelectValue /></SelectTrigger>
+                  <Label htmlFor="speech-model-transport">
+                    {t("models.speech.transport", "Transport")}
+                  </Label>
+                  <Select
+                    value={form.transport}
+                    onValueChange={(value: SpeechModelTransport) =>
+                      setForm({ ...form, transport: value })
+                    }
+                  >
+                    <SelectTrigger
+                      id="speech-model-transport"
+                      className="w-full"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cli">{t("models.speech.transportCli", "Local whisper-cli")}</SelectItem>
-                      <SelectItem value="endpoint">{t("models.speech.transportEndpoint", "Whisper server endpoint")}</SelectItem>
+                      <SelectItem value="cli">
+                        {t("models.speech.transportCli", "Local whisper-cli")}
+                      </SelectItem>
+                      <SelectItem value="endpoint">
+                        {t(
+                          "models.speech.transportEndpoint",
+                          "Whisper server endpoint",
+                        )}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="flex items-center gap-2 pt-7">
-                  <Switch id="speech-model-enabled" checked={form.enabled} onCheckedChange={(enabled) => setForm({ ...form, enabled })} />
-                  <Label htmlFor="speech-model-enabled">{t("models.speech.modelEnabled", "Model enabled")}</Label>
+                  <Switch
+                    id="speech-model-enabled"
+                    checked={form.enabled}
+                    onCheckedChange={(enabled) => setForm({ ...form, enabled })}
+                  />
+                  <Label htmlFor="speech-model-enabled">
+                    {t("models.speech.modelEnabled", "Model enabled")}
+                  </Label>
                 </div>
                 {form.transport === "endpoint" ? (
                   <div className="grid gap-1.5 sm:col-span-2">
-                    <Label htmlFor="speech-model-endpoint">{t("models.speech.endpoint", "Whisper server endpoint")}</Label>
-                    <Input id="speech-model-endpoint" value={form.endpoint} onChange={(event) => setForm({ ...form, endpoint: event.target.value })} placeholder="http://127.0.0.1:8080" />
+                    <Label htmlFor="speech-model-endpoint">
+                      {t("models.speech.endpoint", "Whisper server endpoint")}
+                    </Label>
+                    <Input
+                      id="speech-model-endpoint"
+                      value={form.endpoint}
+                      onChange={(event) =>
+                        setForm({ ...form, endpoint: event.target.value })
+                      }
+                      placeholder="http://127.0.0.1:8080"
+                    />
                   </div>
                 ) : (
                   <>
                     <div className="grid gap-1.5 sm:col-span-2">
-                      <Label htmlFor="speech-model-executable">{t("models.speech.executable", "whisper-cli executable path")}</Label>
-                      <Input id="speech-model-executable" value={form.executable} onChange={(event) => setForm({ ...form, executable: event.target.value })} placeholder="/absolute/path/to/whisper-cli" />
+                      <Label htmlFor="speech-model-executable">
+                        {t(
+                          "models.speech.executable",
+                          "whisper-cli executable path",
+                        )}
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="speech-model-executable"
+                          value={form.executable}
+                          onChange={(event) =>
+                            setForm({ ...form, executable: event.target.value })
+                          }
+                          placeholder="/absolute/path/to/whisper-cli"
+                          className="min-w-0 flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setFilePickerKind("executable")}
+                        >
+                          Explore executable
+                        </Button>
+                      </div>
                     </div>
                     <div className="grid gap-1.5 sm:col-span-2">
-                      <Label htmlFor="speech-model-file">{t("models.speech.modelPath", "Whisper model path")}</Label>
-                      <Input id="speech-model-file" value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} placeholder="/absolute/path/to/ggml-base.bin" />
+                      <Label htmlFor="speech-model-file">
+                        {t("models.speech.modelPath", "Whisper model path")}
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="speech-model-file"
+                          value={form.model}
+                          onChange={(event) =>
+                            setForm({ ...form, model: event.target.value })
+                          }
+                          placeholder="/absolute/path/to/ggml-base.bin"
+                          className="min-w-0 flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setFilePickerKind("whisper")}
+                        >
+                          Explore models
+                        </Button>
+                      </div>
                     </div>
                   </>
                 )}
               </div>
               <div className="mt-4 flex justify-end gap-2">
-                <Button type="button" variant="ghost" onClick={cancelForm}>{t("models.speech.cancel", "Cancel")}</Button>
-                <Button type="button" onClick={() => void saveModel()} disabled={saving}>
+                <Button type="button" variant="ghost" onClick={cancelForm}>
+                  {t("models.speech.cancel", "Cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void saveModel()}
+                  disabled={saving}
+                >
                   {saving && <IconLoader2 className="size-4 animate-spin" />}
                   {t("models.speech.save", "Save speech model")}
                 </Button>
@@ -309,6 +537,19 @@ export function SpeechToTextModels() {
           )}
         </CardContent>
       </Card>
+      <ModelFilePickerDialog
+        open={filePickerKind !== null}
+        onOpenChange={(open) => !open && setFilePickerKind(null)}
+        kind={filePickerKind ?? "whisper"}
+        onSelect={(path) => {
+          if (filePickerKind === "whisper") {
+            setForm((current) => ({ ...current, model: path }))
+          } else if (filePickerKind === "executable") {
+            setForm((current) => ({ ...current, executable: path }))
+          }
+          setFilePickerKind(null)
+        }}
+      />
     </section>
   )
 }

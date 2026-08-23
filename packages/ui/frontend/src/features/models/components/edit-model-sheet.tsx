@@ -40,6 +40,10 @@ import { refreshGatewayState } from "@/store/gateway"
 
 import { FetchModelsDialog } from "./fetch-models-dialog"
 import {
+  ModelFilePickerDialog,
+  type ModelFilePickerKind,
+} from "./model-file-picker-dialog"
+import {
   getEffectiveAPIBase,
   getSubmittedAPIBase,
   normalizeApiBase,
@@ -165,6 +169,8 @@ export function EditModelSheet({
   const [modelValidation, setModelValidation] =
     useState<FieldValidation | null>(null)
   const [testOpen, setTestOpen] = useState(false)
+  const [filePickerKind, setFilePickerKind] =
+    useState<ModelFilePickerKind | null>(null)
   const [fetchOpen, setFetchOpen] = useState(false)
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
   const [catalogModels, setCatalogModels] = useState<string[]>([])
@@ -591,16 +597,38 @@ export function EditModelSheet({
                   hint="Use a GGUF file with llama-server, or an existing loopback OpenAI-compatible endpoint. No API key is used."
                 >
                   <div className="grid gap-2">
-                    <Input
-                      value={form.localModelPath}
-                      onChange={setField("localModelPath")}
-                      placeholder="/models/Miki-7B-Instruct.Q4_K_M.gguf"
-                    />
-                    <Input
-                      value={form.localExecutablePath}
-                      onChange={setField("localExecutablePath")}
-                      placeholder="/usr/local/bin/llama-server"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        value={form.localModelPath}
+                        onChange={setField("localModelPath")}
+                        placeholder="/models/Miki-7B-Instruct.Q4_K_M.gguf"
+                        className="min-w-0 flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFilePickerKind("llm")}
+                      >
+                        Explore models
+                      </Button>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={form.localExecutablePath}
+                        onChange={setField("localExecutablePath")}
+                        placeholder="/usr/local/bin/llama-server"
+                        className="min-w-0 flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFilePickerKind("executable")}
+                      >
+                        Explore executable
+                      </Button>
+                    </div>
                     <div className="grid grid-cols-3 gap-2">
                       <Input
                         value={form.localPort}
@@ -891,6 +919,19 @@ export function EditModelSheet({
         apiBase={effectiveApiBase}
         modelIndex={model?.index}
         backendOptions={providerOptions}
+      />
+      <ModelFilePickerDialog
+        open={filePickerKind !== null}
+        onOpenChange={(open) => !open && setFilePickerKind(null)}
+        kind={filePickerKind ?? "llm"}
+        onSelect={(path) => {
+          if (filePickerKind === "llm") {
+            setForm((current) => ({ ...current, localModelPath: path }))
+          } else if (filePickerKind === "executable") {
+            setForm((current) => ({ ...current, localExecutablePath: path }))
+          }
+          setFilePickerKind(null)
+        }}
       />
     </>
   )
