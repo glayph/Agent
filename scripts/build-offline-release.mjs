@@ -348,11 +348,18 @@ function stageNodeRuntime() {
   fs.mkdirSync(extracted, { recursive: true });
   if (isWindows) {
     const archivePath = path.resolve(archive);
-    const archiveDir = path.dirname(archivePath);
-    const extractionTarget = path.relative(archiveDir, extracted) || ".";
-    run("tar", ["-xf", path.basename(archivePath), "-C", extractionTarget], {
-      cwd: archiveDir,
-    });
+    const escapedArchive = archivePath.replaceAll("'", "''");
+    const escapedDestination = extracted.replaceAll("'", "''");
+    run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Expand-Archive -LiteralPath '${escapedArchive}' -DestinationPath '${escapedDestination}' -Force`,
+      ],
+      { cwd: root },
+    );
   } else {
     run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], { cwd: root });
   }
