@@ -15,7 +15,6 @@ const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const eslintEntry = path.join(
   root,
   "node_modules",
@@ -59,9 +58,20 @@ function run(cmd, cmdArgs, opts = {}) {
     shell: false,
     ...opts,
   });
+  if (result.error) {
+    fatal(`${cmd} could not start: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     fatal(`${cmd} failed with exit code ${result.status ?? 1}`);
   }
+}
+
+function runNpm(args, opts = {}) {
+  if (process.platform === "win32") {
+    run("npm.cmd", args, { ...opts, shell: true });
+    return;
+  }
+  run("npm", args, opts);
 }
 
 function main() {
@@ -90,26 +100,26 @@ function main() {
 
   // Step 2: Strict typechecking
   log("Step 2/5: Running strict typechecks...");
-  run(npmCommand, ["run", "typecheck", "--workspaces", "--if-present"], {
-    cwd: root,
-  });
-  run(
-    npmCommand,
+  runNpm(["run", "typecheck", "--workspaces", "--if-present"], { cwd: root });
+  runNpm(
     ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "build"],
-    { cwd: root },
+    {
+      cwd: root,
+    },
   );
 
   // Step 3: Production builds
   log("Step 3/5: Running production builds...");
-  run(npmCommand, ["run", "build:all"], { cwd: root });
+  runNpm(["run", "build:all"], { cwd: root });
 
   // Step 4: Tests
   log("Step 4/5: Running tests...");
-  run(npmCommand, ["test", "--workspaces", "--if-present"], { cwd: root });
-  run(
-    npmCommand,
+  runNpm(["test", "--workspaces", "--if-present"], { cwd: root });
+  runNpm(
     ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "test"],
-    { cwd: root },
+    {
+      cwd: root,
+    },
   );
 
   // Step 5: Doctor
