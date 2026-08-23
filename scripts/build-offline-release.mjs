@@ -347,7 +347,12 @@ function stageNodeRuntime() {
   fs.rmSync(extracted, { recursive: true, force: true });
   fs.mkdirSync(extracted, { recursive: true });
   if (isWindows) {
-    run("tar", ["-xf", archive, "-C", extracted], { cwd: root });
+    const archivePath = path.resolve(archive);
+    const archiveDir = path.dirname(archivePath);
+    const extractionTarget = path.relative(archiveDir, extracted) || ".";
+    run("tar", ["-xf", path.basename(archivePath), "-C", extractionTarget], {
+      cwd: archiveDir,
+    });
   } else {
     run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], { cwd: root });
   }
