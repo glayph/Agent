@@ -80,9 +80,9 @@ The current code establishes local/remote call origin for HTTP chat/tool routes,
 
 ## Conversational Chat and Inspector Details
 
-The normal chat transcript is intentionally conversational: routine assistant replies stay short and direct instead of repeating plans, tool activity, timestamps, verification, or report-style headings. Detailed execution information is emitted as concise, categorized runtime summaries for the Inspector. When a response has linked summaries, its bubble shows a collapsible **Thoughts…** control. Expanding it reveals only a brief execution summary and an **Open Inspector** action; the full run record remains in Inspector.
+The normal chat transcript is intentionally conversational: each assistant bubble shows only a short, human-like answer preview. The complete answer is not expanded inside the bubble; the user opens **Inspector** on that bubble to read the full response and all detailed explanation. Plans, thought summaries, tool activity, source-research notes, reports, and verification remain in Inspector.
 
-The UI groups thought summaries and hidden tool-feedback messages by `run_id`, so the details shown beside a response belong to that response rather than to an unrelated turn. The Inspector’s Thoughts page explicitly labels its content as summaries and redacts private hidden chain-of-thought. This keeps ordinary chat readable while preserving auditability, source leads, tool activity, and verification evidence.
+The UI groups thought summaries and hidden tool-feedback messages by `run_id`, so the details shown in Inspector belong to that response rather than to an unrelated turn. The Inspector’s Thoughts page explicitly labels its content as summaries and redacts private hidden chain-of-thought. This keeps ordinary chat readable while preserving auditability, source leads, tool activity, and verification evidence.
 
 ## Inspector
 

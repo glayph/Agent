@@ -353,9 +353,9 @@ A provider test returning HTTP 401 or a message that credentials were rejected m
 
 ### Conversational chat and Inspector details
 
-Normal Chat is designed to read like a person-to-person conversation. Routine replies should be short and direct; plans, tool activity, source-research notes, verification, reports, and long explanations are kept in Inspector runtime summaries. If a response has linked details, its bubble displays **Thoughts…**. Click it to expand a concise summary, then use **Open Inspector** for the full run record.
+Normal Chat is designed to read like a person-to-person conversation. Each assistant bubble shows only a short answer preview. To read the complete answer, explanation, source details, tool activity, report, or verification, click that bubble’s **Inspector** action and open the Inspector menu. Full details are not expanded inside the normal chat bubble.
 
-The Inspector’s **Thoughts** page shows categorized summaries such as Plan, Action, Progress, Decision, and Verification. It does not display private hidden chain-of-thought. Thought and hidden tool-feedback events are linked to the matching assistant response through `run_id`, so details remain attached to the correct chat bubble. This behavior is independent of whether the selected answer model is local or cloud-based.
+The Inspector’s **Response** page shows the complete answer, while **Thoughts**, **Work**, **Artifacts**, **Evidence**, and **Events** show their respective runtime details. It does not display private hidden chain-of-thought. Thought and hidden tool-feedback events are linked to the matching assistant response through `run_id`, so details remain attached to the correct chat bubble. This behavior is independent of whether the selected answer model is local or cloud-based.
 
 ### Search-necessity smoke test
 

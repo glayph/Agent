@@ -323,8 +323,9 @@ export function ChatInspector({
                 <IconArchive className="size-3.5" /> Response
               </div>
               <div className="text-foreground/80">
-                This is the short, human-facing answer. Detailed execution stays
-                in Thoughts and Work.
+                This is the complete assistant response. The normal chat bubble
+                shows only a short preview; detailed execution stays in Thoughts
+                and Work.
               </div>
             </div>
             {responseMessages.length > 0 ? (

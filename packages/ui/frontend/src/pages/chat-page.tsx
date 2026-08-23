@@ -358,7 +358,7 @@ export function ChatPage() {
   }, [monitorState.nodes, monitorState.runs])
   const handleInspectMessage = useCallback(
     (messageId: string) => {
-      openInspector({ chatId: activeSessionId, messageId, page: "overview" })
+      openInspector({ chatId: activeSessionId, messageId, page: "response" })
     },
     [activeSessionId, openInspector],
   )

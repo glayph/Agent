@@ -11,19 +11,7 @@ import { Button } from "@/shared/ui/button"
 import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
 import { shouldShowAssistantMessage } from "@/store/chat"
 
-import type { AssistantBubbleDetails } from "../assistant-message"
 import { ChatMessage as WorkspaceChatMessage } from "./chat-message"
-
-function messageRunId(message: ChatMessage): string | undefined {
-  if (message.runId?.trim()) return message.runId.trim()
-  if (message.kind === "thought") {
-    return message.id.split("-thought-")[0] || undefined
-  }
-  if (message.kind === "tool_calls") {
-    return message.id.split("-tool-")[0] || undefined
-  }
-  return undefined
-}
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
@@ -85,27 +73,6 @@ export function ChatMessageList({
     fromEnd: true,
     resetKey: messages[0]?.id ?? "empty",
   })
-  const bubbleDetailsByRunId = useMemo(() => {
-    const grouped = new Map<string, AssistantBubbleDetails>()
-    for (const message of messages) {
-      if (message.kind !== "thought" && message.kind !== "tool_calls") continue
-      const runId = messageRunId(message)
-      if (!runId) continue
-      const current = grouped.get(runId) ?? { thoughts: [], toolMessages: [] }
-      if (message.kind === "thought") {
-        current.thoughts.push(message)
-      } else {
-        current.toolMessages.push(message)
-      }
-      grouped.set(runId, current)
-    }
-    for (const details of grouped.values()) {
-      details.thoughts = details.thoughts.slice(-6)
-      details.toolMessages = details.toolMessages.slice(-4)
-    }
-    return grouped
-  }, [messages])
-
   return (
     <div
       ref={scrollRef}
@@ -144,11 +111,6 @@ export function ChatMessageList({
           <WorkspaceChatMessage
             key={message.id}
             message={message}
-            bubbleDetails={
-              message.role === "assistant"
-                ? bubbleDetailsByRunId.get(message.runId ?? message.id)
-                : undefined
-            }
             canRetry={
               connectionState === "connected" &&
               !isTyping &&
