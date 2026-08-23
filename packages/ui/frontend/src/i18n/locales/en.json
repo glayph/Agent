@@ -21,6 +21,7 @@
     "system_index": "System Index",
     "logs": "Logs",
     "health": "Health",
+    "control": "Agent Control",
     "agents": "Agents",
     "toggle_sidebar": "Toggle sidebar",
     "channels": "Channels"

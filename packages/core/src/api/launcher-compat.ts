@@ -307,6 +307,7 @@ export interface LauncherAdminController {
     name: string,
     enabled: boolean,
   ): Promise<Record<string, unknown>>;
+  setActiveModel?(model: string): Promise<Record<string, unknown>>;
 }
 
 interface LauncherCompatOptions {
@@ -4426,6 +4427,51 @@ export function createLauncherCompatRouter({
         gateway_restart_required: apply.gateway_restart_required,
         runtime_apply_status: apply.status,
         runtime_apply_error: apply.error,
+      };
+    },
+    setActiveModel: async (modelName) => {
+      validateModelIdentifier(modelName);
+      const selectedModel = (state.models || []).find(
+        (model) =>
+          model.model_name === modelName ||
+          runtimeModelName(model) === modelName,
+      );
+      const activeModelName = selectedModel
+        ? runtimeModelName(selectedModel)
+        : modelName;
+      if (
+        !selectedModel &&
+        !settings.getSupportedModels().includes(activeModelName)
+      ) {
+        throw new Error(`Model '${modelName}' is not available`);
+      }
+      const providerOptions = await launcherProviderOptions(paths);
+      const provider = normalizeProvider(
+        selectedModel?.provider,
+        activeModelName,
+        providerOptions,
+      );
+      updateEnvVar(paths, "MIKI_MODEL", activeModelName);
+      updateEnvVar(paths, "DEFAULT_MODEL", activeModelName);
+      updateEnvVar(paths, "MIKI_PROVIDER", provider);
+      settings.setModel(activeModelName);
+      settings.provider = provider;
+      process.env.MIKI_PROVIDER = provider;
+      orchestrator.modelName = activeModelName;
+      orchestrator.provider = provider;
+      const localRuntime =
+        await synchronizeLocalRuntimeForModel(activeModelName);
+      state.gateway_restart_required = true;
+      saveState();
+      const apply = await applyRuntimeChanges({ reason: "models.default" });
+      return {
+        status: "ok",
+        default_model: selectedModel?.model_name || modelName,
+        gateway_restart_required: apply.gateway_restart_required,
+        runtime_apply_status: apply.status,
+        runtime_apply_error: apply.error,
+        pending_restart_fields: apply.pending_restart_fields || [],
+        local_runtime: localRuntime,
       };
     },
     setToolState: async (name, enabled) => {

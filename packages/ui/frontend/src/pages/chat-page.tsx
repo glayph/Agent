@@ -269,6 +269,7 @@ function workspaceTitle({
   return fallbackTitle
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- kept exported for deterministic status tests
 export function buildStatusPills({
   connectionState,
   gatewayState,

@@ -15,6 +15,7 @@ import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as ConfigRouteImport } from './routes/config'
+import { Route as ControlRouteImport } from './routes/control'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DriveRouteImport } from './routes/drive'
 import { Route as HealthRouteImport } from './routes/health'
@@ -69,6 +70,11 @@ const ChatRoute = ChatRouteImport.update({
 const ConfigRoute = ConfigRouteImport.update({
   id: '/config',
   path: '/config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ControlRoute = ControlRouteImport.update({
+  id: '/control',
+  path: '/control',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CredentialsRoute = CredentialsRouteImport.update({
@@ -205,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/chat': typeof ChatRoute
   '/config': typeof ConfigRouteWithChildren
+  '/control': typeof ControlRoute
   '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/agent': typeof AgentRouteWithChildren
   '/chat': typeof ChatRoute
   '/config': typeof ConfigRouteWithChildren
+  '/control': typeof ControlRoute
   '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
@@ -270,6 +278,7 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/chat': typeof ChatRoute
   '/config': typeof ConfigRouteWithChildren
+  '/control': typeof ControlRoute
   '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
@@ -305,6 +314,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/chat'
     | '/config'
+    | '/control'
     | '/credentials'
     | '/drive'
     | '/health'
@@ -337,6 +347,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/chat'
     | '/config'
+    | '/control'
     | '/credentials'
     | '/drive'
     | '/health'
@@ -369,6 +380,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/chat'
     | '/config'
+    | '/control'
     | '/credentials'
     | '/drive'
     | '/health'
@@ -403,6 +415,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   ChatRoute: typeof ChatRoute
   ConfigRoute: typeof ConfigRouteWithChildren
+  ControlRoute: typeof ControlRoute
   CredentialsRoute: typeof CredentialsRoute
   DriveRoute: typeof DriveRoute
   HealthRoute: typeof HealthRoute
@@ -455,6 +468,13 @@ declare module '@tanstack/react-router' {
       path: '/config'
       fullPath: '/config'
       preLoaderRoute: typeof ConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/control': {
+      id: '/control'
+      path: '/control'
+      fullPath: '/control'
+      preLoaderRoute: typeof ControlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/credentials': {
@@ -721,6 +741,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRouteWithChildren,
   ChatRoute: ChatRoute,
   ConfigRoute: ConfigRouteWithChildren,
+  ControlRoute: ControlRoute,
   CredentialsRoute: CredentialsRoute,
   DriveRoute: DriveRoute,
   HealthRoute: HealthRoute,

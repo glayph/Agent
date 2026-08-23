@@ -21,6 +21,10 @@
     "./llm/provider": {
       "import": "./dist/llm/provider/index.js",
       "types": "./dist/llm/provider/index.d.ts"
+    },
+    "./control": {
+      "import": "./dist/control/index.js",
+      "types": "./dist/control/index.d.ts"
     }
   },
   "scripts": {

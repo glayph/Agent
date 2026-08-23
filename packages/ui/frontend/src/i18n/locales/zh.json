@@ -21,6 +21,7 @@
     "system_index": "系统索引",
     "logs": "日志",
     "health": "健康",
+    "control": "Agent 控制",
     "agents": "代理人",
     "toggle_sidebar": "切换侧边栏",
     "channels": "频道"

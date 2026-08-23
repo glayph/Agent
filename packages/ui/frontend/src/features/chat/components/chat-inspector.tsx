@@ -146,7 +146,7 @@ export function ChatInspector({
       selection?.messageId
         ? messages.find((message) => message.id === selection.messageId)
         : messages.find((message) => message.role === "assistant"),
-    [messages, selection?.messageId],
+    [messages, selection],
   )
   const nodes = useMemo(
     () =>
@@ -348,7 +348,9 @@ export function ChatInspector({
                     <div className="text-muted-foreground mb-1 flex items-center justify-between text-[10px]">
                       <span>Agent Miki</span>
                       <span>
-                        {formatTime(Number(message.timestamp) || Date.now())}
+                        {Number.isFinite(Number(message.timestamp))
+                          ? formatTime(Number(message.timestamp))
+                          : "—"}
                       </span>
                     </div>
                     <div className="text-foreground/90 text-sm leading-6 whitespace-pre-wrap">
@@ -477,7 +479,9 @@ export function ChatInspector({
                         Thought · {category}
                       </span>
                       <span className="text-muted-foreground text-[10px]">
-                        {formatTime(Number(message.timestamp) || Date.now())}
+                        {Number.isFinite(Number(message.timestamp))
+                          ? formatTime(Number(message.timestamp))
+                          : "—"}
                       </span>
                       <IconChevronDown
                         className={cn(
@@ -703,7 +707,9 @@ export function ChatInspector({
                             : "Uploaded audio"}
                         </span>
                         <span>
-                          {formatTime(Number(message.timestamp) || Date.now())}
+                          {Number.isFinite(Number(message.timestamp))
+                            ? formatTime(Number(message.timestamp))
+                            : "—"}
                         </span>
                       </div>
                       <div className="text-foreground mb-3 text-sm leading-6 whitespace-pre-wrap">
@@ -753,7 +759,9 @@ export function ChatInspector({
                       Inspector summary · {thoughtCategory(message.content)}
                     </div>
                     <div className="text-muted-foreground mt-0.5 text-[10px]">
-                      {formatTime(Number(message.timestamp) || Date.now())}
+                      {Number.isFinite(Number(message.timestamp))
+                        ? formatTime(Number(message.timestamp))
+                        : "—"}
                     </div>
                     <div className="text-muted-foreground mt-1 text-[11px] leading-5">
                       {preview(message.content, 220)}

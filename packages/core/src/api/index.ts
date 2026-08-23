@@ -89,6 +89,9 @@ import {
   createLauncherCompatRouter,
   type LauncherRuntimeAuthBridge,
 } from "./launcher-compat.js";
+import { AgentControlService, createControlRouter } from "../control/index.js";
+import type { ControlApprovalRequest } from "../control/index.js";
+import { createLlamaCppAdapter } from "../control/model-adapters.js";
 import {
   getPlatformDescriptor,
   isSupportedPlatformProvider,
@@ -461,6 +464,8 @@ const skillsRouter = createSkillsRouter(skillLoader, runtimePaths, {
   toolRegistry: orchestrator.tools,
 });
 let launcherRuntimeAuth: LauncherRuntimeAuthBridge | null = null;
+let agentControlService: AgentControlService | undefined;
+const controlRouter = createControlRouter(() => agentControlService);
 const launcherCompatRouter = createLauncherCompatRouter({
   orchestrator,
   skillLoader,
@@ -471,6 +476,116 @@ const launcherCompatRouter = createLauncherCompatRouter({
   },
   registerAdminController: (controller) => {
     orchestrator.tools.setAdminController(controller);
+    agentControlService = new AgentControlService({
+      controller,
+      runtimePaths,
+      modelAdapters: [createLlamaCppAdapter()],
+      approvals: {
+        requestApproval: async (request: ControlApprovalRequest) => {
+          const previewHash = JSON.stringify({
+            capability: request.capability,
+            action: request.action,
+            input: request.sanitizedInput,
+          });
+          const challenge = approvalInbox.request({
+            runId: request.operationId,
+            actor: request.context.actor || "agent-control",
+            action:
+              request.risk === "destructive" ? "delete" : "external_write",
+            resource: `control:${request.capability}.${request.action}`,
+            risk:
+              request.risk === "destructive"
+                ? "critical"
+                : request.risk === "service" || request.risk === "install"
+                  ? "high"
+                  : "medium",
+            reason: request.reason,
+            context: {
+              stepId: `${request.capability}:${request.action}`,
+              deliveryId: request.operationId,
+              previewHash,
+            },
+          });
+          return { requestId: challenge.request.id };
+        },
+        isApproved: (request: ControlApprovalRequest, token?: string) => {
+          if (!request.context || !request.operationId) return false;
+          const requestId = request.approvalRequestId;
+          if (!requestId) return false;
+          if (token) return approvalInbox.isApproved(requestId, token);
+          try {
+            const previewHash = JSON.stringify({
+              capability: request.capability,
+              action: request.action,
+              input: request.sanitizedInput,
+            });
+            approvalInbox.assertApprovedByContext(
+              requestId,
+              {
+                runId: request.operationId,
+                stepId: `${request.capability}:${request.action}`,
+                deliveryId: request.operationId,
+                previewHash,
+              },
+              request.context.actor || "agent-control",
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        consumeApproval: (
+          request: ControlApprovalRequest,
+          requestId: string,
+        ) => {
+          try {
+            const previewHash = JSON.stringify({
+              capability: request.capability,
+              action: request.action,
+              input: request.sanitizedInput,
+            });
+            approvalInbox.consumeByContext(
+              requestId,
+              {
+                runId: request.operationId,
+                stepId: `${request.capability}:${request.action}`,
+                deliveryId: request.operationId,
+                previewHash,
+              },
+              request.context.actor || "agent-control",
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      },
+      hooks: {
+        reload: async (_reason) => {
+          await orchestrator.reloadConfig();
+          return { pendingRestart: false };
+        },
+        readToolState: () => {
+          const config = controller.getConfig();
+          const tools = config.tools;
+          const state =
+            tools && typeof tools === "object" && !Array.isArray(tools)
+              ? (tools as Record<string, unknown>).tool_state
+              : undefined;
+          return state && typeof state === "object" && !Array.isArray(state)
+            ? (state as Record<string, boolean>)
+            : {};
+        },
+        readExtraState: () => ({
+          gateway_restart_required: false,
+          reload_available: true,
+          operation_control: "shared_launcher_controller",
+          active_model: orchestrator.modelName,
+          provider: orchestrator.provider,
+        }),
+      },
+    });
+    orchestrator.control = agentControlService;
   },
   reloadRuntime: async ({ channelsChanged = [] } = {}) => {
     await orchestrator.reloadConfig();
@@ -797,6 +912,16 @@ app.post("/api/search/fetch", requireHttpAuth, async (req, res) => {
     res.status(502).json({ error: message });
   }
 });
+
+// Mount the shared management API before the compatibility router. It uses
+// the same authenticated HTTP boundary and the same controller instance that
+// powers the dashboard.
+app.use("/api/control", requireHttpAuth, controlRouter);
+app.use(
+  "/api/control/approvals",
+  requireHttpAuth,
+  createApprovalRouter(approvalInbox),
+);
 
 // Mount /api/chat before the compat router so it is not shadowed by the
 // compat router's unconditional `router.use(requireDashboardAuth)`. The

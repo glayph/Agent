@@ -21,6 +21,7 @@
     "system_index": "Indice do sistema",
     "logs": "Logs",
     "health": "Saude",
+    "control": "Controle do agente",
     "agents": "Agentes",
     "toggle_sidebar": "Alternar barra lateral",
     "channels": "Canais"

@@ -90,7 +90,7 @@ export async function listFiles(path: string): Promise<DirectoryListing> {
   const pageSize = 1000
   const allEntries: FileEntry[] = []
   let offset = 0
-  let listing: DirectoryListing | null = null
+  let listing: DirectoryListing
 
   do {
     const params = new URLSearchParams({
@@ -103,10 +103,6 @@ export async function listFiles(path: string): Promise<DirectoryListing> {
     offset += listing.entries.length
     if (listing.entries.length === 0) break
   } while (listing.hasMore)
-
-  if (!listing) {
-    throw new FilesApiError("Directory listing was empty", 500)
-  }
 
   return {
     ...listing,

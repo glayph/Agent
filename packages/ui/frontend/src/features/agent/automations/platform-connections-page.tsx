@@ -92,7 +92,10 @@ export function PlatformConnectionsPage() {
     queryFn: () => listConnections(),
     refetchInterval: 15_000,
   })
-  const platforms = platformsQuery.data?.platforms ?? []
+  const platforms = useMemo(
+    () => platformsQuery.data?.platforms ?? [],
+    [platformsQuery.data?.platforms],
+  )
   const connections = connectionsQuery.data?.connections ?? []
   const grouped = useMemo(
     () =>

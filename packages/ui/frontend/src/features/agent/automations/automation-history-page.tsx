@@ -5,7 +5,7 @@ import {
 } from "@tabler/icons-react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useSearch } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { listAutomationExecutions, listAutomations } from "@/api/automations"
 import { PageHeader } from "@/app/layout/page-header"
@@ -50,7 +50,10 @@ export function AutomationHistoryPage() {
     queryFn: () => listAutomations(),
     refetchInterval: 15_000,
   })
-  const automations = automationsQuery.data?.automations ?? []
+  const automations = useMemo(
+    () => automationsQuery.data?.automations ?? [],
+    [automationsQuery.data?.automations],
+  )
   const selected =
     automations.find((automation) => automation.id === selectedId) ??
     automations[0] ??

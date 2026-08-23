@@ -76,6 +76,7 @@ const primaryNav: NavItem[] = [
   { titleKey: "navigation.hub", url: "/agent/hub", icon: IconSearch },
   { titleKey: "navigation.skills", url: "/agent/skills", icon: IconSparkles },
   { titleKey: "navigation.tools", url: "/agent/tools", icon: IconTools },
+  { titleKey: "navigation.control", url: "/control", icon: IconSettings },
   { titleKey: "navigation.runs", url: "/agent/runs", icon: IconTimeline },
   {
     titleKey: "navigation.automations",

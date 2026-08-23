@@ -106,6 +106,7 @@ import { AgentDelegator } from "./agent-delegator.js";
 import { createRunStrategy } from "./agent-run.js";
 import { globalAgentAggregator } from "./agent-aggregator.js";
 import { globalAgentPlanner } from "./agent-planner.js";
+import type { AgentControlService } from "./control/index.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 12;
@@ -533,6 +534,12 @@ export class AgentOrchestrator {
    * Exposed so external systems (API, tests) can inspect the swarm.
    */
   public agentRegistry: AgentRegistry;
+  /** Shared dashboard-backed management service, attached by the API bootstrap. */
+  public control: AgentControlService | null = null;
+
+  getControlService(): AgentControlService | null {
+    return this.control;
+  }
 
   get agentConfig(): { name?: string; project?: string; persona?: string } {
     return (this.config.agent || {}) as {

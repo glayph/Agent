@@ -80,7 +80,10 @@ export function AutomationsPage() {
     queryFn: () => listAutomations(),
     refetchInterval: 15_000,
   })
-  const automations = automationsQuery.data?.automations ?? []
+  const automations = useMemo(
+    () => automationsQuery.data?.automations ?? [],
+    [automationsQuery.data?.automations],
+  )
   const selected = useMemo(
     () =>
       automations.find((automation) => automation.id === selectedId) ??
