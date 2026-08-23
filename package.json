@@ -13,6 +13,7 @@
     "build:llama": "node scripts/build-llama.mjs",
     "build:all": "npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend",
     "build:frontend": "npm --prefix packages/ui/frontend run build",
+    "build:release:linux": "node scripts/build-linux-offline-release.mjs",
     "dev": "node scripts/dev.js",
     "start": "node bin/miki.js",
     "runtime:24-7": "node scripts/miki-24-7.mjs",

@@ -18,6 +18,12 @@ The complete build includes the platform-specific llama.cpp server and may requi
 
 After startup, open the local dashboard address printed by the launcher. The verified local instance served the dashboard at `http://127.0.0.1:18800` and exposed a password setup/login flow.
 
+## Linux x64 Offline Release
+
+The repository includes a reproducible builder for the Linux x64 offline release. Run `MIKI_WHISPER_CPP_BIN=/absolute/path/to/whisper-cli MIKI_WHISPER_CPP_MODEL=/absolute/path/to/ggml-tiny.en.bin MIKI_LFM2_MODEL=/absolute/path/to/LFM2-1.2B-Q4_K_M.gguf npm run build:release:linux` after preparing the official native inputs. The builder assembles the production application, memory and skills packages, bundled npm dependencies, embedded Node runtime, llama.cpp server, FFmpeg-enabled Whisper.cpp runtime, official models, notices, an npm `.tgz`, an extracted `.tar.gz`, and SHA256 checksums. Generated release files are written outside Git-tracked source by default.
+
+The published Linux package is intentionally scoped to `linux-x64`; it is not a Windows build. Its full install/start instructions and model/license limitations are written into the release asset’s README and `THIRD_PARTY_NOTICES.md`. The LFM2 model is distributed under the LFM Open License v1.0 and is not covered by Agent Miki’s MIT license.
+
 ## Verified in the Local Runtime
 
 | Area                             | Observed behavior                                                                                                                                                                                                                                                                |

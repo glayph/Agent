@@ -1,0 +1,408 @@
+#!/usr/bin/env node
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const launcherDir = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.resolve(launcherDir, "..");
+const sourceRuntime = path.join(packageRoot, "runtime");
+const embeddedNode = path.join(sourceRuntime, "node", "bin", "node");
+const bundledModel = path.join(
+  sourceRuntime,
+  "models",
+  "LFM2-1.2B-Q4_K_M.gguf",
+);
+const bundledLlama = path.join(
+  sourceRuntime,
+  "native",
+  "llama-server",
+);
+const bundledWhisper = path.join(sourceRuntime, "voice", "whisper-cli");
+const bundledWhisperModel = path.join(
+  sourceRuntime,
+  "voice",
+  "ggml-tiny.en.bin",
+);
+const defaultDataRoot = path.join(
+  process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"),
+  "miki",
+);
+const runtimeRoot = path.resolve(
+  process.env.MIKI_RUNTIME_ROOT || path.join(defaultDataRoot, "runtime"),
+);
+const workspaceRoot = path.resolve(
+  process.env.MIKI_WORKSPACE_DIR || path.join(defaultDataRoot, "workspace"),
+);
+const statePath = path.join(runtimeRoot, "data", "launcher-state.json");
+const credentialPath = path.join(runtimeRoot, "data", "first-run-credentials.txt");
+const defaultModelName = "LFM2-Local";
+const defaultModelId = "llama.cpp/lfm2-local";
+const defaultLocalPort = 19300;
+
+function fail(message, code = 1) {
+  console.error(`[miki-offline] ${message}`);
+  process.exitCode = code;
+}
+
+function ensureDir(target) {
+  fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+}
+
+function copyMissingTree(source, destination) {
+  if (!fs.existsSync(source)) return;
+  const stat = fs.statSync(source);
+  if (stat.isDirectory()) {
+    ensureDir(destination);
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+      copyMissingTree(
+        path.join(source, entry.name),
+        path.join(destination, entry.name),
+      );
+    }
+    return;
+  }
+  if (!fs.existsSync(destination)) {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+    try {
+      fs.chmodSync(destination, stat.mode & 0o777);
+    } catch {
+      // File modes are best-effort on filesystems that do not preserve them.
+    }
+  }
+}
+
+function readJson(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(file, value) {
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
+function localModelRecord() {
+  const modelDir = path.dirname(bundledModel);
+  return {
+    model_name: defaultModelName,
+    provider: "llama.cpp",
+    model: "lfm2-local",
+    api_base: `http://127.0.0.1:${defaultLocalPort}/v1`,
+    auth_method: "none",
+    enabled: true,
+    extra_body: {},
+    custom_headers: {},
+    local: {
+      runtime: "llama.cpp",
+      model_path: bundledModel,
+      model_format: "gguf",
+      display_name: "LiquidAI LFM2 1.2B (bundled local)",
+      context_size: 4096,
+      gpu_layers: 0,
+      enabled: true,
+      auto_start: true,
+      executable_path: bundledLlama,
+      port: defaultLocalPort,
+      allowed_model_dirs: [modelDir],
+    },
+  };
+}
+
+function passwordHash(password, salt) {
+  return crypto.scryptSync(password, salt, 64).toString("hex");
+}
+
+function passwordFromCredentialFile() {
+  try {
+    const text = fs.readFileSync(credentialPath, "utf8");
+    const line = text
+      .split(/\r?\n/)
+      .find((entry) => entry.toLowerCase().startsWith("password:"));
+    return line ? line.slice(line.indexOf(":") + 1).trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function ensureDashboardAuth(state) {
+  if (state.auth?.password_hash && state.auth?.salt) {
+    return { state, password: undefined, created: false };
+  }
+  const password =
+    process.env.MIKI_DASHBOARD_PASSWORD?.trim() ||
+    passwordFromCredentialFile() ||
+    crypto.randomBytes(12).toString("base64url");
+  if (password.length < 8) {
+    throw new Error(
+      "MIKI_DASHBOARD_PASSWORD must contain at least 8 characters.",
+    );
+  }
+  const salt = crypto.randomBytes(16).toString("hex");
+  state.auth = {
+    salt,
+    password_hash: passwordHash(password, salt),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  ensureDir(path.dirname(credentialPath));
+  if (!process.env.MIKI_DASHBOARD_PASSWORD && !fs.existsSync(credentialPath)) {
+    fs.writeFileSync(
+      credentialPath,
+      `Agent Miki first-run dashboard credentials\nPassword: ${password}\n\nDelete this file after saving the password.\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
+  return { state, password, created: true };
+}
+
+function prepareRuntimeLayout() {
+  if (!fs.existsSync(sourceRuntime)) {
+    throw new Error(`Bundled runtime is missing: ${sourceRuntime}`);
+  }
+  ensureDir(runtimeRoot);
+  ensureDir(workspaceRoot);
+  for (const directory of [
+    path.join(runtimeRoot, "config"),
+    path.join(runtimeRoot, "data"),
+    path.join(runtimeRoot, "cache"),
+    path.join(runtimeRoot, "skills"),
+    path.join(workspaceRoot, "data"),
+    path.join(workspaceRoot, "logs"),
+  ]) {
+    ensureDir(directory);
+  }
+
+  copyMissingTree(path.join(sourceRuntime, "config"), path.join(runtimeRoot, "config"));
+  const envPath = path.join(runtimeRoot, "config", ".env");
+  if (!fs.existsSync(envPath)) {
+    fs.writeFileSync(
+      envPath,
+      `# Agent Miki offline defaults\nMIKI_MODEL=${defaultModelId}\nDEFAULT_MODEL=${defaultModelId}\nMIKI_PROVIDER=llama.cpp\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
+  copyMissingTree(
+    path.join(sourceRuntime, "packages", "ui", "frontend", "dist"),
+    path.join(runtimeRoot, "packages", "ui", "frontend", "dist"),
+  );
+  copyMissingTree(
+    path.join(sourceRuntime, "packages", "skills", "src"),
+    path.join(runtimeRoot, "skills"),
+  );
+
+  const state = readJson(statePath, {});
+  if (!Array.isArray(state.models)) state.models = [];
+  if (
+    !state.models.some(
+      (model) =>
+        model &&
+        typeof model === "object" &&
+        String(model.model_name || "").toLowerCase() ===
+          defaultModelName.toLowerCase(),
+    )
+  ) {
+    state.models.push(localModelRecord());
+  }
+  state.miki_token ||= crypto.randomBytes(24).toString("base64url");
+  const auth = ensureDashboardAuth(state);
+  writeJson(statePath, auth.state);
+  return auth;
+}
+
+function requiredAssets() {
+  return [
+    ["embedded Node", embeddedNode],
+    ["llama.cpp server", bundledLlama],
+    ["LFM2 GGUF model", bundledModel],
+    ["Whisper.cpp CLI", bundledWhisper],
+    ["Whisper tiny.en model", bundledWhisperModel],
+    ["gateway build", path.join(sourceRuntime, "packages", "gateway", "dist", "index.js")],
+    [
+      "dashboard index",
+      path.join(
+        runtimeRoot,
+        "packages",
+        "ui",
+        "frontend",
+        "dist",
+        "index.html",
+      ),
+    ],
+  ];
+}
+
+function printCredentials(auth) {
+  if (!auth.created) return;
+  if (auth.password) {
+    console.log(`[miki-offline] First-run dashboard password: ${auth.password}`);
+  }
+  console.log(
+    `[miki-offline] Credentials are also stored at ${credentialPath} (mode 600); delete that file after saving the password.`,
+  );
+}
+
+function doctor() {
+  let failed = false;
+  console.log("Agent Miki Linux x64 offline diagnostic\n");
+  console.log(`Package root: ${packageRoot}`);
+  console.log(`Runtime data: ${runtimeRoot}`);
+  console.log(`Workspace: ${workspaceRoot}`);
+  console.log(`Node: ${embeddedNode}`);
+  try {
+    const nodeVersion = spawnSyncVersion(embeddedNode);
+    console.log(`Node version: ${nodeVersion}`);
+  } catch (error) {
+    console.log(`Node version: unavailable (${error.message})`);
+    failed = true;
+  }
+  for (const [label, target] of requiredAssets()) {
+    const ok = fs.existsSync(target);
+    console.log(`${ok ? "PASS" : "FAIL"} ${label}: ${target}`);
+    if (!ok) failed = true;
+  }
+  if (fs.existsSync(bundledLlama)) {
+    try {
+      fs.accessSync(bundledLlama, fs.constants.X_OK);
+    } catch {
+      console.log(`FAIL llama.cpp server is not executable: ${bundledLlama}`);
+      failed = true;
+    }
+  }
+  if (failed) {
+    fail("Offline package is incomplete. Reinstall the matching Linux x64 release asset.", 1);
+  } else {
+    console.log("\nPASS All bundled offline assets are present.");
+    console.log("The dashboard remains bound to 127.0.0.1 unless GATEWAY_HOST is explicitly changed.");
+  }
+}
+
+function spawnSyncVersion(executable) {
+  const child = spawnSync(executable, ["--version"], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (child.error) throw child.error;
+  if (child.status !== 0) throw new Error(child.stderr || "version command failed");
+  return child.stdout.trim();
+}
+
+function startGateway(auth, argv) {
+  for (const [label, target] of requiredAssets()) {
+    if (!fs.existsSync(target)) throw new Error(`Missing ${label}: ${target}`);
+  }
+  const gatewayEntry = path.join(sourceRuntime, "packages", "gateway", "dist", "index.js");
+  const nodeExecutable = fs.existsSync(embeddedNode) ? embeddedNode : process.execPath;
+  const voiceLibraryDir = path.join(sourceRuntime, "voice");
+  const nativeLibraryDir = path.join(sourceRuntime, "native", "lib");
+  const oldPath = process.env.PATH || "";
+  const oldLibraryPath = process.env.LD_LIBRARY_PATH || "";
+  const env = {
+    ...process.env,
+    NODE_ENV: process.env.NODE_ENV || "production",
+    PATH: `${path.dirname(nodeExecutable)}${path.delimiter}${oldPath}`,
+    MIKI_SOURCE_ROOT: sourceRuntime,
+    MIKI_RUNTIME_ROOT: runtimeRoot,
+    MIKI_WORKSPACE_DIR: workspaceRoot,
+    MIKI_MODEL: process.env.MIKI_MODEL || defaultModelId,
+    DEFAULT_MODEL: process.env.DEFAULT_MODEL || defaultModelId,
+    MIKI_PROVIDER: process.env.MIKI_PROVIDER || "llama.cpp",
+    MIKI_LLAMA_SERVER_BIN: process.env.MIKI_LLAMA_SERVER_BIN || bundledLlama,
+    MIKI_SPEECH_TO_TEXT_ENABLED: process.env.MIKI_SPEECH_TO_TEXT_ENABLED || "true",
+    MIKI_WHISPER_CPP_EXECUTABLE:
+      process.env.MIKI_WHISPER_CPP_EXECUTABLE || bundledWhisper,
+    MIKI_WHISPER_CPP_MODEL:
+      process.env.MIKI_WHISPER_CPP_MODEL || bundledWhisperModel,
+    MIKI_SPEECH_TO_TEXT_LANGUAGE:
+      process.env.MIKI_SPEECH_TO_TEXT_LANGUAGE || "en",
+    MIKI_SPEECH_TO_TEXT_MAX_AUDIO_SECONDS:
+      process.env.MIKI_SPEECH_TO_TEXT_MAX_AUDIO_SECONDS || "120",
+    MIKI_SPEECH_TO_TEXT_MAX_FILE_MB:
+      process.env.MIKI_SPEECH_TO_TEXT_MAX_FILE_MB || "25",
+    LD_LIBRARY_PATH: [voiceLibraryDir, nativeLibraryDir, oldLibraryPath]
+      .filter(Boolean)
+      .join(path.delimiter),
+  };
+  const portIndex = argv.indexOf("--port");
+  if (portIndex >= 0 && argv[portIndex + 1]) {
+    env.GATEWAY_PORT = argv[portIndex + 1];
+  }
+  console.log("[miki-offline] Starting local Agent Miki gateway...");
+  console.log(`[miki-offline] Dashboard: http://${env.GATEWAY_HOST || "127.0.0.1"}:${env.GATEWAY_PORT || "18800"}`);
+  console.log(`[miki-offline] Local model: ${env.MIKI_MODEL}`);
+  console.log(`[miki-offline] Voice: bundled whisper.cpp CLI + tiny.en`);
+  printCredentials(auth);
+  const child = spawn(nodeExecutable, [gatewayEntry], {
+    cwd: workspaceRoot,
+    env,
+    stdio: "inherit",
+    shell: false,
+  });
+  const shutdown = (signal) => {
+    try {
+      child.kill(signal);
+    } catch {
+      // The gateway may have exited already.
+    }
+  };
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  child.once("error", (error) => {
+    console.error(`[miki-offline] Gateway failed to start: ${error.message}`);
+    process.exitCode = 1;
+  });
+  child.once("exit", (code, signal) => {
+    if (signal) console.log(`[miki-offline] Gateway stopped after ${signal}.`);
+    else if (code) console.error(`[miki-offline] Gateway exited with code ${code}.`);
+    process.exitCode = code ?? 0;
+  });
+}
+
+function usage() {
+  console.log(`Agent Miki Linux x64 offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and bundled local model\n  doctor        Check all bundled runtime, model, voice, and dashboard assets\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_DASHBOARD_PASSWORD\n`);
+}
+
+const command = process.argv[2] || "start";
+const args = process.argv.slice(3);
+try {
+  if (command === "help" || command === "--help" || command === "-h") {
+    usage();
+  } else if (command === "install") {
+    const auth = prepareRuntimeLayout();
+    console.log("[miki-offline] Offline runtime prepared.");
+    console.log(`[miki-offline] Runtime data: ${runtimeRoot}`);
+    console.log(`[miki-offline] Workspace: ${workspaceRoot}`);
+    printCredentials(auth);
+    console.log("[miki-offline] Run 'miki start' to open the dashboard.");
+  } else if (command === "doctor") {
+    prepareRuntimeLayout();
+    doctor();
+  } else if (command === "status") {
+    prepareRuntimeLayout();
+    console.log(JSON.stringify({
+      package_root: packageRoot,
+      runtime_root: runtimeRoot,
+      workspace: workspaceRoot,
+      model: bundledModel,
+      whisper_model: bundledWhisperModel,
+      auth_initialized: Boolean(readJson(statePath, {}).auth?.password_hash),
+    }, null, 2));
+  } else if (command === "start" || command === "run") {
+    const auth = prepareRuntimeLayout();
+    startGateway(auth, args);
+  } else {
+    usage();
+    fail(`Unknown command: ${command}`, 2);
+  }
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error), 1);
+}
