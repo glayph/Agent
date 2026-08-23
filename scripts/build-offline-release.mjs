@@ -677,6 +677,15 @@ function runGit(args) {
   return result.stdout.trim();
 }
 
+function assertZipArchive(file) {
+  const header = fs.readFileSync(file).subarray(0, 4).toString("hex");
+  if (!["504b0304", "504b0506", "504b0708"].includes(header)) {
+    fail(
+      `Windows companion archive is not a ZIP file: ${file} (header ${header})`,
+    );
+  }
+}
+
 function packageAndArchive() {
   // The npm-compatible .tgz always has a `package` root. The companion
   // archive uses tar.gz on Linux and zip on Windows.
@@ -695,13 +704,19 @@ function packageAndArchive() {
     `${releaseName}.${archiveExtension}`,
   );
   if (isWindows) {
+    const destination = namedArchive.replace(/'/g, "''");
     run(
-      "tar",
-      ["-a", "-cf", path.basename(namedArchive), "-C", ".", "package"],
-      {
-        cwd: releaseDir,
-      },
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$ErrorActionPreference = 'Stop'; " +
+          `Compress-Archive -Path 'package' -DestinationPath '${destination}' -CompressionLevel Optimal -Force`,
+      ],
+      { cwd: releaseDir },
     );
+    assertZipArchive(namedArchive);
   } else {
     run(
       "tar",

@@ -136,6 +136,10 @@ jobs:
           if (Test-Path $voiceDir) { throw "Voice runtime/model directory was bundled" }
           $voiceAssets = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'whisper|ggml-(tiny|base|small)' }
           if ($voiceAssets) { throw "Voice runtime/model assets were bundled: $($voiceAssets.FullName -join ', ')" }
+          $releaseZips = Get-ChildItem -Path $env:MIKI_RELEASE_DIR -Filter 'agent-miki-windows-x64-offline-*.zip' -File
+          if ($releaseZips.Count -ne 1) { throw "Expected exactly one Windows release ZIP, found $($releaseZips.Count)" }
+          $zipBytes = [System.IO.File]::ReadAllBytes($releaseZips[0].FullName)
+          if ($zipBytes.Length -lt 4 -or $zipBytes[0] -ne 0x50 -or $zipBytes[1] -ne 0x4B -or $zipBytes[2] -ne 0x03 -or $zipBytes[3] -ne 0x04) { throw "Windows release archive is not a valid ZIP: $($releaseZips[0].FullName)" }
           Push-Location $env:MIKI_RELEASE_DIR
           try { Get-Content .\SHA256SUMS | ForEach-Object { if ($_ -match '^([a-f0-9]{64})\s+(.+)$') { if ((Get-FileHash $Matches[2] -Algorithm SHA256).Hash.ToLower() -ne $Matches[1]) { throw "Checksum mismatch: $($Matches[2])" } } } }
           finally { Pop-Location }
