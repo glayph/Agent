@@ -610,12 +610,20 @@ function packageAndArchive() {
   // The npm-compatible .tgz always has a `package` root. The companion
   // archive uses tar.gz on Linux and zip on Windows.
   const tgz = path.join(releaseDir, `${packageName}-${version}.tgz`);
-  run("tar", ["-czf", tgz, "-C", releaseDir, "package"], { cwd: root });
+  if (isWindows) {
+    run("tar", ["-czf", path.basename(tgz), "-C", ".", "package"], {
+      cwd: releaseDir,
+    });
+  } else {
+    run("tar", ["-czf", tgz, "-C", releaseDir, "package"], { cwd: root });
+  }
   if (!fs.existsSync(tgz)) fail(`Expected npm package was not created: ${tgz}`);
   const archiveExtension = isWindows ? "zip" : "tar.gz";
   const namedArchive = path.join(releaseDir, `${releaseName}.${archiveExtension}`);
   if (isWindows) {
-    run("tar", ["-a", "-cf", namedArchive, "-C", releaseDir, "package"], { cwd: root });
+    run("tar", ["-a", "-cf", path.basename(namedArchive), "-C", ".", "package"], {
+      cwd: releaseDir,
+    });
   } else {
     run("tar", ["-czf", namedArchive, "--transform", `s,^package,${releaseName},`, "-C", releaseDir, "package"], { cwd: root });
   }
