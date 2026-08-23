@@ -353,7 +353,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 
           {!isCollapsedBlock && hasText && (
             <MessageActionBar
-              content={visibleContent}
+              content={content}
               align="start"
               copyLabel={t("chat.copyMessage")}
               copiedLabel={t("chat.copiedLabel")}
