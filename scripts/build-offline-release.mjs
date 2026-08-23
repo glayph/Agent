@@ -558,9 +558,9 @@ function sha256(file) {
 
 function writeManifest() {
   const important = [
-    ["runtime/node/bin/node", "Embedded Node.js runtime"],
-    ["runtime/native/llama-server", "Bundled llama.cpp server executable"],
-    ["runtime/voice/whisper-cli", "Whisper.cpp CLI"],
+    [`runtime/node/bin/${isWindows ? "node.exe" : "node"}`, "Embedded Node.js runtime"],
+    [`runtime/native/${llamaExecutableName}`, "Bundled llama.cpp server executable"],
+    [`runtime/voice/${whisperExecutableName}`, "Whisper.cpp CLI"],
     ["runtime/voice/ggml-tiny.en.bin", "Whisper tiny.en model"],
     ["bin/miki-offline.js", "Portable launcher"],
     ["runtime/packages/gateway/dist/index.js", "Gateway build"],
