@@ -16,7 +16,13 @@ const root = path.resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+const eslintEntry = path.join(
+  root,
+  "node_modules",
+  "eslint",
+  "bin",
+  "eslint.js",
+);
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: node scripts/run-verify.mjs [options]
@@ -64,9 +70,9 @@ function main() {
   // Step 1: TypeScript lint
   log("Step 1/5: Linting backend packages...");
   run(
-    npxCommand,
+    process.execPath,
     [
-      "eslint",
+      eslintEntry,
       "packages/config/src/**/*.ts",
       "packages/core/src/**/*.ts",
       "packages/gateway/src/**/*.ts",
