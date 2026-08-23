@@ -71,6 +71,10 @@ import {
 import { getErrorMessage } from "./errors.js";
 import { classifyAgentTask, formatAgentTaskProfile } from "./task-profile.js";
 import {
+  detectDeterministicIntent,
+  type DeterministicFileRequest,
+} from "./deterministic-intent.js";
+import {
   formatAgentRouteDecision,
   routeAgentTask,
   summarizeAgentRoute,
@@ -162,6 +166,99 @@ function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
   if (results.length === 0) return "";
   const sourceCount = results.length;
   return `আমি বিষয়টি খুঁজে দেখেছি, তবে এখনই নিশ্চিত synthesis দিতে পারছি না। ${sourceCount}টি source lead Inspector-এর Work/Thoughts-এ রাখা আছে—সেগুলো cross-check না করে কোনো leak বা rumor-কে confirmed তথ্য হিসেবে ধরবেন না।`;
+}
+
+function buildDeterministicSearchResponse(output: string): string {
+  try {
+    const parsed = JSON.parse(output) as {
+      results?: unknown;
+    };
+    const results = Array.isArray(parsed.results)
+      ? parsed.results.filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item) && typeof item === "object",
+        )
+      : [];
+    const verified = results.filter(
+      (item) =>
+        typeof item.title === "string" &&
+        /^https?:\/\//i.test(String(item.url || "")),
+    );
+    if (verified.length === 0) {
+      return "ওয়েব সার্চ চালানো হয়েছে, কিন্তু কোনো verified result পাওয়া যায়নি।";
+    }
+    const lines = verified.slice(0, 3).map((item, index) => {
+      const title = String(item.title).trim().slice(0, 180);
+      const url = String(item.url).trim();
+      return `${index + 1}. ${title} — ${url}`;
+    });
+    return `ওয়েবে খুঁজে পাওয়া source:\n${lines.join("\n")}`;
+  } catch {
+    return output.startsWith("Web search failed:")
+      ? "ওয়েব সার্চ ব্যর্থ হয়েছে; কোনো verified ফলাফল পাওয়া যায়নি।"
+      : "ওয়েব সার্চের ফলাফল যাচাই করা যায়নি।";
+  }
+}
+
+function normalizeReadBack(value: string): string {
+  return value.replace(/\r\n/g, "\n").trim();
+}
+
+function readWorkspaceFile(
+  workspaceDir: string,
+  requestedPath: string,
+): string | null {
+  try {
+    const workspaceRoot = path.resolve(workspaceDir);
+    const targetPath = path.resolve(workspaceRoot, requestedPath);
+    const relativeTarget = path.relative(workspaceRoot, targetPath);
+    if (relativeTarget.startsWith("..") || path.isAbsolute(relativeTarget)) {
+      return null;
+    }
+    const realWorkspaceRoot = fs.realpathSync.native(workspaceRoot);
+    const realTargetPath = fs.realpathSync.native(targetPath);
+    const realRelativeTarget = path.relative(realWorkspaceRoot, realTargetPath);
+    if (
+      realRelativeTarget.startsWith("..") ||
+      path.isAbsolute(realRelativeTarget)
+    ) {
+      return null;
+    }
+    if (!fs.statSync(realTargetPath).isFile()) return null;
+    return fs.readFileSync(realTargetPath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function buildDeterministicFileResponse(
+  files: DeterministicFileRequest[],
+  toolMessages: ChatMessage[],
+  workspaceDir: string,
+): string {
+  const writes = toolMessages.filter(
+    (message) => message.name === "file_write",
+  );
+  const reads = toolMessages.filter((message) => message.name === "file_read");
+  const checks = files.map((request, index) => {
+    const writeOutput = writes[index]?.content || "";
+    const readOutput = reads[index]?.content || "";
+    const workspaceContent = readWorkspaceFile(workspaceDir, request.path);
+    const writeOk = !/^Error(?: executing tool)?/i.test(writeOutput.trim());
+    const readOk =
+      !/^Error(?: executing tool)?/i.test(readOutput.trim()) &&
+      workspaceContent !== null &&
+      normalizeReadBack(workspaceContent) ===
+        normalizeReadBack(request.content);
+    return { request, ok: writeOk && readOk };
+  });
+  if (checks.length > 0 && checks.every((item) => item.ok)) {
+    return `ফাইল তৈরি ও যাচাই সফল: ${checks.map((item) => item.request.path).join(", ")}`;
+  }
+  const failed = checks
+    .filter((item) => !item.ok)
+    .map((item) => item.request.path);
+  return `ফাইল workflow সম্পূর্ণভাবে যাচাই করা যায়নি: ${failed.join(", ") || "unknown file"}`;
 }
 
 function withTimeout<T>(
@@ -1551,6 +1648,104 @@ export class AgentOrchestrator {
     // falling back to all registered tools here would add the full catalog to
     // every ordinary prompt and defeat adaptive pruning.
     const toolsSchema = prunedTools as unknown as ToolDefinition[];
+
+    const deterministicIntent = detectDeterministicIntent(userMessage);
+    if (deterministicIntent && turnProfile.toolsMode !== "off") {
+      const requiredToolNames =
+        deterministicIntent.kind === "web_search"
+          ? ["web_search"]
+          : (deterministicIntent.files || []).flatMap(() => [
+              "file_write",
+              "file_read",
+            ]);
+      const uniqueRequiredToolNames = [...new Set(requiredToolNames)];
+      const allowedToolNames = new Set([
+        ...toolsSchema.map((tool) => tool.function.name),
+        ...uniqueRequiredToolNames,
+      ]);
+      const syntheticCalls: RawAgentToolCall[] =
+        deterministicIntent.kind === "web_search"
+          ? [
+              {
+                id: crypto.randomUUID(),
+                function: {
+                  name: "web_search",
+                  arguments: JSON.stringify({
+                    query: deterministicIntent.query || userMessage,
+                    max_results: 5,
+                    mode: /\b(cloud|api)\b/i.test(userMessage)
+                      ? "cloud"
+                      : /\bauto\b/i.test(userMessage)
+                        ? "auto"
+                        : "local",
+                  }),
+                },
+              },
+            ]
+          : (deterministicIntent.files || []).flatMap((file) => [
+              {
+                id: crypto.randomUUID(),
+                function: {
+                  name: "file_write",
+                  arguments: JSON.stringify({
+                    path: file.path,
+                    content: file.content,
+                  }),
+                },
+              },
+              {
+                id: crypto.randomUUID(),
+                function: {
+                  name: "file_read",
+                  arguments: JSON.stringify({ path: file.path }),
+                },
+              },
+            ]);
+      const deterministicMessages: ChatMessage[] = [];
+      const toolMessagesBefore = deterministicMessages.length;
+      for await (const event of this._executeToolCallsAndYield(
+        sessionId,
+        userMessage,
+        syntheticCalls,
+        deterministicMessages,
+        0,
+        options.signal,
+        allowedToolNames,
+      )) {
+        yield event;
+      }
+      const deterministicToolMessages = deterministicMessages
+        .slice(toolMessagesBefore)
+        .filter((message) => message.role === "tool");
+      const deterministicResponse =
+        deterministicIntent.kind === "web_search"
+          ? buildDeterministicSearchResponse(
+              deterministicToolMessages[0]?.content || "",
+            )
+          : buildDeterministicFileResponse(
+              deterministicIntent.files || [],
+              deterministicToolMessages,
+              this.tools.workspaceDir,
+            );
+      await this._saveAssistantHistoryMessage(
+        sessionId,
+        deterministicResponse,
+        options.responseMessageId,
+      );
+      this._logMemoryInteraction(sessionId, userMessage, deterministicResponse);
+      yield JSON.stringify({
+        type: "stream_chunk",
+        content: deterministicResponse,
+        model_name: this.modelName,
+      });
+      yield JSON.stringify({
+        type: "stream_done",
+        usage: { tokens: 0 },
+        agent_loop_id: loopId,
+        model_name: this.modelName,
+      });
+      return;
+    }
 
     // Pre-warm the most likely tools
     if (resource.toolWarmupEnabled) {

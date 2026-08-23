@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { detectDeterministicIntent } from "../deterministic-intent.js";
 
 export interface ArtifactContract {
   root: string;
@@ -36,6 +37,29 @@ export function detectArtifactContract(
   content: string,
   workspaceRoot?: string,
 ): ArtifactContract | null {
+  const deterministicIntent = detectDeterministicIntent(content);
+  if (
+    workspaceRoot &&
+    deterministicIntent?.kind === "file_workflow" &&
+    deterministicIntent.files?.length
+  ) {
+    const required = deterministicIntent.files
+      .map((file) => file.path.replace(/\\/g, "/"))
+      .filter(
+        (file) =>
+          file &&
+          !file.startsWith("/") &&
+          !file.split("/").some((part) => part === ".."),
+      );
+    if (required.length === deterministicIntent.files.length) {
+      return {
+        root: path.resolve(workspaceRoot),
+        required: [...new Set(required)],
+        label: "file workflow",
+      };
+    }
+  }
+
   const hasLandingIntent =
     /landing\s*page|static\s+(site|page)|index\.html|styles?\.css|website|ল্যান্ডিং\s*পেজ|ওয়েবসাইট|ওয়েবসাইট|পেজ\s+তৈরি/i.test(
       content,

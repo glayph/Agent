@@ -20,6 +20,30 @@ describe("artifact contract", () => {
     expect(contract?.required).toEqual(["index.html"]);
   });
 
+  it("detects and verifies generic exact file workflows", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-files-"));
+    const content =
+      "Create multi-one.txt containing exactly one; create multi-two.txt containing exactly two; then verify both files.";
+    const contract = detectArtifactContract(content, workspace);
+    expect(contract).toEqual({
+      root: path.resolve(workspace),
+      required: ["multi-one.txt", "multi-two.txt"],
+      label: "file workflow",
+    });
+    expect(verifyArtifactContract(contract!)).toEqual({
+      ok: false,
+      missing: ["multi-one.txt", "multi-two.txt"],
+      invalid: [],
+    });
+    fs.writeFileSync(path.join(workspace, "multi-one.txt"), "one", "utf8");
+    fs.writeFileSync(path.join(workspace, "multi-two.txt"), "two", "utf8");
+    expect(verifyArtifactContract(contract!)).toEqual({
+      ok: true,
+      missing: [],
+      invalid: [],
+    });
+  });
+
   it("reconciles a verified artifact with a provider warning", () => {
     expect(
       reconcileArtifactOutcome({ ok: true, missing: [], invalid: [] }, true),

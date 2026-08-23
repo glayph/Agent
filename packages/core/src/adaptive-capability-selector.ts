@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "./mcp/contracts/tools.js";
 import type { AgentRouteDecision } from "./agent-router.js";
 import type { AgentTaskProfile } from "./task-profile.js";
+import { detectDeterministicIntent } from "./deterministic-intent.js";
 import {
   globalContextualToolPruner,
   type ContextualToolPruner,
@@ -36,7 +37,14 @@ function normalize(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, " ");
+    .replace(/[^\p{L}\p{N}_-]+/gu, " ");
+}
+
+function explicitToolNames(userMessage: string): Set<string> {
+  const intent = detectDeterministicIntent(userMessage);
+  if (!intent) return new Set<string>();
+  if (intent.kind === "web_search") return new Set(["web_search"]);
+  return new Set(["file_write", "file_read"]);
 }
 
 function includesTerm(text: string, term: string): boolean {
@@ -94,6 +102,7 @@ export function selectAdaptiveCapabilities(
   const candidateNames = new Set(candidates.map((item) => item.name || ""));
   const allByName = new Map(allTools.map((item) => [toolName(item), item]));
   const selected: ToolDefinition[] = [];
+  const explicitTools = explicitToolNames(userMessage);
   const ambiguousTurn =
     profile.complexity === "simple" && profile.verificationDepth === "none";
 
@@ -103,7 +112,9 @@ export function selectAdaptiveCapabilities(
     if (
       definition &&
       candidateNames.has(preferred) &&
-      (!ambiguousTurn || isSafeForAmbiguousTurn(preferred)) &&
+      (!ambiguousTurn ||
+        isSafeForAmbiguousTurn(preferred) ||
+        explicitTools.has(preferred)) &&
       selected.length < maxTools &&
       !selected.some((item) => toolName(item) === preferred)
     ) {
@@ -117,8 +128,23 @@ export function selectAdaptiveCapabilities(
     if (
       definition &&
       candidateNames.has(name) &&
-      (!ambiguousTurn || isSafeForAmbiguousTurn(name)) &&
+      (!ambiguousTurn ||
+        isSafeForAmbiguousTurn(name) ||
+        explicitTools.has(name)) &&
       !selected.some((item) => toolName(item) === name) &&
+      selected.length < maxTools
+    ) {
+      selected.push(definition);
+    }
+  }
+
+  // Explicit user intent is authoritative for the narrowly recognized safe
+  // operations. Add the required tools even if heuristic ranking omitted them.
+  for (const explicit of explicitTools) {
+    const definition = allByName.get(explicit);
+    if (
+      definition &&
+      !selected.some((item) => toolName(item) === explicit) &&
       selected.length < maxTools
     ) {
       selected.push(definition);
@@ -154,6 +180,9 @@ export function selectAdaptiveCapabilities(
       ? `pruned:${allTools.length - selected.length}`
       : "catalog:full",
   ];
+  if (explicitTools.size > 0) {
+    rationale.push(`explicit_tools:${[...explicitTools].join(",")}`);
+  }
   if (
     preferredTools.some((item) =>
       selected.some((tool) => toolName(tool) === item),
