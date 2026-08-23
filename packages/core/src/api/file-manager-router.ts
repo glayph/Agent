@@ -89,7 +89,7 @@ interface FileEntry {
   readonly: boolean;
 }
 
-class FileManagerError extends Error {
+export class FileManagerError extends Error {
   public readonly status: number;
 
   constructor(status: number, message: string) {
@@ -1156,7 +1156,10 @@ function asyncRoute(
   };
 }
 
-function readRequestBuffer(req: Request, maxBytes: number): Promise<Buffer> {
+export function readRequestBuffer(
+  req: Request,
+  maxBytes: number,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -1174,7 +1177,7 @@ function readRequestBuffer(req: Request, maxBytes: number): Promise<Buffer> {
   });
 }
 
-function multipartBoundary(req: Request): string {
+export function multipartBoundary(req: Request): string {
   const contentType = req.headers["content-type"] || "";
   const match = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(String(contentType));
   if (!match) {
@@ -1194,17 +1197,27 @@ function parseContentDisposition(value: string): Record<string, string> {
   return result;
 }
 
-function parseMultipartForm(
+export function parseMultipartForm(
   body: Buffer,
   boundary: string,
 ): {
   fields: Record<string, string>;
-  files: Array<{ field: string; filename: string; data: Buffer }>;
+  files: Array<{
+    field: string;
+    filename: string;
+    data: Buffer;
+    contentType?: string;
+  }>;
 } {
   const marker = Buffer.from(`--${boundary}`);
   const separator = Buffer.from("\r\n\r\n");
   const fields: Record<string, string> = {};
-  const files: Array<{ field: string; filename: string; data: Buffer }> = [];
+  const files: Array<{
+    field: string;
+    filename: string;
+    data: Buffer;
+    contentType?: string;
+  }> = [];
   let cursor = body.indexOf(marker);
 
   while (cursor >= 0) {
@@ -1230,11 +1243,21 @@ function parseMultipartForm(
     const disposition = parseContentDisposition(
       dispositionLine.replace(/^content-disposition:\s*/i, ""),
     );
+    const contentTypeLine =
+      headers.split(/\r?\n/).find((line) => /^content-type:/i.test(line)) || "";
+    const contentType = contentTypeLine
+      .replace(/^content-type:\s*/i, "")
+      .trim();
     const field = disposition.name;
     if (field) {
       const data = body.subarray(dataStart, dataEnd);
       if (disposition.filename) {
-        files.push({ field, filename: disposition.filename, data });
+        files.push({
+          field,
+          filename: disposition.filename,
+          data,
+          ...(contentType ? { contentType } : {}),
+        });
       } else {
         fields[field] = data.toString("utf8");
       }

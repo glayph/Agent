@@ -41,6 +41,15 @@ export interface SessionDetail {
       filename?: string
       content_type?: string
     }[]
+    voice?: {
+      source: "microphone" | "upload"
+      provider: "whisper.cpp"
+      language: string
+      transcript: string
+      duration_ms?: number
+      latency_ms?: number
+      transport?: "endpoint" | "cli"
+    }
     tool_calls?: {
       id?: string
       type?: string

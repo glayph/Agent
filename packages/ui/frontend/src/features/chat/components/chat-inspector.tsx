@@ -10,6 +10,7 @@ import {
   IconListDetails,
   IconLockCheck,
   IconMaximize,
+  IconMicrophone,
   IconMinimize,
   IconPlayerPlay,
   IconShieldCheck,
@@ -50,6 +51,7 @@ const pages: Array<{
   { id: "artifacts", label: "Artifacts", icon: IconFile },
   { id: "evidence", label: "Evidence", icon: IconLockCheck },
   { id: "events", label: "Events", icon: IconListDetails },
+  { id: "voice", label: "Voice", icon: IconMicrophone },
 ]
 
 function preview(value: string | undefined, limit = 180): string {
@@ -169,6 +171,10 @@ export function ChatInspector({
   )
   const toolMessages = useMemo(
     () => messages.filter((message) => message.kind === "tool_calls"),
+    [messages],
+  )
+  const voiceMessages = useMemo(
+    () => messages.filter((message) => message.voice),
     [messages],
   )
   const artifacts = useMemo(
@@ -663,6 +669,69 @@ export function ChatInspector({
               ))
             ) : (
               <EmptyState>No verifier evidence or checkpoints yet.</EmptyState>
+            )}
+          </div>
+        )}
+
+        {page === "voice" && (
+          <div className="flex flex-col gap-3">
+            <div className="border-primary/15 bg-primary/5 rounded-xl border p-3 text-xs leading-5">
+              <div className="text-primary mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase">
+                <IconMicrophone className="size-3.5" /> Voice transcription
+              </div>
+              <div className="text-foreground/80">
+                Voice is transcribed locally through the configured whisper.cpp
+                runtime, then the transcript follows the same Local or Cloud LLM
+                chat route. Raw audio is not retained by Agent Miki.
+              </div>
+            </div>
+            {voiceMessages.length > 0 ? (
+              voiceMessages
+                .slice()
+                .reverse()
+                .map((message) => {
+                  const voice = message.voice!
+                  return (
+                    <div
+                      key={`voice-${message.id}`}
+                      className="border-border/60 bg-muted/20 rounded-xl border p-3"
+                    >
+                      <div className="text-muted-foreground mb-2 flex items-center justify-between text-[10px]">
+                        <span>
+                          {voice.source === "microphone"
+                            ? "Microphone recording"
+                            : "Uploaded audio"}
+                        </span>
+                        <span>
+                          {formatTime(Number(message.timestamp) || Date.now())}
+                        </span>
+                      </div>
+                      <div className="text-foreground mb-3 text-sm leading-6 whitespace-pre-wrap">
+                        {voice.transcript}
+                      </div>
+                      <div className="text-muted-foreground grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] sm:grid-cols-4">
+                        <span>Provider: {voice.provider}</span>
+                        <span>Language: {voice.language}</span>
+                        <span>
+                          Duration:{" "}
+                          {voice.durationMs !== undefined
+                            ? `${Math.round(voice.durationMs / 1000)}s`
+                            : "—"}
+                        </span>
+                        <span>
+                          Latency:{" "}
+                          {voice.latencyMs !== undefined
+                            ? `${Math.round(voice.latencyMs)}ms`
+                            : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })
+            ) : (
+              <EmptyState>
+                No voice transcription is available for this chat yet.
+              </EmptyState>
             )}
           </div>
         )}

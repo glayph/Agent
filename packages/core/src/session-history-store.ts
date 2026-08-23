@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import Database from "better-sqlite3";
-import type { ChatMessage } from "@miki/config";
+import type { ChatMessage, VoiceMessageMetadata } from "@miki/config";
 
 export interface SessionMetadata {
   created: string;
@@ -31,6 +31,67 @@ interface MessageRow {
   role: string;
   content: string;
   image_urls: string | null;
+  voice_json: string | null;
+}
+
+function parseVoiceMetadata(
+  value: string | null,
+): VoiceMessageMetadata | undefined {
+  if (!value) return undefined;
+  try {
+    const raw = JSON.parse(value) as Record<string, unknown>;
+    if (
+      (raw.source !== "microphone" && raw.source !== "upload") ||
+      raw.provider !== "whisper.cpp" ||
+      typeof raw.language !== "string" ||
+      typeof raw.transcript !== "string" ||
+      raw.transcript.length > 50_000
+    ) {
+      return undefined;
+    }
+    const duration = Number(raw.duration_ms);
+    const latency = Number(raw.latency_ms);
+    return {
+      source: raw.source,
+      provider: "whisper.cpp",
+      language: raw.language.trim().slice(0, 20),
+      transcript: raw.transcript,
+      ...(Number.isFinite(duration) && duration >= 0
+        ? { duration_ms: Math.round(duration) }
+        : {}),
+      ...(Number.isFinite(latency) && latency >= 0
+        ? { latency_ms: Math.round(latency) }
+        : {}),
+      ...(raw.transport === "endpoint" || raw.transport === "cli"
+        ? { transport: raw.transport }
+        : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeVoiceMetadata(
+  value: VoiceMessageMetadata | undefined,
+): string | null {
+  if (!value || (value.source !== "microphone" && value.source !== "upload")) {
+    return null;
+  }
+  return JSON.stringify({
+    source: value.source,
+    provider: "whisper.cpp",
+    language: value.language.trim().slice(0, 20),
+    transcript: value.transcript.slice(0, 50_000),
+    ...(Number.isFinite(value.duration_ms) && value.duration_ms >= 0
+      ? { duration_ms: Math.round(value.duration_ms) }
+      : {}),
+    ...(Number.isFinite(value.latency_ms) && value.latency_ms >= 0
+      ? { latency_ms: Math.round(value.latency_ms) }
+      : {}),
+    ...(value.transport === "endpoint" || value.transport === "cli"
+      ? { transport: value.transport }
+      : {}),
+  });
 }
 
 /** Durable transcript storage for the dashboard session list and chat surface. */
@@ -57,12 +118,19 @@ export class SqliteSessionHistoryStore {
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         image_urls TEXT,
+        voice_json TEXT,
         PRIMARY KEY (session_id, position),
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_session_messages_id
         ON session_messages (session_id, id);
     `);
+    const columns = this.db
+      .prepare("PRAGMA table_info(session_messages)")
+      .all() as Array<{ name?: string }>;
+    if (!columns.some((column) => column.name === "voice_json")) {
+      this.db.exec("ALTER TABLE session_messages ADD COLUMN voice_json TEXT");
+    }
   }
 
   load(): Map<string, PersistedSession> {
@@ -73,7 +141,7 @@ export class SqliteSessionHistoryStore {
       .all() as SessionRow[];
     const messages = this.db
       .prepare(
-        "SELECT session_id, position, id, created_at, role, content, image_urls FROM session_messages ORDER BY session_id, position ASC",
+        "SELECT session_id, position, id, created_at, role, content, image_urls, voice_json FROM session_messages ORDER BY session_id, position ASC",
       )
       .all() as MessageRow[];
     const bySession = new Map<string, ChatMessage[]>();
@@ -92,12 +160,14 @@ export class SqliteSessionHistoryStore {
           imageUrls = undefined;
         }
       }
+      const voice = parseVoiceMetadata(row.voice_json);
       const message: ChatMessage = {
         id: row.id,
         created_at: row.created_at,
         role: row.role as ChatMessage["role"],
         content: row.content,
         ...(imageUrls && imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
+        ...(voice ? { voice } : {}),
       };
       const history = bySession.get(row.session_id) || [];
       history.push(message);
@@ -146,8 +216,8 @@ export class SqliteSessionHistoryStore {
         .prepare("DELETE FROM session_messages WHERE session_id = ?")
         .run(sessionId);
       const insert = this.db.prepare(
-        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, voice_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       messages.forEach((message, position) => {
         const imageUrls = Array.isArray(message.image_urls)
@@ -163,6 +233,7 @@ export class SqliteSessionHistoryStore {
           message.role,
           String(message.content || ""),
           imageUrls.length > 0 ? JSON.stringify(imageUrls) : null,
+          serializeVoiceMetadata(message.voice),
         );
       });
     });

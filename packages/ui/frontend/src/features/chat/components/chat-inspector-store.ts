@@ -8,6 +8,7 @@ export type ChatInspectorPage =
   | "artifacts"
   | "evidence"
   | "events"
+  | "voice"
 
 export interface ChatInspectorSelection {
   chatId: string

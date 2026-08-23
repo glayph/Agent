@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { SessionSummary } from "@/api/sessions"
+import { transcribeVoiceAudio } from "@/api/voice"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
 import { openChatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
@@ -38,6 +39,23 @@ import type { GatewayState } from "@/store/gateway"
 
 const MAX_IMAGE_SIZE_BYTES = 7 * 1024 * 1024
 const MAX_IMAGE_SIZE_LABEL = "7 MB"
+const MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
+const MAX_AUDIO_SIZE_LABEL = "25 MB"
+const MAX_AUDIO_DURATION_MS = 5 * 60 * 1000
+const ALLOWED_AUDIO_TYPES = new Set([
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/ogg",
+  "application/ogg",
+  "audio/webm",
+  "audio/flac",
+  "audio/x-flac",
+])
 const SESSION_HISTORY_REFRESH_DELAYS_MS = [500, 1800] as const
 const ALLOWED_IMAGE_TYPES = new Set([
   "image/jpeg",
@@ -59,6 +77,52 @@ function readFileAsDataUrl(file: File): Promise<string> {
     }
     reader.onerror = () => reject(reader.error || new Error("file_read_failed"))
     reader.readAsDataURL(file)
+  })
+}
+
+function preferredRecorderMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined") return undefined
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",
+  ]
+  return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType))
+}
+
+function audioExtensionForMimeType(mimeType: string): string {
+  const normalized = mimeType.split(";", 1)[0].toLowerCase()
+  if (normalized.includes("ogg")) return "ogg"
+  if (normalized.includes("mp4")) return "m4a"
+  if (normalized.includes("mpeg")) return "mp3"
+  if (normalized.includes("wav")) return "wav"
+  if (normalized.includes("flac")) return "flac"
+  return "webm"
+}
+
+function measureAudioDuration(file: Blob): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const audio = document.createElement("audio")
+    let settled = false
+    const finish = (value?: number) => {
+      if (settled) return
+      settled = true
+      URL.revokeObjectURL(url)
+      audio.remove()
+      resolve(value)
+    }
+    audio.preload = "metadata"
+    audio.onloadedmetadata = () => {
+      const duration = Number.isFinite(audio.duration)
+        ? audio.duration * 1000
+        : undefined
+      finish(duration)
+    }
+    audio.onerror = () => finish(undefined)
+    window.setTimeout(() => finish(undefined), 4000)
+    audio.src = url
   })
 }
 
@@ -319,12 +383,23 @@ export function ChatPage() {
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const audioInputRef = useRef<HTMLInputElement>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recorderStreamRef = useRef<MediaStream | null>(null)
+  const recorderChunksRef = useRef<Blob[]>([])
+  const recorderStartedAtRef = useRef<number | null>(null)
+  const recorderCancelledRef = useRef(false)
+  const recorderMaxTimerRef = useRef<number | null>(null)
   const isAtBottomRef = useRef(true)
   const scrollFrameRef = useRef<number | null>(null)
   const historyRefreshTimersRef = useRef<number[]>([])
   const lastHistoryRefreshKeyRef = useRef("")
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [voiceState, setVoiceState] = useState<
+    "idle" | "recording" | "transcribing"
+  >("idle")
+  const [voiceElapsedMs, setVoiceElapsedMs] = useState(0)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [goalShortcutOpen, setGoalShortcutOpen] = useState(false)
   const hasLoadedSessionsRef = useRef(false)
@@ -464,6 +539,218 @@ export function ChatPage() {
   const canInput = inputDisabledReason === null
   const isEditingMessage = editingMessageId !== null
 
+  const sendVoiceBlob = useCallback(
+    async (
+      blob: Blob,
+      filename: string,
+      source: "microphone" | "upload",
+      durationMs?: number,
+    ) => {
+      setVoiceState("transcribing")
+      try {
+        const result = await transcribeVoiceAudio(blob, filename, durationMs)
+        const transcript = result.transcript.trim()
+        if (!transcript) {
+          throw new Error("No speech was detected in the recording.")
+        }
+        const sent = await sendMessage({
+          content: transcript,
+          voice: {
+            source,
+            provider: result.provider,
+            language: result.language,
+            transcript,
+            durationMs: result.duration_ms ?? durationMs,
+            latencyMs: result.latency_ms,
+            transport: result.transport,
+          },
+        })
+        if (!sent) {
+          throw new Error("The transcript could not be sent to Agent Miki.")
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("chat.voiceFailed", {
+                defaultValue: "Voice message could not be processed.",
+              }),
+        )
+      } finally {
+        setVoiceState("idle")
+        setVoiceElapsedMs(0)
+      }
+    },
+    [sendMessage, t],
+  )
+
+  const handleStopVoice = useCallback(() => {
+    const recorder = recorderRef.current
+    if (recorder?.state === "recording") {
+      recorder.stop()
+    }
+  }, [])
+
+  const handleStartVoice = useCallback(async () => {
+    if (!canInput || voiceState !== "idle" || isEditingMessage) return
+    if (
+      typeof navigator.mediaDevices?.getUserMedia !== "function" ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      toast.error(
+        t("chat.voiceUnsupported", {
+          defaultValue:
+            "This browser does not support microphone recording. Use Upload audio instead.",
+        }),
+      )
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = preferredRecorderMimeType()
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+      recorderStreamRef.current = stream
+      recorderChunksRef.current = []
+      recorderCancelledRef.current = false
+      recorderStartedAtRef.current = Date.now()
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recorderChunksRef.current.push(event.data)
+      }
+      recorder.onerror = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        recorderRef.current = null
+        if (recorderMaxTimerRef.current !== null) {
+          window.clearTimeout(recorderMaxTimerRef.current)
+          recorderMaxTimerRef.current = null
+        }
+        setVoiceState("idle")
+        toast.error(
+          t("chat.voiceFailed", {
+            defaultValue: "Voice message could not be processed.",
+          }),
+        )
+      }
+      recorder.onstop = () => {
+        const wasCancelled = recorderCancelledRef.current
+        recorderCancelledRef.current = false
+        const startedAt = recorderStartedAtRef.current
+        const elapsedMs = startedAt
+          ? Math.max(0, Date.now() - startedAt)
+          : undefined
+        const actualMimeType = recorder.mimeType || mimeType || "audio/webm"
+        const blob = new Blob(recorderChunksRef.current, {
+          type: actualMimeType,
+        })
+        recorderChunksRef.current = []
+        recorderRef.current = null
+        recorderStreamRef.current = null
+        if (recorderMaxTimerRef.current !== null) {
+          window.clearTimeout(recorderMaxTimerRef.current)
+          recorderMaxTimerRef.current = null
+        }
+        stream.getTracks().forEach((track) => track.stop())
+        if (!wasCancelled) {
+          void sendVoiceBlob(
+            blob,
+            `voice-${Date.now()}.${audioExtensionForMimeType(actualMimeType)}`,
+            "microphone",
+            elapsedMs,
+          )
+        }
+      }
+      recorder.start()
+      setVoiceElapsedMs(0)
+      setVoiceState("recording")
+      recorderMaxTimerRef.current = window.setTimeout(() => {
+        if (recorderRef.current?.state === "recording")
+          recorderRef.current.stop()
+      }, MAX_AUDIO_DURATION_MS)
+    } catch {
+      recorderStreamRef.current?.getTracks().forEach((track) => track.stop())
+      recorderStreamRef.current = null
+      recorderRef.current = null
+      toast.error(
+        t("chat.voicePermissionDenied", {
+          defaultValue: "Microphone access was not granted.",
+        }),
+      )
+    }
+  }, [canInput, isEditingMessage, sendVoiceBlob, t, voiceState])
+
+  const handleAddAudio = useCallback(() => {
+    if (!canInput || isEditingMessage || voiceState !== "idle") return
+    audioInputRef.current?.click()
+  }, [canInput, isEditingMessage, voiceState])
+
+  const handleAudioSelection = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      event.target.value = ""
+      if (!file) return
+      if (
+        !ALLOWED_AUDIO_TYPES.has(file.type) &&
+        !/\.(wav|mp3|m4a|mp4|ogg|oga|webm|flac)$/i.test(file.name)
+      ) {
+        toast.error(
+          t("chat.invalidAudio", {
+            defaultValue:
+              "Choose a WAV, MP3, M4A, OGG, WebM, or FLAC audio file.",
+          }),
+        )
+        return
+      }
+      if (file.size > MAX_AUDIO_SIZE_BYTES) {
+        toast.error(
+          t("chat.audioTooLarge", {
+            defaultValue: "Audio must be {{size}} or smaller.",
+            size: MAX_AUDIO_SIZE_LABEL,
+          }),
+        )
+        return
+      }
+      const durationMs = await measureAudioDuration(file)
+      if (durationMs !== undefined && durationMs > MAX_AUDIO_DURATION_MS) {
+        toast.error(
+          t("chat.audioTooLong", {
+            defaultValue:
+              "Voice messages must be {{seconds}} seconds or shorter.",
+            seconds: Math.floor(MAX_AUDIO_DURATION_MS / 1000),
+          }),
+        )
+        return
+      }
+      await sendVoiceBlob(file, file.name, "upload", durationMs)
+    },
+    [sendVoiceBlob, t],
+  )
+
+  useEffect(() => {
+    if (voiceState !== "recording") return
+    const timer = window.setInterval(() => {
+      const startedAt = recorderStartedAtRef.current
+      setVoiceElapsedMs(startedAt ? Math.max(0, Date.now() - startedAt) : 0)
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [voiceState])
+
+  useEffect(
+    () => () => {
+      if (recorderMaxTimerRef.current !== null) {
+        window.clearTimeout(recorderMaxTimerRef.current)
+      }
+      if (recorderRef.current?.state === "recording") {
+        recorderCancelledRef.current = true
+        recorderRef.current.stop()
+      }
+      recorderStreamRef.current?.getTracks().forEach((track) => track.stop())
+    },
+    [],
+  )
+
   useEffect(() => {
     if (!editingMessageId) {
       return
@@ -521,6 +808,7 @@ export function ChatPage() {
 
   const handleSend = async () => {
     if (
+      voiceState !== "idle" ||
       (!input.trim() && attachments.length === 0) ||
       (!isEditingMessage && !canInput)
     ) {
@@ -809,6 +1097,11 @@ export function ChatPage() {
               attachments={attachments}
               onInputChange={setInput}
               onAddImages={handleAddImages}
+              onAddAudio={handleAddAudio}
+              onStartVoice={handleStartVoice}
+              onStopVoice={handleStopVoice}
+              voiceState={voiceState}
+              voiceElapsedMs={voiceElapsedMs}
               onModeClick={handleModeClick}
               onRemoveAttachment={handleRemoveAttachment}
               onSend={handleSend}
@@ -816,7 +1109,7 @@ export function ChatPage() {
               inputDisabledReason={
                 isEditingMessage ? null : inputDisabledReason
               }
-              canSend={canSubmit}
+              canSend={canSubmit && voiceState === "idle"}
               contextUsage={contextUsage}
             />
           </>
@@ -837,6 +1130,14 @@ export function ChatPage() {
         accept="image/jpeg,image/png,image/gif,image/webp,image/bmp"
         className="hidden"
         onChange={handleImageSelection}
+      />
+      <input
+        ref={audioInputRef}
+        type="file"
+        aria-label={t("chat.attachAudio", { defaultValue: "Upload audio" })}
+        accept="audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/webm,audio/flac,.m4a,.mp3,.wav,.ogg,.webm,.flac"
+        className="hidden"
+        onChange={handleAudioSelection}
       />
     </div>
   )

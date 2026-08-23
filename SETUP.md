@@ -29,16 +29,18 @@ The repository keeps the complete llama.cpp source under `packages/core/src/llm/
 
 A clean installation requires a supported Node.js runtime, npm, Git, a C/C++ build toolchain for platforms where a bundled llama.cpp binary is not already available, and Go only if the Go terminal interface is required. The root package requires Node.js 20 or newer; the CLI package declares support for Node.js `^20.19.0 || ^22.13.0 || >=24`. Go tests and the native terminal interface require Go 1.25 or newer as declared by `packages/cli/go.mod`.
 
-| Requirement    | Linux                                                      | Windows                                                        | Required for                            |
-| -------------- | ---------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------- |
-| Git            | Recommended                                                | Recommended                                                    | Cloning and updating the repository.    |
-| Node.js        | 20+                                                        | 20+                                                            | All Agent Miki commands.                |
-| npm            | Bundled with Node.js                                       | Bundled with Node.js                                           | Dependency installation and scripts.    |
-| CMake          | Required when `npm run build:llama` must compile llama.cpp | Required when Windows llama.cpp must be compiled locally       | Building the vendored llama.cpp server. |
-| C/C++ compiler | GCC/G++ or Clang                                           | Visual Studio Build Tools or another CMake-compatible compiler | llama.cpp compilation.                  |
-| Go             | 1.25+                                                      | 1.25+                                                          | Go CLI build/test/use.                  |
-| GGUF model     | Only for local-model use                                   | Only for local-model use                                       | Running a local model.                  |
-| Cloud API key  | Only for cloud-model use                                   | Only for cloud-model use                                       | Using a remote provider.                |
+| Requirement               | Linux                                                         | Windows                                                        | Required for                            |
+| ------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------- |
+| Git                       | Recommended                                                   | Recommended                                                    | Cloning and updating the repository.    |
+| Node.js                   | 20+                                                           | 20+                                                            | All Agent Miki commands.                |
+| npm                       | Bundled with Node.js                                          | Bundled with Node.js                                           | Dependency installation and scripts.    |
+| CMake                     | Required when `npm run build:llama` must compile llama.cpp    | Required when Windows llama.cpp must be compiled locally       | Building the vendored llama.cpp server. |
+| C/C++ compiler            | GCC/G++ or Clang                                              | Visual Studio Build Tools or another CMake-compatible compiler | llama.cpp compilation.                  |
+| Go                        | 1.25+                                                         | 1.25+                                                          | Go CLI build/test/use.                  |
+| GGUF model                | Only for local-model use                                      | Only for local-model use                                       | Running a local model.                  |
+| Cloud API key             | Only for cloud-model use                                      | Only for cloud-model use                                       | Using a remote provider.                |
+| Whisper.cpp runtime/model | Optional for voice transcription; official native build/model | Optional for voice transcription; official native build/model  | Browser microphone/audio transcription. |
+| FFmpeg                    | Optional; needed by whisper-server `--convert` for WebM/M4A   | Optional; needed by whisper-server `--convert` for WebM/M4A    | Browser-recorded formats beyond WAV.    |
 
 Official installation references are listed at the end of this guide: Node.js [1], CMake [2], Go [3], Git [4], and llama.cpp [5].
 
@@ -356,6 +358,29 @@ A provider test returning HTTP 401 or a message that credentials were rejected m
 Normal Chat is designed to read like a person-to-person conversation. Each assistant bubble shows only a short answer preview. To read the complete answer, explanation, source details, tool activity, report, or verification, click that bubble’s **Inspector** action and open the Inspector menu. Full details are not expanded inside the normal chat bubble.
 
 The Inspector’s **Response** page shows the complete answer, while **Thoughts**, **Work**, **Artifacts**, **Evidence**, and **Events** show their respective runtime details. It does not display private hidden chain-of-thought. Thought and hidden tool-feedback events are linked to the matching assistant response through `run_id`, so details remain attached to the correct chat bubble. This behavior is independent of whether the selected answer model is local or cloud-based.
+
+### Voice messages with whisper.cpp
+
+The Chat composer includes a microphone recorder and an **Upload audio** fallback. The browser sends one bounded recording to `POST /api/voice/transcribe`; the Node core validates the multipart body, invokes the configured official `whisper.cpp` server or CLI, deletes any temporary CLI audio directory, and sends the resulting transcript through the same WebSocket `message.send` and `runAgentLoop` path used by normal text. Therefore, the response model can be either the configured local llama.cpp/Ollama model or a cloud/API model; transcription and answer generation are separate choices.
+
+Voice transcription is disabled until an operator installs whisper.cpp and configures a runtime. The checked-in `config/agent.yaml` contains the safe defaults. For repeated microphone messages, build the official project and run `whisper-server` locally with a small model, then use an endpoint configuration:
+
+```yaml
+speech_to_text:
+  enabled: true
+  provider: whisper.cpp
+  endpoint: http://127.0.0.1:8080
+  language: auto
+  max_audio_seconds: 300
+  max_file_mb: 25
+  timeout_ms: 120000
+  concurrency: 1
+  retain_audio: false
+```
+
+On Linux, the official source workflow is `git clone https://github.com/ggml-org/whisper.cpp.git`, `cmake -B build`, and `cmake --build build -j --config Release`. Download an official GGML model with the upstream `models/download-ggml-model.sh` script, then start the server with `./build/bin/whisper-server --host 127.0.0.1 --port 8080 --model /absolute/path/to/ggml-base.bin --convert` when accepting browser formats such as WebM; `--convert` requires FFmpeg. On Windows, use the official repository with Visual Studio Build Tools/CMake, run the equivalent CMake Release build, and start `build\\bin\\Release\\whisper-server.exe` on loopback with the same model and `--convert` options. Agent Miki does not silently download, install, or execute the native runtime or model.
+
+The direct CLI alternative requires both `executable` and `model` paths and is useful for controlled WAV input. If the runtime is not configured, the UI shows the returned actionable error rather than uploading audio to a cloud transcription service. The backend enforces the configured file-size, timeout, and concurrency bounds; `retain_audio: false` is enforced in the current implementation. Inspector’s **Voice** page shows transcript, language, provider, duration, latency, and transport; raw audio, file paths, credentials, and private hidden chain-of-thought are not shown. The current implementation is a Web UI microphone/upload path; Telegram voice-file ingestion and optional spoken TTS replies are not claimed as implemented.
 
 ### Search-necessity smoke test
 

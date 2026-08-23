@@ -3,10 +3,14 @@
  * Signatures match actual core/gateway call sites.
  */
 
+import type { VoiceMessageMetadata } from "./types.js";
+export type { VoiceMessageMetadata } from "./types.js";
 import {
   migrateRuntimeConfig as migrateSchemaRuntimeConfig,
   validateRuntimeConfig as validateSchemaRuntimeConfig,
 } from "./schema.js";
+export { SpeechToTextSchema } from "./schema.js";
+export type { SpeechToTextSettings } from "./schema.js";
 import {
   resolveConfiguredSecret as resolvePersistentSecret,
   setConfiguredSecret as setPersistentSecret,
@@ -28,6 +32,7 @@ export interface ChatMessage {
   content: string;
   /** Image URLs or data URLs to be serialized as provider image content parts. */
   image_urls?: string[];
+  voice?: VoiceMessageMetadata;
   name?: string;
   tool_call_id?: string;
   tool_calls?: Array<{

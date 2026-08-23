@@ -2,7 +2,11 @@ import {
   IconAdjustmentsHorizontal,
   IconAlertCircle,
   IconArrowUp,
+  IconFileMusic,
+  IconLoader2,
+  IconMicrophone,
   IconPhotoPlus,
+  IconPlayerStop,
   IconPlus,
   IconX,
 } from "@tabler/icons-react"
@@ -52,6 +56,11 @@ export interface ChatComposerProps {
   attachments: ChatAttachment[]
   onInputChange: (value: string) => void
   onAddImages: () => void
+  onAddAudio?: () => void
+  onStartVoice?: () => void
+  onStopVoice?: () => void
+  voiceState?: "idle" | "recording" | "transcribing"
+  voiceElapsedMs?: number
   onModeClick?: () => void
   onRemoveAttachment: (index: number) => void
   onSend: () => void
@@ -65,16 +74,20 @@ export interface ChatComposerProps {
 function ComposerActionsMenu({
   attachEnabled,
   onAddImages,
+  onAddAudio,
   onModeClick,
   attachLabel,
+  audioLabel,
   modeLabel,
   menuLabel,
   buttonClassName,
 }: {
   attachEnabled: boolean
   onAddImages: () => void
+  onAddAudio?: () => void
   onModeClick?: () => void
   attachLabel: string
+  audioLabel: string
   modeLabel: string
   menuLabel: string
   buttonClassName?: string
@@ -101,6 +114,12 @@ function ComposerActionsMenu({
           <IconPhotoPlus className="size-4" />
           {attachLabel}
         </DropdownMenuItem>
+        {onAddAudio && (
+          <DropdownMenuItem disabled={!attachEnabled} onSelect={onAddAudio}>
+            <IconFileMusic className="size-4" />
+            {audioLabel}
+          </DropdownMenuItem>
+        )}
         {onModeClick && (
           <DropdownMenuItem onSelect={onModeClick}>
             <IconAdjustmentsHorizontal className="size-4" />
@@ -117,6 +136,11 @@ export function ChatComposer({
   attachments,
   onInputChange,
   onAddImages,
+  onAddAudio,
+  onStartVoice,
+  onStopVoice,
+  voiceState,
+  voiceElapsedMs = 0,
   onModeClick,
   onRemoveAttachment,
   onSend,
@@ -128,6 +152,9 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const { t } = useTranslation()
   const canInput = inputDisabledReason === null
+  const resolvedVoiceState = voiceState ?? "idle"
+  const isRecording = resolvedVoiceState === "recording"
+  const isTranscribing = resolvedVoiceState === "transcribing"
   const composingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const sendHintId = useId()
@@ -219,8 +246,12 @@ export function ChatComposer({
             <ComposerActionsMenu
               attachEnabled={canInput}
               onAddImages={onAddImages}
+              onAddAudio={onAddAudio}
               onModeClick={onModeClick}
               attachLabel={t("chat.attachImage")}
+              audioLabel={t("chat.attachAudio", {
+                defaultValue: "Upload audio",
+              })}
               modeLabel={resolvedModeLabel}
               menuLabel={actionsMenuLabel}
               buttonClassName="size-9 rounded-full"
@@ -250,6 +281,67 @@ export function ChatComposer({
             <span id={sendHintId} className="sr-only">
               {t("chat.sendHint")}
             </span>
+            {onStartVoice && (
+              <div className="flex shrink-0 items-center gap-1 pb-0.5">
+                {isRecording && (
+                  <span
+                    className="text-destructive hidden text-xs tabular-nums sm:inline"
+                    aria-live="polite"
+                  >
+                    {t("chat.voiceRecording", {
+                      defaultValue: "Recording {{seconds}}s",
+                      seconds: Math.max(0, Math.floor(voiceElapsedMs / 1000)),
+                    })}
+                  </span>
+                )}
+                <Tooltip delayDuration={700}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={isRecording ? "destructive" : "ghost"}
+                      className={cn(
+                        "size-8 rounded-full transition-colors",
+                        !isRecording &&
+                          "text-muted-foreground hover:bg-primary/10 hover:text-primary",
+                      )}
+                      onClick={isRecording ? onStopVoice : onStartVoice}
+                      disabled={isTranscribing}
+                      aria-label={
+                        isRecording
+                          ? t("chat.stopVoice", {
+                              defaultValue: "Stop recording",
+                            })
+                          : t("chat.startVoice", {
+                              defaultValue: "Record voice message",
+                            })
+                      }
+                    >
+                      {isTranscribing ? (
+                        <IconLoader2 className="size-4 animate-spin" />
+                      ) : isRecording ? (
+                        <IconPlayerStop className="size-4" />
+                      ) : (
+                        <IconMicrophone className="size-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isTranscribing
+                      ? t("chat.transcribingVoice", {
+                          defaultValue: "Transcribing…",
+                        })
+                      : isRecording
+                        ? t("chat.stopVoice", {
+                            defaultValue: "Stop recording",
+                          })
+                        : t("chat.startVoice", {
+                            defaultValue: "Record voice message",
+                          })}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            )}
             <div className="flex shrink-0 items-center gap-1 pb-0.5">
               {contextUsage && (
                 <ContextUsageRing
@@ -290,8 +382,12 @@ export function ChatComposer({
             <ComposerActionsMenu
               attachEnabled={false}
               onAddImages={onAddImages}
+              onAddAudio={onAddAudio}
               onModeClick={onModeClick}
               attachLabel={t("chat.attachImage")}
+              audioLabel={t("chat.attachAudio", {
+                defaultValue: "Upload audio",
+              })}
               modeLabel={resolvedModeLabel}
               menuLabel={actionsMenuLabel}
               buttonClassName="size-9 rounded-full"

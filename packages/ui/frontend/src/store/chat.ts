@@ -21,6 +21,16 @@ export interface ChatAttachment {
   contentType?: string
 }
 
+export interface ChatVoiceMetadata {
+  source: "microphone" | "upload"
+  provider: "whisper.cpp"
+  language: string
+  transcript: string
+  durationMs?: number
+  latencyMs?: number
+  transport?: "endpoint" | "cli"
+}
+
 export interface ChatToolCallFunction {
   name?: string
   arguments?: string
@@ -53,6 +63,7 @@ export interface ChatMessage {
   thoughtCategory?: AssistantThoughtCategory
   inspectorOnly?: boolean
   attachments?: ChatAttachment[]
+  voice?: ChatVoiceMetadata
   toolCalls?: ChatToolCall[]
 }
 

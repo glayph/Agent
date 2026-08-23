@@ -20,18 +20,19 @@ After startup, open the local dashboard address printed by the launcher. The ver
 
 ## Verified in the Local Runtime
 
-| Area                             | Observed behavior                                                                                                                                                                                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Dashboard and authentication** | The React dashboard served successfully. The first-run/login surface accepted the configured local password and opened the authenticated workspace.                                                                                                          |
-| **Chat surface**                 | The composer, model selector, running/ready state, context indicator, message actions, and provider-error display rendered. A successful cloud-model answer was not obtained in the tested environment because the provider credential request was rejected. |
-| **Models and credentials**       | The catalog returned 7 models, including Gemini and OpenAI entries. The dashboard exposed model selection and credential-management pages.                                                                                                                   |
-| **Memory**                       | Selective memory search, region filters, reindex, chunk inspection, retrieval traces, postings, and graph-edge status rendered.                                                                                                                              |
-| **Tools**                        | The authenticated API returned 50 tool entries. The catalog included filesystem, shell, browser, computer, model, runtime, workflow, web-search, and skill-discovery/install surfaces.                                                                       |
-| **Channels**                     | The channel catalog returned 15 entries. The Web channel page exposed enable, token, type, streaming, runtime probe, reset, and save controls.                                                                                                               |
-| **Drive**                        | The workspace and home-directory locations rendered with path, refresh, and file-action controls.                                                                                                                                                            |
-| **Runs and automations**         | Runs and Automation Center pages rendered with refresh/export/replay/manual-run, workflow, schedule, connection, and execution-history controls. The disposable workspace had no recorded runs or configured workflows.                                      |
-| **Config, Health, and Logs**     | Configuration, health, and logs pages rendered. The command-pattern test correctly marked `rm -rf /tmp/demo` as blocked by the configured deny pattern.                                                                                                      |
-| **Inspector**                    | The Inspector opened from an assistant message, exposed Overview, Response, Thoughts, Work, Artifacts, Evidence, and Events, and its expand/shrink and close controls worked.                                                                                |
+| Area                             | Observed behavior                                                                                                                                                                                                                                                                |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dashboard and authentication** | The React dashboard served successfully. The first-run/login surface accepted the configured local password and opened the authenticated workspace.                                                                                                                              |
+| **Chat surface**                 | The composer, model selector, running/ready state, context indicator, message actions, and provider-error display rendered. A successful cloud-model answer was not obtained in the tested environment because the provider credential request was rejected.                     |
+| **Models and credentials**       | The catalog returned 7 models, including Gemini and OpenAI entries. The dashboard exposed model selection and credential-management pages.                                                                                                                                       |
+| **Memory**                       | Selective memory search, region filters, reindex, chunk inspection, retrieval traces, postings, and graph-edge status rendered.                                                                                                                                                  |
+| **Tools**                        | The authenticated API returned 50 tool entries. The catalog included filesystem, shell, browser, computer, model, runtime, workflow, web-search, and skill-discovery/install surfaces.                                                                                           |
+| **Channels**                     | The channel catalog returned 15 entries. The Web channel page exposed enable, token, type, streaming, runtime probe, reset, and save controls.                                                                                                                                   |
+| **Drive**                        | The workspace and home-directory locations rendered with path, refresh, and file-action controls.                                                                                                                                                                                |
+| **Runs and automations**         | Runs and Automation Center pages rendered with refresh/export/replay/manual-run, workflow, schedule, connection, and execution-history controls. The disposable workspace had no recorded runs or configured workflows.                                                          |
+| **Config, Health, and Logs**     | Configuration, health, and logs pages rendered. The command-pattern test correctly marked `rm -rf /tmp/demo` as blocked by the configured deny pattern.                                                                                                                          |
+| **Inspector**                    | The Inspector opened from an assistant message, exposed Overview, Response, Thoughts, Work, Artifacts, Evidence, Events, and Voice, and its expand/shrink and close controls worked.                                                                                             |
+| **Voice transcription**          | Implemented as an authenticated browser microphone/audio-upload path backed by configured Whisper.cpp endpoint/CLI, with local temporary-audio cleanup and transcript routing through the normal chat pipeline. Runtime/model validation depends on the operator’s installation. |
 
 ## Plugins and Skills
 
@@ -84,19 +85,26 @@ The normal chat transcript is intentionally conversational: each assistant bubbl
 
 The UI groups thought summaries and hidden tool-feedback messages by `run_id`, so the details shown in Inspector belong to that response rather than to an unrelated turn. The Inspector’s Thoughts page explicitly labels its content as summaries and redacts private hidden chain-of-thought. This keeps ordinary chat readable while preserving auditability, source leads, tool activity, and verification evidence.
 
+## Voice Messages with Whisper.cpp
+
+The Chat composer includes microphone recording and an **Upload audio** fallback. Audio is sent to an authenticated, bounded transcription endpoint, validated, and processed by an operator-configured official `whisper.cpp` server or CLI. The returned transcript is submitted through the same WebSocket and `runAgentLoop` path as typed text, so the answer can come from the local LLM route or a configured cloud/API model. Transcription is local/offline by default when the endpoint is loopback; no raw audio is retained by the current implementation.
+
+Voice transcription is disabled until a Whisper.cpp runtime and model are explicitly installed and configured. The supported configuration, browser limits, Linux/Windows build commands, and the optional FFmpeg requirement for browser formats are in [SETUP.md](SETUP.md). The Inspector adds a **Voice** page for transcript, provider, language, timing, and transport diagnostics. Telegram voice-file ingestion and spoken TTS replies are not claimed as implemented.
+
 ## Inspector
 
 The Inspector opens from **Inspect agent** on an assistant message. Its verified pages are:
 
-| Page          | Observed purpose                                                                       |
-| ------------- | -------------------------------------------------------------------------------------- |
-| **Overview**  | Message count, live-node count, selected message, and recent activity.                 |
-| **Response**  | Short human-facing answer separate from detailed execution information.                |
-| **Thoughts**  | Concise categorized execution summaries; private hidden chain-of-thought is not shown. |
-| **Work**      | Execution nodes and tool-call summaries when available.                                |
-| **Artifacts** | Generated files and attachments when available.                                        |
-| **Evidence**  | Checkpoints and verifier evidence when available.                                      |
-| **Events**    | Timestamped realtime summaries and execution/error events.                             |
+| Page          | Observed purpose                                                                                                     |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Overview**  | Message count, live-node count, selected message, and recent activity.                                               |
+| **Response**  | Short human-facing answer separate from detailed execution information.                                              |
+| **Thoughts**  | Concise categorized execution summaries; private hidden chain-of-thought is not shown.                               |
+| **Work**      | Execution nodes and tool-call summaries when available.                                                              |
+| **Artifacts** | Generated files and attachments when available.                                                                      |
+| **Evidence**  | Checkpoints and verifier evidence when available.                                                                    |
+| **Events**    | Timestamped realtime summaries and execution/error events.                                                           |
+| **Voice**     | Whisper.cpp transcript, language, provider, duration, latency, and transport diagnostics; raw audio is not retained. |
 
 ## Verification Record
 

@@ -5,6 +5,7 @@ import {
   settings,
   ChatMessage,
   ToolDefinition,
+  type VoiceMessageMetadata,
   LLMResponse,
   validateRuntimeConfig,
   createWorkspaceSecretVault,
@@ -1457,6 +1458,8 @@ export class AgentOrchestrator {
       imageUrls?: string[];
       /** Stable ID of the user message supplied by the WebSocket client. */
       messageId?: string;
+      /** Safe voice transcription provenance; raw audio is never part of history. */
+      voice?: VoiceMessageMetadata;
       /** Stable ID used for the completed assistant response. */
       responseMessageId?: string;
       completionGuard?: () => {
@@ -1476,6 +1479,7 @@ export class AgentOrchestrator {
         created_at: new Date().toISOString(),
         role: "user",
         content: userMessage,
+        ...(options.voice ? { voice: options.voice } : {}),
       });
       this._messageHistory.set(sessionId, history);
       this._touchSession(sessionId);

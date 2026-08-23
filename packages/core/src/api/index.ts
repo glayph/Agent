@@ -16,6 +16,7 @@ import {
   createWorkspaceSecretVault,
   settings,
   readMikiEnv,
+  type VoiceMessageMetadata,
 } from "@miki/config";
 import {
   allowedCorsOriginsFromEnv,
@@ -101,6 +102,7 @@ import {
   type SearchMode,
 } from "../search/local-first-search.js";
 import { createMemoryRouter } from "./memory-router.js";
+import { createVoiceRouter } from "./voice-router.js";
 import { normalizeChatSessionId } from "./chat-session.js";
 import {
   subscribeDeliveryOutcome,
@@ -775,6 +777,11 @@ async function handleSearchRequest(req: Request, res: Response): Promise<void> {
 app.get("/api/search", requireHttpAuth, handleSearchRequest);
 app.post("/api/search", requireHttpAuth, handleSearchRequest);
 app.use("/api/memory", requireHttpAuth, memoryRouter);
+app.use(
+  "/api/voice",
+  requireHttpAuth,
+  createVoiceRouter({ configDir: runtimePaths.configDir }),
+);
 
 app.post("/api/search/fetch", requireHttpAuth, async (req, res) => {
   const url = typeof req.body?.url === "string" ? req.body.url : "";
@@ -1645,6 +1652,36 @@ mikiWss.on("connection", (ws, req) => {
     const media = Array.isArray(payload.media)
       ? payload.media.filter((item): item is string => typeof item === "string")
       : [];
+    const rawVoice = _asRecord(payload.voice);
+    const voiceProvider =
+      rawVoice.provider === "whisper.cpp" ? "whisper.cpp" : undefined;
+    const voiceLanguage =
+      typeof rawVoice.language === "string"
+        ? rawVoice.language.trim().slice(0, 20)
+        : undefined;
+    const voiceTransport =
+      rawVoice.transport === "endpoint" || rawVoice.transport === "cli"
+        ? rawVoice.transport
+        : undefined;
+    const voiceDurationMs = Number(rawVoice.durationMs);
+    const voiceLatencyMs = Number(rawVoice.latencyMs);
+    const voiceMetadata: VoiceMessageMetadata | undefined =
+      voiceProvider &&
+      (rawVoice.source === "microphone" || rawVoice.source === "upload")
+        ? {
+            source: rawVoice.source,
+            provider: voiceProvider,
+            language: voiceLanguage || "auto",
+            transcript: content,
+            ...(Number.isFinite(voiceDurationMs) && voiceDurationMs >= 0
+              ? { duration_ms: Math.round(voiceDurationMs) }
+              : {}),
+            ...(Number.isFinite(voiceLatencyMs) && voiceLatencyMs >= 0
+              ? { latency_ms: Math.round(voiceLatencyMs) }
+              : {}),
+            ...(voiceTransport ? { transport: voiceTransport } : {}),
+          }
+        : undefined;
 
     if (!content && media.length === 0) {
       _sendmiki(ws, {
@@ -1739,6 +1776,21 @@ mikiWss.on("connection", (ws, req) => {
           timestamp: Date.now(),
           payload: { run_id: assistantMessageId, objective: content },
         });
+        if (voiceProvider) {
+          const duration = Number.isFinite(voiceDurationMs)
+            ? `, ${Math.round(Math.max(0, voiceDurationMs))} ms audio`
+            : "";
+          const latency = Number.isFinite(voiceLatencyMs)
+            ? `, ${Math.round(Math.max(0, voiceLatencyMs))} ms transcription`
+            : "";
+          _sendInspectorThought(
+            ws,
+            sessionId,
+            assistantMessageId,
+            `Voice transcription received from whisper.cpp (${voiceTransport || "configured runtime"}${voiceLanguage ? `, language ${voiceLanguage}` : ""}${duration}${latency}). The transcript is being sent through the standard model route.`,
+            "Progress",
+          );
+        }
 
         const messageForAgent =
           media.length > 0
@@ -1762,6 +1814,7 @@ mikiWss.on("connection", (ws, req) => {
               },
               imageUrls: media,
               messageId: requestId,
+              ...(voiceMetadata ? { voice: voiceMetadata } : {}),
               responseMessageId: assistantMessageId,
               completionGuard: () =>
                 artifactContract

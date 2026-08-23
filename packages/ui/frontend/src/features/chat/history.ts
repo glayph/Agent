@@ -60,6 +60,17 @@ export async function loadSessionMessages(
       media: message.media,
       attachments: message.attachments,
     }),
+    voice: message.voice
+      ? {
+          source: message.voice.source,
+          provider: message.voice.provider,
+          language: message.voice.language,
+          transcript: message.voice.transcript,
+          durationMs: message.voice.duration_ms,
+          latencyMs: message.voice.latency_ms,
+          transport: message.voice.transport,
+        }
+      : undefined,
     timestamp: message.created_at ?? detail.updated,
   }))
 }
@@ -85,10 +96,13 @@ function messageSignature(message: ChatMessage): string {
         `${attachment.type}\u0001${attachment.url}\u0001${attachment.filename ?? ""}`,
     )
     .join("\u0002")
+  const voiceSignature = message.voice
+    ? `${message.voice.source}\u0001${message.voice.provider}\u0001${message.voice.language}\u0001${message.voice.transcript}`
+    : ""
 
   return `${message.role}\u0000${message.content}\u0000${normalizeMessageTimestamp(
     message.timestamp,
-  )}\u0000${message.kind ?? ""}\u0000${message.modelName ?? ""}\u0000${attachmentSignature}\u0000${toolCallsSignature(
+  )}\u0000${message.kind ?? ""}\u0000${message.modelName ?? ""}\u0000${attachmentSignature}\u0000${voiceSignature}\u0000${toolCallsSignature(
     message.toolCalls,
   )}`
 }

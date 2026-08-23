@@ -168,6 +168,32 @@ const WebSearchSchema = z
   })
   .passthrough();
 
+/**
+ * Local speech-to-text is opt-in. The runtime never downloads binaries/models
+ * or forwards audio to a cloud provider implicitly; an operator must provide
+ * an official whisper.cpp endpoint or executable/model pair.
+ */
+export const SpeechToTextSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    provider: z.literal("whisper.cpp").default("whisper.cpp"),
+    endpoint: z.string().url().optional(),
+    executable: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    language: z
+      .string()
+      .regex(/^[A-Za-z][A-Za-z0-9-]{0,19}$/)
+      .default("auto"),
+    max_audio_seconds: z.number().int().min(1).max(3600).default(300),
+    max_file_mb: z.number().int().min(1).max(50).default(25),
+    timeout_ms: z.number().int().min(1000).max(300000).default(120000),
+    concurrency: z.number().int().min(1).max(4).default(1),
+    retain_audio: z.boolean().default(false),
+  })
+  .passthrough();
+
+export type SpeechToTextSettings = z.infer<typeof SpeechToTextSchema>;
+
 const AgentResourceSchema = z
   .object({
     mode: z.enum(["eco", "balanced", "performance"]).optional(),
@@ -329,6 +355,7 @@ export const RuntimeConfigSchema = z
     channels: JsonRecordSchema.optional(),
     channel_list: JsonRecordSchema.optional(),
     web_search: WebSearchSchema.optional(),
+    speech_to_text: SpeechToTextSchema.optional(),
   })
   .extend({
     tools: ToolsSchema.optional(),
@@ -445,6 +472,7 @@ export function validateRuntimeConfig(
     "channels",
     "channel_list",
     "web_search",
+    "speech_to_text",
   ]);
   for (const key of Object.keys(config)) {
     if (!knownKeys.has(key)) {
@@ -468,7 +496,7 @@ export function validateRuntimeConfig(
   validateMcpServers(config, errors);
   validateMqttBrokerConfig(config, errors);
   validateWebSearchConfig(config, errors);
-
+  validateSpeechToTextConfig(config, errors);
   return {
     valid: errors.length === 0,
     config: parsed.success ? parsed.data : config,
@@ -691,6 +719,45 @@ function validateWebSearchConfig(
   }
 }
 
+function validateSpeechToTextConfig(
+  config: RuntimeConfig,
+  errors: ConfigValidationIssue[],
+): void {
+  if (!isRecord(config.speech_to_text)) return;
+  const speech = config.speech_to_text;
+  if (speech.enabled !== true) return;
+  const endpoint = stringValue(speech.endpoint);
+  const executable = stringValue(speech.executable);
+  const model = stringValue(speech.model);
+  if (!endpoint && !(executable && model)) {
+    errors.push(
+      issue(
+        "speech_to_text",
+        "Enabled speech-to-text requires an HTTP endpoint or both executable and model paths.",
+        "missing_speech_to_text_runtime",
+      ),
+    );
+    return;
+  }
+  if (endpoint && !isHttpUrl(endpoint)) {
+    errors.push(
+      issue(
+        "speech_to_text.endpoint",
+        "Speech-to-text endpoint must use http:// or https://.",
+        "invalid_speech_to_text_endpoint",
+      ),
+    );
+  }
+  if (endpoint && (executable || model)) {
+    errors.push(
+      issue(
+        "speech_to_text",
+        "Configure either endpoint or executable+model, not both.",
+        "ambiguous_speech_to_text_runtime",
+      ),
+    );
+  }
+}
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }

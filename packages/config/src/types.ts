@@ -4,6 +4,16 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+export interface VoiceMessageMetadata {
+  source: "microphone" | "upload";
+  provider: "whisper.cpp";
+  language: string;
+  transcript: string;
+  duration_ms?: number;
+  latency_ms?: number;
+  transport?: "endpoint" | "cli";
+}
+
 export interface ChatMessage {
   /** Stable identifier used by persisted session history mutations. */
   id?: string;
@@ -11,6 +21,8 @@ export interface ChatMessage {
   created_at?: string;
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  image_urls?: string[];
+  voice?: VoiceMessageMetadata;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;

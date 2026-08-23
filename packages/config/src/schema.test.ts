@@ -56,6 +56,70 @@ describe("runtime config schema", () => {
     );
   });
 
+  it("accepts disabled speech-to-text defaults and a valid Whisper.cpp endpoint", () => {
+    const disabled = validateRuntimeConfig({
+      speech_to_text: { enabled: false },
+    });
+    expect(disabled.valid).toBe(true);
+    expect(disabled.config.speech_to_text).toMatchObject({
+      enabled: false,
+      provider: "whisper.cpp",
+      language: "auto",
+      max_audio_seconds: 300,
+      max_file_mb: 25,
+      timeout_ms: 120000,
+      concurrency: 1,
+      retain_audio: false,
+    });
+
+    const endpoint = validateRuntimeConfig({
+      speech_to_text: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:8080",
+        max_audio_seconds: 120,
+        max_file_mb: 10,
+        timeout_ms: 60000,
+        concurrency: 2,
+      },
+    });
+    expect(endpoint.valid).toBe(true);
+    expect(endpoint.errors).toEqual([]);
+  });
+
+  it("rejects unsafe or incomplete speech-to-text configuration", () => {
+    const missingRuntime = validateRuntimeConfig({
+      speech_to_text: { enabled: true },
+    });
+    expect(missingRuntime.valid).toBe(false);
+    expect(missingRuntime.errors).toContainEqual(
+      expect.objectContaining({
+        path: "speech_to_text",
+        code: "missing_speech_to_text_runtime",
+      }),
+    );
+
+    const invalidBounds = validateRuntimeConfig({
+      speech_to_text: {
+        enabled: false,
+        provider: "other",
+        max_audio_seconds: 0,
+        max_file_mb: 51,
+        timeout_ms: 500,
+        concurrency: 0,
+      },
+    });
+    expect(invalidBounds.valid).toBe(false);
+    expect(invalidBounds.errors.map((item) => item.path)).toEqual(
+      expect.arrayContaining([
+        "speech_to_text.provider",
+        "speech_to_text.max_audio_seconds",
+        "speech_to_text.max_file_mb",
+        "speech_to_text.timeout_ms",
+        "speech_to_text.concurrency",
+      ]),
+    );
+  });
+
   it("accepts resource-aware agent runtime settings", () => {
     const result = validateRuntimeConfig({
       agent: {

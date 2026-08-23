@@ -30,6 +30,7 @@ import { handleMonitorMessage } from "@/features/monitor/protocol"
 import i18n from "@/i18n"
 import {
   type ChatAttachment,
+  type ChatVoiceMetadata,
   getChatState,
   updateChatStore,
 } from "@/store/chat"
@@ -406,6 +407,7 @@ export async function hydrateActiveSession() {
 interface SendChatMessageInput {
   content: string
   attachments?: ChatAttachment[]
+  voice?: ChatVoiceMetadata
 }
 
 interface EditChatMessageInput {
@@ -427,6 +429,7 @@ function sendmikiMessage(
   requestId: string,
   content: string,
   attachments: ChatAttachment[],
+  voice?: ChatVoiceMetadata,
 ) {
   socket.send(
     JSON.stringify({
@@ -435,6 +438,7 @@ function sendmikiMessage(
       payload: {
         content,
         media: attachments.map((attachment) => attachment.url),
+        ...(voice ? { voice } : {}),
       },
     }),
   )
@@ -549,6 +553,7 @@ async function handlePlatformConnectionIntent(
 export async function sendChatMessage({
   content,
   attachments = [],
+  voice,
 }: SendChatMessageInput): Promise<boolean> {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
@@ -584,6 +589,7 @@ export async function sendChatMessage({
         content: normalizedContent,
         attachments:
           normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
+        voice: voice ? { ...voice, transcript: normalizedContent } : undefined,
         timestamp: Date.now(),
       },
     ],
@@ -591,7 +597,7 @@ export async function sendChatMessage({
   }))
 
   try {
-    sendmikiMessage(socket, id, normalizedContent, normalizedAttachments)
+    sendmikiMessage(socket, id, normalizedContent, normalizedAttachments, voice)
     return true
   } catch (error) {
     console.error("Failed to send miki message:", error)
