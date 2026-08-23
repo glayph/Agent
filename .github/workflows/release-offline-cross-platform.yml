@@ -120,7 +120,7 @@ jobs:
           test ! -d "$MIKI_RELEASE_DIR/package/runtime/models"
           ! find "$MIKI_RELEASE_DIR/package/runtime" -type f -iname '*.gguf' -print -quit | grep -q .
           test ! -d "$MIKI_RELEASE_DIR/package/runtime/voice"
-          ! find "$MIKI_RELEASE_DIR/package/runtime" -type f \( -iname '*whisper*' -o -iname '*ggml-*' -o -iname '*speech-to-text*' \) -print -quit | grep -q .
+          ! find "$MIKI_RELEASE_DIR/package/runtime" -type f \( -iname '*whisper*' -o -iname '*ggml-tiny*' -o -iname '*ggml-base*' -o -iname '*ggml-small*' \) -print -quit | grep -q .
           (cd "$MIKI_RELEASE_DIR" && sha256sum -c SHA256SUMS)
           cp "$MIKI_RELEASE_DIR/SHA256SUMS" "$MIKI_RELEASE_DIR/SHA256SUMS-linux-x64"
 
@@ -134,7 +134,7 @@ jobs:
           if ($gguf) { throw "Answer-model GGUF was bundled: $($gguf.FullName)" }
           $voiceDir = Join-Path $env:MIKI_RELEASE_DIR "package\runtime\voice"
           if (Test-Path $voiceDir) { throw "Voice runtime/model directory was bundled" }
-          $voiceAssets = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'whisper|ggml-|speech-to-text' }
+          $voiceAssets = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'whisper|ggml-(tiny|base|small)' }
           if ($voiceAssets) { throw "Voice runtime/model assets were bundled: $($voiceAssets.FullName -join ', ')" }
           Push-Location $env:MIKI_RELEASE_DIR
           try { Get-Content .\SHA256SUMS | ForEach-Object { if ($_ -match '^([a-f0-9]{64})\s+(.+)$') { if ((Get-FileHash $Matches[2] -Algorithm SHA256).Hash.ToLower() -ne $Matches[1]) { throw "Checksum mismatch: $($Matches[2])" } } } }

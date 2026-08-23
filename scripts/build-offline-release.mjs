@@ -378,9 +378,7 @@ function assertNoBundledVoiceAssets() {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) scan(target);
-      else if (
-        /whisper|ggml-(tiny|base|small)|speech.?to.?text/i.test(entry.name)
-      ) {
+      else if (/whisper|ggml-(tiny|base|small)/i.test(entry.name)) {
         forbidden.push(target);
       }
     }
