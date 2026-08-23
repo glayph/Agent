@@ -86,6 +86,64 @@ describe("runtime config schema", () => {
     expect(endpoint.errors).toEqual([]);
   });
 
+  it("accepts multiple speech models with an active selection", () => {
+    const result = validateRuntimeConfig({
+      speech_to_text: {
+        enabled: true,
+        active_model_id: "base-cli",
+        models: [
+          {
+            id: "base-cli",
+            name: "Whisper Base CLI",
+            transport: "cli",
+            executable: "/opt/whisper-cli",
+            model: "/models/ggml-base.bin",
+          },
+          {
+            id: "server-small",
+            name: "Whisper Server Small",
+            transport: "endpoint",
+            endpoint: "http://127.0.0.1:8080",
+          },
+        ],
+      },
+    });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.config.speech_to_text?.active_model_id).toBe("base-cli");
+    expect(result.config.speech_to_text?.models).toHaveLength(2);
+  });
+
+  it("rejects invalid or duplicate speech model records", () => {
+    const result = validateRuntimeConfig({
+      speech_to_text: {
+        enabled: true,
+        active_model_id: "duplicate",
+        models: [
+          {
+            id: "duplicate",
+            name: "One",
+            transport: "endpoint",
+            endpoint: "http://127.0.0.1:8080",
+          },
+          {
+            id: "duplicate",
+            name: "Two",
+            transport: "cli",
+            executable: "/opt/whisper-cli",
+          },
+        ],
+      },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.map((item) => item.code)).toEqual(
+      expect.arrayContaining([
+        "duplicate_speech_to_text_model_id",
+        "invalid_speech_to_text_model",
+      ]),
+    );
+  });
+
   it("rejects unsafe or incomplete speech-to-text configuration", () => {
     const missingRuntime = validateRuntimeConfig({
       speech_to_text: { enabled: true },

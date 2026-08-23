@@ -9,13 +9,18 @@ import { fileURLToPath } from "node:url";
 const launcherDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(launcherDir, "..");
 const sourceRuntime = path.join(packageRoot, "runtime");
-const embeddedNode = path.join(sourceRuntime, "node", "bin", "node");
+const executableSuffix = process.platform === "win32" ? ".exe" : "";
+const embeddedNode = path.join(sourceRuntime, "node", "bin", `node${executableSuffix}`);
 const bundledLlama = path.join(
   sourceRuntime,
   "native",
-  "llama-server",
+  `llama-server${executableSuffix}`,
 );
-const bundledWhisper = path.join(sourceRuntime, "voice", "whisper-cli");
+const bundledWhisper = path.join(
+  sourceRuntime,
+  "voice",
+  `whisper-cli${executableSuffix}`,
+);
 const bundledWhisperModel = path.join(
   sourceRuntime,
   "voice",
@@ -325,7 +330,7 @@ function printCredentials(auth) {
 
 function doctor() {
   let failed = false;
-  console.log("Agent Miki Linux x64 offline diagnostic\n");
+  console.log(`Agent Miki ${process.platform}-${process.arch} offline diagnostic\n`);
   console.log(`Package root: ${packageRoot}`);
   console.log(`Runtime data: ${runtimeRoot}`);
   console.log(`Workspace: ${workspaceRoot}`);
@@ -454,7 +459,7 @@ function startGateway(auth, argv) {
 }
 
 function usage() {
-  console.log(`Agent Miki Linux x64 offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and voice assets\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n`);
+  console.log(`Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and voice assets\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n`);
 }
 
 const command = process.argv[2] || "start";

@@ -29,6 +29,33 @@ describe("WhisperCppService", () => {
     });
   });
 
+  it("uses the active speech model record for endpoint transport", async () => {
+    const service = new WhisperCppService(
+      makeConfig(
+        [
+          "speech_to_text:",
+          "  enabled: true",
+          "  active_model_id: server-small",
+          "  models:",
+          "    - id: server-small",
+          "      name: Whisper Server Small",
+          "      transport: endpoint",
+          "      endpoint: http://127.0.0.1:9",
+        ].join("\n"),
+      ),
+    );
+    await expect(
+      service.transcribe({
+        data: Buffer.from("RIFF0000WAVE", "ascii"),
+        filename: "voice.wav",
+        mimeType: "audio/wav",
+      }),
+    ).rejects.toMatchObject<Partial<SpeechToTextError>>({
+      status: 502,
+      code: "whisper_endpoint_unavailable",
+    });
+  });
+
   it("rejects a disguised upload before contacting the configured endpoint", async () => {
     const service = new WhisperCppService(
       makeConfig(

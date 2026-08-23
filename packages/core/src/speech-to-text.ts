@@ -150,7 +150,36 @@ function readSpeechConfig(configDir: string): Record<string, unknown> {
       "Speech-to-text configuration is invalid; check agent.yaml or environment overrides.",
     );
   }
-  return parsed.data as Record<string, unknown>;
+  const config = parsed.data as SpeechToTextSettings;
+  const hasDirectRuntimeOverride = Boolean(
+    environmentConfig.endpoint ||
+    environmentConfig.executable ||
+    environmentConfig.model,
+  );
+  const activeModel = hasDirectRuntimeOverride
+    ? undefined
+    : config.models.find(
+        (candidate) =>
+          candidate.id === config.active_model_id &&
+          candidate.enabled !== false,
+      );
+  if (activeModel) {
+    return {
+      ...config,
+      ...(activeModel.transport === "endpoint"
+        ? {
+            endpoint: activeModel.endpoint,
+            executable: undefined,
+            model: undefined,
+          }
+        : {
+            endpoint: undefined,
+            executable: activeModel.executable,
+            model: activeModel.model,
+          }),
+    } as Record<string, unknown>;
+  }
+  return config as Record<string, unknown>;
 }
 
 export function loadSpeechToTextSettings(

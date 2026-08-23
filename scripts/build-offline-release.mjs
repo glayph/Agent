@@ -13,16 +13,26 @@ const rootPackage = JSON.parse(
   fs.readFileSync(path.join(root, "package.json"), "utf8"),
 );
 const version = rootPackage.version;
-const packageName = "agent-miki-linux-x64-offline";
+const isWindows = process.platform === "win32";
+const isLinux = process.platform === "linux";
+const isX64 = process.arch === "x64";
+const platformKey = `${process.platform}-${process.arch}`;
+const artifactPlatform = isWindows ? "windows-x64" : "linux-x64";
+const packageName = `agent-miki-${artifactPlatform}-offline`;
 const releaseName = `${packageName}-${version}`;
+const llamaExecutableName = isWindows ? "llama-server.exe" : "llama-server";
+const whisperExecutableName = isWindows ? "whisper-cli.exe" : "whisper-cli";
 const releaseDir = path.resolve(
   process.env.MIKI_RELEASE_DIR || path.join(os.tmpdir(), releaseName),
 );
 const stageDir = path.join(releaseDir, "package");
 const runtimeDir = path.join(stageDir, "runtime");
 const nodeVersion = "v22.23.2";
-const nodeArchiveName = `node-${nodeVersion}-linux-x64.tar.xz`;
+const nodeArchiveName = isWindows
+  ? `node-${nodeVersion}-win-x64.zip`
+  : `node-${nodeVersion}-linux-x64.tar.xz`;
 const nodeArchiveUrl = `https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName}`;
+const npmCommand = isWindows ? "npm.cmd" : "npm";
 const whisperCommit = "233fe1fc9b48a09e361d3594520838ca266537fe";
 const whisperSourceUrl = "https://github.com/ggml-org/whisper.cpp";
 const ffmpegVersion = "7.1.1";
@@ -91,7 +101,7 @@ function writeText(file, text, mode = 0o644) {
 }
 
 function chmodExecutable(file) {
-  fs.chmodSync(file, 0o755);
+  if (!isWindows) fs.chmodSync(file, 0o755);
 }
 
 function download(url, destination) {
@@ -276,11 +286,12 @@ function stageNativeAndModels() {
     "llm",
     "local",
     "native",
-    "linux-x64",
-    "llama-server",
+    platformKey,
+    llamaExecutableName,
   );
-  copyRequired(llamaSource, path.join(runtimeDir, "native", "llama-server"), "Linux x64 llama-server");
-  chmodExecutable(path.join(runtimeDir, "native", "llama-server"));
+  const llamaDestination = path.join(runtimeDir, "native", llamaExecutableName);
+  copyRequired(llamaSource, llamaDestination, `${platformKey} llama-server`);
+  chmodExecutable(llamaDestination);
 
   const whisperSource = process.env.MIKI_WHISPER_CPP_BIN;
   const whisperModel = process.env.MIKI_WHISPER_CPP_MODEL;
@@ -290,12 +301,20 @@ function stageNativeAndModels() {
     );
   }
   const voiceDir = path.join(runtimeDir, "voice");
-  copyRequired(whisperSource, path.join(voiceDir, "whisper-cli"), "Whisper.cpp CLI");
-  chmodExecutable(path.join(voiceDir, "whisper-cli"));
+  const whisperDestination = path.join(voiceDir, whisperExecutableName);
+  copyRequired(whisperSource, whisperDestination, `${platformKey} Whisper.cpp CLI`);
+  chmodExecutable(whisperDestination);
   const whisperLibraryDir = path.dirname(whisperSource);
   for (const entry of fs.readdirSync(whisperLibraryDir)) {
-    if (/^lib.*\.so(?:\.|$)/.test(entry)) {
-      copyRequired(path.join(whisperLibraryDir, entry), path.join(voiceDir, entry), `Whisper runtime library ${entry}`);
+    const isRuntimeLibrary = isWindows
+      ? entry.toLowerCase().endsWith(".dll")
+      : /^lib.*\.so(?:\.|$)/.test(entry);
+    if (isRuntimeLibrary) {
+      copyRequired(
+        path.join(whisperLibraryDir, entry),
+        path.join(voiceDir, entry),
+        `Whisper runtime library ${entry}`,
+      );
     }
   }
   copyRequired(whisperModel, path.join(voiceDir, "ggml-tiny.en.bin"), "Whisper tiny.en model");
@@ -327,44 +346,70 @@ function stageNodeRuntime() {
   const extracted = path.join(releaseDir, "node-extracted");
   fs.rmSync(extracted, { recursive: true, force: true });
   fs.mkdirSync(extracted, { recursive: true });
-  run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], { cwd: root });
-  copyRequired(path.join(extracted, "bin", "node"), path.join(runtimeDir, "node", "bin", "node"), "Node Linux x64 binary");
-  copyRequired(path.join(extracted, "LICENSE"), path.join(runtimeDir, "node", "LICENSE"), "Node license");
-  copyRequired(path.join(extracted, "README.md"), path.join(runtimeDir, "node", "README.md"), "Node notice");
-  chmodExecutable(path.join(runtimeDir, "node", "bin", "node"));
+  if (isWindows) {
+    run("tar", ["-xf", archive, "-C", extracted], { cwd: root });
+  } else {
+    run("tar", ["-xJf", archive, "--strip-components=1", "-C", extracted], { cwd: root });
+  }
+  const nodeRoot = isWindows
+    ? path.join(extracted, `node-${nodeVersion}-win-x64`)
+    : extracted;
+  const nodeName = isWindows ? "node.exe" : "node";
+  const nodeDestination = path.join(runtimeDir, "node", "bin", nodeName);
+  const nodeSource = isWindows
+    ? path.join(nodeRoot, nodeName)
+    : path.join(nodeRoot, "bin", nodeName);
+  copyRequired(nodeSource, nodeDestination, `${platformKey} Node binary`);
+  copyRequired(path.join(nodeRoot, "LICENSE"), path.join(runtimeDir, "node", "LICENSE"), "Node license");
+  copyRequired(path.join(nodeRoot, "README.md"), path.join(runtimeDir, "node", "README.md"), "Node notice");
+  chmodExecutable(nodeDestination);
 }
 
 function stageNotices() {
   const licensesDir = path.join(stageDir, "licenses");
+  const ffmpegLicense =
+    process.env.MIKI_FFMPEG_LICENSE ||
+    (isLinux
+      ? path.join("/tmp", "miki-ffmpeg-clean", `ffmpeg-${ffmpegVersion}`, "LICENSE.md")
+      : "");
+  const whisperLicense =
+    process.env.MIKI_WHISPER_CPP_LICENSE ||
+    (isLinux ? path.join("/tmp", "miki-whisper.cpp", "LICENSE") : "");
   copyRequired(
     path.join(root, "packages", "core", "src", "llm", "local", "miki-native-runtime (keep it Always for windows build)", "LICENSE"),
     path.join(licensesDir, "LLAMA_CPP_AND_GGML_LICENSE"),
     "llama.cpp/GGML license",
   );
-  copyRequired(
-    path.join("/tmp", "miki-whisper.cpp", "LICENSE"),
-    path.join(licensesDir, "WHISPER_CPP_LICENSE"),
-    "whisper.cpp license",
-  );
-  copyRequired(
-    path.join("/tmp", "miki-ffmpeg-clean", `ffmpeg-${ffmpegVersion}`, "LICENSE.md"),
-    path.join(licensesDir, "FFMPEG_LICENSE.md"),
-    "FFmpeg license",
-  );
+  if (whisperLicense) {
+    copyRequired(whisperLicense, path.join(licensesDir, "WHISPER_CPP_LICENSE"), "whisper.cpp license");
+  } else {
+    writeText(
+      path.join(licensesDir, "WHISPER_CPP_LICENSE"),
+      `whisper.cpp license: ${whisperSourceUrl} at commit ${whisperCommit}`,
+    );
+  }
+  if (ffmpegLicense) {
+    copyRequired(ffmpegLicense, path.join(licensesDir, "FFMPEG_LICENSE.md"), "FFmpeg license");
+  } else {
+    writeText(
+      path.join(licensesDir, "FFMPEG_LICENSE.md"),
+      `FFmpeg ${ffmpegVersion} licensing information: https://ffmpeg.org/legal.html`,
+    );
+  }
   download(
     "https://raw.githubusercontent.com/openai/whisper/main/LICENSE",
     path.join(licensesDir, "OPENAI_WHISPER_LICENSE"),
   );
-  const notices = `# Agent Miki Linux x64 offline release notices
+  const notices = `# Agent Miki ${isWindows ? "Windows x64" : "Linux x64"} offline release notices
 
 This package ships the following third-party artifacts. Their licenses are included in the \`licenses/\` directory and remain separate from the Agent Miki MIT license.
 
 | Component | Shipped artifact | License/notice | Official source |
 | --- | --- | --- | --- |
-| Node.js | \`runtime/node/bin/node\` (${nodeVersion}) | Node.js license and bundled-runtime notice | https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName} |
-| llama.cpp / GGML | \`runtime/native/llama-server\` | MIT license | https://github.com/ggml-org/llama.cpp |
-| whisper.cpp | \`runtime/voice/whisper-cli\` and its shared runtime libraries | MIT license | ${whisperSourceUrl} at commit ${whisperCommit} |
-| FFmpeg decoder subset | Statically linked into the Whisper voice libraries | LGPL 2.1-or-later build | ${ffmpegSourceUrl} |
+| Node.js | \`runtime/node/bin/${isWindows ? "node.exe" : "node"}\` (${nodeVersion}) | Node.js license and bundled-runtime notice | https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName} |
+| llama.cpp / GGML | \`runtime/native/${llamaExecutableName}\` | MIT license | https://github.com/ggml-org/llama.cpp |
+| whisper.cpp | \`runtime/voice/${whisperExecutableName}\` and its shared runtime libraries | MIT license | ${whisperSourceUrl} at commit ${whisperCommit} |
+| FFmpeg decoder support | License notice for the voice conversion dependency | LGPL 2.1-or-later | ${ffmpegSourceUrl} |
 | OpenAI Whisper tiny.en | \`runtime/voice/ggml-tiny.en.bin\` | Upstream Whisper model attribution/license | ${whisperModelSourceUrl} |
 `;
   writeText(path.join(stageDir, "THIRD_PARTY_NOTICES.md"), notices);
@@ -377,7 +422,17 @@ function stageLauncher() {
     "offline launcher template",
   );
   chmodExecutable(path.join(stageDir, "bin", "miki-offline.js"));
-  const installScript = `#!/usr/bin/env bash
+  if (isWindows) {
+    const installScript = `$ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$NodeBin = Join-Path $ScriptDir "runtime\\node\\bin\\node.exe"
+if (-not (Test-Path $NodeBin)) { throw "Embedded Node runtime is missing: $NodeBin" }
+& $NodeBin (Join-Path $ScriptDir "bin\\miki-offline.js") install @args
+exit $LASTEXITCODE
+`;
+    writeText(path.join(stageDir, "install-offline.ps1"), installScript);
+  } else {
+    const installScript = `#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 NODE_BIN="$SCRIPT_DIR/runtime/node/bin/node"
@@ -387,8 +442,9 @@ if [[ ! -x "$NODE_BIN" ]]; then
 fi
 exec "$NODE_BIN" "$SCRIPT_DIR/bin/miki-offline.js" install "$@"
 `;
-  writeText(path.join(stageDir, "install-offline.sh"), installScript, 0o755);
-  chmodExecutable(path.join(stageDir, "install-offline.sh"));
+    writeText(path.join(stageDir, "install-offline.sh"), installScript, 0o755);
+    chmodExecutable(path.join(stageDir, "install-offline.sh"));
+  }
 }
 
 function writePackageMetadata(productionPackages) {
@@ -399,15 +455,15 @@ function writePackageMetadata(productionPackages) {
   const packageJson = {
     name: packageName,
     version,
-    description: "Agent Miki Linux x64 self-contained offline distribution",
+    description: `Agent Miki ${platformKey} self-contained offline distribution`,
     type: "module",
     main: "bin/miki-offline.js",
     bin: {
       miki: "bin/miki-offline.js",
       "agent-miki": "bin/miki-offline.js",
     },
-    os: ["linux"],
-    cpu: ["x64"],
+    os: [process.platform],
+    cpu: [process.arch],
     engines: { node: ">=20" },
     license: "MIT",
     files: [
@@ -418,7 +474,7 @@ function writePackageMetadata(productionPackages) {
       "THIRD_PARTY_NOTICES.md",
       "README.md",
       "manifest.json",
-      "install-offline.sh",
+      isWindows ? "install-offline.ps1" : "install-offline.sh",
     ],
     dependencies,
     bundledDependencies: Object.keys(dependencies),
@@ -427,33 +483,44 @@ function writePackageMetadata(productionPackages) {
 }
 
 function writeReadme() {
-  const readme = `# Agent Miki ${version}: Linux x64 offline package
+  const platformLabel = isWindows ? "Windows x64" : "Linux x64";
+  const extractedInstallMessage = isWindows
+    ? "Extract the archive with Windows Explorer or 7-Zip, open PowerShell in the extracted directory, and run the embedded Node launcher directly."
+    : `The companion ${releaseName}.tar.gz archive can be extracted anywhere and run without npm.`;
+  const extractedCommands = isWindows
+    ? `& .\\\\install-offline.ps1
+& .\\\\runtime\\\\node\\\\bin\\\\node.exe .\\\\bin\\\\miki-offline.js doctor
+& .\\\\runtime\\\\node\\\\bin\\\\node.exe .\\\\bin\\\\miki-offline.js start`
+    : `tar -xzf ${releaseName}.tar.gz
+cd ${releaseName}
+./install-offline.sh
+./runtime/node/bin/node ./bin/miki-offline.js doctor
+./runtime/node/bin/node ./bin/miki-offline.js start`;
+  const npmInstallCommands = isWindows
+    ? `npm install --offline --ignore-scripts --prefix "$env:LOCALAPPDATA\\\\Miki\\\\npm-install" .\\\\${packageName}-${version}.tgz`
+    : `npm install --offline --ignore-scripts --prefix "$HOME/.local/share/miki/npm-install" \\\n  ./${packageName}-${version}.tgz`;
+  const readme = `# Agent Miki ${version}: ${platformLabel} offline package
 
-This is the **self-contained Linux x64 release artifact** for Agent Miki. It contains the production dashboard, gateway, core, memory package, skills catalog, prebundled production Node dependencies, an embedded Node ${nodeVersion} runtime, the llama.cpp server executable, Whisper.cpp voice recognition, and an FFmpeg-enabled Whisper build for WAV, MP3, M4A, OGG, WebM, and FLAC inputs. No answer-model GGUF is bundled; choose and configure a local model separately or use a configured cloud provider.
+This is the **self-contained ${platformLabel} release artifact** for Agent Miki. It contains the production dashboard, gateway, core, memory package, skills catalog, prebundled production Node dependencies, an embedded Node ${nodeVersion} runtime, the llama.cpp server executable, Whisper.cpp voice recognition, and an FFmpeg-enabled Whisper build for WAV, MP3, M4A, OGG, WebM, and FLAC inputs. No answer-model GGUF is bundled; choose and configure a local model separately or use a configured cloud provider.
 
-The package is intended for Linux x86_64 systems with a compatible glibc and CPU. The embedded native components still use the host kernel and glibc; this is not a virtual machine or a full operating-system image.
+The package is intended for ${isWindows ? "Windows x64" : "Linux x86_64"} systems. The embedded native components still use the host operating system; this is not a virtual machine or a full operating-system image.
 
 ## Offline npm installation
 
 Download the matching \`${packageName}-${version}.tgz\` asset, then install it without contacting the registry:
 
-\`\`\`bash
-npm install --offline --ignore-scripts --prefix "$HOME/.local/share/miki/npm-install" \\
-  ./${packageName}-${version}.tgz
+\`\`\`${isWindows ? "powershell" : "bash"}
+${npmInstallCommands}
 \`\`\`
 
 The archive already contains its production dependencies through npm bundled dependencies. No dependency download is required after the asset is downloaded. The installed command is available at the package’s \`node_modules/.bin/miki\` path; the included launcher is also directly executable.
 
 ## Extracted archive installation
 
-The companion \`${releaseName}.tar.gz\` archive can be extracted anywhere and run without npm:
+${extractedInstallMessage}
 
-\`\`\`bash
-tar -xzf ${releaseName}.tar.gz
-cd ${releaseName}
-./install-offline.sh
-./runtime/node/bin/node ./bin/miki-offline.js doctor
-./runtime/node/bin/node ./bin/miki-offline.js start
+\`\`\`${isWindows ? "powershell" : "bash"}
+${extractedCommands}
 \`\`\`
 
 On first start the launcher creates user-writable state below \`$XDG_DATA_HOME/miki\` or \`~/.local/share/miki\`, keeps the immutable package tree untouched, enables local Whisper.cpp transcription, and writes a randomly generated dashboard password to \`runtime/data/first-run-credentials.txt\` with mode 600. Save the printed password and delete that file after saving it. To choose a password before first start, set \`MIKI_DASHBOARD_PASSWORD\` to a value of at least eight characters.
@@ -464,7 +531,7 @@ No cloud API key, online registry, model download, or plugin download is used by
 
 ## Diagnostics and limitations
 
-Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable but not an answer-model GGUF; model quality, context length, latency, and RAM use depend on the separately selected model and host CPU/memory. The release was built for Linux x86_64 and is not a Windows build.
+Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable but not an answer-model GGUF; model quality, context length, latency, and RAM use depend on the separately selected model and host CPU/memory. This archive targets ${platformLabel}.
 
 The dashboard’s existing conversational chat/Inspector behavior, local/API/Auto web-search controls, memory system, skills, MCP surfaces, and voice transcript routing are included from the source commit used to create this release. External online acquisitions remain approval-gated by the application’s safety controls and are not silently performed by this package.
 
@@ -503,7 +570,7 @@ function writeManifest() {
       {
         package: packageName,
         version,
-        target: "linux-x64",
+        target: platformKey,
         source_commit: runGit(["rev-parse", "HEAD"]),
         built_at: new Date().toISOString(),
         node: { version: nodeVersion, archive: nodeArchiveName },
@@ -528,16 +595,19 @@ function runGit(args) {
 }
 
 function packageAndArchive() {
-  // npm-compatible package archives are simply gzip-compressed tarballs whose
-  // root directory is named `package`. Building directly avoids npm pack’s
-  // large in-memory file enumeration while preserving bundled node_modules.
+  // The npm-compatible .tgz always has a `package` root. The companion
+  // archive uses tar.gz on Linux and zip on Windows.
   const tgz = path.join(releaseDir, `${packageName}-${version}.tgz`);
   run("tar", ["-czf", tgz, "-C", releaseDir, "package"], { cwd: root });
   if (!fs.existsSync(tgz)) fail(`Expected npm package was not created: ${tgz}`);
-  const archive = path.join(releaseDir, `${releaseName}.tar.gz`);
-  run("tar", ["-czf", archive, "--transform", `s,^package,${releaseName},`, "-C", releaseDir, "package"], { cwd: root });
-  const namedArchive = path.join(releaseDir, `${releaseName}.tar.gz`);
-  if (archive !== namedArchive) fs.renameSync(archive, namedArchive);
+  const archiveExtension = isWindows ? "zip" : "tar.gz";
+  const namedArchive = path.join(releaseDir, `${releaseName}.${archiveExtension}`);
+  if (isWindows) {
+    run("tar", ["-a", "-cf", namedArchive, "-C", releaseDir, "package"], { cwd: root });
+  } else {
+    run("tar", ["-czf", namedArchive, "--transform", `s,^package,${releaseName},`, "-C", releaseDir, "package"], { cwd: root });
+  }
+  if (!fs.existsSync(namedArchive)) fail(`Expected archive was not created: ${namedArchive}`);
   const checksumFiles = [tgz, namedArchive];
   const sums = checksumFiles
     .map((file) => `${sha256(file)}  ${path.basename(file)}`)
@@ -547,13 +617,13 @@ function packageAndArchive() {
 }
 
 function main() {
-  if (process.platform !== "linux" || process.arch !== "x64") {
-    fail("This builder only creates the Linux x64 artifact.");
+  if ((!isLinux && !isWindows) || !isX64) {
+    fail("This builder only creates Linux x64 or Windows x64 artifacts.");
   }
   fs.rmSync(releaseDir, { recursive: true, force: true });
   fs.mkdirSync(stageDir, { recursive: true });
   log(`Building ${packageName}@${version} into ${releaseDir}`);
-  run("npm", ["run", "build:all"], { cwd: root });
+  run(npmCommand, ["run", "build:all"], { cwd: root });
   stageRuntimeTree();
   writeRuntimeLoader();
   stageNativeAndModels();

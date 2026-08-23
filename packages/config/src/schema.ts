@@ -173,6 +173,18 @@ const WebSearchSchema = z
  * or forwards audio to a cloud provider implicitly; an operator must provide
  * an official whisper.cpp endpoint or executable/model pair.
  */
+export const SpeechToTextModelSchema = z
+  .object({
+    id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+    name: z.string().min(1).max(120),
+    transport: z.enum(["endpoint", "cli"]),
+    enabled: z.boolean().default(true),
+    endpoint: z.string().url().optional(),
+    executable: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+  })
+  .passthrough();
+
 export const SpeechToTextSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -180,6 +192,8 @@ export const SpeechToTextSchema = z
     endpoint: z.string().url().optional(),
     executable: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
+    active_model_id: z.string().min(1).optional(),
+    models: z.array(SpeechToTextModelSchema).default([]),
     language: z
       .string()
       .regex(/^[A-Za-z][A-Za-z0-9-]{0,19}$/)
@@ -192,6 +206,7 @@ export const SpeechToTextSchema = z
   })
   .passthrough();
 
+export type SpeechToTextModel = z.infer<typeof SpeechToTextModelSchema>;
 export type SpeechToTextSettings = z.infer<typeof SpeechToTextSchema>;
 
 const AgentResourceSchema = z
@@ -726,9 +741,76 @@ function validateSpeechToTextConfig(
   if (!isRecord(config.speech_to_text)) return;
   const speech = config.speech_to_text;
   if (speech.enabled !== true) return;
-  const endpoint = stringValue(speech.endpoint);
-  const executable = stringValue(speech.executable);
-  const model = stringValue(speech.model);
+  const models = Array.isArray(speech.models) ? speech.models : [];
+  const modelIds = new Set<string>();
+  for (const [index, item] of models.entries()) {
+    if (!isRecord(item)) continue;
+    const id = stringValue(item.id);
+    if (id && modelIds.has(id)) {
+      errors.push(
+        issue(
+          `speech_to_text.models.${index}.id`,
+          `Speech model id "${id}" is duplicated.`,
+          "duplicate_speech_to_text_model_id",
+        ),
+      );
+    }
+    if (id) modelIds.add(id);
+    const transport = stringValue(item.transport);
+    const itemEndpoint = stringValue(item.endpoint);
+    const itemExecutable = stringValue(item.executable);
+    const itemModel = stringValue(item.model);
+    if (
+      transport === "endpoint" &&
+      (!itemEndpoint || itemExecutable || itemModel)
+    ) {
+      errors.push(
+        issue(
+          `speech_to_text.models.${index}`,
+          "Endpoint speech models require endpoint only.",
+          "invalid_speech_to_text_model",
+        ),
+      );
+    }
+    if (
+      transport === "cli" &&
+      (!itemExecutable || !itemModel || itemEndpoint)
+    ) {
+      errors.push(
+        issue(
+          `speech_to_text.models.${index}`,
+          "CLI speech models require executable and model paths only.",
+          "invalid_speech_to_text_model",
+        ),
+      );
+    }
+    if (itemEndpoint && !isHttpUrl(itemEndpoint)) {
+      errors.push(
+        issue(
+          `speech_to_text.models.${index}.endpoint`,
+          "Speech-to-text endpoint must use http:// or https://.",
+          "invalid_speech_to_text_endpoint",
+        ),
+      );
+    }
+  }
+  const activeModelId = stringValue(speech.active_model_id);
+  if (activeModelId && !modelIds.has(activeModelId)) {
+    errors.push(
+      issue(
+        "speech_to_text.active_model_id",
+        "The selected speech model does not exist.",
+        "unknown_speech_to_text_model",
+      ),
+    );
+  }
+  const activeModel = models.find(
+    (item) =>
+      isRecord(item) && item.id === activeModelId && item.enabled !== false,
+  );
+  const endpoint = stringValue(activeModel?.endpoint ?? speech.endpoint);
+  const executable = stringValue(activeModel?.executable ?? speech.executable);
+  const model = stringValue(activeModel?.model ?? speech.model);
   if (!endpoint && !(executable && model)) {
     errors.push(
       issue(

@@ -1,6 +1,6 @@
 # Agent Miki — Complete Setup Guide
 
-**Version:** 1.3.5
+**Version:** 1.3.6
 **Project type:** Local-first autonomous AI agent  
 **Audience:** Users installing Agent Miki from a clean Linux or Windows machine  
 **Author:** Manus AI
@@ -377,6 +377,8 @@ speech_to_text:
   concurrency: 1
   retain_audio: false
 ```
+
+You can also manage multiple speech models from **Models → Speech-to-Text Models**. Select **Add audio model**, give the record an ID and display name, choose **Local whisper-cli** or **Whisper server endpoint**, enter the corresponding executable/model paths or HTTP(S) endpoint, and save it. The first saved model becomes active automatically; use the model row’s activate action to switch models later. The section also supports editing, deleting, enabling/disabling individual records, and turning transcription on or off globally. These settings are persisted under `speech_to_text.models` and `speech_to_text.active_model_id` in `config/agent.yaml`.
 
 On Linux, the official source workflow is `git clone https://github.com/ggml-org/whisper.cpp.git`, `cmake -B build`, and `cmake --build build -j --config Release`. Download an official GGML model with the upstream `models/download-ggml-model.sh` script, then start the server with `./build/bin/whisper-server --host 127.0.0.1 --port 8080 --model /absolute/path/to/ggml-base.bin --convert` when accepting browser formats such as WebM; `--convert` requires FFmpeg. On Windows, use the official repository with Visual Studio Build Tools/CMake, run the equivalent CMake Release build, and start `build\\bin\\Release\\whisper-server.exe` on loopback with the same model and `--convert` options. Agent Miki does not silently download, install, or execute the native runtime or model.
 

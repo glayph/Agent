@@ -1591,6 +1591,18 @@ function wecomPlatformCode(): number {
   }
 }
 
+function isHttpUrlValue(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      Boolean(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isDisabledLevel(level: unknown): boolean {
   return ["DISABLED", "OFF", "DENY", "DENIED", "BLOCKED"].includes(
     String(level || "").toUpperCase(),
@@ -1660,6 +1672,7 @@ function runtimeConfigFromFiles(paths: RuntimePaths): JsonRecord {
     session: recordOrEmpty(agentYaml.session),
     evolution: recordOrEmpty(agentYaml.evolution),
     devices: recordOrEmpty(agentYaml.devices),
+    speech_to_text: recordOrEmpty(agentYaml.speech_to_text),
     tools: mergePatch(runtimeTools, { exec: execConfig }),
     channels,
     channel_list: channels,
@@ -1695,6 +1708,9 @@ function syncAgentYaml(paths: RuntimePaths, config: JsonRecord): void {
   next.session = recordOrEmpty(config.session);
   next.evolution = recordOrEmpty(config.evolution);
   next.devices = recordOrEmpty(config.devices);
+  if (isRecord(config.speech_to_text)) {
+    next.speech_to_text = clone(config.speech_to_text);
+  }
 
   const channels = recordOrEmpty(config.channels);
   next.channels = channels;
@@ -5267,6 +5283,227 @@ export function createLauncherCompatRouter({
       return res
         .status(500)
         .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  const speechConfig = (): JsonRecord =>
+    recordOrEmpty(state.config?.speech_to_text);
+  const speechModels = (): JsonRecord[] => {
+    const models = speechConfig().models;
+    return Array.isArray(models) ? models.filter(isRecord) : [];
+  };
+  const normalizeSpeechModel = (
+    input: JsonRecord,
+    current?: JsonRecord,
+  ): JsonRecord => {
+    const id = String(input.id ?? current?.id ?? "").trim();
+    const name = String(input.name ?? current?.name ?? "").trim();
+    const transport = String(
+      input.transport ?? current?.transport ?? "cli",
+    ).trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id)) {
+      throw new Error(
+        "Speech model id must start with a letter/number and contain only letters, numbers, dots, underscores, or hyphens.",
+      );
+    }
+    if (!name || name.length > 120) {
+      throw new Error(
+        "Speech model name is required and must be at most 120 characters.",
+      );
+    }
+    if (transport !== "endpoint" && transport !== "cli") {
+      throw new Error("Speech model transport must be endpoint or cli.");
+    }
+    const enabled = input.enabled !== false;
+    if (transport === "endpoint") {
+      const endpoint = String(input.endpoint ?? current?.endpoint ?? "").trim();
+      if (!endpoint || !isHttpUrlValue(endpoint)) {
+        throw new Error(
+          "Endpoint speech models require a valid http:// or https:// URL.",
+        );
+      }
+      return { id, name, transport, enabled, endpoint };
+    }
+    const executable = String(
+      input.executable ?? current?.executable ?? "",
+    ).trim();
+    const model = String(input.model ?? current?.model ?? "").trim();
+    if (!executable || !model) {
+      throw new Error(
+        "CLI speech models require both executable and model paths.",
+      );
+    }
+    return { id, name, transport, enabled, executable, model };
+  };
+  const speechResponse = () => {
+    const config = speechConfig();
+    const models = speechModels();
+    const activeModelId = String(config.active_model_id || "").trim();
+    return {
+      provider: "whisper.cpp",
+      enabled: config.enabled === true,
+      active_model_id: activeModelId || null,
+      models,
+      settings: {
+        language: String(config.language || "auto"),
+        max_audio_seconds: numberOrUndefined(config.max_audio_seconds) || 300,
+        max_file_mb: numberOrUndefined(config.max_file_mb) || 25,
+        timeout_ms: numberOrUndefined(config.timeout_ms) || 120000,
+        concurrency: numberOrUndefined(config.concurrency) || 1,
+        retain_audio: config.retain_audio === true,
+      },
+    };
+  };
+  const speechApplyResponse = async (reason: string) => {
+    const apply = await applyRuntimeChanges({ reason });
+    return {
+      gateway_restart_required: apply.gateway_restart_required,
+      runtime_apply_status: apply.status,
+      runtime_apply_error: apply.error,
+      pending_restart_fields: apply.pending_restart_fields || [],
+    };
+  };
+
+  router.get("/speech-to-text/models", (_req, res) => {
+    res.json(speechResponse());
+  });
+
+  router.put("/speech-to-text/config", async (req, res) => {
+    try {
+      const input = isRecord(req.body) ? req.body : {};
+      const current = speechConfig();
+      const next: JsonRecord = { ...current };
+      for (const key of [
+        "enabled",
+        "language",
+        "max_audio_seconds",
+        "max_file_mb",
+        "timeout_ms",
+        "concurrency",
+        "retain_audio",
+        "active_model_id",
+      ]) {
+        if (input[key] !== undefined) next[key] = input[key];
+      }
+      const committed = commitConfig({
+        ...(state.config || {}),
+        speech_to_text: next,
+      });
+      const applied = await speechApplyResponse("speech-to-text.config");
+      res.json({ status: "ok", ...speechResponse(), ...applied });
+      void committed;
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.post("/speech-to-text/models", async (req, res) => {
+    try {
+      const input = isRecord(req.body) ? req.body : {};
+      const model = normalizeSpeechModel(input);
+      const existing = speechModels();
+      if (existing.some((item) => item.id === model.id)) {
+        return res
+          .status(409)
+          .json({ error: "Speech model id already exists." });
+      }
+      const current = speechConfig();
+      const next: JsonRecord = {
+        ...current,
+        models: [...existing, model],
+      };
+      if (
+        !String(current.active_model_id || "").trim() ||
+        input.set_active === true
+      ) {
+        next.active_model_id = model.id;
+      }
+      commitConfig({ ...(state.config || {}), speech_to_text: next });
+      const applied = await speechApplyResponse("speech-to-text.model.add");
+      res.json({ status: "ok", ...speechResponse(), ...applied });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.put("/speech-to-text/models/:id", async (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      const input = isRecord(req.body) ? req.body : {};
+      const existing = speechModels();
+      const index = existing.findIndex((item) => item.id === id);
+      if (index < 0)
+        return res.status(404).json({ error: "Speech model not found." });
+      const model = normalizeSpeechModel({ ...input, id }, existing[index]);
+      const nextModels = [...existing];
+      nextModels[index] = model;
+      const current = speechConfig();
+      const next: JsonRecord = { ...current, models: nextModels };
+      if (current.active_model_id === id && model.enabled === false) {
+        next.active_model_id = nextModels.find(
+          (item) => item.enabled !== false,
+        )?.id;
+      }
+      commitConfig({ ...(state.config || {}), speech_to_text: next });
+      const applied = await speechApplyResponse("speech-to-text.model.update");
+      res.json({ status: "ok", ...speechResponse(), ...applied });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.delete("/speech-to-text/models/:id", async (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      const existing = speechModels();
+      if (!existing.some((item) => item.id === id)) {
+        return res.status(404).json({ error: "Speech model not found." });
+      }
+      const nextModels = existing.filter((item) => item.id !== id);
+      const current = speechConfig();
+      const next: JsonRecord = { ...current, models: nextModels };
+      if (current.active_model_id === id) {
+        next.active_model_id = nextModels.find(
+          (item) => item.enabled !== false,
+        )?.id;
+      }
+      commitConfig({ ...(state.config || {}), speech_to_text: next });
+      const applied = await speechApplyResponse("speech-to-text.model.delete");
+      res.json({ status: "ok", ...speechResponse(), ...applied });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.post("/speech-to-text/models/active", async (req, res) => {
+    try {
+      const id = String(req.body?.model_id || "").trim();
+      const selected = speechModels().find((item) => item.id === id);
+      if (!selected)
+        return res.status(404).json({ error: "Speech model not found." });
+      if (selected.enabled === false) {
+        return res
+          .status(400)
+          .json({ error: "Disabled speech models cannot be selected." });
+      }
+      commitConfig({
+        ...(state.config || {}),
+        speech_to_text: { ...speechConfig(), active_model_id: id },
+      });
+      const applied = await speechApplyResponse("speech-to-text.model.active");
+      res.json({ status: "ok", ...speechResponse(), ...applied });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   });
 

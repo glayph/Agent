@@ -1,0 +1,246 @@
+name: Cross-platform offline release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "New GitHub Release tag, for example v1.3.6-offline"
+        required: true
+        type: string
+      source_ref:
+        description: "Branch, tag, or commit to build"
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.23.2"
+  WHISPER_COMMIT: "233fe1fc9b48a09e361d3594520838ca266537fe"
+  WHISPER_MODEL_URL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+  FFMPEG_LICENSE_URL: "https://raw.githubusercontent.com/FFmpeg/FFmpeg/n7.1.1/LICENSE.md"
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} offline package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: windows-x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Agent Miki
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Enable MSVC developer environment
+        if: matrix.platform == 'windows-x64'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Linux native build dependencies
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config
+
+      - name: Install Windows native build dependencies
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' --no-progress -y
+
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Checkout pinned whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_COMMIT }}
+          path: .ci/whisper.cpp
+          fetch-depth: 1
+
+      - name: Download voice model and licenses (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/miki-assets"
+          curl -fL --retry 3 "$WHISPER_MODEL_URL" -o "$RUNNER_TEMP/miki-assets/ggml-tiny.en.bin"
+          curl -fL --retry 3 "https://raw.githubusercontent.com/ggml-org/whisper.cpp/$WHISPER_COMMIT/LICENSE" -o "$RUNNER_TEMP/miki-assets/WHISPER_LICENSE"
+          curl -fL --retry 3 "$FFMPEG_LICENSE_URL" -o "$RUNNER_TEMP/miki-assets/FFMPEG_LICENSE.md"
+
+      - name: Download voice model and licenses (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $env:RUNNER_TEMP "miki-assets"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+          Invoke-WebRequest -Uri $env:WHISPER_MODEL_URL -OutFile (Join-Path $assetDir "ggml-tiny.en.bin")
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ggml-org/whisper.cpp/$env:WHISPER_COMMIT/LICENSE" -OutFile (Join-Path $assetDir "WHISPER_LICENSE")
+          Invoke-WebRequest -Uri $env:FFMPEG_LICENSE_URL -OutFile (Join-Path $assetDir "FFMPEG_LICENSE.md")
+
+      - name: Build whisper.cpp (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S .ci/whisper.cpp -B .ci/whisper-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_COMMON_FFMPEG=OFF
+          cmake --build .ci/whisper-build --config Release --target whisper-cli --parallel 2
+          printf 'MIKI_WHISPER_CPP_BIN=%s\n' "$GITHUB_WORKSPACE/.ci/whisper-build/bin/whisper-cli" >> "$GITHUB_ENV"
+
+      - name: Build whisper.cpp (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          cmake -S .ci/whisper.cpp -B .ci/whisper-build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DWHISPER_BUILD_EXAMPLES=ON `
+            -DWHISPER_BUILD_SERVER=OFF `
+            -DWHISPER_BUILD_TESTS=OFF `
+            -DWHISPER_COMMON_FFMPEG=OFF
+          cmake --build .ci/whisper-build --config Release --target whisper-cli --parallel 2
+          $cli = Get-ChildItem -Path .ci/whisper-build -Filter whisper-cli.exe -Recurse | Select-Object -First 1
+          if (-not $cli) { throw "whisper-cli.exe was not produced" }
+          "MIKI_WHISPER_CPP_BIN=$($cli.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure release inputs (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'MIKI_WHISPER_CPP_MODEL=%s\n' "$RUNNER_TEMP/miki-assets/ggml-tiny.en.bin"
+            printf 'MIKI_WHISPER_CPP_LICENSE=%s\n' "$RUNNER_TEMP/miki-assets/WHISPER_LICENSE"
+            printf 'MIKI_FFMPEG_LICENSE=%s\n' "$RUNNER_TEMP/miki-assets/FFMPEG_LICENSE.md"
+            printf 'MIKI_RELEASE_DIR=%s\n' "$RUNNER_TEMP/agent-miki-linux-x64-offline"
+            printf 'MIKI_LLAMA_BUILD_JOBS=2\n'
+          } >> "$GITHUB_ENV"
+
+      - name: Configure release inputs (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $env:RUNNER_TEMP "miki-assets"
+          "MIKI_WHISPER_CPP_MODEL=$(Join-Path $assetDir 'ggml-tiny.en.bin')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MIKI_WHISPER_CPP_LICENSE=$(Join-Path $assetDir 'WHISPER_LICENSE')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MIKI_FFMPEG_LICENSE=$(Join-Path $assetDir 'FFMPEG_LICENSE.md')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MIKI_RELEASE_DIR=$(Join-Path $env:RUNNER_TEMP 'agent-miki-windows-x64-offline')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MIKI_LLAMA_BUILD_JOBS=2" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run repository verification
+        run: npm run verify
+
+      - name: Build offline package
+        run: npm run build:release:offline
+
+      - name: Assert no answer model is bundled (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -d "$MIKI_RELEASE_DIR/package/runtime/models"
+          ! find "$MIKI_RELEASE_DIR/package/runtime" -type f -iname '*.gguf' -print -quit | grep -q .
+          sha256sum -c "$MIKI_RELEASE_DIR/SHA256SUMS"
+          cp "$MIKI_RELEASE_DIR/SHA256SUMS" "$MIKI_RELEASE_DIR/SHA256SUMS-linux-x64"
+
+      - name: Assert no answer model is bundled (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $modelDir = Join-Path $env:MIKI_RELEASE_DIR "package\runtime\models"
+          if (Test-Path $modelDir) { throw "Answer-model directory was bundled" }
+          $gguf = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Filter *.gguf -Recurse -ErrorAction SilentlyContinue
+          if ($gguf) { throw "Answer-model GGUF was bundled: $($gguf.FullName)" }
+          Copy-Item (Join-Path $env:MIKI_RELEASE_DIR "SHA256SUMS") (Join-Path $env:MIKI_RELEASE_DIR "SHA256SUMS-windows-x64")
+
+      - name: Upload Linux artifacts
+        if: matrix.platform == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-miki-linux-x64-offline
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tar.gz
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/SHA256SUMS-linux-x64
+
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-miki-windows-x64-offline
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.zip
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/SHA256SUMS-windows-x64
+
+  publish:
+    name: Publish cross-platform offline release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          mapfile -t assets < <(find release-assets -type f \( -name '*.tgz' -o -name '*.tar.gz' -o -name '*.zip' -o -name 'SHA256SUMS-*' \) -print | sort)
+          if [ "${#assets[@]}" -ne 6 ]; then
+            printf 'Expected 6 release assets, found %s:\n' "${#assets[@]}" >&2
+            printf '%s\n' "${assets[@]}" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --title "Agent Miki ${RELEASE_TAG} — Windows x64 + Linux x64 offline" \
+            --notes "This release contains separate Windows x64 and Linux x64 offline packages. The embedded Node.js runtime, dashboard, gateway, core, memory, skills, llama.cpp server executable, Whisper.cpp voice runtime, and production dependencies are included for each platform. No answer-model GGUF is bundled or pre-installed; configure a separately obtained local GGUF with MIKI_MODEL_PATH or use a configured cloud provider. Each platform has its own SHA256 manifest."

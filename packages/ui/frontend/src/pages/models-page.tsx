@@ -22,6 +22,7 @@ import { DeleteModelDialog } from "@/features/models/components/delete-model-dia
 import { EditModelSheet } from "@/features/models/components/edit-model-sheet"
 import { buildProviderGroups } from "@/features/models/components/models-page-model"
 import { ProviderSection } from "@/features/models/components/provider-section"
+import { SpeechToTextModels } from "@/features/models/components/speech-to-text-models"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { Button } from "@/shared/ui/button"
 import { refreshGatewayState } from "@/store/gateway"
@@ -197,6 +198,7 @@ export function ModelsPage() {
                 />
               ),
             )}
+            <SpeechToTextModels />
           </div>
         )}
       </div>
