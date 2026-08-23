@@ -147,6 +147,14 @@ const WebSearchProviderSettingsSchema = z
   })
   .passthrough();
 
+const WebSearchOptimizationSchema = z
+  .object({
+    cache_enabled: z.boolean().optional(),
+    cache_ttl_ms: z.number().int().min(0).max(86400000).optional(),
+    snippet_chars: z.number().int().min(120).max(1000).optional(),
+  })
+  .passthrough();
+
 const WebSearchSchema = z
   .object({
     execution_mode: z.enum(["local", "cloud", "api", "auto"]).optional(),
@@ -154,6 +162,7 @@ const WebSearchSchema = z
     current_service: z.string().min(1).optional(),
     prefer_native: z.boolean().optional(),
     proxy: z.string().optional(),
+    optimization: WebSearchOptimizationSchema.optional(),
     providers: z.array(WebSearchProviderSchema).optional(),
     settings: z.record(WebSearchProviderSettingsSchema).optional(),
   })
@@ -163,6 +172,7 @@ const AgentResourceSchema = z
   .object({
     mode: z.enum(["eco", "balanced", "performance"]).optional(),
     message_history_limit: z.number().int().min(1).max(50).optional(),
+    web_search_max_calls_per_turn: z.number().int().min(1).max(5).optional(),
     max_context_chars: z.number().int().min(8000).max(200000).optional(),
     system_index_limit: z.number().int().min(0).max(20).optional(),
     system_index_cache_ttl_ms: z.number().int().min(0).max(300000).optional(),

@@ -104,7 +104,7 @@ import { globalAgentPlanner } from "./agent-planner.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 12;
-const MAX_WEB_SEARCH_CALLS_PER_TURN = 3;
+const DEFAULT_WEB_SEARCH_CALLS_PER_TURN = 2;
 const DEFAULT_MESSAGE_HISTORY_LIMIT = 15;
 
 // Bug #9 fix: Add approximate token/character cap to message history
@@ -201,6 +201,7 @@ type AgentResourceMode = "eco" | "balanced" | "performance";
 interface AgentResourceConfig {
   mode?: AgentResourceMode;
   message_history_limit?: number;
+  web_search_max_calls_per_turn?: number;
   max_context_chars?: number;
   system_index_limit?: number;
   system_index_cache_ttl_ms?: number;
@@ -211,6 +212,7 @@ interface AgentResourceConfig {
 interface ResolvedAgentResourceConfig {
   mode: AgentResourceMode;
   messageHistoryLimit: number;
+  webSearchMaxCallsPerTurn: number;
   maxContextChars: number;
   contextWindowTokens?: number;
   summarizeMessageThreshold: number;
@@ -226,6 +228,7 @@ const RESOURCE_PROFILES: Record<
   eco: {
     mode: "eco",
     messageHistoryLimit: 8,
+    webSearchMaxCallsPerTurn: 1,
     maxContextChars: 40000,
     summarizeMessageThreshold: 20,
     summarizeTokenPercent: 75,
@@ -235,6 +238,7 @@ const RESOURCE_PROFILES: Record<
   balanced: {
     mode: "balanced",
     messageHistoryLimit: DEFAULT_MESSAGE_HISTORY_LIMIT,
+    webSearchMaxCallsPerTurn: DEFAULT_WEB_SEARCH_CALLS_PER_TURN,
     maxContextChars: DEFAULT_MAX_TOTAL_CONTEXT_CHARS,
     summarizeMessageThreshold: 20,
     summarizeTokenPercent: 75,
@@ -244,6 +248,7 @@ const RESOURCE_PROFILES: Record<
   performance: {
     mode: "performance",
     messageHistoryLimit: 25,
+    webSearchMaxCallsPerTurn: 3,
     maxContextChars: 120000,
     summarizeMessageThreshold: 20,
     summarizeTokenPercent: 75,
@@ -597,6 +602,12 @@ export class AgentOrchestrator {
         profile.messageHistoryLimit,
         1,
         50,
+      ),
+      webSearchMaxCallsPerTurn: this._boundedInt(
+        raw.web_search_max_calls_per_turn,
+        profile.webSearchMaxCallsPerTurn,
+        1,
+        5,
       ),
       maxContextChars,
       contextWindowTokens: contextWindow,
@@ -1870,11 +1881,11 @@ export class AgentOrchestrator {
         ).length;
         if (
           requestedWebSearchCalls > 0 &&
-          webSearchCallsUsed >= MAX_WEB_SEARCH_CALLS_PER_TURN
+          webSearchCallsUsed >= resource.webSearchMaxCallsPerTurn
         ) {
           const fallbackContent =
             buildToolOnlyFallbackResponse(llmMessages) ||
-            "I reached the web-search safety limit for this turn before a final synthesis was returned. Please ask me to continue the research in a new turn.";
+            `I reached the web-search safety limit (${resource.webSearchMaxCallsPerTurn} call${resource.webSearchMaxCallsPerTurn === 1 ? "" : "s"}) for this turn before a final synthesis was returned. Please ask me to continue the research in a new turn.`;
           this._saveAssistantHistoryMessage(
             sessionId,
             fallbackContent,

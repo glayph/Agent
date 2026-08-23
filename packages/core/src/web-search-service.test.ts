@@ -2,7 +2,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { searchWeb, type WebSearchConfig } from "./web-search-service.js";
+import {
+  clearWebSearchCache,
+  searchWeb,
+  type WebSearchConfig,
+} from "./web-search-service.js";
 
 const originalFetch = globalThis.fetch;
 const originalTavilyKey = process.env.TAVILY_API_KEY;
@@ -27,6 +31,7 @@ function localHtml(): string {
 }
 
 afterEach(() => {
+  clearWebSearchCache();
   globalThis.fetch = originalFetch;
   if (originalTavilyKey === undefined) delete process.env.TAVILY_API_KEY;
   else process.env.TAVILY_API_KEY = originalTavilyKey;
@@ -54,6 +59,44 @@ describe("dual-mode web search", () => {
       { id: 1, title: "First result", url: "https://example.com/one" },
       { id: 2, title: "Second result", url: "https://example.com/two" },
     ]);
+  });
+
+  it("bounds snippets, removes tracking duplicates, and caches normalized queries", async () => {
+    const longSnippet = "x".repeat(500);
+    const fetchMock = vi.fn(async () =>
+      response(`
+        <a class="result__a" href="https://example.com/one?utm_source=test">First result</a>
+        <a class="result__snippet">${longSnippet}</a>
+        <a class="result__a" href="https://example.com/one#section">Duplicate result</a>
+        <a class="result__snippet">Duplicate snippet</a>
+        <a class="result__a" href="https://example.com/two">Second result</a>
+        <a class="result__snippet">Second snippet</a>
+      `),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    const config: WebSearchConfig = {
+      execution_mode: "local",
+      provider: "native",
+      optimization: {
+        cache_enabled: true,
+        cache_ttl_ms: 300000,
+        snippet_chars: 120,
+      },
+    };
+
+    const first = await searchWeb(os.tmpdir(), config, "cached test", {});
+    const second = await searchWeb(
+      os.tmpdir(),
+      config,
+      "  CACHED   TEST  ",
+      {},
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(first.results).toHaveLength(2);
+    expect(first.results[0]?.url).toBe("https://example.com/one");
+    expect(first.results[0]?.snippet).toHaveLength(120);
+    expect(second.results).toEqual(first.results);
   });
 
   it("uses an enabled API provider only in explicit cloud mode", async () => {

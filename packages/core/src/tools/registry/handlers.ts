@@ -529,7 +529,9 @@ export async function handleWebSearch(
       mode: args.mode,
       provider: args.provider,
     });
-    return JSON.stringify(result, null, 2);
+    // Keep the result structured while avoiding pretty-print whitespace in the
+    // model context. Inspector events still retain the complete output.
+    return JSON.stringify(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return `Web search failed: ${message.slice(0, 240)}`;

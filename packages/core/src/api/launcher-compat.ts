@@ -711,6 +711,11 @@ const WEB_SEARCH_DEFAULT = {
   provider: "native",
   current_service: "native",
   prefer_native: true,
+  optimization: {
+    cache_enabled: true,
+    cache_ttl_ms: 300000,
+    snippet_chars: 420,
+  },
   providers: [
     {
       id: "native",
@@ -809,6 +814,9 @@ function normalizeWebSearchExecutionMode(
 function normalizeWebSearchConfig(input: JsonRecord): JsonRecord {
   const defaults = clone(WEB_SEARCH_DEFAULT) as JsonRecord;
   const merged = { ...defaults, ...input };
+  const defaultOptimization = recordOrEmpty(defaults.optimization);
+  const inputOptimization = recordOrEmpty(input.optimization);
+  merged.optimization = { ...defaultOptimization, ...inputOptimization };
   merged.execution_mode = normalizeWebSearchExecutionMode(input.execution_mode);
   return merged;
 }

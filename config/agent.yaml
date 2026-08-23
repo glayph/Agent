@@ -19,6 +19,7 @@ agent:
   resource:
     mode: balanced
     message_history_limit: 8
+    web_search_max_calls_per_turn: 2
     max_context_chars: 40000
     system_index_limit: 6
     system_index_cache_ttl_ms: 15000

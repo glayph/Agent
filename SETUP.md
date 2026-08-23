@@ -322,13 +322,15 @@ Web search is independent from the model used to write the final answer. In **Lo
 
 Open **Tools → Web Search** in the dashboard and choose the execution mode. The default is Local. Enable the provider you want before choosing API / Cloud or Auto. API keys are entered through the secret-aware provider field and are stored in the workspace vault; they are not returned by the settings API or included in search results. Each successful search returns normalized results and numbered citations with the title and URL.
 
-| Mode        | Retrieval path                                          | Requires a search API key | Internet behavior                                         |
-| ----------- | ------------------------------------------------------- | ------------------------: | --------------------------------------------------------- |
-| Local       | Native DuckDuckGo, public Bing HTML fallback, or configured local SearXNG | No | The Miki host makes the web request. |
-| API / Cloud | Enabled Brave, Tavily, SerpAPI, Serper, or Bing adapter |                       Yes | The query is sent to the selected API provider.           |
-| Auto        | Local first, API fallback if permitted                  |         Only for fallback | Sensitive credential-like queries never use API fallback. |
+| Mode        | Retrieval path                                                            | Requires a search API key | Internet behavior                                         |
+| ----------- | ------------------------------------------------------------------------- | ------------------------: | --------------------------------------------------------- |
+| Local       | Native DuckDuckGo, public Bing HTML fallback, or configured local SearXNG |                        No | The Miki host makes the web request.                      |
+| API / Cloud | Enabled Brave, Tavily, SerpAPI, Serper, or Bing adapter                   |                       Yes | The query is sent to the selected API provider.           |
+| Auto        | Local first, API fallback if permitted                                    |         Only for fallback | Sensitive credential-like queries never use API fallback. |
 
-The active answer model is configured separately under **Models**. A local llama.cpp/Ollama model can synthesize the returned citations without using a cloud model; a cloud/API model can also synthesize them when selected. This gives two independent choices: **where Miki retrieves web data** and **where Miki generates the final answer**. Miki normally searches only when the request requires current or externally verifiable information. A per-turn limit of three `web_search` calls prevents low-cost models from looping; if no final synthesis is returned, Miki provides a source-lead summary explicitly marked as unverified.
+The active answer model is configured separately under **Models**. A local llama.cpp/Ollama model can synthesize the returned citations without using a cloud model; a cloud/API model can also synthesize them when selected. This gives two independent choices: **where Miki retrieves web data** and **where Miki generates the final answer**. Miki normally searches only when the request requires current or externally verifiable information. The default Balanced resource profile permits at most two `web_search` calls per turn; Eco permits one and Performance permits three. Set `agent.resource.web_search_max_calls_per_turn` from 1 to 5 only when a workflow genuinely needs more search steps. If no final synthesis is returned, Miki provides a source-lead summary explicitly marked as unverified.
+
+For faster, lower-context Local search, use the **Local Search Performance** controls on the same dashboard page. `Reuse Recent Results` caches only non-sensitive searches, `Cache Lifetime (minutes)` controls freshness, and `Snippet Character Limit` controls how much text is sent to the answer model. The shipped defaults are caching enabled, 5 minutes, and 420 characters. Provider **Max Results** should normally remain at 5 or below. Search output is compact JSON, removes tracking URL duplicates, and retains citations even when snippets are shortened. A practical breaking-news profile is 1–3 minutes of cache lifetime and 3–5 results; a documentation profile can use 15–60 minutes.
 
 ### API provider credentials
 

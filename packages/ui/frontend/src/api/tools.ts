@@ -44,6 +44,12 @@ export interface WebSearchProviderConfig {
   api_key_set?: boolean
 }
 
+export interface WebSearchOptimizationConfig {
+  cache_enabled?: boolean
+  cache_ttl_ms?: number
+  snippet_chars?: number
+}
+
 export interface WebSearchConfigResponse {
   gateway_restart_required?: boolean
   runtime_apply_status?: "applied" | "pending_restart" | "failed"
@@ -55,6 +61,7 @@ export interface WebSearchConfigResponse {
   current_service: string
   prefer_native: boolean
   proxy?: string
+  optimization?: WebSearchOptimizationConfig
   providers: WebSearchProviderOption[]
   settings: Record<string, WebSearchProviderConfig>
 }

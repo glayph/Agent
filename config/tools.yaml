@@ -68,6 +68,10 @@ web_search:
   provider: native
   current_service: native
   prefer_native: true
+  optimization:
+    cache_enabled: true
+    cache_ttl_ms: 300000
+    snippet_chars: 420
   providers:
     - id: native
       label: Native Web Search (DuckDuckGo)

@@ -247,6 +247,29 @@ describe("runtime config schema", () => {
     );
   });
 
+  it("rejects invalid web-search optimization bounds", () => {
+    const result = validateRuntimeConfig({
+      web_search: {
+        optimization: {
+          cache_ttl_ms: -1,
+          snippet_chars: 50,
+        },
+      },
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "web_search.optimization.cache_ttl_ms",
+        }),
+        expect.objectContaining({
+          path: "web_search.optimization.snippet_chars",
+        }),
+      ]),
+    );
+  });
+
   it("rejects unsupported web-search providers", () => {
     const result = validateRuntimeConfig({
       web_search: {

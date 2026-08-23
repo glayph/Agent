@@ -165,6 +165,109 @@ export function WebSearchGeneralSettings({
             className="data-[state=checked]:shadow-xs"
           />
         </SettingRow>
+
+        <div className="bg-muted/20 text-muted-foreground border-border/20 border-t px-5 py-3 text-xs font-semibold tracking-wide uppercase">
+          {t(
+            "pages.agent.tools.web_search.performance_title",
+            "Local Search Performance",
+          )}
+        </div>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.web_search.cache_enabled",
+            "Reuse Recent Results",
+          )}
+          description={t(
+            "pages.agent.tools.web_search.cache_enabled_hint",
+            "Caches non-sensitive search results briefly so repeated questions avoid another network request.",
+          )}
+        >
+          <Switch
+            checked={draft.optimization?.cache_enabled ?? true}
+            onCheckedChange={(checked) =>
+              onUpdateDraft((current) => ({
+                ...current,
+                optimization: {
+                  ...current.optimization,
+                  cache_enabled: checked,
+                },
+              }))
+            }
+            aria-label={t(
+              "pages.agent.tools.web_search.cache_enabled",
+              "Reuse Recent Results",
+            )}
+            className="data-[state=checked]:shadow-xs"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.web_search.cache_ttl",
+            "Cache Lifetime (minutes)",
+          )}
+          description={t(
+            "pages.agent.tools.web_search.cache_ttl_hint",
+            "Use 0 to disable caching; current/news queries should use a short lifetime.",
+          )}
+        >
+          <Input
+            type="number"
+            min={0}
+            max={1440}
+            value={Math.round(
+              (draft.optimization?.cache_ttl_ms ?? 300000) / 60000,
+            )}
+            onChange={(event) =>
+              onUpdateDraft((current) => ({
+                ...current,
+                optimization: {
+                  ...current.optimization,
+                  cache_ttl_ms: Math.max(
+                    0,
+                    Math.min(
+                      86400000,
+                      (Number(event.target.value) || 0) * 60000,
+                    ),
+                  ),
+                },
+              }))
+            }
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-[background-color,border-color,box-shadow] duration-300 sm:w-32"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.web_search.snippet_chars",
+            "Snippet Character Limit",
+          )}
+          description={t(
+            "pages.agent.tools.web_search.snippet_chars_hint",
+            "Shorter snippets reduce local-model context usage while keeping source citations.",
+          )}
+        >
+          <Input
+            type="number"
+            min={120}
+            max={1000}
+            value={draft.optimization?.snippet_chars ?? 420}
+            onChange={(event) =>
+              onUpdateDraft((current) => ({
+                ...current,
+                optimization: {
+                  ...current.optimization,
+                  snippet_chars: Math.max(
+                    120,
+                    Math.min(1000, Number(event.target.value) || 120),
+                  ),
+                },
+              }))
+            }
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-[background-color,border-color,box-shadow] duration-300 sm:w-32"
+          />
+        </SettingRow>
       </div>
     </div>
   )
