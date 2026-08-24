@@ -35,7 +35,7 @@ For development with hot reload, use:
 npm run dev
 ```
 
-The complete setup guide is available in [`SETUP.md`](SETUP.md). It contains the platform-specific prerequisites, model configuration, voice setup, provider setup, troubleshooting, and release instructions.
+The complete setup guide is available in [`SETUP.md`](SETUP.md). It contains the platform-specific prerequisites, model configuration, voice setup, provider setup, troubleshooting, and release instructions. The reproducible local/CI build and self-service LLM workflow is documented in [`docs/BUILD_AND_MODEL_INSTALL.md`](docs/BUILD_AND_MODEL_INSTALL.md).
 
 ## Linux and Windows support
 
@@ -62,7 +62,7 @@ The **Agent Control** page is available at `/control` and from the dashboard sid
 | Runtime reload | Reload supported configuration and report restart requirements |
 | Protected operations | Owner approval, context binding, one-time consumption, and journaled outcome |
 
-Complex or destructive actions are not silently guessed. Arbitrary shell commands, unrestricted filesystem mutation, factory reset, credential deletion, unattended third-party code installation, and generic model downloading remain outside the autonomous control boundary.
+Complex or destructive actions are not silently guessed. Unrestricted filesystem mutation, factory reset, credential deletion, unattended third-party code installation, and arbitrary model downloading remain outside the autonomous control boundary. The bounded model-runtime path may install only checksum-pinned, allow-listed LLM artifacts through the self-service model manager.
 
 The control API is documented in [`docs/agent-control-api.md`](docs/agent-control-api.md). The implementation audit is in [`docs/agent-control-capability-report.md`](docs/agent-control-capability-report.md).
 
@@ -89,7 +89,7 @@ For detailed Linux/Windows service setup, relocation, native runtimes, voice tra
 
 Miki supports local-first web search, configurable API search providers, Whisper.cpp-based voice transcription, authenticated MCP, Telegram-style channel administration, skill discovery/import, and persistent approval workflows. Optional capabilities remain disabled or degraded until their runtime, credentials, model, endpoint, or allow-list is explicitly configured.
 
-The project deliberately treats external MCP servers, downloaded skills, native binaries, and model files as untrusted or operator-provided inputs. Installation and side-effectful operations must pass validation and, where required, owner approval.
+The project deliberately treats external MCP servers, downloaded skills, native binaries, and model files as untrusted or operator-provided inputs. The self-service LLM manager is limited to checksum-pinned catalog entries; installation and other side-effectful operations must pass validation and, where required, owner approval.
 
 ## Project layout
 
@@ -110,12 +110,17 @@ The project deliberately treats external MCP servers, downloaded skills, native 
 | --- | --- |
 | `npm run dev` | Start the development workflow |
 | `npm run build:all` | Build native/runtime packages and the production dashboard |
+| `npm run build:local` | Check prerequisites, build locally, and run verification |
+| `npm run build:local:release` | Build locally and create the platform offline package |
 | `npm start` | Start the launcher |
 | `npm run test` | Run workspace tests where configured |
 | `npm run verify` | Run the project verification workflow |
 | `npm run runtime:24-7:check` | Check continuous-runtime readiness |
 | `npm run build:release:linux` | Build the Linux offline release package |
 | `npm run build:release:windows` | Build the Windows release package |
+| `npm run model:list` | Show the pinned downloadable LLM catalog |
+| `npm run model:install -- <model-id> --start` | Verify, install, register, and start an allow-listed local LLM |
+| `npm run model:status` | Show installed model and runtime paths without secrets |
 
 ## Verification notes
 

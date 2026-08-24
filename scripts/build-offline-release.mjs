@@ -494,6 +494,11 @@ function stageLauncher() {
     path.join(stageDir, "bin", "miki-offline.js"),
     "offline launcher template",
   );
+  copyRequired(
+    path.join(root, "scripts", "miki-model.mjs"),
+    path.join(stageDir, "bin", "miki-model.js"),
+    "self-service LLM model manager",
+  );
   chmodExecutable(path.join(stageDir, "bin", "miki-offline.js"));
   if (isWindows) {
     const installScript = `$ErrorActionPreference = "Stop"
@@ -601,13 +606,13 @@ ${extractedCommands}
 
 On first start the launcher creates user-writable state below \`$XDG_DATA_HOME/miki\` or \`~/.local/share/miki\`, keeps the immutable package tree untouched, leaves local voice-to-text Off until a user-provided or approval-gated runtime/model passes health checks, and writes a randomly generated dashboard password to \`runtime/data/first-run-credentials.txt\` with mode 600. Save the printed password and delete that file after saving it. To choose a password before first start, set \`MIKI_DASHBOARD_PASSWORD\` to a value of at least eight characters.
 
-The dashboard defaults to \`http://127.0.0.1:18800\`. No answer-model GGUF is pre-installed. To use the bundled llama.cpp executable with a separate local model, set \`MIKI_MODEL_PATH=/absolute/path/to/model.gguf\` before \`start\`; optionally set \`MIKI_LOCAL_MODEL_NAME\` and \`MIKI_MODEL_ID\`. The launcher registers that external model in user state and restricts its model allowlist to the model directory. You can also add a model from the dashboard Models page. If no model is configured, the gateway still starts and the dashboard remains available for cloud-provider or later model configuration.
+The dashboard defaults to \`http://127.0.0.1:18800\`. The bundled self-service model manager exposes \`miki-offline.js model-list\` and \`miki-offline.js model-install gemma-4-E2B-it-Q4_0\`. It downloads only the pinned allow-listed model, verifies its size and SHA-256, stores it in user state, and registers it for llama.cpp. To automatically install an approved model before startup, set \`MIKI_AUTO_INSTALL_MODEL=gemma-4-E2B-it-Q4_0\`; an interrupted or tampered download is discarded. No answer-model GGUF is bundled in the package. To use a separate operator-provided local model, set \`MIKI_MODEL_PATH=/absolute/path/to/model.gguf\` before \`start\`; optionally set \`MIKI_LOCAL_MODEL_NAME\` and \`MIKI_MODEL_ID\`. The launcher registers that external model in user state and restricts its model allowlist to the model directory. You can also add a model from the dashboard Models page. If no model is configured, the gateway still starts and the dashboard remains available for cloud-provider or later model configuration.
 
-No cloud API key, online registry, model download, or plugin download is used by the offline start path. Remote channels, cloud providers, external MCP servers, and online skill installation remain optional features that require explicit configuration and network access.
+No cloud API key, online registry, or plugin download is used by the default offline start path. Network access is used for model weights only when the operator explicitly sets the approved \`MIKI_AUTO_INSTALL_MODEL\` option or runs \`model-install\`. Remote channels, cloud providers, external MCP servers, and online skill installation remain optional features that require explicit configuration and network access.
 
 ## Diagnostics and limitations
 
-Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable but not an answer-model GGUF or voice-to-text assets; model quality, context length, latency, and RAM use depend on separately selected models and host CPU/memory. This archive targets ${platformLabel}.
+Run \`miki doctor\` or the direct launcher command shown above to verify the archive. The release includes the local inference executable and the self-service model manager, but does not bundle answer-model weights or voice-to-text assets; model quality, context length, latency, and RAM use depend on separately selected models and host CPU/memory. This archive targets ${platformLabel}.
 
 The dashboard’s existing conversational chat/Inspector behavior, local/API/Auto web-search controls, memory system, skills, MCP surfaces, and voice transcript routing are included from the source commit used to create this release. External online acquisitions remain approval-gated by the application’s safety controls and are not silently performed by this package.
 

@@ -512,9 +512,43 @@ function startGateway(auth, argv) {
   });
 }
 
+function modelManagerScript() {
+  const packaged = path.join(packageRoot, "bin", "miki-model.js");
+  const source = path.join(packageRoot, "scripts", "miki-model.mjs");
+  return fs.existsSync(packaged) ? packaged : source;
+}
+
+function runModelManager(managerArgs) {
+  const script = modelManagerScript();
+  if (!fs.existsSync(script)) throw new Error(`LLM model manager is missing: ${script}`);
+  const nodeExecutable = fs.existsSync(embeddedNode) ? embeddedNode : process.execPath;
+  const result = spawnSync(nodeExecutable, [script, ...managerArgs], {
+    cwd: workspaceRoot,
+    env: {
+      ...process.env,
+      MIKI_RUNTIME_ROOT: runtimeRoot,
+      MIKI_MODEL_DIR: path.join(runtimeRoot, "models"),
+      MIKI_STATE_PATH: statePath,
+      MIKI_CONFIG_DIR: path.join(runtimeRoot, "config"),
+      MIKI_LLAMA_SERVER_BIN: bundledLlama,
+    },
+    stdio: "inherit",
+    shell: false,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`LLM model manager exited with status ${result.status ?? "unknown"}.`);
+}
+
+function autoInstallRequestedModel() {
+  const requested = process.env.MIKI_AUTO_INSTALL_MODEL?.trim();
+  if (!requested) return;
+  console.log(`[miki-offline] Auto-installing the approved local model: ${requested}`);
+  runModelManager(["install", requested]);
+}
+
 function usage() {
   console.log(
-    `Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and optional voice configuration\n  status        Show installation paths and selected local assets\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n`,
+    `Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and optional voice configuration\n  status        Show installation paths and selected local assets\n  model-list    Show the pinned downloadable LLM catalog\n  model-install Install and register an approved LLM model\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n  MIKI_AUTO_INSTALL_MODEL  Install an approved model automatically before start\n`,
   );
 }
 
@@ -552,8 +586,17 @@ try {
         2,
       ),
     );
+  } else if (command === "model-list") {
+    prepareRuntimeLayout();
+    runModelManager(["list"]);
+  } else if (command === "model-install") {
+    prepareRuntimeLayout();
+    const requested = args.find((arg) => !arg.startsWith("-"));
+    if (!requested) throw new Error("model-install requires an approved model id or alias.");
+    runModelManager(["install", requested, ...(args.includes("--start") ? ["--start"] : [])]);
   } else if (command === "start" || command === "run") {
     const auth = prepareRuntimeLayout();
+    autoInstallRequestedModel();
     startGateway(auth, args);
   } else {
     usage();

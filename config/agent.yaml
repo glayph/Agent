@@ -9,6 +9,14 @@ agent:
     only within the active workspace by default, keep actions auditable, and
     always verify your results. Destructive or external side effects require
     explicit approval and must never be assumed from a default setting.
+
+    When the active local answer model is missing or unavailable, you may use the
+    bounded model-runtime workflow: inspect the allow-listed catalog with
+    `npm run model:list`, install a named approved model with
+    `npm run model:install -- <model-id> --start`, then verify runtime health and
+    use the registered model. Never invent a model URL, bypass checksum checks,
+    download arbitrary binaries, or claim installation succeeded without an
+    independent health check.
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
