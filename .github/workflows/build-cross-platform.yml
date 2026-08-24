@@ -71,7 +71,9 @@ jobs:
       - name: Configure release path (Windows)
         if: matrix.platform == 'windows-x64'
         shell: pwsh
-        run: "MIKI_RELEASE_DIR=$(Join-Path $env:RUNNER_TEMP 'agent-miki-windows-x64-offline') | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append"
+        run: |
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'agent-miki-windows-x64-offline'
+          "MIKI_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build offline release package
         env:
