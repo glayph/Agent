@@ -26,14 +26,17 @@ function run(command, commandArgs, options = {}) {
   const result = spawnSync(command, commandArgs, {
     cwd: root,
     stdio: "inherit",
-    shell: false,
+    shell: isWindows && command.toLowerCase().endsWith(".cmd"),
     ...options,
   });
   if (result.error) fail(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) fail(`${command} exited with status ${result.status ?? "unknown"}`);
 }
 function commandAvailable(command) {
-  const result = spawnSync(command, ["--version"], { stdio: "ignore", shell: false });
+  const result = spawnSync(command, ["--version"], {
+    stdio: "ignore",
+    shell: isWindows && command.toLowerCase().endsWith(".cmd"),
+  });
   return result.status === 0;
 }
 function checkPrerequisites() {
