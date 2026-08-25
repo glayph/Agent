@@ -111,7 +111,7 @@ export async function extractTarGz(
 export async function findManifest(
   dir: string,
 ): Promise<{ manifest: Record<string, unknown>; filePath: string } | null> {
-  const candidates = ["plugin.json", "package.json"];
+  const candidates = ["plugin.json", "miki.provider.json", "package.json"];
   for (const candidate of candidates) {
     const fullPath = path.join(dir, candidate);
     try {

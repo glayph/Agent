@@ -22,6 +22,10 @@
       "import": "./dist/llm/provider/index.js",
       "types": "./dist/llm/provider/index.d.ts"
     },
+    "./llm/provider/sdk": {
+      "import": "./dist/llm/provider/sdk/index.js",
+      "types": "./dist/llm/provider/sdk/index.d.ts"
+    },
     "./control": {
       "import": "./dist/control/index.js",
       "types": "./dist/control/index.d.ts"

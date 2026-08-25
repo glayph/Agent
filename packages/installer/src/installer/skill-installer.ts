@@ -7,16 +7,39 @@ import {
   ParsedSkillSpec,
   InstallOptions,
   InstallResult,
+  InstallPreviewResult,
   InstalledSkill,
+  PluginInstallability,
 } from "../types.js";
 import { fetchSkill } from "../source-dispatch.js";
 import { validatePluginManifest } from "../utils/validator.js";
 import { SkillRegistry } from "../registry/skill-registry.js";
 
 const MAX_MARKETPLACE_METADATA_BYTES = 128 * 1024;
+const ENTRYPOINT_RUNTIMES: Record<string, "node" | "python"> = {
+  ".cjs": "node",
+  ".js": "node",
+  ".mjs": "node",
+  ".py": "python",
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function classifyInstallability(
+  valid: boolean,
+  entrypoint: string,
+): {
+  installability: PluginInstallability;
+  runtime?: "node" | "python";
+} {
+  if (!valid) return { installability: "invalid" };
+  if (!entrypoint) return { installability: "metadata_only" };
+  const runtime = ENTRYPOINT_RUNTIMES[path.extname(entrypoint).toLowerCase()];
+  return runtime
+    ? { installability: "installable", runtime }
+    : { installability: "unsupported_runtime" };
 }
 
 async function readMarketplaceMetadata(
@@ -67,7 +90,10 @@ export class SkillInstaller {
     const opts: InstallOptions = { force: false, ...options };
 
     try {
-      const parsed = this.parseSpec(skillSpec);
+      const parsed = this.applyInstallOptions(
+        this.parseSpec(skillSpec),
+        options,
+      );
 
       const conflict = await this.registry.checkConflict(
         parsed.packageName,
@@ -117,6 +143,10 @@ export class SkillInstaller {
         }
 
         const manifest = validation.manifest!;
+        const installability = classifyInstallability(
+          validation.valid,
+          downloadResult.entrypoint,
+        );
         const marketplace = await readMarketplaceMetadata(
           downloadResult.filesDir,
         );
@@ -169,6 +199,7 @@ export class SkillInstaller {
           contracts: manifest.contracts,
           plugin: manifest.plugin,
           marketplace,
+          installability: installability.installability,
         };
 
         await this.registry.installAndLoad(result);
@@ -195,8 +226,78 @@ export class SkillInstaller {
     }
   }
 
+  async preview(
+    skillSpec: string,
+    options?: Pick<InstallOptions, "version" | "branch">,
+  ): Promise<InstallPreviewResult> {
+    let parsed: ParsedSkillSpec | undefined;
+    try {
+      parsed = this.applyInstallOptions(this.parseSpec(skillSpec), options);
+      const tmpDir = path.join(
+        os.tmpdir(),
+        `plugin-preview-${parsed.packageName.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}`,
+      );
+      await fs.promises.mkdir(tmpDir, { recursive: true });
+      try {
+        const downloadResult = await fetchSkill(
+          parsed.protocol,
+          parsed,
+          tmpDir,
+          { clawhubRegistryUrl: this.clawhubRegistryUrl || undefined },
+        );
+        const validation = await validatePluginManifest(
+          downloadResult.manifest,
+          downloadResult.filesDir,
+        );
+        const classification = classifyInstallability(
+          validation.valid,
+          downloadResult.entrypoint,
+        );
+        return {
+          valid: validation.valid,
+          ...classification,
+          name: downloadResult.manifest.name || parsed.packageName,
+          version: downloadResult.manifest.version || "0.0.0",
+          sourceProtocol: parsed.protocol,
+          entrypoint: downloadResult.entrypoint || undefined,
+          manifest: validation.manifest,
+          errors: validation.errors,
+          warnings: validation.warnings,
+        };
+      } finally {
+        await fs.promises
+          .rm(tmpDir, { recursive: true, force: true })
+          .catch(() => {});
+      }
+    } catch (err) {
+      return {
+        valid: false,
+        installability: "invalid",
+        name: parsed?.packageName || this.safeParseName(skillSpec),
+        version: options?.version || "0.0.0",
+        sourceProtocol: parsed?.protocol || SourceProtocol.LOCAL,
+        manifest: null,
+        errors: [err instanceof Error ? err.message : String(err)],
+        warnings: [],
+      };
+    }
+  }
+
   getRegistry(): SkillRegistry {
     return this.registry;
+  }
+
+  private applyInstallOptions(
+    parsed: ParsedSkillSpec,
+    options?: Pick<InstallOptions, "version" | "branch">,
+  ): ParsedSkillSpec {
+    return {
+      ...parsed,
+      ...(parsed.version || !options?.version
+        ? {}
+        : { version: options.version }),
+      ...(parsed.branch || !options?.branch ? {} : { branch: options.branch }),
+    };
   }
 
   private async getExistingVersion(name: string): Promise<string | null> {

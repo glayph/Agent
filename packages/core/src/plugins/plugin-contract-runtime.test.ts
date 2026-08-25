@@ -221,6 +221,30 @@ describe("loadRuntimePluginContracts", () => {
     );
   });
 
+  it("rejects a contract entrypoint symlink that escapes plugin assets", async () => {
+    workspaceDir = createWorkspace();
+    const skillsDir = skillsDirFor(workspaceDir);
+    const assetsPath = path.join(skillsDir, "plugin_assets");
+    const outsidePath = path.join(workspaceDir, "outside-run.js");
+    fs.writeFileSync(outsidePath, "process.stdout.write('outside');\n");
+    await registerPlugin(workspaceDir, {
+      contracts: {
+        tools: [{ name: "escaped_tool", entrypoint: "tools/run.js" }],
+      },
+    });
+    fs.symlinkSync(outsidePath, path.join(assetsPath, "tools", "run.js"));
+
+    const [contract] = await loadRuntimePluginContracts(workspaceDir, {
+      kind: "tools",
+    });
+
+    expect(contract.readiness.status).toBe("needs_entrypoint");
+    expect(contract.readiness.executable).toBe(false);
+    expect(contract.readiness.reasons).toContain(
+      "Entrypoint resolves outside the installed plugin assets.",
+    );
+  });
+
   it("does not execute plugin tools until execution policy is enabled", async () => {
     workspaceDir = createWorkspace();
     fs.writeFileSync(

@@ -435,6 +435,20 @@ function resolveEntrypoint(entry: PluginContractCatalogEntry): {
       reason: "Entrypoint file is missing from installed plugin assets.",
     };
   }
+  try {
+    const baseReal = fs.realpathSync.native(baseDir);
+    const entryReal = fs.realpathSync.native(resolved);
+    const realRelative = path.relative(baseReal, entryReal);
+    if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
+      return {
+        reason: "Entrypoint resolves outside the installed plugin assets.",
+      };
+    }
+  } catch {
+    return {
+      reason: "Entrypoint realpath could not be verified.",
+    };
+  }
   const runtime =
     SUPPORTED_RUNTIME_EXTENSIONS[path.extname(resolved).toLowerCase()];
   if (!runtime) {

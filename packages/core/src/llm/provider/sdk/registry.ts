@@ -10,7 +10,7 @@ import {
   type ProviderPluginDescriptor,
 } from "./index.js";
 import { LLMAPIError } from "../errors.js";
-import { ProviderPluginLoader } from "./loader.js";
+import { ProviderPluginLoader, validateProviderManifest } from "./loader.js";
 
 export interface ProviderPluginRegistryOptions {
   workspaceDir: string;
@@ -91,6 +91,16 @@ export class ProviderPluginRegistry {
     if (!id) throw new Error("provider plugin manifest id is required");
     if (!plugin.complete || !plugin.catalog)
       throw new Error(`provider plugin ${id} is missing required hooks`);
+    const validation = validateProviderManifest(plugin.manifest, {
+      source,
+      mikiVersion: this.options.mikiVersion,
+      pluginApiVersion: this.options.apiVersion,
+      allowedExternalPermissions: ["network"],
+    });
+    if (!validation.valid)
+      throw new Error(
+        `provider plugin ${id} has an invalid manifest: ${validation.errors.join("; ")}`,
+      );
     if (
       apiMajor(plugin.manifest.pluginApiVersion) !==
       apiMajor(this.options.apiVersion)

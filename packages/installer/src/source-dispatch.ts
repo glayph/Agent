@@ -32,6 +32,77 @@ interface ClawhubPackageResponse {
   manifest?: Record<string, unknown>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value.filter(
+    (item): item is string => typeof item === "string" && item.trim() === item,
+  );
+  return values.length === value.length ? values : undefined;
+}
+
+function providerManifestToPlugin(
+  raw: Record<string, unknown>,
+): PluginManifest | null {
+  const id = stringValue(raw.id);
+  const displayName = stringValue(raw.displayName) || stringValue(raw.name);
+  const version = stringValue(raw.version);
+  if (!id || !displayName || !version) return null;
+
+  const permissions = stringArray(raw.permissions);
+  const entrypoint = stringValue(raw.entrypoint);
+  const metadata: Record<string, unknown> = {
+    id,
+    display_name: displayName,
+    ...(stringValue(raw.baseUrl) ? { base_url: stringValue(raw.baseUrl) } : {}),
+    ...(stringValue(raw.apiKeyEnv)
+      ? { api_key_env: stringValue(raw.apiKeyEnv) }
+      : {}),
+    ...(typeof raw.local === "boolean" ? { local: raw.local } : {}),
+    ...(typeof raw.supportsFetch === "boolean"
+      ? { supports_fetch: raw.supportsFetch }
+      : {}),
+    ...(stringValue(raw.authMethod)
+      ? { auth_method: stringValue(raw.authMethod) }
+      : {}),
+    ...(stringArray(raw.modelIds) ? { models: stringArray(raw.modelIds) } : {}),
+    ...(stringArray(raw.secretFields)
+      ? { secret_fields: stringArray(raw.secretFields) }
+      : {}),
+    capabilities: isRecord(raw.capabilities) ? raw.capabilities : {},
+    plugin_api_version: stringValue(raw.pluginApiVersion) || "1.0",
+  };
+
+  return {
+    name: id,
+    version,
+    description: displayName,
+    permissions,
+    plugin: {
+      entrypoint,
+      permissions,
+      contracts: {
+        providers: [
+          {
+            name: id,
+            description: displayName,
+            entrypoint,
+            permissions,
+            metadata,
+          },
+        ],
+      },
+    },
+  };
+}
+
 function normalizeGitUrl(raw: string): string {
   if (raw.startsWith("git://") || raw.startsWith("http://"))
     throw new Error("Git source URLs must use https:// or ssh://");
@@ -43,14 +114,27 @@ function normalizeGitUrl(raw: string): string {
 }
 
 async function buildManifest(
-  found: { manifest: unknown } | null,
+  found: { manifest: unknown; filePath?: string } | null,
   fallback: Partial<PluginManifest>,
   _destDir: string,
-): Promise<{ manifest: PluginManifest; entrypoint: string }> {
+): Promise<{
+  manifest: PluginManifest;
+  entrypoint: string;
+  manifestFormat?: "plugin.json" | "package.json" | "miki.provider.json";
+}> {
   let manifest: PluginManifest;
+  let manifestFormat:
+    "plugin.json" | "package.json" | "miki.provider.json" | undefined;
   if (found) {
-    const raw = found.manifest as Record<string, unknown>;
-    manifest = {
+    const raw = isRecord(found.manifest) ? found.manifest : {};
+    manifestFormat = path.basename(
+      found.filePath || "",
+    ) as typeof manifestFormat;
+    const providerManifest =
+      manifestFormat === "miki.provider.json"
+        ? providerManifestToPlugin(raw)
+        : null;
+    manifest = providerManifest || {
       name: (raw.name as string) || fallback.name || "",
       version: (raw.version as string) || fallback.version || "0.0.0",
       description: (raw.description as string) || fallback.description || "",
@@ -72,8 +156,10 @@ async function buildManifest(
     };
   }
   const entrypoint =
-    manifest.plugin?.entrypoint || manifest.main || `${manifest.name}.ts`;
-  return { manifest, entrypoint };
+    manifest.plugin?.entrypoint ||
+    manifest.main ||
+    (manifestFormat === "miki.provider.json" ? "" : `${manifest.name}.ts`);
+  return { manifest, entrypoint, manifestFormat };
 }
 
 async function fetchGit(
@@ -103,14 +189,14 @@ async function fetchGit(
     const found = await findManifest(destDir);
     if (!found)
       throw new Error(
-        `No plugin.json or package.json found in git repo "${spec.packageName}"`,
+        `No plugin.json, miki.provider.json, or package.json found in git repo "${spec.packageName}"`,
       );
-    const { manifest, entrypoint } = await buildManifest(
+    const { manifest, entrypoint, manifestFormat } = await buildManifest(
       found,
       { name: path.basename(repoUrl).replace(/\.git$/, "") },
       destDir,
     );
-    return { manifest, filesDir: destDir, entrypoint };
+    return { manifest, filesDir: destDir, entrypoint, manifestFormat };
   } finally {
     fs.promises.rm(cloneDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -146,14 +232,14 @@ async function fetchNpm(
     const found = await findManifest(destDir);
     if (!found)
       throw new Error(
-        `No package.json or plugin.json found in npm package "${pkgSpec}"`,
+        `No package.json, plugin.json, or miki.provider.json found in npm package "${pkgSpec}"`,
       );
-    const { manifest, entrypoint } = await buildManifest(
+    const { manifest, entrypoint, manifestFormat } = await buildManifest(
       found,
       { name: spec.packageName },
       destDir,
     );
-    return { manifest, filesDir: destDir, entrypoint };
+    return { manifest, filesDir: destDir, entrypoint, manifestFormat };
   } finally {
     fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -190,14 +276,14 @@ async function fetchLocal(
   const found = await findManifest(destDir);
   if (!found)
     throw new Error(
-      `No plugin.json or package.json found in local path "${spec.packageName}"`,
+      `No plugin.json, miki.provider.json, or package.json found in local path "${spec.packageName}"`,
     );
-  const { manifest, entrypoint } = await buildManifest(
+  const { manifest, entrypoint, manifestFormat } = await buildManifest(
     found,
     { name: path.basename(sourcePath) },
     destDir,
   );
-  return { manifest, filesDir: destDir, entrypoint };
+  return { manifest, filesDir: destDir, entrypoint, manifestFormat };
 }
 
 async function fetchClawhub(
@@ -236,12 +322,12 @@ async function fetchClawhub(
     await fs.promises.mkdir(destDir, { recursive: true });
     await extractTarGz(archivePath, destDir, { stripComponents: 1 });
     const found = await findManifest(destDir);
-    const { manifest, entrypoint } = await buildManifest(
+    const { manifest, entrypoint, manifestFormat } = await buildManifest(
       found,
       pkgInfo,
       destDir,
     );
-    return { manifest, filesDir: destDir, entrypoint };
+    return { manifest, filesDir: destDir, entrypoint, manifestFormat };
   } finally {
     fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }

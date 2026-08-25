@@ -1,7 +1,11 @@
 import { Router, Request, Response } from "express";
 import { SkillLoader } from "./skill-loader.js";
 import { type RuntimePaths, resolveDownloadedSkillsDir } from "./paths.js";
-import { SkillInstaller, type PluginContractKind } from "@miki/installer";
+import {
+  SkillInstaller,
+  type InstallPreviewResult,
+  type PluginContractKind,
+} from "@miki/installer";
 import { createSuccessResponse, createErrorResponse } from "./skill-utils.js";
 import {
   executeRuntimePluginTool,
@@ -73,6 +77,16 @@ async function discoverInstalledSkillIds(
   } catch {
     return [];
   }
+}
+
+async function previewSkillDirect(
+  skillSpec: string,
+  downloadedSkillsDir: string,
+  options?: { version?: string; branch?: string },
+): Promise<InstallPreviewResult> {
+  const skillInstaller = new SkillInstaller(downloadedSkillsDir);
+  await skillInstaller.init();
+  return skillInstaller.preview(skillSpec, options);
 }
 
 async function installSkillDirect(
@@ -394,6 +408,36 @@ export function createSkillsRouter(
             indexPath: skillDef.index,
             tools: skillDef.tools?.length || 0,
           }),
+        );
+      }
+
+      if (action === "preview-install") {
+        const source = req.body.source;
+        if (!source)
+          return res
+            .status(400)
+            .json(createErrorResponse("Missing required field: source"));
+        const preview = await previewSkillDirect(
+          source,
+          resolveDownloadedSkillsDir(effectivePaths),
+          {
+            version:
+              typeof req.body.version === "string"
+                ? req.body.version
+                : undefined,
+            branch:
+              typeof req.body.branch === "string" ? req.body.branch : undefined,
+          },
+        );
+        return res.status(preview.valid ? 200 : 422).json(
+          preview.valid
+            ? createSuccessResponse(preview)
+            : {
+                success: false,
+                data: preview,
+                error: "Plugin preview validation failed",
+                detail: preview.errors.join("; "),
+              },
         );
       }
 

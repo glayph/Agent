@@ -5,7 +5,7 @@ import path from "node:path";
 import { ProviderPluginLoader, validateProviderManifest } from "./loader.js";
 import { ProviderPluginRegistry } from "./registry.js";
 import type { MikiProviderPlugin } from "./index.js";
-import { omniRouteProviderPlugin } from "./builtin.js";
+import { builtinProviderPlugins } from "./builtin.js";
 
 function manifest(id: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -117,6 +117,68 @@ describe("ProviderPluginLoader", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("rejects an entrypoint symlink that escapes the plugin directory", async () => {
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-provider-symlink-"),
+    );
+    const outside = path.join(root, "outside.mjs");
+    const pluginDir = path.join(root, "plugin");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(outside, "export default {};\n");
+    fs.writeFileSync(
+      path.join(pluginDir, "miki.provider.json"),
+      JSON.stringify(manifest("symlink-provider", { entrypoint: "index.mjs" })),
+    );
+    fs.symlinkSync(outside, path.join(pluginDir, "index.mjs"));
+
+    const [record] = new ProviderPluginLoader({
+      builtinDirectories: [root],
+    }).discover();
+    await expect(
+      new ProviderPluginLoader({ builtinDirectories: [root] }).load(record),
+    ).rejects.toThrow(/outside its plugin directory/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("re-validates the manifest exported by the provider entrypoint", async () => {
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-provider-exported-manifest-"),
+    );
+    fs.writeFileSync(
+      path.join(root, "miki.provider.json"),
+      JSON.stringify(
+        manifest("exported-provider", { entrypoint: "index.mjs" }),
+      ),
+    );
+    fs.writeFileSync(
+      path.join(root, "index.mjs"),
+      `export default {
+        manifest: ${JSON.stringify(
+          manifest("exported-provider", {
+            entrypoint: "index.mjs",
+            capabilities: {
+              chat: true,
+              tools: "invalid",
+              streaming: true,
+              vision: false,
+              local: false,
+            },
+          }),
+        )},
+        async catalog() { return { auth: { mode: "none", allowEmptyKey: true }, models: [] }; },
+        async complete() { return { choices: [] }; },
+      };\n`,
+    );
+
+    const [record] = new ProviderPluginLoader({
+      builtinDirectories: [root],
+    }).discover();
+    await expect(
+      new ProviderPluginLoader({ builtinDirectories: [root] }).load(record),
+    ).rejects.toThrow(/entrypoint manifest is invalid/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   it("reports a missing entrypoint when a built-in executable manifest is loaded", async () => {
     const root = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-provider-missing-"),
@@ -157,6 +219,16 @@ describe("ProviderPluginRegistry", () => {
     },
   });
 
+  it("rejects malformed manifests at registry registration", () => {
+    const registry = new ProviderPluginRegistry({
+      workspaceDir: "/tmp",
+      configDir: "/tmp",
+    });
+    const malformed = plugin("malformed-provider", ["malformed"]);
+    malformed.manifest.capabilities.tools = "invalid" as unknown as boolean;
+    expect(() => registry.register(malformed)).toThrow(/invalid manifest/);
+  });
+
   it("resolves provider/model references and rejects duplicate registrations", () => {
     const registry = new ProviderPluginRegistry({
       workspaceDir: "/tmp",
@@ -171,16 +243,15 @@ describe("ProviderPluginRegistry", () => {
     ).toThrow(/duplicate/);
   });
 
-  it("exposes OmniRoute’s local endpoint and placeholder authentication policy", async () => {
-    const catalog = await omniRouteProviderPlugin.catalog({
-      workspaceDir: "/tmp",
-      configDir: "/tmp",
-      mikiVersion: "1.3.3",
-      log() {},
-    });
-    expect(catalog?.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:20128\/v1/);
-    expect(omniRouteProviderPlugin.auth.allowEmptyKey).toBe(true);
-    expect(omniRouteProviderPlugin.auth.mode).toBe("local");
+  it("exposes only the configured Gemini and llama.cpp built-ins", () => {
+    expect(
+      builtinProviderPlugins.map((provider) => provider.manifest.id),
+    ).toEqual(["gemini", "llama.cpp"]);
+    expect(
+      builtinProviderPlugins.every(
+        (provider) => validateProviderManifest(provider.manifest).valid,
+      ),
+    ).toBe(true);
   });
 
   it("dispatches through a selected local plugin without requiring a cloud credential", async () => {

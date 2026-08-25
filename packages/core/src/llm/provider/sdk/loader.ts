@@ -9,7 +9,7 @@ import {
   type ProviderPluginDescriptor,
 } from "./index.js";
 
-const ID_PATTERN = /^[a-z][a-z0-9_-]{1,63}$/;
+const ID_PATTERN = /^[a-z][a-z0-9_.-]{1,63}$/;
 const ALLOWED_PERMISSIONS = new Set([
   "network",
   "filesystem",
@@ -67,6 +67,21 @@ function isPathInside(parent: string, candidate: string): boolean {
     relative === "" ||
     (!relative.startsWith("..") && !path.isAbsolute(relative))
   );
+}
+
+async function isRealPathInside(
+  parent: string,
+  candidate: string,
+): Promise<boolean> {
+  try {
+    const [parentReal, candidateReal] = await Promise.all([
+      fs.promises.realpath(parent),
+      fs.promises.realpath(candidate),
+    ]);
+    return isPathInside(parentReal, candidateReal);
+  } catch {
+    return false;
+  }
 }
 
 export function validateProviderManifest(
@@ -348,6 +363,10 @@ export class ProviderPluginLoader {
       throw new Error("provider entrypoint escapes its manifest directory");
     if (!fs.existsSync(entrypoint) || !fs.statSync(entrypoint).isFile())
       throw new Error("provider entrypoint is missing");
+    if (!(await isRealPathInside(record.directory, entrypoint)))
+      throw new Error(
+        "provider entrypoint resolves outside its plugin directory",
+      );
     const imported = await import(pathToFileURL(entrypoint).href);
     const plugin = (imported.default ||
       imported.plugin ||
@@ -362,6 +381,16 @@ export class ProviderPluginLoader {
         "provider entrypoint must export a compatible MikiProviderPlugin",
       );
     }
+    const exportedValidation = validateProviderManifest(plugin.manifest, {
+      source: record.source,
+      mikiVersion: this.options.mikiVersion,
+      pluginApiVersion: this.options.pluginApiVersion,
+      allowedExternalPermissions: this.options.allowedExternalPermissions,
+    });
+    if (!exportedValidation.valid)
+      throw new Error(
+        `provider entrypoint manifest is invalid: ${exportedValidation.errors.join("; ")}`,
+      );
     return plugin;
   }
 }

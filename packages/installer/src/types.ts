@@ -50,14 +50,31 @@ export interface PluginContract {
   metadata?: Record<string, unknown>;
 }
 
+export type PluginInstallability =
+  "installable" | "metadata_only" | "unsupported_runtime" | "invalid";
+
 export interface InstallOptions {
   force?: boolean;
   version?: string;
   branch?: string;
 }
 
+export interface InstallPreviewResult {
+  valid: boolean;
+  installability: PluginInstallability;
+  name: string;
+  version: string;
+  sourceProtocol: SourceProtocol;
+  entrypoint?: string;
+  runtime?: "node" | "python";
+  manifest: PluginManifest | null;
+  errors: string[];
+  warnings: string[];
+}
+
 export interface InstallResult {
   success: boolean;
+  installability?: PluginInstallability;
   name: string;
   version: string;
   path: string;
@@ -118,6 +135,7 @@ export interface PluginDownloadResult {
   manifest: PluginManifest;
   filesDir: string;
   entrypoint: string;
+  manifestFormat?: "plugin.json" | "package.json" | "miki.provider.json";
 }
 
 export interface PluginValidationResult {
