@@ -420,8 +420,18 @@ export class ToolRegistrySchemas {
         function: {
           name: "browser_screenshot",
           description:
-            "Take a screenshot of the current page and save it locally.",
-          parameters: { type: "object", properties: {} },
+            "Take a screenshot of the current page and save it locally. When path is provided, it must be a .png file inside the workspace.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description:
+                  "Optional workspace-relative .png destination, e.g. hello-world-landing/hello-world-landing.png.",
+              },
+            },
+            required: [],
+          },
         },
       },
       {

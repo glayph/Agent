@@ -94,14 +94,8 @@ function scheduleReconnect(generation: number, sessionId: string) {
 
 function needsActiveSessionHydration(): boolean {
   const state = getChatState()
-  const storedSessionId = readStoredSessionId()
-  const hasExplicitSession = state.activeSessionId !== SINGLE_CHAT_SESSION_ID
 
-  return Boolean(
-    !state.hasHydratedActiveSession &&
-    ((hasExplicitSession && state.activeSessionId) ||
-      (storedSessionId && storedSessionId === state.activeSessionId)),
-  )
+  return Boolean(!state.hasHydratedActiveSession && state.activeSessionId)
 }
 
 function setActiveSessionId(sessionId: string) {
@@ -336,21 +330,19 @@ export async function hydrateActiveSession() {
   const state = getChatState()
   const storedSessionId = readStoredSessionId()
 
-  if (
-    !storedSessionId ||
-    state.hasHydratedActiveSession ||
-    storedSessionId !== state.activeSessionId
-  ) {
+  const sessionId = state.activeSessionId || storedSessionId
+
+  if (!sessionId || state.hasHydratedActiveSession) {
     if (!state.hasHydratedActiveSession) {
       updateChatStore({ hasHydratedActiveSession: true })
     }
     return
   }
 
-  hydratePromise = loadSessionMessages(storedSessionId)
+  hydratePromise = loadSessionMessages(sessionId)
     .then((historyMessages) => {
       const currentState = getChatState()
-      if (currentState.activeSessionId !== storedSessionId) {
+      if (currentState.activeSessionId !== sessionId) {
         return
       }
 
@@ -378,7 +370,7 @@ export async function hydrateActiveSession() {
       }
 
       const currentState = getChatState()
-      if (currentState.activeSessionId !== storedSessionId) {
+      if (currentState.activeSessionId !== sessionId) {
         return
       }
 
@@ -387,7 +379,9 @@ export async function hydrateActiveSession() {
         return
       }
 
-      clearStoredSessionId()
+      if (storedSessionId === sessionId) {
+        clearStoredSessionId()
+      }
       if (isMissingStoredSession) {
         setActiveSessionId(SINGLE_CHAT_SESSION_ID)
       }

@@ -5,6 +5,13 @@
 
 import type { VoiceMessageMetadata } from "./types.js";
 export type { VoiceMessageMetadata } from "./types.js";
+
+export interface ChatAttachment {
+  type: "image" | "audio" | "video" | "file";
+  url: string;
+  filename?: string;
+  content_type?: string;
+}
 import {
   migrateRuntimeConfig as migrateSchemaRuntimeConfig,
   validateRuntimeConfig as validateSchemaRuntimeConfig,
@@ -32,6 +39,7 @@ export interface ChatMessage {
   content: string;
   /** Image URLs or data URLs to be serialized as provider image content parts. */
   image_urls?: string[];
+  attachments?: ChatAttachment[];
   voice?: VoiceMessageMetadata;
   name?: string;
   tool_call_id?: string;

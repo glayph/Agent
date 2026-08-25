@@ -311,9 +311,11 @@ export async function handleBrowserExtract(
 
 export async function handleBrowserScreenshot(
   this: ToolHandlerContext,
-  _args: Record<string, unknown>,
+  args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.browser.screenshot();
+  const destination =
+    typeof args["path"] === "string" ? args["path"] : undefined;
+  return await this.browser.screenshot(destination);
 }
 
 export async function handleBrowserScroll(

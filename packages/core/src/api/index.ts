@@ -16,6 +16,7 @@ import {
   createWorkspaceSecretVault,
   settings,
   readMikiEnv,
+  type ChatAttachment,
   type VoiceMessageMetadata,
 } from "@miki/config";
 import {
@@ -64,6 +65,7 @@ import {
   detectArtifactContract as _detectArtifactContract,
   reconcileArtifactOutcome as _reconcileArtifactOutcome,
   verifyArtifactContract as _verifyArtifactContract,
+  repairProviderModelMetadata as _repairProviderModelMetadata,
   type ArtifactContract,
 } from "./artifact-contract.js";
 import { SqliteAuditLog } from "../audit-log.js";
@@ -186,6 +188,50 @@ function getProviderForModel(model: string): string {
   if (model.startsWith("anthropic/")) return "Anthropic";
   if (model.startsWith("openai/")) return "OpenAI";
   return "OpenRouter";
+}
+
+function artifactContentType(relativePath: string): string | undefined {
+  const extension = path.extname(relativePath).toLowerCase();
+  return (
+    {
+      ".html": "text/html",
+      ".htm": "text/html",
+      ".css": "text/css",
+      ".js": "text/javascript",
+      ".mjs": "text/javascript",
+      ".json": "application/json",
+      ".md": "text/markdown",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+      ".gif": "image/gif",
+    } as Record<string, string>
+  )[extension];
+}
+
+function buildArtifactAttachments(
+  contract: ArtifactContract,
+  verification: ReturnType<typeof _verifyArtifactContract>,
+): ChatAttachment[] {
+  if (!verification.ok) return [];
+  return contract.required.map((relativePath) => {
+    const targetPath = path.resolve(contract.root, relativePath);
+    const extension = path.extname(relativePath).toLowerCase();
+    const isImage = [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(
+      extension,
+    );
+    const endpoint = isImage ? "preview" : "download";
+    const query = new URLSearchParams({ path: targetPath });
+    return {
+      type: isImage ? "image" : "file",
+      url: `/api/files/${endpoint}?${query.toString()}`,
+      filename: path.basename(targetPath),
+      ...(artifactContentType(relativePath)
+        ? { content_type: artifactContentType(relativePath) }
+        : {}),
+    };
+  });
 }
 
 type AuthenticatedRequest = Request & { requestId?: string };
@@ -1692,6 +1738,33 @@ function _toolResultDescription(
  * These messages use kind="thought", which the main transcript intentionally
  * hides while the Inspector renders them as expandable categorized cards.
  */
+function _sendUserStatus(
+  ws: WebSocket,
+  sessionId: string,
+  runId: string,
+  statusId: string,
+  content: string,
+  modelName: string,
+): void {
+  const trimmed = content.trim();
+  if (!trimmed) return;
+  _sendmiki(ws, {
+    type: "message.create",
+    id: crypto.randomUUID(),
+    session_id: sessionId,
+    timestamp: Date.now(),
+    payload: {
+      message_id: statusId,
+      run_id: runId,
+      content: trimmed,
+      kind: "normal",
+      placeholder: true,
+      status_message: true,
+      model_name: modelName,
+    },
+  });
+}
+
 function _sendInspectorThought(
   ws: WebSocket,
   sessionId: string,
@@ -1948,16 +2021,40 @@ mikiWss.on("connection", (ws, req) => {
         const assistantMessageId = `assistant-${requestId}`;
         activeRunIds.set(sessionId, assistantMessageId);
         let fullResponse = "";
+        let resolvedRunModel = orchestrator.modelName;
         let artifactContract: ArtifactContract | null = null;
         let lastContextUsage: mikiContextUsage | null = null;
         let providerFailureDetected = false;
+        let finalAttachments: ChatAttachment[] = [];
         const toolFeedback = _getToolFeedbackConfig();
         const streaming = _getmikiStreamingConfig();
         let lastStreamSentAt = 0;
         let lastStreamSentLength = 0;
         let toolFeedbackCounter = 0;
+        let userProgressSent = false;
+        let progressTimer: ReturnType<typeof setTimeout> | null = null;
         const toolInputs = new Map<number, unknown>();
         const toolFeedbackMessageIds = new Map<number, string>();
+
+        _sendUserStatus(
+          ws,
+          sessionId,
+          assistantMessageId,
+          `${assistantMessageId}-status-accepted`,
+          "ঠিক আছে, কাজটি শুরু করছি।",
+          resolvedRunModel,
+        );
+        progressTimer = setTimeout(() => {
+          progressTimer = null;
+          _sendUserStatus(
+            ws,
+            sessionId,
+            assistantMessageId,
+            `${assistantMessageId}-status-working`,
+            "কাজ চলছে; প্রয়োজনীয় ধাপগুলো সম্পন্ন করছি।",
+            resolvedRunModel,
+          );
+        }, 10000);
 
         if (streaming.enabled) {
           _sendmiki(ws, { type: "typing.start", session_id: sessionId });
@@ -1971,7 +2068,7 @@ mikiWss.on("connection", (ws, req) => {
               run_id: assistantMessageId,
               content: "",
               placeholder: true,
-              model_name: orchestrator.modelName,
+              model_name: resolvedRunModel,
             },
           });
         }
@@ -2047,6 +2144,12 @@ mikiWss.on("connection", (ws, req) => {
             if (eventContextUsage) {
               lastContextUsage = eventContextUsage;
             }
+            if (
+              typeof event.model_name === "string" &&
+              event.model_name.trim()
+            ) {
+              resolvedRunModel = event.model_name.trim();
+            }
 
             if (event.type === "stream_chunk") {
               fullResponse +=
@@ -2074,7 +2177,7 @@ mikiWss.on("connection", (ws, req) => {
                     run_id: assistantMessageId,
                     content: fullResponse,
                     kind: "normal",
-                    model_name: orchestrator.modelName,
+                    model_name: resolvedRunModel,
                     context_usage: _mikiContextUsage(
                       fullResponse,
                       lastContextUsage,
@@ -2153,6 +2256,17 @@ mikiWss.on("connection", (ws, req) => {
               const invocationIndex = Number(event.invocation_index ?? 0);
               const toolInput = event.input;
               toolInputs.set(invocationIndex, toolInput);
+              if (!userProgressSent) {
+                userProgressSent = true;
+                _sendUserStatus(
+                  ws,
+                  sessionId,
+                  assistantMessageId,
+                  `${assistantMessageId}-status-progress-1`,
+                  "প্রথম ধাপ চলছে; কাজের অগ্রগতি যাচাই করছি।",
+                  resolvedRunModel,
+                );
+              }
               const nodeId = `${assistantMessageId}-node-${invocationIndex}`;
               _sendmiki(ws, {
                 type: "node.spawn",
@@ -2225,7 +2339,7 @@ mikiWss.on("connection", (ws, req) => {
                     kind: "tool_calls",
 
                     tool_calls: [toolCallPayload],
-                    model_name: orchestrator.modelName,
+                    model_name: resolvedRunModel,
                   },
                 });
               } else {
@@ -2393,7 +2507,41 @@ mikiWss.on("connection", (ws, req) => {
             fullResponse = "I couldn’t complete that request this time.";
           }
           if (artifactContract) {
+            const repairedMetadata = _repairProviderModelMetadata(
+              artifactContract,
+              resolvedRunModel,
+            );
+            if (repairedMetadata.length > 0) {
+              _sendInspectorThought(
+                ws,
+                sessionId,
+                assistantMessageId,
+                `Corrected Provider/Model metadata using the authoritative runtime identity in: ${repairedMetadata.join(", ")}.`,
+                "Verification",
+              );
+            }
             const verification = _verifyArtifactContract(artifactContract);
+            finalAttachments = buildArtifactAttachments(
+              artifactContract,
+              verification,
+            );
+            if (finalAttachments.length > 0) {
+              const persisted = orchestrator.updateSessionMessage(
+                sessionId,
+                assistantMessageId,
+                { attachments: finalAttachments },
+              );
+              if (!persisted) {
+                finalAttachments = [];
+                _sendInspectorThought(
+                  ws,
+                  sessionId,
+                  assistantMessageId,
+                  "Verified artifacts were found, but the final assistant message could not be updated with attachment metadata.",
+                  "Verification",
+                );
+              }
+            }
             _sendInspectorThought(
               ws,
               sessionId,
@@ -2431,8 +2579,11 @@ mikiWss.on("connection", (ws, req) => {
               run_id: assistantMessageId,
               content: fullResponse,
               kind: "normal",
-              model_name: orchestrator.modelName,
+              model_name: resolvedRunModel,
               context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
+              ...(finalAttachments.length > 0
+                ? { attachments: finalAttachments }
+                : {}),
             },
           });
           if (fullResponse.trim()) {
@@ -2443,6 +2594,10 @@ mikiWss.on("connection", (ws, req) => {
               "The final user-facing reply was prepared after the execution checks.",
               "Progress",
             );
+          }
+          if (progressTimer) {
+            clearTimeout(progressTimer);
+            progressTimer = null;
           }
           if (streaming.enabled) {
             _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
@@ -2463,6 +2618,14 @@ mikiWss.on("connection", (ws, req) => {
             `The run stopped before completion: ${safeError}`,
             "Verification",
           );
+          if (progressTimer) {
+            clearTimeout(progressTimer);
+            progressTimer = null;
+          }
+          const userFacingError = /timed out|timeout/i.test(safeError)
+            ? "কাজটি নির্ধারিত সময়ের মধ্যে শেষ হয়নি। আমি নিরাপদভাবে থামিয়েছি; চাইলে কাজটি ছোট ধাপে আবার দিতে পারেন।"
+            : fullResponse.trim() ||
+              "I couldn’t complete that request this time.";
           _sendmiki(ws, {
             type: "message.update",
             id: crypto.randomUUID(),
@@ -2471,11 +2634,9 @@ mikiWss.on("connection", (ws, req) => {
             payload: {
               message_id: assistantMessageId,
               run_id: assistantMessageId,
-              content:
-                fullResponse.trim() ||
-                "I couldn’t complete that request this time.",
+              content: userFacingError,
               kind: "normal",
-              model_name: orchestrator.modelName,
+              model_name: resolvedRunModel,
             },
           });
           if (streaming.enabled) {

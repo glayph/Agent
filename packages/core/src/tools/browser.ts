@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
+import { createServer, type Server } from "node:http";
 import crypto from "crypto";
 import type { BrowserContext, Locator, Page, Route } from "playwright";
 import { ProfileManager } from "./profile-manager.js";
@@ -95,6 +96,7 @@ export class BrowserTool {
   private page: Page | null = null;
   private headless: boolean;
   private screenshotDir: string;
+  private workspaceDir: string | null = null;
   private userAgent: string;
   private viewport: { width: number; height: number };
   private launchLock: Promise<void> | null = null;
@@ -104,6 +106,9 @@ export class BrowserTool {
   private profileDir: string = "";
   private _maxRetries: number = 3;
   private _chromePath: string | null = null;
+  private workspacePreviewServer: Server | null = null;
+  private workspacePreviewRoot: string | null = null;
+  private workspacePreviewStart: Promise<void> | null = null;
 
   constructor(
     headless: boolean = false,
@@ -360,10 +365,117 @@ export class BrowserTool {
     }
   }
 
+  private async _ensureWorkspacePreviewServer(): Promise<void> {
+    const root = this.workspaceDir;
+    if (!root) return;
+    if (this.workspacePreviewServer && this.workspacePreviewRoot === root)
+      return;
+    if (this.workspacePreviewServer) {
+      await new Promise<void>((resolve) =>
+        this.workspacePreviewServer?.close(() => resolve()),
+      );
+      this.workspacePreviewServer = null;
+      this.workspacePreviewRoot = null;
+    }
+    if (this.workspacePreviewStart) return this.workspacePreviewStart;
+
+    const start = new Promise<void>((resolve, reject) => {
+      const server = createServer((request, response) => {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          response.writeHead(405, { Allow: "GET, HEAD" });
+          response.end();
+          return;
+        }
+
+        let pathname: string;
+        try {
+          pathname = decodeURIComponent(
+            new URL(request.url || "/", "http://127.0.0.1").pathname,
+          );
+        } catch {
+          response.writeHead(400);
+          response.end("Bad request");
+          return;
+        }
+        const target = path.resolve(root, `.${pathname}`);
+        const relative = path.relative(root, target);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
+          response.writeHead(403);
+          response.end("Forbidden");
+          return;
+        }
+
+        let filePath = target;
+        try {
+          if (fs.statSync(filePath).isDirectory()) {
+            filePath = path.join(filePath, "index.html");
+          }
+          const stat = fs.statSync(filePath);
+          if (!stat.isFile()) throw new Error("Not a file");
+          const ext = path.extname(filePath).toLowerCase();
+          const contentType: Record<string, string> = {
+            ".html": "text/html; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+          };
+          response.writeHead(200, {
+            "Content-Type": contentType[ext] || "application/octet-stream",
+            "Content-Length": stat.size,
+            "Cache-Control": "no-store",
+          });
+          if (request.method === "HEAD") {
+            response.end();
+          } else {
+            fs.createReadStream(filePath).pipe(response);
+          }
+        } catch {
+          response.writeHead(404);
+          response.end("Not found");
+        }
+      });
+
+      server.once("error", (error: NodeJS.ErrnoException) => {
+        // Another Miki process may already own the fixed preview port. In that
+        // case navigation can still use the existing local server; do not fail
+        // the artifact workflow solely because the port is already occupied.
+        if (error.code === "EADDRINUSE") {
+          resolve();
+        } else {
+          reject(error);
+        }
+      });
+      server.listen(8765, "127.0.0.1", () => {
+        this.workspacePreviewServer = server;
+        this.workspacePreviewRoot = root;
+        resolve();
+      });
+    });
+    this.workspacePreviewStart = start;
+    try {
+      await start;
+    } finally {
+      this.workspacePreviewStart = null;
+    }
+  }
+
   public async navigate(url: string, retries?: number): Promise<string> {
     await this.ensureLaunched();
 
     url = normalizeBrowserUrl(url);
+    const parsedUrl = new URL(url);
+    if (
+      (parsedUrl.hostname === "127.0.0.1" ||
+        parsedUrl.hostname === "localhost") &&
+      parsedUrl.port === "8765"
+    ) {
+      await this._ensureWorkspacePreviewServer();
+    }
 
     const maxAttempts = retries ?? this._maxRetries;
     let lastError: string | null = null;
@@ -666,14 +778,45 @@ export class BrowserTool {
     }
   }
 
-  public async screenshot(): Promise<string> {
+  public setWorkspaceDir(workspaceDir: string): void {
+    const normalized = workspaceDir.trim();
+    this.workspaceDir = normalized ? path.resolve(normalized) : null;
+  }
+
+  public async screenshot(destinationPath?: string): Promise<string> {
     await this.ensureLaunched();
     try {
-      const filename =
-        "screenshot_" +
-        crypto.randomUUID().replace(/-/g, "").slice(0, 8) +
-        ".png";
-      const filepath = path.join(this.screenshotDir, filename);
+      const requested = destinationPath?.trim();
+      let filepath: string;
+      if (requested) {
+        if (!this.workspaceDir) {
+          throw new Error("Screenshot workspace is not configured");
+        }
+        const candidate = path.resolve(
+          this.workspaceDir,
+          path.isAbsolute(requested)
+            ? path.relative(this.workspaceDir, requested)
+            : requested,
+        );
+        const relative = path.relative(this.workspaceDir, candidate);
+        if (
+          relative.startsWith("..") ||
+          path.isAbsolute(relative) ||
+          !/\.png$/i.test(candidate)
+        ) {
+          throw new Error(
+            "Screenshot path must be a .png file inside the workspace",
+          );
+        }
+        filepath = candidate;
+        fs.mkdirSync(path.dirname(filepath), { recursive: true });
+      } else {
+        const filename =
+          "screenshot_" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 8) +
+          ".png";
+        filepath = path.join(this.screenshotDir, filename);
+      }
       await this.activePage.screenshot({ path: filepath, fullPage: false });
       return "Screenshot saved to: " + filepath;
     } catch (e: unknown) {
@@ -700,6 +843,13 @@ export class BrowserTool {
   }
 
   public async close(): Promise<string> {
+    if (this.workspacePreviewServer) {
+      await new Promise<void>((resolve) =>
+        this.workspacePreviewServer?.close(() => resolve()),
+      );
+      this.workspacePreviewServer = null;
+      this.workspacePreviewRoot = null;
+    }
     if (this.browser) {
       try {
         await this.browser.close();

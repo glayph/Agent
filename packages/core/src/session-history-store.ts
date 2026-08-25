@@ -1,7 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import Database from "better-sqlite3";
-import type { ChatMessage, VoiceMessageMetadata } from "@miki/config";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  VoiceMessageMetadata,
+} from "@miki/config";
 
 export interface SessionMetadata {
   created: string;
@@ -31,6 +35,7 @@ interface MessageRow {
   role: string;
   content: string;
   image_urls: string | null;
+  attachments_json: string | null;
   voice_json: string | null;
 }
 
@@ -69,6 +74,56 @@ function parseVoiceMetadata(
   } catch {
     return undefined;
   }
+}
+
+function parseAttachments(value: string | null): ChatAttachment[] | undefined {
+  if (!value) return undefined;
+  try {
+    const raw = JSON.parse(value);
+    if (!Array.isArray(raw)) return undefined;
+    const attachments = raw.filter((item): item is ChatAttachment => {
+      if (!item || typeof item !== "object") return false;
+      const candidate = item as Record<string, unknown>;
+      return (
+        (candidate.type === "image" ||
+          candidate.type === "audio" ||
+          candidate.type === "video" ||
+          candidate.type === "file") &&
+        typeof candidate.url === "string" &&
+        candidate.url.trim().length > 0 &&
+        candidate.url.length <= 4096
+      );
+    });
+    return attachments.length > 0 ? attachments.slice(0, 16) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeAttachments(
+  value: ChatAttachment[] | undefined,
+): string | null {
+  if (!Array.isArray(value)) return null;
+  const attachments = value
+    .filter(
+      (item) =>
+        (item.type === "image" ||
+          item.type === "audio" ||
+          item.type === "video" ||
+          item.type === "file") &&
+        typeof item.url === "string" &&
+        item.url.trim().length > 0,
+    )
+    .slice(0, 16)
+    .map((item) => ({
+      type: item.type,
+      url: item.url.trim().slice(0, 4096),
+      ...(item.filename ? { filename: item.filename.slice(0, 255) } : {}),
+      ...(item.content_type
+        ? { content_type: item.content_type.slice(0, 160) }
+        : {}),
+    }));
+  return attachments.length > 0 ? JSON.stringify(attachments) : null;
 }
 
 function serializeVoiceMetadata(
@@ -118,6 +173,7 @@ export class SqliteSessionHistoryStore {
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         image_urls TEXT,
+        attachments_json TEXT,
         voice_json TEXT,
         PRIMARY KEY (session_id, position),
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -128,6 +184,11 @@ export class SqliteSessionHistoryStore {
     const columns = this.db
       .prepare("PRAGMA table_info(session_messages)")
       .all() as Array<{ name?: string }>;
+    if (!columns.some((column) => column.name === "attachments_json")) {
+      this.db.exec(
+        "ALTER TABLE session_messages ADD COLUMN attachments_json TEXT",
+      );
+    }
     if (!columns.some((column) => column.name === "voice_json")) {
       this.db.exec("ALTER TABLE session_messages ADD COLUMN voice_json TEXT");
     }
@@ -141,7 +202,7 @@ export class SqliteSessionHistoryStore {
       .all() as SessionRow[];
     const messages = this.db
       .prepare(
-        "SELECT session_id, position, id, created_at, role, content, image_urls, voice_json FROM session_messages ORDER BY session_id, position ASC",
+        "SELECT session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json FROM session_messages ORDER BY session_id, position ASC",
       )
       .all() as MessageRow[];
     const bySession = new Map<string, ChatMessage[]>();
@@ -160,6 +221,7 @@ export class SqliteSessionHistoryStore {
           imageUrls = undefined;
         }
       }
+      const attachments = parseAttachments(row.attachments_json);
       const voice = parseVoiceMetadata(row.voice_json);
       const message: ChatMessage = {
         id: row.id,
@@ -167,6 +229,7 @@ export class SqliteSessionHistoryStore {
         role: row.role as ChatMessage["role"],
         content: row.content,
         ...(imageUrls && imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
+        ...(attachments ? { attachments } : {}),
         ...(voice ? { voice } : {}),
       };
       const history = bySession.get(row.session_id) || [];
@@ -216,8 +279,8 @@ export class SqliteSessionHistoryStore {
         .prepare("DELETE FROM session_messages WHERE session_id = ?")
         .run(sessionId);
       const insert = this.db.prepare(
-        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, voice_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       messages.forEach((message, position) => {
         const imageUrls = Array.isArray(message.image_urls)
@@ -233,6 +296,7 @@ export class SqliteSessionHistoryStore {
           message.role,
           String(message.content || ""),
           imageUrls.length > 0 ? JSON.stringify(imageUrls) : null,
+          serializeAttachments(message.attachments),
           serializeVoiceMetadata(message.voice),
         );
       });

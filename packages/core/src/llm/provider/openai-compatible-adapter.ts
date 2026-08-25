@@ -15,13 +15,17 @@ import {
   LLMEntitlementError,
   type LLMProviderDiagnostic,
 } from "./errors.js";
+import type { MikiProviderMessage } from "./sdk/index.js";
 import type {
   LLMProviderAdapter,
   ProviderCompletionRequest,
   ProviderConnectionResult,
   ProviderModel,
 } from "./contracts.js";
-import { normalizeGeminiExtra } from "./gemini-compat.js";
+import {
+  normalizeGeminiExtra,
+  normalizeGeminiMessages,
+} from "./gemini-compat.js";
 
 const clientCache = new Map<string, OpenAI>();
 
@@ -242,7 +246,13 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
 
   async complete(request: ProviderCompletionRequest): Promise<LLMResponse> {
     const { provider, model, apiKey, extra } = request;
-    const messages = serializeMultimodalMessages(request.messages);
+    const serializedMessages = serializeMultimodalMessages(request.messages);
+    const messages =
+      provider.id === "gemini"
+        ? normalizeGeminiMessages(
+            serializedMessages as unknown as MikiProviderMessage[],
+          )
+        : serializedMessages;
     if (!apiKey && !provider.emptyApiKeyAllowed) {
       throw new LLMMissingCredentialError(
         `No API key is configured for ${provider.displayName}.`,
@@ -292,6 +302,32 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
         lastError = error;
         const message = errorMessage(error).toLowerCase();
         const status = statusCode(error);
+        if (provider.id === "gemini" && status === 400) {
+          console.warn(
+            "[GeminiDiagnostic] HTTP 400 request shape",
+            JSON.stringify({
+              attempt,
+              model,
+              requestKeys: Object.keys(requestBody).sort(),
+              messageRoles: messages.map((item) => item.role),
+              assistantToolCallCounts: messages.map((item) =>
+                Array.isArray(item.tool_calls) ? item.tool_calls.length : 0,
+              ),
+              toolMessageCount: messages.filter((item) => item.role === "tool")
+                .length,
+              toolNames: Array.isArray(requestBody.tools)
+                ? requestBody.tools
+                    .map((tool) =>
+                      typeof tool === "object" && tool !== null
+                        ? (tool as { function?: { name?: unknown } }).function
+                            ?.name
+                        : undefined,
+                    )
+                    .filter((name): name is string => typeof name === "string")
+                : [],
+            }),
+          );
+        }
         if (
           provider.id === "gemini" &&
           status === 400 &&

@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "../../mcp/contracts/tools.js";
+import type { MikiProviderMessage } from "./sdk/index.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -66,6 +67,56 @@ export function normalizeGeminiSchema(value: unknown): JsonObject {
   if (result.type === "object" && result.properties === undefined)
     result.properties = {};
   return result;
+}
+
+export function normalizeGeminiMessages(
+  messages: MikiProviderMessage[],
+): MikiProviderMessage[] {
+  return messages.flatMap((message) => {
+    const candidate = message as unknown as Record<string, unknown>;
+    const role =
+      candidate.role === "system" ||
+      candidate.role === "user" ||
+      candidate.role === "assistant"
+        ? candidate.role
+        : candidate.role === "tool"
+          ? "user"
+          : "user";
+
+    if (candidate.role === "tool") {
+      const toolName =
+        typeof candidate.name === "string" && candidate.name.trim()
+          ? ` (${candidate.name.trim()})`
+          : "";
+      return [
+        {
+          role: "user",
+          content: `Tool result${toolName}: ${String(candidate.content ?? "")}`,
+        } as MikiProviderMessage,
+      ];
+    }
+
+    // Gemini's OpenAI-compatible endpoint can reject a continuation that
+    // contains OpenAI-style assistant.tool_calls followed by role=tool. Keep
+    // the execution trace as ordinary assistant text; the next request still
+    // includes the available tools, so Gemini can select the next operation.
+    if (role === "assistant" && Array.isArray(candidate.tool_calls)) {
+      const content = String(candidate.content ?? "").trim();
+      return [
+        {
+          role: "assistant",
+          content: content || "The requested tool operation was executed.",
+        } as MikiProviderMessage,
+      ];
+    }
+
+    return [
+      {
+        role,
+        content: candidate.content ?? "",
+      } as MikiProviderMessage,
+    ];
+  });
 }
 
 export function normalizeGeminiTools(tools: unknown): ToolDefinition[] {

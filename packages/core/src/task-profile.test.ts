@@ -24,6 +24,17 @@ describe("agent task profile", () => {
     );
   });
 
+  it("classifies artifact and browser workflows as complex", () => {
+    const profile = classifyAgentTask(
+      "Create a self-contained index.html landing page, open it in the browser, capture a screenshot, and attach both files after verifying them",
+    );
+
+    expect(profile.complexity).toBe("complex");
+    expect(profile.verificationDepth).toBe("integration");
+    expect(profile.signals).toContain("artifact_workflow");
+    expect(profile.verification).toContain("required");
+  });
+
   it("classifies plugin or dashboard integration work as medium", () => {
     const profile = classifyAgentTask(
       "Add a dashboard and backend contract update for plugin runtime smoke",

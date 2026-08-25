@@ -1,6 +1,7 @@
 import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { getSessionHistory } from "@/api/sessions"
 import { getChatState, updateChatStore } from "@/store/chat"
 import { gatewayAtom } from "@/store/gateway"
 
@@ -8,10 +9,12 @@ import {
   connectChat,
   disconnectChat,
   editChatMessage,
+  hydrateActiveSession,
   isPlatformConnectionIntent,
   sendChatMessage,
   setWebSocketFactory,
 } from "./controller"
+import { SINGLE_CHAT_SESSION_ID, writeStoredSessionId } from "./state"
 
 vi.mock("sonner", () => ({
   toast: {
@@ -24,6 +27,7 @@ vi.mock("@/api/sessions", async () => {
     await vi.importActual<typeof import("@/api/sessions")>("@/api/sessions")
   return {
     ...actual,
+    getSessionHistory: vi.fn(),
     updateSessionMessage: vi.fn().mockResolvedValue(undefined),
   }
 })
@@ -56,6 +60,8 @@ class MockWebSocket {
   }
 }
 
+const mockedGetSessionHistory = vi.mocked(getSessionHistory)
+
 function resetChatState() {
   updateChatStore({
     messages: [
@@ -81,6 +87,108 @@ function resetChatState() {
     contextUsage: undefined,
   })
 }
+
+describe("chat controller active-session hydration", () => {
+  beforeEach(() => {
+    mockedGetSessionHistory.mockReset()
+    writeStoredSessionId("session-1")
+    updateChatStore({
+      messages: [],
+      activeSessionId: "session-1",
+      hasHydratedActiveSession: false,
+    })
+  })
+
+  afterEach(() => {
+    writeStoredSessionId("")
+  })
+
+  it("hydrates the default session when localStorage has no session ID", async () => {
+    writeStoredSessionId("")
+    updateChatStore({
+      messages: [],
+      activeSessionId: SINGLE_CHAT_SESSION_ID,
+      hasHydratedActiveSession: false,
+    })
+    mockedGetSessionHistory.mockResolvedValue({
+      id: SINGLE_CHAT_SESSION_ID,
+      messages: [
+        {
+          id: "default-history-1",
+          role: "user",
+          content: "Default persisted question",
+          created_at: "2026-08-25T00:00:00.000Z",
+        },
+      ],
+      summary: "Default persisted question",
+      created: "2026-08-25T00:00:00.000Z",
+      updated: "2026-08-25T00:00:00.000Z",
+    })
+
+    await hydrateActiveSession()
+
+    expect(mockedGetSessionHistory).toHaveBeenCalledWith(SINGLE_CHAT_SESSION_ID)
+    expect(getChatState().messages[0]?.content).toBe(
+      "Default persisted question",
+    )
+    expect(getChatState().hasHydratedActiveSession).toBe(true)
+  })
+
+  it("coalesces concurrent hydration calls into one history request", async () => {
+    let resolveHistory: ((value: Awaited<ReturnType<typeof getSessionHistory>>) => void) | undefined
+    mockedGetSessionHistory.mockReturnValue(
+      new Promise((resolve) => {
+        resolveHistory = resolve
+      }),
+    )
+
+    const firstHydration = hydrateActiveSession()
+    const secondHydration = hydrateActiveSession()
+    expect(mockedGetSessionHistory).toHaveBeenCalledTimes(1)
+
+    resolveHistory?.({
+      id: "session-1",
+      messages: [],
+      summary: "",
+      created: "2026-08-25T00:00:00.000Z",
+      updated: "2026-08-25T00:00:00.000Z",
+    })
+    await Promise.all([firstHydration, secondHydration])
+  })
+
+  it("hydrates a stored session even when it is already the active session", async () => {
+    mockedGetSessionHistory.mockResolvedValue({
+      id: "session-1",
+      messages: [
+        {
+          id: "history-user-1",
+          role: "user",
+          content: "Persisted question",
+          created_at: "2026-08-25T00:00:00.000Z",
+        },
+        {
+          id: "history-assistant-1",
+          role: "assistant",
+          content: "Persisted answer",
+          created_at: "2026-08-25T00:00:01.000Z",
+          kind: "normal",
+        },
+      ],
+      summary: "Persisted question",
+      created: "2026-08-25T00:00:00.000Z",
+      updated: "2026-08-25T00:00:01.000Z",
+    })
+
+    await hydrateActiveSession()
+
+    expect(mockedGetSessionHistory).toHaveBeenCalledWith("session-1")
+    expect(getChatState().messages.map((message) => message.content)).toEqual([
+      "Persisted question",
+      "Persisted answer",
+    ])
+    expect(getChatState().hasHydratedActiveSession).toBe(true)
+  })
+})
 
 describe("chat controller message editing", () => {
   beforeEach(() => {

@@ -17,6 +17,47 @@ export interface ArtifactVerification {
 export type ArtifactRunStatus =
   "completed" | "completed_with_warning" | "failed";
 
+function providerLabelForRuntimeModel(model: string): string {
+  if (/^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i.test(model)) {
+    return "llama.cpp";
+  }
+  if (/^(gemini|google)(?:\/|-)/i.test(model)) return "Gemini";
+  return "unknown";
+}
+
+/**
+ * Repairs only an explicit Markdown `Provider/Model:` metadata field.
+ * User prose and arbitrary content are intentionally left untouched.
+ */
+export function repairProviderModelMetadata(
+  contract: ArtifactContract,
+  runtimeModel: string,
+): string[] {
+  const provider = providerLabelForRuntimeModel(runtimeModel);
+  if (provider === "unknown" || !runtimeModel.trim()) return [];
+  const repaired: string[] = [];
+  const metadataLine =
+    /^(\s*(?:[-*]\s*)?(?:\*\*)?Provider\s*\/\s*Model(?:\*\*)?\s*:\s*).+$/gim;
+  for (const relative of contract.required) {
+    if (!/\.(?:md|markdown|mdx|txt)$/i.test(relative)) continue;
+    const target = path.join(contract.root, relative);
+    if (!isWithinRoot(contract.root, target) || !fs.existsSync(target))
+      continue;
+    try {
+      const source = fs.readFileSync(target, "utf8");
+      const expected = `${provider} — ${runtimeModel}`;
+      const updated = source.replace(metadataLine, `$1${expected}`);
+      if (updated !== source) {
+        fs.writeFileSync(target, updated, "utf8");
+        repaired.push(relative);
+      }
+    } catch {
+      // Verification remains authoritative if an artifact cannot be repaired.
+    }
+  }
+  return repaired;
+}
+
 export function reconcileArtifactOutcome(
   verification: ArtifactVerification,
   providerFailureDetected: boolean,
@@ -74,10 +115,19 @@ export function detectArtifactContract(
     normalized && /\.(html|css|js|tsx?|jsx?)$/i.test(normalized)
       ? path.dirname(normalized)
       : normalized;
+  const relativeHtmlPath = content
+    .match(/(?:^|[\s`'\"])((?:[A-Za-z0-9._-]+\/)+index\.html)\b/i)?.[1]
+    ?.replace(/\s+/g, "");
+  const relativeRoot =
+    workspaceRoot && relativeHtmlPath
+      ? path.resolve(workspaceRoot, path.dirname(relativeHtmlPath))
+      : undefined;
   const root = workspaceRoot
-    ? candidateRoot && isWithinRoot(workspaceRoot, candidateRoot)
-      ? path.resolve(candidateRoot)
-      : path.resolve(workspaceRoot)
+    ? relativeRoot && isWithinRoot(workspaceRoot, relativeRoot)
+      ? relativeRoot
+      : candidateRoot && isWithinRoot(workspaceRoot, candidateRoot)
+        ? path.resolve(candidateRoot)
+        : path.resolve(workspaceRoot)
     : candidateRoot
       ? path.resolve(candidateRoot)
       : undefined;
@@ -86,6 +136,13 @@ export function detectArtifactContract(
   const required = /styles?\.css|css\s+file|স্টাইল\s*শিট/i.test(content)
     ? ["index.html", "styles.css"]
     : ["index.html"];
+  if (
+    /screenshot|screen\s*capture|capture\s+the\s+page|স্ক্রিনশট|স্ক্রিন\s*ক্যাপচার/i.test(
+      content,
+    )
+  ) {
+    required.push("hello-world-landing.png");
+  }
   return { root, required, label: "landing page" };
 }
 

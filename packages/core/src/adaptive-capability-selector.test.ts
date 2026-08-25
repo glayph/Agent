@@ -43,6 +43,39 @@ describe("adaptive capability selector", () => {
     expect(selection.rationale).toContain("specialist_tools_prioritized");
   });
 
+  it("retains file and browser tools for artifact workflows", () => {
+    const message =
+      "Create index.html, open it in the browser, capture a screenshot, and attach the files";
+    const profile = classifyAgentTask(message);
+    const decision = routeAgentTask(message, {}, profile);
+    const allTools = [
+      tool("file_write", "Write a local file"),
+      tool("file_read", "Read a local file"),
+      tool("browser_navigate", "Open a browser page"),
+      tool("browser_extract", "Extract browser content"),
+      tool("browser_screenshot", "Capture a browser screenshot"),
+      tool("memory_search", "Search memory"),
+    ];
+
+    const selection = selectAdaptiveCapabilities(
+      message,
+      allTools,
+      decision,
+      profile,
+    );
+
+    expect(selection.selectedToolNames).toEqual(
+      expect.arrayContaining([
+        "file_write",
+        "file_read",
+        "browser_navigate",
+        "browser_extract",
+        "browser_screenshot",
+      ]),
+    );
+    expect(selection.rationale.join(" ")).toContain("required_tools");
+  });
+
   it("keeps an available read-only fallback when the request is ambiguous", () => {
     const message = "Help me with this";
     const profile = classifyAgentTask(message);

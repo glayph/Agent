@@ -200,6 +200,7 @@ export class ToolRegistry {
       undefined,
       browserConfig,
     );
+    this.browser.setWorkspaceDir(this.workspaceDir);
     this.computer = new ComputerAgent();
     this.crawler = new CrawlerAgent(this.browser);
     this.initRuntimeFetcher();
@@ -249,6 +250,7 @@ export class ToolRegistry {
     this.workspaceDir = path.resolve(trimmed);
     this.executor.setWorkspaceRoot(this.workspaceDir);
     this.fileOps.setWorkspaceRoot(this.workspaceDir);
+    this.browser.setWorkspaceDir(this.workspaceDir);
   }
 
   setPlatformConnectionStore(store: SqlitePlatformConnectionStore): void {

@@ -16,6 +16,13 @@ export interface VoiceMessageMetadata {
   model?: string;
 }
 
+export interface ChatAttachment {
+  type: "image" | "audio" | "video" | "file";
+  url: string;
+  filename?: string;
+  content_type?: string;
+}
+
 export interface ChatMessage {
   /** Stable identifier used by persisted session history mutations. */
   id?: string;
@@ -24,6 +31,7 @@ export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   image_urls?: string[];
+  attachments?: ChatAttachment[];
   voice?: VoiceMessageMetadata;
   tool_calls?: ToolCall[];
   tool_call_id?: string;

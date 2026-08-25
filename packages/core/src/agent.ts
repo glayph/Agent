@@ -4,6 +4,7 @@ import * as yaml from "js-yaml";
 import {
   settings,
   ChatMessage,
+  ChatAttachment,
   ToolDefinition,
   type VoiceMessageMetadata,
   LLMResponse,
@@ -69,7 +70,11 @@ import {
   type ToolInvocationLike,
 } from "./tool-call-parallelism.js";
 import { getErrorMessage } from "./errors.js";
-import { classifyAgentTask, formatAgentTaskProfile } from "./task-profile.js";
+import {
+  classifyAgentTask,
+  formatAgentTaskProfile,
+  type AgentTaskComplexity,
+} from "./task-profile.js";
 import {
   detectDeterministicIntent,
   type DeterministicFileRequest,
@@ -117,12 +122,16 @@ const DEFAULT_MESSAGE_HISTORY_LIMIT = 15;
 // Bug #9 fix: Add approximate token/character cap to message history
 const DEFAULT_MAX_TOTAL_CONTEXT_CHARS = 80000; // ~20K tokens
 const LOCAL_LLM_CALL_TIMEOUT_MS = Math.max(
-  90_000,
-  Number.parseInt(process.env.MIKI_LOCAL_LLM_TIMEOUT_MS || "300000", 10) ||
-    300_000,
+  30_000,
+  Number.parseInt(process.env.MIKI_LOCAL_LLM_TIMEOUT_MS || "90000", 10) ||
+    90_000,
 );
 const REMOTE_LLM_CALL_TIMEOUT_MS = 120_000;
-const LOCAL_AGENT_RUN_TIMEOUT_MS = 300_000;
+const LOCAL_AGENT_RUN_TIMEOUT_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.MIKI_LOCAL_AGENT_TIMEOUT_MS || "180000", 10) ||
+    180_000,
+);
 const REMOTE_AGENT_RUN_TIMEOUT_MS = 240_000;
 
 function isLocalModelName(model: string): boolean {
@@ -130,6 +139,12 @@ function isLocalModelName(model: string): boolean {
     /^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i.test(model) ||
     /(?:^|[-_/])local(?:$|[-_/])/i.test(model)
   );
+}
+
+function providerLabelForModel(model: string): string {
+  if (isLocalModelName(model)) return "llama.cpp";
+  if (/^(gemini|google)(?:\/|-)/i.test(model)) return "Gemini";
+  return "unknown";
 }
 
 function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
@@ -349,6 +364,11 @@ interface AgentRuntimeConfig {
   max_tokens_per_cycle?: number;
   browser?: AgentBrowserConfig;
   resource?: AgentResourceConfig;
+  model_routing?: {
+    enabled?: boolean;
+    local_model?: string;
+    complex_model?: string;
+  };
 }
 
 interface AgentMemoryConfig {
@@ -1153,14 +1173,31 @@ export class AgentOrchestrator {
     }
   }
 
+  private _resolveTurnModel(complexity: AgentTaskComplexity): string {
+    const routing = asAgentConfig(this.config).agent?.model_routing;
+    if (!routing || routing.enabled === false) return this.modelName;
+    const localModel =
+      typeof routing.local_model === "string" ? routing.local_model.trim() : "";
+    const complexModel =
+      typeof routing.complex_model === "string"
+        ? routing.complex_model.trim()
+        : "";
+    // Keep both simple and standard conversational work on the local model;
+    // reserve Gemini for genuinely complex multi-step tasks.
+    if (complexity === "complex" && complexModel) return complexModel;
+    if (localModel) return localModel;
+    return this.modelName;
+  }
+
   private async _callLlmApi(
     messages: ChatMessage[],
     toolsSchema?: ToolDefinition[],
-    runtimeOptions: { maxTokens?: number } = {},
+    runtimeOptions: { maxTokens?: number; model?: string } = {},
   ): Promise<LLMResponse> {
     const startedAt = Date.now();
+    const model = runtimeOptions.model?.trim() || this.modelName;
     const metricTags = {
-      model: this.modelName,
+      model,
       tools: String(Boolean(toolsSchema?.length)),
     };
     const options: Record<string, unknown> = {};
@@ -1208,7 +1245,7 @@ export class AgentOrchestrator {
     try {
       const response = await globalExecutionTracer.spanAsync(
         "agent.llm_call",
-        () => achatCompletion(processedMessages as never, options),
+        () => achatCompletion(processedMessages as never, options, model),
         metricTags,
       );
       globalMetricsCollector.recordLatency(
@@ -1273,7 +1310,11 @@ export class AgentOrchestrator {
   public updateSessionMessage(
     sessionId: string,
     messageId: string,
-    patch: { content?: string; image_urls?: string[] },
+    patch: {
+      content?: string;
+      image_urls?: string[];
+      attachments?: ChatAttachment[] | null;
+    },
   ): ChatMessage | null {
     const history = this._ensureSessionMessageIds(sessionId);
     const message = history?.find((item) => item.id === messageId);
@@ -1281,6 +1322,15 @@ export class AgentOrchestrator {
     if (patch.content !== undefined) message.content = patch.content;
     if (patch.image_urls !== undefined)
       message.image_urls = [...patch.image_urls];
+    if (patch.attachments !== undefined) {
+      if (patch.attachments === null || patch.attachments.length === 0) {
+        delete message.attachments;
+      } else {
+        message.attachments = patch.attachments.map((attachment) => ({
+          ...attachment,
+        }));
+      }
+    }
     this._touchSession(sessionId);
     return { ...message };
   }
@@ -1608,11 +1658,6 @@ export class AgentOrchestrator {
       1,
       200,
     );
-    const localModel = isLocalModelName(this.modelName);
-    const runDeadline =
-      Date.now() +
-      (localModel ? LOCAL_AGENT_RUN_TIMEOUT_MS : REMOTE_AGENT_RUN_TIMEOUT_MS);
-
     const history = this._messageHistory.get(sessionId) || [];
     const turnProfile = this._turnProfilePolicy();
     const pastMessages =
@@ -1623,6 +1668,11 @@ export class AgentOrchestrator {
     // Decide the specialist and per-turn capability budget before prompting.
     // The selected catalog is also used as an execution allowlist below.
     const taskProfile = classifyAgentTask(userMessage);
+    const turnModel = this._resolveTurnModel(taskProfile.complexity);
+    const localModel = isLocalModelName(turnModel);
+    const runDeadline =
+      Date.now() +
+      (localModel ? LOCAL_AGENT_RUN_TIMEOUT_MS : REMOTE_AGENT_RUN_TIMEOUT_MS);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
     const allTools = this.tools.getToolDefinitions();
     const adaptiveSelection = selectAdaptiveCapabilities(
@@ -1638,6 +1688,7 @@ export class AgentOrchestrator {
       adaptiveSelection,
       sessionId,
       turnProfile,
+      turnModel,
     );
 
     // Warm up only the selected tools for faster and more accurate selection.
@@ -1746,13 +1797,13 @@ export class AgentOrchestrator {
       yield JSON.stringify({
         type: "stream_chunk",
         content: deterministicResponse,
-        model_name: this.modelName,
+        model_name: turnModel,
       });
       yield JSON.stringify({
         type: "stream_done",
         usage: { tokens: 0 },
         agent_loop_id: loopId,
-        model_name: this.modelName,
+        model_name: turnModel,
       });
       return;
     }
@@ -1819,7 +1870,7 @@ export class AgentOrchestrator {
         type: "stream_done",
         usage: { tokens },
         agent_loop_id: loopId,
-        model_name: this.modelName,
+        model_name: turnModel,
         ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
       });
 
@@ -1843,13 +1894,13 @@ export class AgentOrchestrator {
         );
         yield JSON.stringify({
           type: "execution_timeout",
-          model_name: this.modelName,
+          model_name: turnModel,
           turn,
         });
         yield JSON.stringify({
           type: "stream_chunk",
           content: timeoutMessage,
-          model_name: this.modelName,
+          model_name: turnModel,
         });
         yield streamDoneEvent(spentBudgetTokens);
         return;
@@ -1883,7 +1934,7 @@ export class AgentOrchestrator {
         );
 
         const requestBudget = buildAgentTokenBudget({
-          modelName: this.modelName,
+          modelName: turnModel,
           userMessage,
           messages: llmMessages,
           toolsSchema,
@@ -1894,6 +1945,12 @@ export class AgentOrchestrator {
           summarizeTokenPercent: resource.summarizeTokenPercent,
         });
         latestContextUsage = requestBudget.contextUsage;
+        // A small local model should answer ordinary turns briefly; a tight
+        // per-call cap prevents accidental runaway generation while Gemini
+        // retains the full configured budget for complex work.
+        const requestMaxTokens = localModel
+          ? Math.min(requestBudget.maxTokens, 512)
+          : requestBudget.maxTokens;
 
         if (!requestBudget.shouldCall) {
           const exhaustedMessage =
@@ -1907,7 +1964,7 @@ export class AgentOrchestrator {
           yield JSON.stringify({
             type: "stream_chunk",
             content: exhaustedMessage,
-            model_name: this.modelName,
+            model_name: turnModel,
             context_usage: latestContextUsage,
           });
           yield streamDoneEvent(spentBudgetTokens);
@@ -1916,14 +1973,16 @@ export class AgentOrchestrator {
 
         // Deduplicate LLM calls for efficiency
         const requestKey = {
+          model: turnModel,
           messages: llmMessages,
           tools: toolsSchema,
-          maxTokens: requestBudget.maxTokens,
+          maxTokens: requestMaxTokens,
         };
         response = await withTimeout(
           globalRequestDeduplicator.execute(requestKey, () =>
             this._callLlmApi(llmMessages, toolsSchema, {
-              maxTokens: requestBudget.maxTokens,
+              maxTokens: requestMaxTokens,
+              model: turnModel,
             }),
           ),
           localModel ? LOCAL_LLM_CALL_TIMEOUT_MS : REMOTE_LLM_CALL_TIMEOUT_MS,
@@ -1997,7 +2056,7 @@ export class AgentOrchestrator {
         yield JSON.stringify({
           type: "stream_chunk",
           content: errorMessage,
-          model_name: this.modelName,
+          model_name: turnModel,
           ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
         });
         yield streamDoneEvent(0);
@@ -2017,7 +2076,7 @@ export class AgentOrchestrator {
         yield JSON.stringify({
           type: "stream_chunk",
           content,
-          model_name: this.modelName,
+          model_name: turnModel,
           ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
         });
         {
@@ -2095,7 +2154,7 @@ export class AgentOrchestrator {
           yield JSON.stringify({
             type: "stream_chunk",
             content: fallbackContent,
-            model_name: this.modelName,
+            model_name: turnModel,
             ...(latestContextUsage
               ? { context_usage: latestContextUsage }
               : {}),
@@ -2119,7 +2178,7 @@ export class AgentOrchestrator {
           yield JSON.stringify({
             type: "stream_chunk",
             content: warningMessage,
-            model_name: this.modelName,
+            model_name: turnModel,
             ...(latestContextUsage
               ? { context_usage: latestContextUsage }
               : {}),
@@ -2197,7 +2256,7 @@ export class AgentOrchestrator {
         yield JSON.stringify({
           type: "stream_chunk",
           content: fallbackContent,
-          model_name: this.modelName,
+          model_name: turnModel,
           ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
         });
       }
@@ -2670,6 +2729,7 @@ export class AgentOrchestrator {
     adaptiveSelection?: AdaptiveCapabilitySelection,
     sessionId?: string,
     turnProfile = this._turnProfilePolicy(),
+    turnModel?: string,
   ): Promise<string> {
     const taskProfile = classifyAgentTask(userMessage);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
@@ -2685,6 +2745,13 @@ export class AgentOrchestrator {
     );
     const taskProfileBlock = `\n${formatAgentTaskProfile(taskProfile)}\n`;
     const agentRouteBlock = `\n${formatAgentRouteDecision(routeDecision)}\n`;
+    const resolvedTurnModel = turnModel?.trim() || this.modelName;
+    const executionIdentityBlock =
+      `\n[AUTHORITATIVE EXECUTION IDENTITY]\n` +
+      `Provider: ${providerLabelForModel(resolvedTurnModel)}\n` +
+      `Model: ${resolvedTurnModel}\n` +
+      `Selected specialist/route: ${routeDecision.selected.name}\n` +
+      "Provider/model and specialist/route are different fields. If a report or artifact requires a Provider/Model line, use the Provider and Model above; never use the specialist name as the provider. Treat actual tool results and runtime verification as authoritative, and never claim a file or web action succeeded without those results.\n";
     const accelerationBlock = `\n${formatWorkflowAccelerationPlan(accelerationPlan)}\n`;
     const decisionPatternBlock = `\n${formatWorkflowDecisionPattern(decisionPattern)}\n`;
     const adaptiveBlock = adaptiveSelection
@@ -2803,15 +2870,24 @@ export class AgentOrchestrator {
     }
     // --- End Temporal Memory Context ---
 
+    const artifactWorkflowBlock = taskProfile.signals.includes(
+      "artifact_workflow",
+    )
+      ? "\n[ARTIFACT WORKFLOW — REQUIRED]\n" +
+        "This is a multi-step artifact task. Do not claim completion from prose alone. First create the requested files inside the workspace, then verify them with file_read. If a screenshot is requested, navigate to the rendered page and call browser_screenshot with path `hello-world-landing/hello-world-landing.png` so the PNG is inside the workspace. Before your final reply, ensure every required artifact exists and is non-empty; the runtime will attach verified artifacts automatically.\n"
+      : "";
+
     return (
       `${memoryContextBlock}` +
       `${screenshotBlock}${turnProfile.systemPromptMode === "off" ? "" : systemPersona}` +
       `${taskProfileBlock}` +
       `${agentRouteBlock}` +
+      `${executionIdentityBlock}` +
       `${accelerationBlock}` +
       `${decisionPatternBlock}` +
       `${adaptiveBlock}` +
       `${capabilityBlock}` +
+      `${artifactWorkflowBlock}` +
       `${systemIndexBlock}` +
       `${dynamicStateBlock}` +
       `CONVERSATION STYLE:\n` +

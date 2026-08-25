@@ -120,6 +120,48 @@ describe("SqliteSessionHistoryStore", () => {
     ]);
   });
 
+  it("persists verified file and image attachments after reopening", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-session-history-"),
+    );
+    tempDirs.push(directory);
+    const dbPath = path.join(directory, "attachment-history.db");
+    const store = new SqliteSessionHistoryStore(dbPath);
+    openStores.push(store);
+    const message: ChatMessage = {
+      id: "assistant-artifact-1",
+      created_at: "2026-08-21T00:00:00.000Z",
+      role: "assistant",
+      content: "Completed and verified.",
+      attachments: [
+        {
+          type: "file",
+          url: "/api/files/download?path=%2Fworkspace%2Findex.html",
+          filename: "index.html",
+          content_type: "text/html",
+        },
+        {
+          type: "image",
+          url: "/api/files/preview?path=%2Fworkspace%2Flanding.png",
+          filename: "landing.png",
+          content_type: "image/png",
+        },
+      ],
+    };
+    store.save("session-artifact", [message], {
+      created: message.created_at!,
+      updated: message.created_at!,
+    });
+    store.close();
+    openStores.splice(openStores.indexOf(store), 1);
+
+    const reopened = new SqliteSessionHistoryStore(dbPath);
+    openStores.push(reopened);
+    expect(reopened.load().get("session-artifact")?.messages).toEqual([
+      message,
+    ]);
+  });
+
   it("deletes a session and its messages durably", () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-session-history-"),

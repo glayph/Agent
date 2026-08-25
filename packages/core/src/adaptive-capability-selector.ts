@@ -103,8 +103,32 @@ export function selectAdaptiveCapabilities(
   const allByName = new Map(allTools.map((item) => [toolName(item), item]));
   const selected: ToolDefinition[] = [];
   const explicitTools = explicitToolNames(userMessage);
+  const requiredArtifactTools = profile.signals.includes("artifact_workflow")
+    ? [
+        "file_write",
+        "file_read",
+        "browser_navigate",
+        "browser_extract",
+        "browser_screenshot",
+      ]
+    : [];
+  const requiredTools = new Set([...explicitTools, ...requiredArtifactTools]);
   const ambiguousTurn =
     profile.complexity === "simple" && profile.verificationDepth === "none";
+
+  // Artifact workflows must retain every tool needed for the declared
+  // file/browser/screenshot sequence. Reserve these tools before filling the
+  // remaining budget with specialist preferences or heuristic candidates.
+  for (const required of requiredTools) {
+    const definition = allByName.get(required);
+    if (
+      definition &&
+      !selected.some((item) => toolName(item) === required) &&
+      selected.length < maxTools
+    ) {
+      selected.push(definition);
+    }
+  }
 
   // Route preferences are authoritative when the registered tool exists.
   for (const preferred of preferredTools) {
@@ -132,19 +156,6 @@ export function selectAdaptiveCapabilities(
         isSafeForAmbiguousTurn(name) ||
         explicitTools.has(name)) &&
       !selected.some((item) => toolName(item) === name) &&
-      selected.length < maxTools
-    ) {
-      selected.push(definition);
-    }
-  }
-
-  // Explicit user intent is authoritative for the narrowly recognized safe
-  // operations. Add the required tools even if heuristic ranking omitted them.
-  for (const explicit of explicitTools) {
-    const definition = allByName.get(explicit);
-    if (
-      definition &&
-      !selected.some((item) => toolName(item) === explicit) &&
       selected.length < maxTools
     ) {
       selected.push(definition);
@@ -180,8 +191,8 @@ export function selectAdaptiveCapabilities(
       ? `pruned:${allTools.length - selected.length}`
       : "catalog:full",
   ];
-  if (explicitTools.size > 0) {
-    rationale.push(`explicit_tools:${[...explicitTools].join(",")}`);
+  if (requiredTools.size > 0) {
+    rationale.push(`required_tools:${[...requiredTools].join(",")}`);
   }
   if (
     preferredTools.some((item) =>

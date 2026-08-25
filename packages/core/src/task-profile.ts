@@ -85,6 +85,42 @@ const HEAVY_TASK_TERMS = [
   "workflow overhaul",
 ];
 
+const ARTIFACT_WORKFLOW_TERMS = [
+  "file",
+  "index.html",
+  "screenshot",
+  "screen capture",
+  "attachment",
+  "attach",
+  "browser",
+  "render",
+  "png",
+  "html",
+  "ফাইল",
+  "স্ক্রিনশট",
+  "অ্যাটাচ",
+  "ব্রাউজার",
+];
+
+const ARTIFACT_OPERATION_TERMS = [
+  "create",
+  "write",
+  "build",
+  "generate",
+  "save",
+  "capture",
+  "take",
+  "open",
+  "send",
+  "attach",
+  "তৈরি",
+  "লিখ",
+  "বানাও",
+  "সেভ",
+  "নাও",
+  "পাঠাও",
+];
+
 const MULTI_STEP_TERMS = [
   "after",
   "and",
@@ -131,6 +167,7 @@ function verificationDepthFor(
     return "release";
   }
   if (
+    signals.includes("artifact_workflow") ||
     /\b(integration|smoke|gateway|channel|runtime|plugin|dashboard|marketplace|onboarding)\b/.test(
       normalized,
     )
@@ -209,6 +246,14 @@ export function classifyAgentTask(message: string): AgentTaskProfile {
   if (hasAny(normalized, MULTI_STEP_TERMS)) {
     score += 1;
     signals.push("multi_step_language");
+  }
+
+  if (
+    hasAny(normalized, ARTIFACT_WORKFLOW_TERMS) &&
+    hasAny(normalized, ARTIFACT_OPERATION_TERMS)
+  ) {
+    score += 4;
+    signals.push("artifact_workflow");
   }
 
   if (hasAny(normalized, SPEED_TERMS)) {

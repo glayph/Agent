@@ -34,8 +34,10 @@ export {
 export async function achatCompletion(
   messages: MikiProviderMessage[],
   extra?: Record<string, unknown>,
+  modelOverride?: string,
 ): Promise<LLMResponse> {
-  const model = (await import("@miki/config")).settings.defaultModel;
+  const model =
+    modelOverride?.trim() || (await import("@miki/config")).settings.defaultModel;
   return providerRegistry.complete(model, messages, extra);
 }
 

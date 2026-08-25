@@ -5,6 +5,7 @@ import {
   detectArtifactContract,
   reconcileArtifactOutcome,
   verifyArtifactContract,
+  repairProviderModelMetadata,
 } from "./artifact-contract.js";
 import { PersistentJobQueue } from "../persistent-job-queue.js";
 
@@ -18,6 +19,20 @@ describe("artifact contract", () => {
 
     expect(contract?.root).toBe(path.resolve(workspace));
     expect(contract?.required).toEqual(["index.html"]);
+  });
+
+  it("roots nested landing-page artifacts and requires requested screenshot", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-artifact-"));
+    const contract = detectArtifactContract(
+      "Create hello-world-landing/index.html and take a rendered screenshot.",
+      workspace,
+    );
+
+    expect(contract).toEqual({
+      root: path.join(workspace, "hello-world-landing"),
+      required: ["index.html", "hello-world-landing.png"],
+      label: "landing page",
+    });
   });
 
   it("detects and verifies generic exact file workflows", () => {
@@ -42,6 +57,37 @@ describe("artifact contract", () => {
       missing: [],
       invalid: [],
     });
+  });
+
+  it("repairs only an explicit Provider/Model metadata line from runtime identity", () => {
+    const workspace = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-provider-metadata-"),
+    );
+    fs.writeFileSync(
+      path.join(workspace, "report.md"),
+      [
+        "# Report",
+        "- **Provider/Model**: Sage (Multi-agent research specialist routing)",
+        "- Provider prose: Sage was selected for research.",
+        "",
+      ].join(String.fromCharCode(10)),
+      "utf8",
+    );
+    const contract = {
+      root: workspace,
+      required: ["report.md"],
+      label: "file workflow",
+    };
+    expect(
+      repairProviderModelMetadata(contract, "gemini/gemini-3.5-flash-lite"),
+    ).toEqual(["report.md"]);
+    const updated = fs.readFileSync(path.join(workspace, "report.md"), "utf8");
+    expect(updated).toContain(
+      "- **Provider/Model**: Gemini — gemini/gemini-3.5-flash-lite",
+    );
+    expect(updated).toContain(
+      "Provider prose: Sage was selected for research.",
+    );
   });
 
   it("reconciles a verified artifact with a provider warning", () => {

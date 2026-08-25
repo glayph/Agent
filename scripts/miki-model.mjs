@@ -41,16 +41,16 @@ const defaultContext = Math.max(
 // documented artifacts; arbitrary URLs are intentionally not accepted.
 const MODEL_CATALOG = [
   {
-    id: "gemma-4-E2B-it-Q4_0",
-    alias: "gemma-local-e2b",
+    id: "lfm2.5-1.2b-instruct-q4_0",
+    alias: "lfm2.5-local-1.2b",
     provider: "llama.cpp",
-    display_name: "Gemma 4 E2B Instruct Q4_0",
-    filename: "gemma-4-E2B-it-Q4_0.gguf",
-    url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf?download=true",
-    sha256: "8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52",
-    bytes: 2841481184,
-    license: "Apache-2.0",
-    source: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF",
+    display_name: "LFM2.5 1.2B Instruct Q4_0",
+    filename: "LFM2.5-1.2B-Instruct-Q4_0.gguf",
+    url: "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_0.gguf?download=true",
+    sha256: "2ea801949d760cdf1a2cc04a54262c22c3c0c54f0769d57760c9adeb0e59233f",
+    bytes: 695751488,
+    license: "lfm1.0",
+    source: "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF",
     context_size: 32768,
   },
 ];
