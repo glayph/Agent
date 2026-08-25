@@ -8,7 +8,7 @@ import type { MikiProviderMessage } from "./llm/provider/sdk/index.js";
  * Backward-compatible provider name used by existing agent configuration.
  * New provider implementations belong under `./llm/provider/`.
  */
-export type Provider = "gemini" | "openai" | "openrouter";
+export type Provider = "gemini" | "llama.cpp";
 
 export {
   LLMProviderError,
@@ -58,11 +58,11 @@ export function estimateCost(
   promptTokens: number,
   completionTokens: number,
 ): number {
-  const normalized = model.replace(/^openrouter\//, "");
+  const normalized = model.replace(/^(?:gemini|google)\//i, "");
   const candidates = [
     model,
     normalized,
-    normalized.replace(/^gemini\//, "google/"),
+    normalized.replace(/^gemini\//i, "google/"),
   ];
   const costs = candidates
     .map((candidate) => MODEL_COSTS[candidate])

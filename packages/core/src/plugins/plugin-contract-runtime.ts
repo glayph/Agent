@@ -668,7 +668,13 @@ function runtimeCommand(runtime: RuntimePluginEntrypointRuntime): {
   args: string[];
 } {
   if (runtime === "node") return { command: process.execPath, args: [] };
-  return { command: "python", args: [] };
+  // Prefer the conventional interpreter for each host, while retaining a
+  // fallback for minimal installations. The spawn error remains explicit if
+  // neither interpreter is installed on the target host.
+  if (process.platform === "win32") {
+    return { command: process.env.MIKI_PYTHON_BIN || "python", args: [] };
+  }
+  return { command: process.env.MIKI_PYTHON_BIN || "python3", args: [] };
 }
 
 function buildPluginEnvironment(

@@ -145,7 +145,16 @@ export class SkillRegistry {
   private async saveState(): Promise<void> {
     const tmpPath = `${this.statePath}.tmp`;
     await fs.promises.mkdir(path.dirname(this.statePath), { recursive: true });
-    await fs.promises.writeFile(tmpPath, JSON.stringify(this.state), "utf-8");
+    await fs.promises.writeFile(tmpPath, JSON.stringify(this.state), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    const handle = await fs.promises.open(tmpPath, "r+");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     try {
       await fs.promises.rename(tmpPath, this.statePath);
     } catch (err) {

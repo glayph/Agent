@@ -286,6 +286,43 @@ describe("loadRuntimePluginContracts", () => {
     }
   });
 
+  it("executes ready Python plugin tools with the host interpreter policy", async () => {
+    workspaceDir = createWorkspace();
+    fs.writeFileSync(
+      path.join(workspaceDir, "config", "tools.yaml"),
+      [
+        "runtime:",
+        "  plugin_contracts:",
+        "    allow_execution: true",
+        "    allowed_runtimes:",
+        "      - python",
+      ].join("\n"),
+    );
+    const skillsDir = skillsDirFor(workspaceDir);
+    const assetsPath = path.join(skillsDir, "plugin_assets");
+    fs.mkdirSync(path.join(assetsPath, "tools"), { recursive: true });
+    fs.writeFileSync(
+      path.join(assetsPath, "tools", "run.py"),
+      [
+        "import json, sys",
+        "payload = json.load(sys.stdin)",
+        "print(json.dumps({'output': 'python:' + payload['args']['name']}))",
+      ].join("\n"),
+    );
+    await registerPlugin(workspaceDir, {
+      contracts: {
+        tools: [{ name: "python_echo", entrypoint: "tools/run.py" }],
+      },
+    });
+
+    const result = await executeRuntimePluginTool(workspaceDir, "python_echo", {
+      name: "Miki",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("python:Miki");
+  });
+
   it("executes ready node plugin tools through a policy-gated stdin payload", async () => {
     workspaceDir = createWorkspace();
     fs.writeFileSync(

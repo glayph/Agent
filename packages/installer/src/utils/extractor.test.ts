@@ -30,6 +30,24 @@ describe("extractTarGz", () => {
     }
   });
 
+  it("rejects archives that exceed the expanded-size limit", async () => {
+    const root = temporaryDirectory();
+    const source = path.join(root, "package");
+    const destination = path.join(root, "destination");
+    const archive = path.join(root, "package.tgz");
+    fs.mkdirSync(source, { recursive: true });
+    fs.writeFileSync(path.join(source, "large.txt"), "1234567890");
+
+    try {
+      await tar.c({ file: archive, gzip: true, cwd: root }, ["package"]);
+      await expect(
+        extractTarGz(archive, destination, { maxExtractedBytes: 5 }),
+      ).rejects.toThrow(/expands beyond the maximum size/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects symlink entries", async () => {
     const root = temporaryDirectory();
     const source = path.join(root, "package");

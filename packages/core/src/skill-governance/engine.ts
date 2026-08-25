@@ -345,6 +345,36 @@ export interface EngineStatus {
     { title: string; total_steps: number; completed: number } | undefined;
 }
 
+const DEFAULT_GOVERNANCE_RULES: GovernanceRule[] = [
+  {
+    id: "destructive-file-delete",
+    pattern: "file_delete",
+    action: "block",
+    enabled: true,
+    description:
+      "Destructive file deletion requires an explicit approved path.",
+    priority: 100,
+  },
+  {
+    id: "shell-execution-review",
+    pattern: "shell_execute",
+    action: "warn",
+    enabled: true,
+    description:
+      "Shell execution requires review and must remain workspace-scoped.",
+    priority: 90,
+  },
+  {
+    id: "external-browser-action-review",
+    pattern: "browser_click",
+    action: "warn",
+    enabled: true,
+    description:
+      "Browser actions may create external side effects and require review.",
+    priority: 80,
+  },
+];
+
 export class SkillGovernanceEngine {
   private config: Required<GovernanceConfig>;
   public selfPlanner: SelfPlanner;
@@ -354,6 +384,11 @@ export class SkillGovernanceEngine {
     this.config = { enabled: config.enabled ?? false };
     this.selfPlanner = new SelfPlanner();
     this.ruleEngine = new RuleEngine();
+    if (this.config.enabled) {
+      for (const rule of DEFAULT_GOVERNANCE_RULES) {
+        this.ruleEngine.addRule({ ...rule });
+      }
+    }
   }
 
   async initAsync(): Promise<void> {
@@ -372,6 +407,7 @@ export class SkillGovernanceEngine {
     toolName: string,
     toolArgs: Record<string, unknown>,
   ): Violation[] {
+    if (!this.config.enabled) return [];
     return this.ruleEngine.checkToolCall(toolName, toolArgs);
   }
 

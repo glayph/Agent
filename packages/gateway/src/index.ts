@@ -83,6 +83,29 @@ const config = {
   maxWsEarlyMessages: 100,
 } as const;
 
+function isLoopbackBind(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1"
+  );
+}
+
+const isPublicBind = !isLoopbackBind(config.gatewayHost);
+if (isPublicBind) {
+  if (env("MIKI_ALLOW_PUBLIC_BIND", "false").toLowerCase() !== "true") {
+    throw new Error(
+      "Refusing non-loopback GATEWAY_HOST without MIKI_ALLOW_PUBLIC_BIND=true.",
+    );
+  }
+  if (resolveAllowedCidrsFromEnv().length === 0) {
+    throw new Error(
+      "Refusing public gateway bind without MIKI_ALLOWED_CIDRS allowlist.",
+    );
+  }
+}
+
 const currentAllowedCorsOrigins = () =>
   allowedCorsOriginsFromEnv({ workspaceDir });
 

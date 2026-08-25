@@ -4,6 +4,8 @@ import * as tar from "tar";
 
 export interface ExtractOptions {
   stripComponents?: number;
+  maxEntries?: number;
+  maxExtractedBytes?: number;
 }
 
 function archivePathAfterStrip(entryPath: string, strip: number): string {
@@ -35,14 +37,24 @@ export async function extractTarGz(
   options?: ExtractOptions,
 ): Promise<string[]> {
   const strip = options?.stripComponents ?? 1;
+  const maxEntries = options?.maxEntries ?? 10_000;
+  const maxExtractedBytes = options?.maxExtractedBytes ?? 200 * 1024 * 1024;
   if (!Number.isInteger(strip) || strip < 0) {
     throw new Error("stripComponents must be a non-negative integer");
+  }
+  if (!Number.isInteger(maxEntries) || maxEntries < 1) {
+    throw new Error("maxEntries must be a positive integer");
+  }
+  if (!Number.isFinite(maxExtractedBytes) || maxExtractedBytes < 1) {
+    throw new Error("maxExtractedBytes must be positive");
   }
 
   await fs.promises.mkdir(destDir, { recursive: true });
 
   try {
     let safetyError: Error | undefined;
+    let entryCount = 0;
+    let extractedBytes = 0;
     await tar.x({
       file: archivePath,
       cwd: destDir,
@@ -53,6 +65,22 @@ export async function extractTarGz(
         if (safetyError) return false;
         try {
           archivePathAfterStrip(entryPath, strip);
+          entryCount += 1;
+          if (entryCount > maxEntries) {
+            throw new Error(
+              `Archive contains too many entries: ${entryCount} > ${maxEntries}`,
+            );
+          }
+          const entrySize =
+            "size" in entry && typeof entry.size === "number" ? entry.size : 0;
+          if (entrySize > 0) {
+            extractedBytes += entrySize;
+            if (extractedBytes > maxExtractedBytes) {
+              throw new Error(
+                `Archive expands beyond the maximum size of ${maxExtractedBytes} bytes`,
+              );
+            }
+          }
           const entryType =
             "type" in entry
               ? entry.type

@@ -114,6 +114,7 @@ import { createMemoryRouter } from "./memory-router.js";
 import { createVoiceRouter } from "./voice-router.js";
 import { normalizeChatSessionId } from "./chat-session.js";
 import { supportsAudioModel } from "../llm.js";
+import { directProviderForModel } from "../llm/provider/catalog.js";
 import {
   subscribeDeliveryOutcome,
   type DeliveryOutcomeEvent,
@@ -164,17 +165,14 @@ bootstrapWorkspaceEnv(runtimePaths.configDir);
 if (process.env.MIKI_MODEL || process.env.DEFAULT_MODEL) {
   const bootModel = process.env.MIKI_MODEL || process.env.DEFAULT_MODEL!;
   settings.setModel(bootModel);
+  const bootProvider = directProviderForModel(bootModel);
   settings.provider =
     process.env.MIKI_PROVIDER ||
-    (bootModel.startsWith("gemini/") ||
-    bootModel.startsWith("google/") ||
-    bootModel.startsWith("gemini-")
+    (bootProvider?.id === "gemini"
       ? "google"
-      : bootModel.startsWith("anthropic/")
-        ? "anthropic"
-        : bootModel.startsWith("openai/") || bootModel.startsWith("gpt-")
-          ? "openai"
-          : "openrouter");
+      : bootProvider?.id === "llama.cpp"
+        ? "llama.cpp"
+        : "unknown");
 }
 
 const chatRunQueues = new Map<string, Promise<void>>();
@@ -183,12 +181,10 @@ const pendingFeedback = new Map<string, string[]>();
 
 // Helper function for model switching
 function getProviderForModel(model: string): string {
-  if (model.startsWith("openrouter/")) return "OpenRouter";
-  if (model.startsWith("gemini/") || model.startsWith("google/"))
-    return "Google Gemini";
-  if (model.startsWith("anthropic/")) return "Anthropic";
-  if (model.startsWith("openai/")) return "OpenAI";
-  return "OpenRouter";
+  const provider = directProviderForModel(model);
+  if (provider?.id === "gemini") return "Google Gemini";
+  if (provider?.id === "llama.cpp") return "llama.cpp Local";
+  return "Unsupported provider";
 }
 
 function artifactContentType(relativePath: string): string | undefined {

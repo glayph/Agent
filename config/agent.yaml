@@ -106,7 +106,7 @@ heartbeat:
     max_tokens_per_cycle: 8192
     max_idle_minutes: 5
 skill_governance:
-  enabled: false
+  enabled: true
   validator:
     check_syntax: true
     check_dangerous_patterns: true
