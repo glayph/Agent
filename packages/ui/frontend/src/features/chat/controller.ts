@@ -30,6 +30,7 @@ import { handleMonitorMessage } from "@/features/monitor/protocol"
 import i18n from "@/i18n"
 import {
   type ChatAttachment,
+  type ChatMessage,
   type ChatVoiceMetadata,
   getChatState,
   updateChatStore,
@@ -37,6 +38,34 @@ import {
 import { type GatewayState, gatewayAtom } from "@/store/gateway"
 
 const store = getDefaultStore()
+
+function providerForRunModel(modelName: string | undefined): string | undefined {
+  if (!modelName) return undefined
+  const normalized = modelName.toLowerCase()
+  if (normalized.startsWith("gemini/") || normalized.startsWith("google/")) {
+    return "gemini"
+  }
+  if (
+    normalized.startsWith("llama.cpp/") ||
+    normalized.startsWith("llama-cpp/") ||
+    normalized.startsWith("local/") ||
+    normalized.startsWith("local-llama/")
+  ) {
+    return "llama.cpp"
+  }
+  return undefined
+}
+
+function latestRunIdentity(messages: ChatMessage[]): {
+  model?: string
+  provider?: string
+} {
+  const message = [...messages]
+    .reverse()
+    .find((candidate) => candidate.role === "assistant" && candidate.modelName)
+  const model = message?.modelName
+  return { model, provider: providerForRunModel(model) }
+}
 
 let wsRef: WebSocket | null = null
 let isConnecting = false
@@ -346,21 +375,17 @@ export async function hydrateActiveSession() {
         return
       }
 
-      if (currentState.messages.length > 0) {
-        updateChatStore({
-          messages: mergeHistoryMessages(
-            historyMessages,
-            currentState.messages,
-          ),
-          hasHydratedActiveSession: true,
-        })
-        return
-      }
-
+      const hydratedMessages =
+        currentState.messages.length > 0
+          ? mergeHistoryMessages(historyMessages, currentState.messages)
+          : historyMessages
+      const identity = latestRunIdentity(hydratedMessages)
       updateChatStore({
-        messages: historyMessages,
+        messages: hydratedMessages,
         isTyping: false,
         hasHydratedActiveSession: true,
+        activeRunModel: identity.model,
+        activeRunProvider: identity.provider,
       })
     })
     .catch((error) => {
@@ -375,7 +400,12 @@ export async function hydrateActiveSession() {
       }
 
       if (currentState.messages.length > 0) {
-        updateChatStore({ hasHydratedActiveSession: true })
+        const identity = latestRunIdentity(currentState.messages)
+        updateChatStore({
+          hasHydratedActiveSession: true,
+          activeRunModel: identity.model,
+          activeRunProvider: identity.provider,
+        })
         return
       }
 
@@ -389,6 +419,8 @@ export async function hydrateActiveSession() {
         messages: [],
         isTyping: false,
         hasHydratedActiveSession: true,
+        activeRunModel: undefined,
+        activeRunProvider: undefined,
       })
     })
     .finally(() => {

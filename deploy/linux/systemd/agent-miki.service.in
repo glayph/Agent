@@ -1,0 +1,44 @@
+[Unit]
+Description=Agent Miki self-healing gateway and local model runtime
+After=network-online.target
+Wants=network-online.target
+
+# The launcher owns the gateway, core, memory and llama.cpp child processes.
+# systemd must manage the complete process group as one service.
+[Service]
+Type=simple
+User=@MIKI_USER@
+Group=@MIKI_GROUP@
+WorkingDirectory=@MIKI_APP_ROOT@
+EnvironmentFile=-@MIKI_ENV_FILE@
+Environment=MIKI_SOURCE_ROOT=@MIKI_APP_ROOT@
+Environment=MIKI_WORKSPACE_DIR=@MIKI_WORKSPACE_DIR@
+Environment=MIKI_RUNTIME_ROOT=@MIKI_RUNTIME_ROOT@
+Environment=MIKI_24_7_RUNTIME=1
+Environment=MIKI_24_7_MAX_RESTARTS=5
+Environment=MIKI_24_7_ALLOW_UNLIMITED_RESTARTS=false
+Environment=MIKI_24_7_READY_TIMEOUT_MS=45000
+ExecStart=/usr/bin/node @MIKI_APP_ROOT@/bin/miki.js
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300s
+StartLimitBurst=5
+TimeoutStartSec=90s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+KillMode=control-group
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@MIKI_WORKSPACE_DIR@ @MIKI_RUNTIME_ROOT@ @MIKI_LOG_DIR@
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=append:@MIKI_LOG_DIR@/service.log
+StandardError=append:@MIKI_LOG_DIR@/service-error.log
+
+[Install]
+WantedBy=multi-user.target

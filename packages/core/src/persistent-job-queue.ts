@@ -312,7 +312,13 @@ export class PersistentJobQueue {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const body: QueueFile = { version: 1, jobs: [...this.jobs.values()] };
     const tmpPath = `${this.filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(tmpPath, `${JSON.stringify(body, null, 2)}\n`, "utf-8");
+    const fd = fs.openSync(tmpPath, "w");
+    try {
+      fs.writeFileSync(fd, `${JSON.stringify(body, null, 2)}\n`, "utf-8");
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(tmpPath, this.filePath);
   }
 

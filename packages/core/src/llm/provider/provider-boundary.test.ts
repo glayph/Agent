@@ -6,6 +6,7 @@ import {
 } from "./catalog.js";
 import {
   classifyError,
+  defaultTimeoutMs,
   openAICompatibleAdapter,
 } from "./openai-compatible-adapter.js";
 import { providerRegistry } from "./registry.js";
@@ -42,6 +43,24 @@ describe("isolated two-provider LLM boundary", () => {
     expect(normalizeDirectModelName("llama.cpp", "llama.cpp/local-model")).toBe(
       "local-model",
     );
+  });
+
+  it("uses a bounded 90-second default timeout for local llama.cpp", () => {
+    const previous = process.env.MIKI_LOCAL_LLM_TIMEOUT_MS;
+    const localProvider = getDirectProviderById("llama.cpp")!;
+    const geminiProvider = getDirectProviderById("gemini")!;
+    try {
+      delete process.env.MIKI_LOCAL_LLM_TIMEOUT_MS;
+      expect(defaultTimeoutMs(localProvider)).toBe(90_000);
+      process.env.MIKI_LOCAL_LLM_TIMEOUT_MS = "60000";
+      expect(defaultTimeoutMs(localProvider)).toBe(60_000);
+      process.env.MIKI_LOCAL_LLM_TIMEOUT_MS = "1000";
+      expect(defaultTimeoutMs(localProvider)).toBe(90_000);
+      expect(defaultTimeoutMs(geminiProvider)).toBe(120_000);
+    } finally {
+      if (previous === undefined) delete process.env.MIKI_LOCAL_LLM_TIMEOUT_MS;
+      else process.env.MIKI_LOCAL_LLM_TIMEOUT_MS = previous;
+    }
   });
 
   it("uses typed provider errors for missing Gemini credentials", async () => {

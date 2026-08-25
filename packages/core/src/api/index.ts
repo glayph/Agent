@@ -11,6 +11,7 @@ import * as path from "path";
 import * as fs from "fs";
 
 import { AgentOrchestrator } from "../agent.js";
+import { suppressVisibleStatusForIntent } from "../deterministic-intent.js";
 import type { AgentTask } from "../task-queue.js";
 import {
   createWorkspaceSecretVault,
@@ -2028,6 +2029,7 @@ mikiWss.on("connection", (ws, req) => {
         let finalAttachments: ChatAttachment[] = [];
         const toolFeedback = _getToolFeedbackConfig();
         const streaming = _getmikiStreamingConfig();
+        const suppressVisibleStatus = suppressVisibleStatusForIntent(content);
         let lastStreamSentAt = 0;
         let lastStreamSentLength = 0;
         let toolFeedbackCounter = 0;
@@ -2036,25 +2038,27 @@ mikiWss.on("connection", (ws, req) => {
         const toolInputs = new Map<number, unknown>();
         const toolFeedbackMessageIds = new Map<number, string>();
 
-        _sendUserStatus(
-          ws,
-          sessionId,
-          assistantMessageId,
-          `${assistantMessageId}-status-accepted`,
-          "ঠিক আছে, কাজটি শুরু করছি।",
-          resolvedRunModel,
-        );
-        progressTimer = setTimeout(() => {
-          progressTimer = null;
+        if (!suppressVisibleStatus) {
           _sendUserStatus(
             ws,
             sessionId,
             assistantMessageId,
-            `${assistantMessageId}-status-working`,
-            "কাজ চলছে; প্রয়োজনীয় ধাপগুলো সম্পন্ন করছি।",
+            `${assistantMessageId}-status-accepted`,
+            "ঠিক আছে, কাজটি শুরু করছি।",
             resolvedRunModel,
           );
-        }, 10000);
+          progressTimer = setTimeout(() => {
+            progressTimer = null;
+            _sendUserStatus(
+              ws,
+              sessionId,
+              assistantMessageId,
+              `${assistantMessageId}-status-working`,
+              "কাজ চলছে; প্রয়োজনীয় ধাপগুলো সম্পন্ন করছি।",
+              resolvedRunModel,
+            );
+          }, 10000);
+        }
 
         if (streaming.enabled) {
           _sendmiki(ws, { type: "typing.start", session_id: sessionId });
@@ -2077,7 +2081,11 @@ mikiWss.on("connection", (ws, req) => {
           id: crypto.randomUUID(),
           session_id: sessionId,
           timestamp: Date.now(),
-          payload: { run_id: assistantMessageId, objective: content },
+          payload: {
+            run_id: assistantMessageId,
+            objective: content,
+            model_name: resolvedRunModel,
+          },
         });
         if (voiceProvider) {
           const duration = Number.isFinite(voiceDurationMs)
@@ -2521,6 +2529,7 @@ mikiWss.on("connection", (ws, req) => {
               );
             }
             const verification = _verifyArtifactContract(artifactContract);
+            let attachmentPersistenceFailed = false;
             finalAttachments = buildArtifactAttachments(
               artifactContract,
               verification,
@@ -2532,6 +2541,7 @@ mikiWss.on("connection", (ws, req) => {
                 { attachments: finalAttachments },
               );
               if (!persisted) {
+                attachmentPersistenceFailed = true;
                 finalAttachments = [];
                 _sendInspectorThought(
                   ws,
@@ -2554,8 +2564,11 @@ mikiWss.on("connection", (ws, req) => {
             finalRunStatus = _reconcileArtifactOutcome(
               verification,
               providerFailureDetected,
+              !attachmentPersistenceFailed,
             );
-            if (!verification.ok) {
+            if (attachmentPersistenceFailed) {
+              fullResponse = `The required ${artifactContract.label} files were verified on disk, but I could not deliver the attachment metadata to this chat. The run is marked failed so it can be reconciled safely.`;
+            } else if (!verification.ok) {
               fullResponse = `I started the ${artifactContract.label}, but it is not complete yet. ${[...verification.missing, ...verification.invalid].join(", ")} still needs attention.`;
             } else if (providerFailureDetected) {
               fullResponse = `Completed and verified the required ${artifactContract.label} files: ${artifactContract.required.join(", ")}. A provider warning occurred while preparing the final response; see the run diagnostics.`;
@@ -2607,7 +2620,11 @@ mikiWss.on("connection", (ws, req) => {
             id: crypto.randomUUID(),
             session_id: sessionId,
             timestamp: Date.now(),
-            payload: { run_id: assistantMessageId, status: finalRunStatus },
+            payload: {
+              run_id: assistantMessageId,
+              status: finalRunStatus,
+              model_name: resolvedRunModel,
+            },
           });
         } catch (err: unknown) {
           const safeError = getErrorMessage(err);
@@ -2659,6 +2676,7 @@ mikiWss.on("connection", (ws, req) => {
               run_id: assistantMessageId,
               status: "failed",
               error: getErrorMessage(err),
+              model_name: resolvedRunModel,
             },
           });
         } finally {
@@ -3165,10 +3183,39 @@ app.post("/tools/:name/call", requireHttpAuth, async (req, res) => {
       caller?: string;
     };
 
-    // Check session-based permissions if session_id is provided
-    if (session_id && !isToolEnabledForSession(session_id, name)) {
-      const decision = getToolPermissionDecision(session_id, name);
-      const denial = recordToolPermissionDenial(session_id, decision, {
+    const normalizedSessionId =
+      typeof session_id === "string" ? session_id.trim() : "";
+    const apiKeyAuthenticated = isApiKeyRequestAuthenticated(req.headers);
+    // Dashboard-cookie callers must provide a server-side session permission
+    // context. A valid API key is the explicit automation/admin credential and
+    // may use a session-less call; this keeps browser sessions from bypassing
+    // per-session tool policy by simply omitting session_id.
+    if (!normalizedSessionId && !apiKeyAuthenticated) {
+      try {
+        permissionAuditLog.record({
+          type: "tool.execute",
+          actor: "api",
+          subject: name,
+          requestId: (req as AuthenticatedRequest).requestId,
+          details: { action: "tool.denied", reason: "session_id_required" },
+        });
+      } catch (error) {
+        console.warn("[API] tool session requirement audit failed:", error);
+      }
+      return res.status(403).json({
+        success: false,
+        error: "session_id is required for dashboard-session tool calls",
+        requestId: (req as AuthenticatedRequest).requestId,
+      });
+    }
+
+    // Check session-based permissions when a session context is supplied.
+    if (
+      normalizedSessionId &&
+      !isToolEnabledForSession(normalizedSessionId, name)
+    ) {
+      const decision = getToolPermissionDecision(normalizedSessionId, name);
+      const denial = recordToolPermissionDenial(normalizedSessionId, decision, {
         actor: caller === "mcp" ? "mcp" : "api",
         requestId: (req as AuthenticatedRequest).requestId,
         args,
@@ -3181,7 +3228,7 @@ app.post("/tools/:name/call", requireHttpAuth, async (req, res) => {
           requestId: (req as AuthenticatedRequest).requestId,
           details: {
             action: "tool.denied",
-            sessionId: session_id,
+            sessionId: normalizedSessionId,
             toolName: decision.toolName,
             reason: decision.reason,
             policy: decision.source,
@@ -3199,7 +3246,7 @@ app.post("/tools/:name/call", requireHttpAuth, async (req, res) => {
           decision: "denied",
           reason: decision.reason,
           policy: decision.source,
-          sessionId: session_id,
+          sessionId: normalizedSessionId,
           deniedAt: denial.deniedAt,
         },
         requestId: (req as AuthenticatedRequest).requestId,

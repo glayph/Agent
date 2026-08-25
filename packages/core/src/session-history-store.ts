@@ -157,41 +157,53 @@ export class SqliteSessionHistoryStore {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        title TEXT,
-        pinned INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS session_messages (
-        session_id TEXT NOT NULL,
-        position INTEGER NOT NULL,
-        id TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        image_urls TEXT,
-        attachments_json TEXT,
-        voice_json TEXT,
-        PRIMARY KEY (session_id, position),
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-      );
-      CREATE INDEX IF NOT EXISTS idx_session_messages_id
-        ON session_messages (session_id, id);
-    `);
-    const columns = this.db
-      .prepare("PRAGMA table_info(session_messages)")
-      .all() as Array<{ name?: string }>;
-    if (!columns.some((column) => column.name === "attachments_json")) {
-      this.db.exec(
-        "ALTER TABLE session_messages ADD COLUMN attachments_json TEXT",
-      );
-    }
-    if (!columns.some((column) => column.name === "voice_json")) {
-      this.db.exec("ALTER TABLE session_messages ADD COLUMN voice_json TEXT");
-    }
+    this.db.pragma("busy_timeout = 5000");
+    this.db.pragma("foreign_keys = ON");
+    const synchronous = ["OFF", "NORMAL", "FULL", "EXTRA"].includes(
+      String(process.env.MIKI_SQLITE_SYNCHRONOUS || "FULL").toUpperCase(),
+    )
+      ? String(process.env.MIKI_SQLITE_SYNCHRONOUS || "FULL").toUpperCase()
+      : "FULL";
+    this.db.pragma(`synchronous = ${synchronous}`);
+    this.db.pragma("wal_autocheckpoint = 1000");
+    const initializeSchema = this.db.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          title TEXT,
+          pinned INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS session_messages (
+          session_id TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          image_urls TEXT,
+          attachments_json TEXT,
+          voice_json TEXT,
+          PRIMARY KEY (session_id, position),
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_messages_id
+          ON session_messages (session_id, id);
+      `);
+      const columns = this.db
+        .prepare("PRAGMA table_info(session_messages)")
+        .all() as Array<{ name?: string }>;
+      if (!columns.some((column) => column.name === "attachments_json")) {
+        this.db.exec(
+          "ALTER TABLE session_messages ADD COLUMN attachments_json TEXT",
+        );
+      }
+      if (!columns.some((column) => column.name === "voice_json")) {
+        this.db.exec("ALTER TABLE session_messages ADD COLUMN voice_json TEXT");
+      }
+    });
+    initializeSchema();
   }
 
   load(): Map<string, PersistedSession> {
@@ -309,6 +321,12 @@ export class SqliteSessionHistoryStore {
       .prepare("DELETE FROM sessions WHERE id = ?")
       .run(sessionId);
     return result.changes > 0;
+  }
+
+  /** Create a consistent SQLite backup without exposing database contents. */
+  async backup(destinationPath: string): Promise<void> {
+    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+    await this.db.backup(destinationPath);
   }
 
   close(): void {

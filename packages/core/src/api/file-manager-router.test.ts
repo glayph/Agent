@@ -26,7 +26,10 @@ interface JsonResponse {
 
 async function withFileServer<T>(
   run: (baseUrl: string, workspaceDir: string, filesDir: string) => Promise<T>,
-  options: { allowSystemWrite?: boolean | (() => boolean) } = {},
+  options: {
+    allowSystemWrite?: boolean | (() => boolean);
+    allowSystemRead?: boolean | (() => boolean);
+  } = {},
 ): Promise<T> {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-files-"));
   const filesDir = path.join(workspaceDir, "files");
@@ -39,6 +42,7 @@ async function withFileServer<T>(
     createFileManagerRouter({
       runtimePaths: normalizeRuntimePaths(workspaceDir),
       allowSystemWrite: options.allowSystemWrite,
+      allowSystemRead: options.allowSystemRead,
     }),
   );
 
@@ -90,33 +94,13 @@ describe("file manager router", () => {
 
       const roots = await jsonFetch(baseUrl, "/files/roots");
       expect(roots.response.status).toBe(200);
-      expect(roots.body.roots).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            kind: "workspace",
-            path: workspaceDir,
-            protected: true,
-          }),
-          expect.objectContaining({
-            path: path.resolve(os.homedir()),
-          }),
-          expect.objectContaining({
-            path: path.resolve(path.parse(workspaceDir).root),
-            protected: true,
-          }),
-        ]),
-      );
-      expect(roots.body.roots?.length).toBeGreaterThan(1);
-      expect(
-        roots.body.roots?.some(
-          (root) =>
-            (root.kind === "drive" || root.kind === "root") &&
-            root.storage &&
-            root.storage.totalBytes > 0 &&
-            root.storage.freeBytes >= 0 &&
-            root.storage.usedBytes >= 0,
-        ),
-      ).toBe(true);
+      expect(roots.body.roots).toEqual([
+        expect.objectContaining({
+          kind: "workspace",
+          path: workspaceDir,
+          protected: true,
+        }),
+      ]);
 
       const workspaceListing = await jsonFetch(
         baseUrl,
@@ -254,8 +238,8 @@ describe("file manager router", () => {
           baseUrl,
           `/files/read?path=${encodeURIComponent(outsideFile)}`,
         );
-        expect(outsideRead.response.status).toBe(200);
-        expect(outsideRead.body.content).toBe("outside");
+        expect(outsideRead.response.status).toBe(403);
+        expect(outsideRead.body.error).toContain("outside workspace");
 
         const outsideWrite = await jsonFetch(baseUrl, "/files/write", {
           method: "PUT",
@@ -323,6 +307,47 @@ describe("file manager router", () => {
       expect(recursiveDelete.response.status).toBe(200);
       expect(fs.existsSync(nestedDir)).toBe(false);
     });
+  });
+
+  it("exposes system-wide roots only when the read override is enabled", async () => {
+    await withFileServer(
+      async (baseUrl, workspaceDir) => {
+        const roots = await jsonFetch(baseUrl, "/files/roots");
+        expect(roots.response.status).toBe(200);
+        expect(roots.body.roots?.length).toBeGreaterThan(1);
+        expect(roots.body.roots).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ path: path.resolve(os.homedir()) }),
+            expect.objectContaining({
+              path: path.resolve(path.parse(workspaceDir).root),
+              protected: true,
+            }),
+          ]),
+        );
+      },
+      { allowSystemRead: true },
+    );
+  });
+
+  it("allows explicit system-wide reads only when the read override is enabled", async () => {
+    await withFileServer(
+      async (baseUrl) => {
+        const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "outside-"));
+        const outsideFile = path.join(outsideDir, "outside.txt");
+        fs.writeFileSync(outsideFile, "outside", "utf8");
+        try {
+          const outsideRead = await jsonFetch(
+            baseUrl,
+            `/files/read?path=${encodeURIComponent(outsideFile)}`,
+          );
+          expect(outsideRead.response.status).toBe(200);
+          expect(outsideRead.body.content).toBe("outside");
+        } finally {
+          fs.rmSync(outsideDir, { recursive: true, force: true });
+        }
+      },
+      { allowSystemRead: true },
+    );
   });
 
   it("allows explicit system-wide writes when the file manager override is enabled", async () => {

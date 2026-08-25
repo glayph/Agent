@@ -29,15 +29,15 @@ import {
 
 const clientCache = new Map<string, OpenAI>();
 
-function defaultTimeoutMs(provider: DirectProviderConfig): number {
+export function defaultTimeoutMs(provider: DirectProviderConfig): number {
   if (provider.id === "llama.cpp") {
     const configured = Number.parseInt(
-      process.env.MIKI_LOCAL_LLM_TIMEOUT_MS || "300000",
+      process.env.MIKI_LOCAL_LLM_TIMEOUT_MS || "90000",
       10,
     );
-    return Number.isFinite(configured) && configured >= 90_000
+    return Number.isFinite(configured) && configured >= 60_000
       ? configured
-      : 300_000;
+      : 90_000;
   }
   return 120_000;
 }

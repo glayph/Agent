@@ -29,6 +29,10 @@ import { closeHttpServer, terminateProcessTree } from "./shutdown.js";
 import { createRotatingLogStream } from "./log-rotation.js";
 import { SlidingWindowRateLimiter } from "./rate-limiter.js";
 import { createProcessStateStore } from "./process-state-snapshot.js";
+import {
+  boundedRestartLimit,
+  computeRestartBackoff,
+} from "./restart-policy.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,8 +68,14 @@ const config = {
   gatewayPort: positiveIntEnv("GATEWAY_PORT", 18800),
   gatewayHost: env("GATEWAY_HOST", "127.0.0.1"),
   enableMcp: env("ENABLE_MCP", "true") !== "false",
-  // 0 = unbounded restarts (with capped exponential backoff)
-  maxCoreRestarts: positiveIntEnv("CORE_MAX_RESTARTS", 0),
+  // Core recovery is bounded by default. Unlimited restarts require an
+  // explicit opt-in and are intended only for controlled diagnostics.
+  maxCoreRestarts: boundedRestartLimit(
+    process.env.CORE_MAX_RESTARTS,
+    5,
+    String(process.env.ALLOW_UNLIMITED_CORE_RESTARTS || "").toLowerCase() ===
+      "true",
+  ),
   coreStartupTimeout: positiveIntEnv("CORE_STARTUP_TIMEOUT", 60000),
   coreHealthInterval: positiveIntEnv("CORE_HEALTH_INTERVAL", 15000),
   coreHealthTimeout: positiveIntEnv("CORE_HEALTH_TIMEOUT", 5000),
@@ -266,23 +276,20 @@ function attemptCoreRestart(): void {
   if (shutdownInProgress || coreRestartTimer) {
     return;
   }
-  // config.maxCoreRestarts === 0 means unbounded
   if (
     config.maxCoreRestarts > 0 &&
     coreRestartAttempts >= config.maxCoreRestarts
   ) {
     log.error(
-      `Max core restarts (${config.maxCoreRestarts}) reached. Giving up. Set CORE_MAX_RESTARTS=0 for unbounded.`,
+      `Max core restarts (${config.maxCoreRestarts}) reached; shutting down gateway for outer-supervisor recovery.`,
     );
+    void shutdown("core restart budget exhausted", 1);
     return;
   }
   coreRestartAttempts++;
   processStateStore.recordRestartAttempt();
   // Backoff: 2s, 4s, 8s … capped at 5 minutes
-  const backoff = Math.min(
-    Math.pow(2, coreRestartAttempts) * 1000,
-    5 * 60 * 1000,
-  );
+  const backoff = computeRestartBackoff(coreRestartAttempts);
   log.info(`Restarting core in ${backoff}ms (attempt ${coreRestartAttempts})`);
   coreRestartTimer = setTimeout(async () => {
     coreRestartTimer = null;

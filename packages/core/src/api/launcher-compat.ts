@@ -100,7 +100,11 @@ import {
 import { buildPluginMarketplaceReadinessReport } from "../plugins/plugin-marketplace-readiness.js";
 import { listRuntimePluginProviderMetadata } from "../plugins/plugin-provider-adapter.js";
 import { providerRegistry } from "../llm/provider/registry.js";
-import type { DirectProviderId } from "../llm/provider/catalog.js";
+import {
+  DIRECT_PROVIDERS,
+  getDirectProviderById,
+  type DirectProviderId,
+} from "../llm/provider/catalog.js";
 import {
   probeProviderCompletion,
   type CompletionHealthResult,
@@ -2318,16 +2322,24 @@ function setPlatformAutostart(paths: RuntimePaths, enabled: boolean): void {
 
 function apiKeyEnvForProvider(provider: string): string {
   if (provider === "google" || provider === "gemini") return "GEMINI_API_KEY";
-  if (["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(provider)) {
+  if (
+    ["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(
+      provider,
+    )
+  ) {
     return "LLAMA_CPP_API_KEY";
   }
   return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
 }
 
 function oauthSecretEnvForProvider(provider: string): string {
-  return provider === "google-antigravity"
-    ? "MIKI_ANTIGRAVITY_API_KEY"
-    : apiKeyEnvForProvider(provider);
+  return apiKeyEnvForProvider(provider);
+}
+
+function normalizeOAuthProvider(
+  provider: string,
+): DirectProviderId | undefined {
+  return getDirectProviderById(provider)?.id;
 }
 
 function maskSecret(value: string): string {
@@ -2379,7 +2391,8 @@ async function launcherProviderOptions(
         icon_slug: descriptor.manifest.id === "llama.cpp" ? "llama" : "google",
         default_api_base:
           descriptor.manifest.id === "gemini"
-            ? process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/"
+            ? process.env.GEMINI_BASE_URL ||
+              "https://generativelanguage.googleapis.com/v1beta/openai/"
             : process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1",
         empty_api_key_allowed: descriptor.auth.allowEmptyKey,
         create_allowed: true,
@@ -2399,7 +2412,15 @@ async function launcherProviderOptions(
     await listRuntimePluginProviderMetadata(paths.sourceDir ?? paths.configDir)
   )
     .filter((provider) =>
-      ["gemini", "google", "llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(provider.id),
+      [
+        "gemini",
+        "google",
+        "llama.cpp",
+        "llama-cpp",
+        "llamacpp",
+        "local",
+        "local-llama",
+      ].includes(provider.id),
     )
     .filter((provider) => !seen.has(provider.id))
     .map((provider): ProviderOption => {
@@ -2454,8 +2475,15 @@ function normalizeProvider(
 ): string {
   const raw = (provider || "").trim().toLowerCase();
   if (raw === "gemini" || raw === "google") return "google";
-  if (["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(raw)) return "llama.cpp";
-  if (raw && options.some((item) => item.id === raw || item.aliases?.includes(raw))) return raw;
+  if (
+    ["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(raw)
+  )
+    return "llama.cpp";
+  if (
+    raw &&
+    options.some((item) => item.id === raw || item.aliases?.includes(raw))
+  )
+    return raw;
   const name = modelName.toLowerCase();
   if (name.startsWith("google/") || name.startsWith("gemini")) return "google";
   if (
@@ -2464,7 +2492,8 @@ function normalizeProvider(
     name.startsWith("llamacpp/") ||
     name.startsWith("local-llama/") ||
     name.startsWith("local/")
-  ) return "llama.cpp";
+  )
+    return "llama.cpp";
   return "google";
 }
 
@@ -3341,6 +3370,7 @@ function oauthProviderStatus(
   const key = oauthSecretEnvForProvider(provider);
   const token = resolveConfiguredSecret(key, paths.configDir);
   return {
+    id: provider,
     provider,
     display_name: displayName,
     methods,
@@ -4830,6 +4860,7 @@ export function createLauncherCompatRouter({
     createFileManagerRouter({
       runtimePaths: paths,
       allowSystemWrite: () => fileManagerAllowsSystemWrite(state.config),
+      allowSystemRead: () => fileManagerAllowsSystemWrite(state.config),
     }),
   );
 
@@ -6322,23 +6353,25 @@ export function createLauncherCompatRouter({
 
   router.get("/oauth/providers", (_req, res) => {
     res.json({
-      providers: [
-        oauthProviderStatus("openai", "OpenAI", ["token"], paths),
+      providers: DIRECT_PROVIDERS.map((provider) =>
         oauthProviderStatus(
-          "google-antigravity",
-          "Google Antigravity",
+          provider.id,
+          provider.displayName,
           ["token"],
           paths,
         ),
-      ],
+      ),
     });
   });
 
   router.post("/oauth/login", async (req, res) => {
-    const provider = String(req.body?.provider || "");
+    const rawProvider = String(req.body?.provider || "");
+    const provider = normalizeOAuthProvider(rawProvider);
     const method = String(req.body?.method || "token");
-    if (!provider)
+    if (!rawProvider)
       return res.status(400).json({ error: "provider is required" });
+    if (!provider)
+      return res.status(400).json({ error: "unsupported provider" });
     if (method === "token") {
       const token = String(req.body?.token || "").trim();
       if (!token) return res.status(400).json({ error: "token is required" });
@@ -6359,18 +6392,14 @@ export function createLauncherCompatRouter({
         runtime_apply_error: apply.error,
       });
     }
-    const manualUrl =
-      provider === "google-antigravity"
-        ? "https://ai.google.dev/gemini-api/docs/api-key"
-        : "https://platform.openai.com/api-keys";
     return res.status(409).json({
       status: "manual_required",
       provider,
       method,
-      auth_url: manualUrl,
-      verify_url: manualUrl,
+      auth_url: "https://ai.google.dev/gemini-api/docs/api-key",
+      verify_url: "https://ai.google.dev/gemini-api/docs/api-key",
       message:
-        "This provider does not expose a browser/device-code exchange in Miki. Create an API key and use the token form instead.",
+        "Miki accepts a provider API key through the token form; no browser/device-code exchange is exposed.",
     });
   });
 
@@ -6392,9 +6421,12 @@ export function createLauncherCompatRouter({
   });
 
   router.post("/oauth/logout", async (req, res) => {
-    const provider = String(req.body?.provider || "");
-    if (!provider)
+    const rawProvider = String(req.body?.provider || "");
+    const provider = normalizeOAuthProvider(rawProvider);
+    if (!rawProvider)
       return res.status(400).json({ error: "provider is required" });
+    if (!provider)
+      return res.status(400).json({ error: "unsupported provider" });
     const envKey = oauthSecretEnvForProvider(provider);
     updateEnvVar(paths, envKey, "");
     delete state.oauth?.[provider];
@@ -6413,16 +6445,26 @@ export function createLauncherCompatRouter({
   });
 
   router.get("/oauth/token/:provider", (req, res) => {
-    const provider = String(req.params.provider || "");
-    if (!provider) {
+    const rawProvider = String(req.params.provider || "");
+    const provider = normalizeOAuthProvider(rawProvider);
+    if (!rawProvider) {
       return res.status(400).json({ error: "provider is required" });
+    }
+    if (!provider) {
+      return res.status(404).json({ error: "unsupported provider" });
     }
     const envKey = oauthSecretEnvForProvider(provider);
     const token = resolveConfiguredSecret(envKey, paths.configDir);
     if (!token) {
       return res.status(404).json({ error: "Token not configured" });
     }
-    res.json({ token });
+    return res.json({
+      provider,
+      configured: true,
+      auth_method: "token",
+      masked_token: maskSecret(token),
+      message: "Raw provider tokens are never returned by the dashboard API.",
+    });
   });
 
   const listLauncherChannels = async (): Promise<

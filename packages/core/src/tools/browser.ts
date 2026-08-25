@@ -45,6 +45,20 @@ export function normalizeBrowserUrl(input: string): string {
   return parsed.toString();
 }
 
+export function rewriteWorkspacePreviewUrl(
+  input: string,
+  ownedPort: number,
+): string {
+  const parsed = new URL(normalizeBrowserUrl(input));
+  if (
+    (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
+    parsed.port === "8765"
+  ) {
+    parsed.port = String(ownedPort);
+  }
+  return parsed.toString();
+}
+
 const USER_AGENTS: string[] = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
@@ -108,6 +122,7 @@ export class BrowserTool {
   private _chromePath: string | null = null;
   private workspacePreviewServer: Server | null = null;
   private workspacePreviewRoot: string | null = null;
+  private workspacePreviewPort: number | null = null;
   private workspacePreviewStart: Promise<void> | null = null;
 
   constructor(
@@ -376,6 +391,7 @@ export class BrowserTool {
       );
       this.workspacePreviewServer = null;
       this.workspacePreviewRoot = null;
+      this.workspacePreviewPort = null;
     }
     if (this.workspacePreviewStart) return this.workspacePreviewStart;
 
@@ -441,18 +457,19 @@ export class BrowserTool {
       });
 
       server.once("error", (error: NodeJS.ErrnoException) => {
-        // Another Miki process may already own the fixed preview port. In that
-        // case navigation can still use the existing local server; do not fail
-        // the artifact workflow solely because the port is already occupied.
-        if (error.code === "EADDRINUSE") {
-          resolve();
-        } else {
-          reject(error);
-        }
+        reject(error);
       });
-      server.listen(8765, "127.0.0.1", () => {
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          reject(
+            new Error("workspace preview server did not expose a TCP port"),
+          );
+          return;
+        }
         this.workspacePreviewServer = server;
         this.workspacePreviewRoot = root;
+        this.workspacePreviewPort = address.port;
         resolve();
       });
     });
@@ -475,6 +492,9 @@ export class BrowserTool {
       parsedUrl.port === "8765"
     ) {
       await this._ensureWorkspacePreviewServer();
+      if (this.workspacePreviewPort) {
+        url = rewriteWorkspacePreviewUrl(url, this.workspacePreviewPort);
+      }
     }
 
     const maxAttempts = retries ?? this._maxRetries;
@@ -849,6 +869,7 @@ export class BrowserTool {
       );
       this.workspacePreviewServer = null;
       this.workspacePreviewRoot = null;
+      this.workspacePreviewPort = null;
     }
     if (this.browser) {
       try {

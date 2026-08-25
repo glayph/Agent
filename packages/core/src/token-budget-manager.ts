@@ -58,7 +58,12 @@ export class TokenBudgetManager {
         costPer1kTokens: 0,
         speedRank: 1,
         qualityRank: 3,
-        bestFor: ["simple_qa", "classification", "extraction", "standard_reasoning"],
+        bestFor: [
+          "simple_qa",
+          "classification",
+          "extraction",
+          "standard_reasoning",
+        ],
         contextWindowTokens: 1_000_000,
         maxOutputTokens: 8_192,
       },

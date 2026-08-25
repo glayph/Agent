@@ -75,6 +75,7 @@ import {
   formatAgentTaskProfile,
   type AgentTaskComplexity,
 } from "./task-profile.js";
+import { selectAgentPromptHistory } from "./agent-history.js";
 import {
   detectDeterministicIntent,
   type DeterministicFileRequest,
@@ -902,7 +903,11 @@ export class AgentOrchestrator {
       typeof cronConfig?.exec_timeout_minutes === "number"
         ? cronConfig.exec_timeout_minutes
         : undefined;
-    this.taskQueue = new TaskQueue({ maxSize: queueSize, defaultPriority: 0 });
+    this.taskQueue = new TaskQueue({
+      maxSize: queueSize,
+      defaultPriority: 0,
+      persistencePath: path.join(runtimePaths.dataDir, "task-queue.json"),
+    });
     this.concurrentManager = new ConcurrentTaskManager(maxConcurrent);
     this.taskScheduler = new TaskScheduler(
       {
@@ -1660,14 +1665,16 @@ export class AgentOrchestrator {
     );
     const history = this._messageHistory.get(sessionId) || [];
     const turnProfile = this._turnProfilePolicy();
-    const pastMessages =
-      turnProfile.historyMode === "off"
-        ? []
-        : history.slice(-resource.messageHistoryLimit);
 
     // Decide the specialist and per-turn capability budget before prompting.
     // The selected catalog is also used as an execution allowlist below.
     const taskProfile = classifyAgentTask(userMessage);
+    const pastMessages = selectAgentPromptHistory(
+      history,
+      taskProfile.complexity,
+      turnProfile.historyMode,
+      resource.messageHistoryLimit,
+    );
     const turnModel = this._resolveTurnModel(taskProfile.complexity);
     const localModel = isLocalModelName(turnModel);
     const runDeadline =
@@ -1711,6 +1718,27 @@ export class AgentOrchestrator {
     const toolsSchema = prunedTools as unknown as ToolDefinition[];
 
     const deterministicIntent = detectDeterministicIntent(userMessage);
+    if (deterministicIntent?.kind === "math") {
+      const deterministicResponse = deterministicIntent.answer || "";
+      await this._saveAssistantHistoryMessage(
+        sessionId,
+        deterministicResponse,
+        options.responseMessageId,
+      );
+      this._logMemoryInteraction(sessionId, userMessage, deterministicResponse);
+      yield JSON.stringify({
+        type: "stream_chunk",
+        content: deterministicResponse,
+        model_name: turnModel,
+      });
+      yield JSON.stringify({
+        type: "stream_done",
+        usage: { tokens: 0 },
+        agent_loop_id: loopId,
+        model_name: turnModel,
+      });
+      return;
+    }
     if (deterministicIntent && turnProfile.toolsMode !== "off") {
       const requiredToolNames =
         deterministicIntent.kind === "web_search"
@@ -2818,7 +2846,10 @@ export class AgentOrchestrator {
     // (Previously nested inside the turn_profile check, so an active plan
     // silently never reached the model unless Turn Profile was explicitly
     // turned on.)
-    const plan = this.skillGovernance.selfPlanner.getActivePlan();
+    const plan =
+      taskProfile.complexity === "simple"
+        ? undefined
+        : this.skillGovernance.selfPlanner.getActivePlan();
     if (plan) {
       const summary = this.skillGovernance.selfPlanner.planSummary();
       if (summary) {
@@ -2845,7 +2876,7 @@ export class AgentOrchestrator {
     // and recent conversation history across sessions. This runs on every
     // turn and is invisible to the user (it's in the system role message).
     let memoryContextBlock = "";
-    const memory = getMemory();
+    const memory = taskProfile.complexity === "simple" ? null : getMemory();
     if (memory) {
       try {
         const memCtx = memory.getEnhancedSystemPrompt(

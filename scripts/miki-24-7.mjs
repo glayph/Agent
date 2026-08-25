@@ -5,6 +5,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import {
+  computeRestartDelay,
+  DEFAULT_MAX_BACKOFF_MS,
+  DEFAULT_RESTART_RESET_AFTER_MS,
+  resolveMaxRestarts,
+  resolvePositiveDuration,
+  restartLimitReached,
+} from './miki-24-7-policy.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,16 +23,34 @@ const runtimeRoot = path.resolve(process.env.MIKI_RUNTIME_ROOT || workspaceDir);
 const dataDir = path.join(workspaceDir, 'data');
 const statePath = path.join(dataDir, '24-7-supervisor.json');
 const lockPath = path.join(dataDir, '24-7-supervisor.lock');
-const gatewayEntry = path.join(sourceRoot, 'packages', 'gateway', 'dist', 'index.js');
-const maxRestarts = Number.isFinite(Number(process.env.MIKI_24_7_MAX_RESTARTS))
-  ? Math.max(0, Number(process.env.MIKI_24_7_MAX_RESTARTS))
-  : 0;
-const maxBackoffMs = 60_000;
+const gatewayEntry = path.resolve(
+  process.env.MIKI_GATEWAY_ENTRY ||
+    path.join(sourceRoot, 'packages', 'gateway', 'dist', 'index.js'),
+);
+const maxRestarts = resolveMaxRestarts(process.env);
+const maxBackoffMs = resolvePositiveDuration(
+  process.env.MIKI_24_7_MAX_BACKOFF_MS,
+  DEFAULT_MAX_BACKOFF_MS,
+);
+const restartResetAfterMs = resolvePositiveDuration(
+  process.env.MIKI_24_7_RESTART_RESET_AFTER_MS,
+  DEFAULT_RESTART_RESET_AFTER_MS,
+);
+const gatewayPort = Number.isFinite(Number(process.env.GATEWAY_PORT))
+  ? Math.max(1, Number(process.env.GATEWAY_PORT))
+  : 18_800;
+const gatewayReadyTimeoutMs = Number.isFinite(
+  Number(process.env.MIKI_24_7_READY_TIMEOUT_MS),
+)
+  ? Math.max(5_000, Number(process.env.MIKI_24_7_READY_TIMEOUT_MS))
+  : 45_000;
+const webhookUrl = String(process.env.MIKI_24_7_WEBHOOK_URL || "").trim();
 
 let gateway = null;
 let stopping = false;
 let restartCount = 0;
 let restartTimer = null;
+let restartResetTimer = null;
 
 function now() {
   return new Date().toISOString();
@@ -103,15 +129,56 @@ function sleep(ms) {
   });
 }
 
-function spawnGateway() {
+async function notify(event, details = {}) {
+  if (!webhookUrl) return;
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        event,
+        timestamp: now(),
+        service: "agent-miki-supervisor",
+        ...details,
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch {
+    // Notification failure must never interfere with recovery.
+  }
+}
+
+async function waitForGatewayReady(child) {
+  const deadline = Date.now() + gatewayReadyTimeoutMs;
+  let lastError = 'not reachable';
+  while (!stopping && gateway === child && Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${gatewayPort}/gateway/health`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      if (response.ok) return true;
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  if (!stopping && gateway === child) {
+    console.error(`[miki-24-7] gateway readiness timeout after ${gatewayReadyTimeoutMs}ms (${lastError})`);
+    void notify("gateway_readiness_failed", { reason: lastError });
+  }
+  return false;
+}
+
+async function spawnGateway() {
   if (stopping) return;
   if (!fs.existsSync(gatewayEntry)) {
     throw new Error(`gateway build not found: ${gatewayEntry}. Run npm run build:all first.`);
   }
   persist('starting');
-  gateway = childProcess.spawn(process.execPath, [gatewayEntry], {
+  const child = childProcess.spawn(process.execPath, [gatewayEntry], {
     cwd: sourceRoot,
-      env: {
+    env: {
       ...process.env,
       MIKI_SOURCE_ROOT: sourceRoot,
       MIKI_RUNTIME_ROOT: runtimeRoot,
@@ -120,37 +187,69 @@ function spawnGateway() {
     },
     stdio: 'inherit',
   });
-  persist('running', { gatewayStartedAt: now() });
-  gateway.once('error', error => {
+  gateway = child;
+  persist('starting', { gatewayStartedAt: now(), gatewayReadyAt: null });
+  child.once('error', error => {
     console.error(`[miki-24-7] gateway spawn error: ${error.message}`);
   });
-  gateway.once('exit', (code, signal) => {
-    gateway = null;
+  child.once('exit', (code, signal) => {
+    if (gateway === child) gateway = null;
     if (stopping) {
       persist('stopped', { exitCode: code, signal });
       return;
     }
     restartCount += 1;
-    persist('restarting', { exitCode: code, signal });
-    if (maxRestarts > 0 && restartCount > maxRestarts) {
-      persist('failed', { exitCode: code, signal, reason: 'restart limit reached' });
-      console.error(`[miki-24-7] restart limit reached (${maxRestarts}); stopping.`);
-      process.exitCode = 1;
-      stopping = true;
+    persist('restarting', {
+      exitCode: code,
+      signal,
+      lastFailureAt: now(),
+      lastFailureReason: `gateway_exit:${code ?? signal ?? "unknown"}`,
+    });
+    void notify("gateway_crashed", {
+      exitCode: code,
+      signal,
+      restartCount,
+    });
+    if (restartLimitReached(maxRestarts, restartCount)) {
+      const reason = `restart limit reached (${maxRestarts})`;
+      console.error(`[miki-24-7] ${reason}; entering failed state.`);
+      void shutdown('restart limit reached').finally(() => {
+        persist('failed', { exitCode: code, signal, reason, failedAt: now() });
+        void notify("restart_exhausted", { reason, exitCode: code, signal });
+        process.exit(1);
+      });
       return;
     }
-    const delay = Math.min(maxBackoffMs, 1_000 * (2 ** Math.min(restartCount - 1, 6)));
+    const delay = computeRestartDelay(restartCount, maxBackoffMs);
     console.warn(`[miki-24-7] gateway exited (code=${code}, signal=${signal}); restarting in ${delay}ms.`);
     sleep(delay).then(() => {
-      if (!stopping) spawnGateway();
+      if (!stopping) void spawnGateway().catch(error => {
+        console.error(`[miki-24-7] restart failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
     });
   });
+
+  const ready = await waitForGatewayReady(child);
+  if (ready && gateway === child && !stopping) {
+    persist('running', { gatewayReadyAt: now() });
+    if (restartCount > 0) {
+      if (restartResetTimer) clearTimeout(restartResetTimer);
+      restartResetTimer = setTimeout(() => {
+        restartResetTimer = null;
+        restartCount = 0;
+        persist('running', { gatewayReadyAt: now(), restartCountReset: true });
+      }, restartResetAfterMs);
+    }
+  } else if (!stopping && gateway === child) {
+    child.kill(process.platform === 'win32' ? undefined : 'SIGTERM');
+  }
 }
 
 async function shutdown(signal) {
   if (stopping) return;
   stopping = true;
   if (restartTimer) clearTimeout(restartTimer);
+  if (restartResetTimer) clearTimeout(restartResetTimer);
   persist('stopping', { signal });
   if (gateway && !gateway.killed) {
     gateway.kill(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM');
@@ -169,7 +268,17 @@ async function shutdown(signal) {
 
 async function main() {
   if (process.argv.includes('--check')) {
-    console.log(JSON.stringify({ ok: fs.existsSync(gatewayEntry), gatewayEntry, sourceRoot, workspaceDir, runtimeRoot }, null, 2));
+    console.log(JSON.stringify({
+      ok: fs.existsSync(gatewayEntry),
+      gatewayEntry,
+      sourceRoot,
+      workspaceDir,
+      runtimeRoot,
+      maxRestarts,
+      maxBackoffMs,
+      restartResetAfterMs,
+      gatewayReadyTimeoutMs,
+    }, null, 2));
     return;
   }
   acquireLock();
@@ -184,7 +293,7 @@ async function main() {
     console.error('[miki-24-7] unhandled rejection:', reason);
     void shutdown('unhandledRejection').finally(() => process.exit(1));
   });
-  spawnGateway();
+  await spawnGateway();
   await new Promise(() => {});
 }
 

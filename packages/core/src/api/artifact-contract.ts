@@ -41,7 +41,7 @@ export function repairProviderModelMetadata(
   for (const relative of contract.required) {
     if (!/\.(?:md|markdown|mdx|txt)$/i.test(relative)) continue;
     const target = path.join(contract.root, relative);
-    if (!isWithinRoot(contract.root, target) || !fs.existsSync(target))
+    if (!isWithinRealRoot(contract.root, target) || !fs.existsSync(target))
       continue;
     try {
       const source = fs.readFileSync(target, "utf8");
@@ -61,8 +61,9 @@ export function repairProviderModelMetadata(
 export function reconcileArtifactOutcome(
   verification: ArtifactVerification,
   providerFailureDetected: boolean,
+  attachmentPersistenceSucceeded: boolean = true,
 ): ArtifactRunStatus {
-  if (!verification.ok) return "failed";
+  if (!verification.ok || !attachmentPersistenceSucceeded) return "failed";
   return providerFailureDetected ? "completed_with_warning" : "completed";
 }
 
@@ -72,6 +73,17 @@ function isWithinRoot(root: string, candidate: string): boolean {
     relative === "" ||
     (!relative.startsWith("..") && !path.isAbsolute(relative))
   );
+}
+
+function isWithinRealRoot(root: string, candidate: string): boolean {
+  if (!isWithinRoot(root, candidate)) return false;
+  try {
+    const realRoot = fs.realpathSync.native(root);
+    const realCandidate = fs.realpathSync.native(candidate);
+    return isWithinRoot(realRoot, realCandidate);
+  } catch {
+    return false;
+  }
 }
 
 export function detectArtifactContract(
@@ -153,7 +165,7 @@ export function verifyArtifactContract(
   const invalid: string[] = [];
   for (const relative of contract.required) {
     const target = path.join(contract.root, relative);
-    if (!isWithinRoot(contract.root, target) || !fs.existsSync(target)) {
+    if (!isWithinRealRoot(contract.root, target) || !fs.existsSync(target)) {
       missing.push(relative);
       continue;
     }

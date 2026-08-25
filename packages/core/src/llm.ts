@@ -37,7 +37,8 @@ export async function achatCompletion(
   modelOverride?: string,
 ): Promise<LLMResponse> {
   const model =
-    modelOverride?.trim() || (await import("@miki/config")).settings.defaultModel;
+    modelOverride?.trim() ||
+    (await import("@miki/config")).settings.defaultModel;
   return providerRegistry.complete(model, messages, extra);
 }
 

@@ -320,34 +320,21 @@ async function runDoctor() {
 
   checks.push(await secretVaultCheck());
 
-  // LLM provider API key availability check
-  const providerKeys = [
-    ["GEMINI_API_KEY", "Gemini"],
-    ["OPENAI_API_KEY", "OpenAI"],
-    ["OPENROUTER_API_KEY", "OpenRouter"],
-  ];
-  const configuredProviders = providerKeys.filter(
-    ([envKey]) => process.env[envKey] && process.env[envKey].trim() !== "",
+  // The direct-provider policy is intentionally limited to Gemini and
+  // llama.cpp. llama.cpp is local and does not require an API key.
+  const geminiConfigured =
+    typeof process.env.GEMINI_API_KEY === "string" &&
+    process.env.GEMINI_API_KEY.trim() !== "";
+  checks.push(
+    check(
+      "provider_keys",
+      "LLM provider keys",
+      geminiConfigured ? "pass" : "warn",
+      geminiConfigured
+        ? "Gemini credential is configured; llama.cpp remains the local no-key provider."
+        : "Gemini credential is not configured; local llama.cpp remains available without an API key.",
+    ),
   );
-  if (configuredProviders.length > 0) {
-    checks.push(
-      check(
-        "provider_keys",
-        "LLM provider keys",
-        "pass",
-        `Configured: ${configuredProviders.map(([, label]) => label).join(", ")}.`,
-      ),
-    );
-  } else {
-    checks.push(
-      check(
-        "provider_keys",
-        "LLM provider keys",
-        "warn",
-        "No provider API key found in the environment. Add a Gemini / OpenRouter / OpenAI key before using the agent.",
-      ),
-    );
-  }
 
   // Package js-yaml hoisting check
   const staleJsYaml = path.join(

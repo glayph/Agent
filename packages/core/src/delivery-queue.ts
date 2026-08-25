@@ -297,11 +297,17 @@ export class DeliveryQueue {
   private save(): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const temp = `${this.filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(
-      temp,
-      `${JSON.stringify({ version: 1, receipts: [...this.receipts.values()] }, null, 2)}\n`,
-      "utf-8",
-    );
+    const fd = fs.openSync(temp, "w");
+    try {
+      fs.writeFileSync(
+        fd,
+        `${JSON.stringify({ version: 1, receipts: [...this.receipts.values()] }, null, 2)}\n`,
+        "utf-8",
+      );
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(temp, this.filePath);
   }
 }

@@ -1,201 +1,240 @@
-#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Miki Gateway Process Supervisor
+    Agent Miki Windows service supervisor.
 
 .DESCRIPTION
-    Monitors the Miki gateway process and restarts it automatically on crash.
-    Designed for unattended 24/7 operation on Windows.
+    Starts the built gateway, waits for its health endpoint, monitors the
+    complete child process tree, and enters a failed/manual-intervention state
+    after the bounded restart budget is exhausted. Unlimited restarts require
+    an explicit environment override and are never the default.
 
-    Usage:
-        .\bin\supervisor.ps1
-        .\bin\supervisor.ps1 -WorkspaceDir "D:\Data\My Agent\Agent\miki"
-        .\bin\supervisor.ps1 -MaxRestarts 10   # limit restarts (0 = unbounded)
-
-    Control files (all in WorkspaceDir\data\):
-        SUPERVISOR_STOP     - create this file to stop the supervisor cleanly
-        RESTART_EXHAUSTED   - written by supervisor when max restarts reached
-
-    Environment variables (override defaults):
-        SUPERVISOR_RESTART_DELAY_MS   Milliseconds to wait before restarting (default: 5000)
-        SUPERVISOR_MAX_RESTARTS       Max restart attempts before giving up (0 = unbounded, default: 0)
-        SUPERVISOR_WEBHOOK_URL        POST a JSON payload here on safe-mode / restart exhausted
-        CORE_MAX_RESTARTS             Forwarded to gateway (0 = unbounded)
-        LOG_LEVEL                     Forwarded to gateway
-
-.PARAMETER WorkspaceDir
-    Root workspace directory. Defaults to the parent of this script's bin/ folder.
-
-.PARAMETER MaxRestarts
-    Maximum number of times to restart the gateway before giving up.
-    0 (default) means unbounded.
+    This script can run directly or under Windows Task Scheduler/Service.
+    It does not contain provider credentials.
 #>
 
 param(
     [string]$WorkspaceDir = "",
-    [int]$MaxRestarts = -1   # -1 = read from env or default 0 (unbounded)
+    [int]$MaxRestarts = -1,
+    [int]$ReadyTimeoutSec = -1,
+    [int]$RestartDelayMs = -1,
+    [int]$RestartResetAfterSec = -1,
+    [string]$EnvironmentFile = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── Resolve paths ─────────────────────────────────────────────────────────────
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot  = Split-Path -Parent $ScriptDir  # miki/
-
-if (-not $WorkspaceDir) {
-    $WorkspaceDir = $RepoRoot
+if (-not $EnvironmentFile) { $EnvironmentFile = $env:MIKI_ENV_FILE }
+if ($EnvironmentFile -and (Test-Path $EnvironmentFile)) {
+    foreach ($line in Get-Content -Path $EnvironmentFile) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$' -and $line -notmatch '^\s*#') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+        }
+    }
 }
 
-$DataDir    = Join-Path $WorkspaceDir "data"
-$LogFile    = Join-Path $DataDir "supervisor.log"
-$StopFile   = Join-Path $DataDir "SUPERVISOR_STOP"
-$ExhFile    = Join-Path $DataDir "RESTART_EXHAUSTED"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Split-Path -Parent $ScriptDir
+if (-not $WorkspaceDir) { $WorkspaceDir = $RepoRoot }
+$WorkspaceDir = [IO.Path]::GetFullPath($WorkspaceDir)
 
-# Ensure data directory exists
+$DataDir = Join-Path $WorkspaceDir "data"
+$LogFile = Join-Path $DataDir "supervisor.log"
+$StopFile = Join-Path $DataDir "SUPERVISOR_STOP"
+$ExhaustedFile = Join-Path $DataDir "RESTART_EXHAUSTED"
+$GatewayPort = [int]($env:GATEWAY_PORT ?? "18800")
+$GatewayEntry = $env:MIKI_GATEWAY_ENTRY
+if (-not $GatewayEntry) {
+    $GatewayEntry = Join-Path $RepoRoot "packages\gateway\dist\index.js"
+}
+
+if ($MaxRestarts -eq -1) {
+    $MaxRestarts = [int]($env:SUPERVISOR_MAX_RESTARTS ?? "5")
+}
+if ($ReadyTimeoutSec -eq -1) {
+    $ReadyTimeoutSec = [int]($env:SUPERVISOR_READY_TIMEOUT_SEC ?? "45")
+}
+if ($RestartDelayMs -eq -1) {
+    $RestartDelayMs = [int]($env:SUPERVISOR_RESTART_DELAY_MS ?? "5000")
+}
+if ($RestartResetAfterSec -eq -1) {
+    $RestartResetAfterSec = [int]($env:SUPERVISOR_RESTART_RESET_AFTER_SEC ?? "300")
+}
+
+$AllowUnlimited = (($env:SUPERVISOR_ALLOW_UNLIMITED_RESTARTS ?? "false") -eq "true")
+if ($MaxRestarts -le 0 -and -not $AllowUnlimited) { $MaxRestarts = 5 }
+if ($ReadyTimeoutSec -lt 5) { $ReadyTimeoutSec = 45 }
+if ($RestartDelayMs -lt 1000) { $RestartDelayMs = 5000 }
+if ($RestartResetAfterSec -lt 30) { $RestartResetAfterSec = 300 }
+
 if (-not (Test-Path $DataDir)) {
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 }
 
-# ── Config ────────────────────────────────────────────────────────────────────
-
-$RestartDelayMs = [int]($env:SUPERVISOR_RESTART_DELAY_MS ?? "5000")
-
-if ($MaxRestarts -eq -1) {
-    $MaxRestarts = [int]($env:SUPERVISOR_MAX_RESTARTS ?? "0")
-}
-
-$WebhookUrl = $env:SUPERVISOR_WEBHOOK_URL ?? ""
-
-# The gateway entry point — adjust if your build output path differs
-$GatewayEntry = Join-Path $RepoRoot "packages\gateway\dist\index.js"
-if (-not (Test-Path $GatewayEntry)) {
-    # Fallback: try the npm start script
-    $GatewayEntry = ""
-}
-
-# ── Logging ───────────────────────────────────────────────────────────────────
-
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
-    $ts = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+    $ts = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
     $line = "[$ts] [$Level] $Message"
     Write-Host $line
-    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
+    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch { }
 }
-
-# ── Webhook notification ──────────────────────────────────────────────────────
 
 function Send-Webhook {
     param([string]$Event, [string]$Detail = "")
-    if (-not $WebhookUrl) { return }
+    $url = $env:SUPERVISOR_WEBHOOK_URL
+    if (-not $url) { return }
     $payload = @{
-        event     = $Event
-        detail    = $Detail
-        hostname  = $env:COMPUTERNAME
+        event = $Event
+        detail = $Detail
+        hostname = $env:COMPUTERNAME
         timestamp = (Get-Date -Format o)
     } | ConvertTo-Json -Compress
     try {
-        Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $payload `
-            -ContentType "application/json" -TimeoutSec 10 -ErrorAction Stop
+        Invoke-RestMethod -Uri $url -Method Post -Body $payload `
+            -ContentType "application/json" -TimeoutSec 10 -ErrorAction Stop | Out-Null
         Write-Log "Webhook delivered: $Event"
     } catch {
-        Write-Log "Webhook failed: $_" "WARN"
+        Write-Log "Webhook delivery failed for $Event" "WARN"
     }
 }
 
-# ── Gateway launch ────────────────────────────────────────────────────────────
+function Stop-Gateway {
+    param([object]$Process)
+    if (-not $Process) { return }
+    try {
+        if (-not $Process.HasExited) {
+            Write-Log "Stopping gateway process tree (PID $($Process.Id))" "WARN"
+            & taskkill.exe /T /F /PID $Process.Id 2>$null | Out-Null
+        }
+    } catch {
+        Write-Log "Gateway process-tree cleanup failed" "WARN"
+    }
+}
 
 function Start-Gateway {
-    # Forward relevant env vars to the gateway
-    $env:Miki_WORKSPACE_DIR = $WorkspaceDir
-    $env:Miki_RUNTIME_ROOT  = $RepoRoot
-    if ($env:CORE_MAX_RESTARTS -eq $null) { $env:CORE_MAX_RESTARTS = "0" }
+    $env:MIKI_WORKSPACE_DIR = $WorkspaceDir
+    $env:MIKI_RUNTIME_ROOT = $RepoRoot
+    $env:MIKI_24_7_RUNTIME = "1"
+    if (-not $env:CORE_MAX_RESTARTS) { $env:CORE_MAX_RESTARTS = "5" }
 
-    if ($GatewayEntry) {
-        Write-Log "Launching gateway: node $GatewayEntry"
-        return Start-Process -FilePath "node" -ArgumentList $GatewayEntry `
-            -WorkingDirectory $WorkspaceDir -PassThru -NoNewWindow
-    } else {
-        Write-Log "Launching gateway via: npm run start"
-        return Start-Process -FilePath "npm" -ArgumentList "run","start" `
+    if (Test-Path $GatewayEntry) {
+        Write-Log "Launching gateway from built entry"
+        return Start-Process -FilePath "node.exe" -ArgumentList @($GatewayEntry) `
             -WorkingDirectory $RepoRoot -PassThru -NoNewWindow
     }
+
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $npm) { throw "Gateway build not found and npm.cmd is unavailable" }
+    Write-Log "Launching gateway through npm fallback" "WARN"
+    return Start-Process -FilePath $npm.Source -ArgumentList @("run", "start") `
+        -WorkingDirectory $RepoRoot -PassThru -NoNewWindow
 }
 
-# ── Main supervisor loop ──────────────────────────────────────────────────────
+function Wait-ForGatewayReady {
+    param([object]$Process)
+    $deadline = (Get-Date).AddSeconds($ReadyTimeoutSec)
+    $lastError = "not reachable"
+    while ((Get-Date) -lt $deadline) {
+        if ($Process.HasExited) {
+            $lastError = "gateway exited with code $($Process.ExitCode)"
+            break
+        }
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$GatewayPort/gateway/health" `
+                -TimeoutSec 2 -ErrorAction Stop
+            if ($health.ok -eq $true -or $null -ne $health) {
+                return $true
+            }
+            $lastError = "health response was not ready"
+        } catch {
+            $lastError = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    Write-Log "Gateway readiness timeout after ${ReadyTimeoutSec}s: $lastError" "ERROR"
+    return $false
+}
 
 Write-Log "=========================================="
-Write-Log "Miki Supervisor starting"
-Write-Log "  WorkspaceDir  : $WorkspaceDir"
-Write-Log "  MaxRestarts   : $(if ($MaxRestarts -eq 0) { 'unbounded' } else { $MaxRestarts })"
-Write-Log "  RestartDelay  : ${RestartDelayMs}ms"
-Write-Log "  WebhookUrl    : $(if ($WebhookUrl) { $WebhookUrl } else { '(none)' })"
+Write-Log "Agent Miki Windows supervisor starting"
+Write-Log "  WorkspaceDir       : $WorkspaceDir"
+Write-Log "  GatewayPort        : $GatewayPort"
+Write-Log "  MaxRestarts        : $(if ($AllowUnlimited) { 'unlimited (explicit override)' } else { $MaxRestarts })"
+Write-Log "  ReadyTimeout       : ${ReadyTimeoutSec}s"
+Write-Log "  RestartDelay       : ${RestartDelayMs}ms"
+Write-Log "  RestartResetAfter  : ${RestartResetAfterSec}s"
 Write-Log "=========================================="
 
-# Remove stale control files from previous runs
 if (Test-Path $StopFile) { Remove-Item $StopFile -Force }
-if (Test-Path $ExhFile)  { Remove-Item $ExhFile  -Force }
+if (Test-Path $ExhaustedFile) { Remove-Item $ExhaustedFile -Force }
 
-$Restarts = 0
+$RestartCount = 0
 $GatewayProcess = $null
+$StopRequested = $false
 
 try {
-    while ($true) {
-
-        # Check for stop signal before launching
+    while (-not $StopRequested) {
         if (Test-Path $StopFile) {
-            Write-Log "SUPERVISOR_STOP file detected. Exiting supervisor cleanly."
+            Write-Log "SUPERVISOR_STOP detected before launch"
             break
         }
 
-        Write-Log "Starting gateway process (restart #$Restarts)..."
+        Write-Log "Starting gateway (restart count $RestartCount)"
         try {
             $GatewayProcess = Start-Gateway
+            Write-Log "Gateway PID: $($GatewayProcess.Id)"
         } catch {
-            Write-Log "Failed to launch gateway: $_" "ERROR"
+            $RestartCount++
+            Write-Log "Gateway launch failed: $($_.Exception.Message)" "ERROR"
+            if (-not $AllowUnlimited -and $RestartCount -gt $MaxRestarts) { break }
             Start-Sleep -Milliseconds $RestartDelayMs
             continue
         }
 
-        Write-Log "Gateway PID: $($GatewayProcess.Id)"
+        if (-not (Wait-ForGatewayReady -Process $GatewayProcess)) {
+            Stop-Gateway -Process $GatewayProcess
+            $ExitCode = -1
+        } else {
+            Write-Log "Gateway readiness confirmed"
+            $HealthySince = Get-Date
+            while (-not $GatewayProcess.HasExited) {
+                if (Test-Path $StopFile) {
+                    Write-Log "SUPERVISOR_STOP detected; shutting down cleanly"
+                    $StopRequested = $true
+                    Stop-Gateway -Process $GatewayProcess
+                    break
+                }
+                if (((Get-Date) - $HealthySince).TotalSeconds -ge $RestartResetAfterSec -and $RestartCount -gt 0) {
+                    $RestartCount = 0
+                    $HealthySince = Get-Date
+                    Write-Log "Stable gateway window reached; restart budget reset"
+                }
+                Start-Sleep -Seconds 1
+            }
+            $ExitCode = if ($GatewayProcess.HasExited) { $GatewayProcess.ExitCode } else { 0 }
+        }
 
-        # Wait for gateway to exit
-        $GatewayProcess.WaitForExit()
-        $ExitCode = $GatewayProcess.ExitCode
-        Write-Log "Gateway exited with code $ExitCode" "WARN"
-
-        # Check stop signal immediately after exit
-        if (Test-Path $StopFile) {
-            Write-Log "SUPERVISOR_STOP file detected. Not restarting."
+        if ($StopRequested) { break }
+        $RestartCount++
+        Write-Log "Gateway exited with code $ExitCode (restart count $RestartCount)" "WARN"
+        if (-not $AllowUnlimited -and $RestartCount -gt $MaxRestarts) {
+            $message = "Gateway restart budget exhausted after $RestartCount failures. Manual intervention required."
+            Write-Log $message "ERROR"
+            Set-Content -Path $ExhaustedFile -Value $message -Encoding UTF8
+            Send-Webhook -Event "restart_exhausted" -Detail $message
             break
         }
 
-        # Check restart limit
-        $Restarts++
-        if ($MaxRestarts -gt 0 -and $Restarts -ge $MaxRestarts) {
-            $msg = "Gateway crashed $Restarts times — max restarts ($MaxRestarts) exhausted."
-            Write-Log $msg "ERROR"
-            Set-Content -Path $ExhFile -Value $msg -Encoding UTF8
-            Send-Webhook -Event "restart_exhausted" -Detail $msg
-            Write-Log "Wrote $ExhFile sentinel. Manual intervention required."
-            break
-        }
-
-        $msg = "Restarting gateway in $($RestartDelayMs)ms (attempt $Restarts)..."
-        Write-Log $msg "WARN"
-        Send-Webhook -Event "gateway_crashed" -Detail "exit_code=$ExitCode restart_attempt=$Restarts"
-
-        Start-Sleep -Milliseconds $RestartDelayMs
+        $Delay = [Math]::Min(60000, $RestartDelayMs * [Math]::Pow(2, [Math]::Min($RestartCount - 1, 6)))
+        $Delay = [int]$Delay
+        Write-Log "Restarting gateway in ${Delay}ms"
+        Send-Webhook -Event "gateway_crashed" -Detail "exit_code=$ExitCode restart_count=$RestartCount"
+        Start-Sleep -Milliseconds $Delay
     }
 } finally {
-    # Ensure we don't leave a zombie gateway on supervisor exit
-    if ($GatewayProcess -and -not $GatewayProcess.HasExited) {
-        Write-Log "Stopping gateway (PID $($GatewayProcess.Id)) before supervisor exit..."
-        try {
-            taskkill /T /PID $GatewayProcess.Id /F 2>$null
-        } catch {}
-    }
-    Write-Log "Supervisor exited."
+    Stop-Gateway -Process $GatewayProcess
+    Write-Log "Supervisor exited"
 }
+
+if (Test-Path $ExhaustedFile) { exit 1 }
+exit 0

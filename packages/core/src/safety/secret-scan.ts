@@ -59,6 +59,8 @@ export interface SecretScanReport {
   scannedFiles: number;
   skippedFiles: number;
   findings: SecretScanFinding[];
+  /** Matches in non-production tests/examples are reported but do not degrade runtime health. */
+  fixtureFindings: SecretScanFinding[];
   fixedFiles: string[];
 }
 
@@ -139,6 +141,23 @@ function collectFiles(
   return { files, skippedFiles };
 }
 
+function isSafeStaticValue(pattern: string, value: string): boolean {
+  if (pattern !== "secret-assignment") return false;
+  // Code often assigns an environment-variable name rather than a secret
+  // value. These identifiers are not credentials and should not degrade the
+  // runtime health report.
+  if (
+    /^[A-Z][A-Z0-9_]{5,}$/.test(value) &&
+    /_(?:KEY|TOKEN|SECRET|PASSWORD|URL)$/.test(value)
+  ) {
+    return true;
+  }
+  // This is an explicit local adapter sentinel, not an authentication secret.
+  return /^(?:local-no-auth-required|not-configured|not-set|none|null)$/i.test(
+    value,
+  );
+}
+
 function collectMatches(content: string): Match[] {
   const matches: Match[] = [];
   for (const pattern of PATTERNS) {
@@ -153,6 +172,9 @@ function collectMatches(content: string): Match[] {
         pattern.name !== "aws-key"
           ? match[1]
           : match[0];
+      if (isSafeStaticValue(pattern.name, value)) {
+        continue;
+      }
       const offset = match[0].indexOf(value);
       matches.push({
         pattern: pattern.name,
@@ -180,6 +202,21 @@ function lineAt(content: string, offset: number): number {
   return content.slice(0, offset).split(/\r?\n/).length;
 }
 
+function isFixturePath(relativePath: string): boolean {
+  const normalized = relativePath.replaceAll(path.sep, "/");
+  const base = path.basename(normalized);
+  return (
+    base === ".env.example" ||
+    base === ".env.sample" ||
+    base === ".env.template" ||
+    normalized.includes("/__tests__/") ||
+    normalized.includes("/test/") ||
+    normalized.includes("/tests/") ||
+    /(?:^|[._-])(?:test|spec)(?:[._-]|$)/i.test(base) ||
+    /_test\.(?:go|js|ts|tsx|jsx|mjs|cjs)$/i.test(base)
+  );
+}
+
 function replaceMatches(content: string, matches: Match[]): string {
   let output = content;
   for (const match of [...matches].sort((a, b) => b.start - a.start)) {
@@ -199,6 +236,7 @@ export function scanSecrets(
     maxFileBytes,
   );
   const findings: SecretScanFinding[] = [];
+  const fixtureFindings: SecretScanFinding[] = [];
   const fixedFiles = new Set<string>();
   let skippedFiles = initialSkipped;
 
@@ -213,12 +251,17 @@ export function scanSecrets(
     const matches = collectMatches(content);
     if (matches.length === 0) continue;
     const file = relativeFile(root, filePath);
-    findings.push({
+    const finding = {
       file,
       line: lineAt(content, matches[0].start),
       pattern: matches[0].pattern,
       redactedPreview: redactPreview(matches[0].value),
-    });
+    };
+    if (isFixturePath(file)) {
+      fixtureFindings.push(finding);
+      continue;
+    }
+    findings.push(finding);
     if (
       options.fix &&
       path.basename(filePath) !== ".env" &&
@@ -239,6 +282,7 @@ export function scanSecrets(
     scannedFiles: files.length,
     skippedFiles,
     findings,
+    fixtureFindings,
     fixedFiles: [...fixedFiles].sort(),
   };
 }

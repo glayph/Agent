@@ -44,7 +44,10 @@ function explicitToolNames(userMessage: string): Set<string> {
   const intent = detectDeterministicIntent(userMessage);
   if (!intent) return new Set<string>();
   if (intent.kind === "web_search") return new Set(["web_search"]);
-  return new Set(["file_write", "file_read"]);
+  if (intent.kind === "file_workflow") {
+    return new Set(["file_write", "file_read"]);
+  }
+  return new Set();
 }
 
 function includesTerm(text: string, term: string): boolean {

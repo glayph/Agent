@@ -59,8 +59,15 @@ export function formatMessageTime(dateRaw: number | string | Date): string {
 }
 
 export function useMikiChat() {
-  const { messages, connectionState, isTyping, activeSessionId, contextUsage } =
-    useAtomValue(chatAtom)
+  const {
+    messages,
+    connectionState,
+    isTyping,
+    activeSessionId,
+    contextUsage,
+    activeRunModel,
+    activeRunProvider,
+  } = useAtomValue(chatAtom)
 
   return {
     messages,
@@ -68,6 +75,8 @@ export function useMikiChat() {
     isTyping,
     activeSessionId,
     contextUsage,
+    activeRunModel,
+    activeRunProvider,
     sendMessage: sendChatMessage,
     deleteMessage: deleteChatMessage,
     editMessage: editChatMessage,

@@ -1,4 +1,6 @@
 import * as crypto from "crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export interface AgentTask {
   id: string;
@@ -27,6 +29,8 @@ export interface TaskQueueConfig {
   defaultPriority?: number;
   enableAging?: boolean;
   agingFactorMs?: number;
+  /** Optional atomic JSON snapshot for restart recovery. */
+  persistencePath?: string;
 }
 
 class BinaryHeap<T> {
@@ -132,13 +136,18 @@ export class TaskQueue {
   private _defaultPriority: number;
   private _enableAging: boolean;
   private _agingFactorMs: number;
+  private _persistencePath?: string;
 
   constructor(config: TaskQueueConfig = {}) {
     this._maxSize = config.maxSize ?? 50;
     this._defaultPriority = config.defaultPriority ?? 0;
     this._enableAging = config.enableAging ?? true;
     this._agingFactorMs = config.agingFactorMs ?? 10000;
+    this._persistencePath = config.persistencePath
+      ? path.resolve(config.persistencePath)
+      : undefined;
     this._pending = new BinaryHeap<AgentTask>(this._compareTasks.bind(this));
+    this._load();
   }
 
   private _effectivePriority(task: AgentTask): number {
@@ -172,6 +181,7 @@ export class TaskQueue {
     this._pending.push(task);
     this._pendingArray.push(task);
     this._syncPendingIndex();
+    this._save();
     return task;
   }
 
@@ -183,6 +193,7 @@ export class TaskQueue {
     task.startedAt = Date.now();
     this._running.set(taskId, task);
     this._removeFromPending(taskId);
+    this._save();
   }
 
   dequeue(): AgentTask | null {
@@ -198,6 +209,7 @@ export class TaskQueue {
     this._tasks.set(task.id, task);
     this._removeFromPendingArray(task.id);
     this._syncPendingIndex();
+    this._save();
     return task;
   }
 
@@ -210,6 +222,7 @@ export class TaskQueue {
     task.checkpointId = checkpointId;
     this._running.delete(taskId);
     this._completed.set(taskId, task);
+    this._save();
   }
 
   fail(taskId: string, error: string): void {
@@ -221,6 +234,7 @@ export class TaskQueue {
     task.completedAt = Date.now();
     this._running.delete(taskId);
     this._completed.set(taskId, task);
+    this._save();
   }
 
   cancel(taskId: string): void {
@@ -233,12 +247,14 @@ export class TaskQueue {
       task.status = "cancelled";
       task.completedAt = Date.now();
       this._completed.set(taskId, task);
+      this._save();
     } else if (task.status === "running") {
       task.abortController?.abort();
       task.status = "cancelled";
       task.completedAt = Date.now();
       this._running.delete(taskId);
       this._completed.set(taskId, task);
+      this._save();
     }
   }
 
@@ -300,7 +316,64 @@ export class TaskQueue {
       }
     }
 
+    if (removed > 0) this._save();
     return removed;
+  }
+
+  private _load(): void {
+    if (!this._persistencePath) return;
+    try {
+      const parsed = JSON.parse(
+        fs.readFileSync(this._persistencePath, "utf-8"),
+      ) as { tasks?: unknown };
+      const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+      for (const value of tasks) {
+        if (!isPersistableTask(value)) continue;
+        const task: AgentTask = { ...value };
+        // A process restart invalidates the old controller and running lease;
+        // replay the work as pending instead of claiming it completed.
+        if (task.status === "running") {
+          task.status = "pending";
+          delete task.startedAt;
+        }
+        this._tasks.set(task.id, task);
+        if (task.status === "pending") {
+          this._pending.push(task);
+          this._pendingArray.push(task);
+        } else {
+          this._completed.set(task.id, task);
+        }
+      }
+      this._syncPendingIndex();
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        console.error(
+          "[TaskQueue] persisted queue could not be loaded; starting empty:",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+  }
+
+  private _save(): void {
+    if (!this._persistencePath) return;
+    fs.mkdirSync(path.dirname(this._persistencePath), { recursive: true });
+    const tasks = [...this._tasks.values()].map(
+      ({ abortController: _abortController, ...task }) => task,
+    );
+    const temporary = `${this._persistencePath}.${process.pid}.tmp`;
+    const fd = fs.openSync(temporary, "w");
+    try {
+      fs.writeFileSync(
+        fd,
+        `${JSON.stringify({ version: 1, tasks }, null, 2)}\n`,
+        "utf-8",
+      );
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temporary, this._persistencePath);
   }
 
   private _syncPendingIndex(): void {
@@ -326,4 +399,23 @@ export class TaskQueue {
       this._pendingArray.splice(idx, 1);
     }
   }
+}
+
+function isPersistableTask(
+  value: unknown,
+): value is Omit<AgentTask, "abortController"> {
+  if (!value || typeof value !== "object") return false;
+  const task = value as Record<string, unknown>;
+  return (
+    typeof task.id === "string" &&
+    typeof task.sessionId === "string" &&
+    typeof task.message === "string" &&
+    ["pending", "running", "completed", "failed", "cancelled"].includes(
+      String(task.status),
+    ) &&
+    typeof task.priority === "number" &&
+    Number.isFinite(task.priority) &&
+    typeof task.createdAt === "number" &&
+    Number.isFinite(task.createdAt)
+  );
 }

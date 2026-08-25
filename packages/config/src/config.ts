@@ -166,7 +166,10 @@ export class Settings {
   }
 
   get llmBaseUrl(): string {
-    return process.env["GEMINI_BASE_URL"] || "https://generativelanguage.googleapis.com/v1beta/openai/";
+    return (
+      process.env["GEMINI_BASE_URL"] ||
+      "https://generativelanguage.googleapis.com/v1beta/openai/"
+    );
   }
 
   get telegramBotToken(): string {
@@ -182,7 +185,8 @@ export class Settings {
       model.startsWith("llama.cpp/") ||
       model.startsWith("llama-cpp/") ||
       model.startsWith("local/")
-    ) return "llama.cpp";
+    )
+      return "llama.cpp";
     return "google";
   }
 

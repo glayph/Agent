@@ -413,6 +413,8 @@ export function ChatPage() {
     isTyping,
     activeSessionId,
     contextUsage,
+    activeRunModel,
+    activeRunProvider,
     sendMessage,
     deleteMessage,
     editMessage,
@@ -1065,8 +1067,20 @@ export function ChatPage() {
     window.dispatchEvent(new Event("Miki:command"))
   }, [])
 
+  const runtimeModelLabel = activeRunModel
+    ? `${activeRunProvider ? `${activeRunProvider} / ` : ""}${activeRunModel}`
+    : undefined
   const headerControls = (
-    <>
+    <div className="flex items-center gap-2">
+      {runtimeModelLabel && (
+        <span
+          className="text-muted-foreground max-w-56 truncate text-[10px]"
+          data-testid="active-run-model"
+          title={`Server-reported run model: ${runtimeModelLabel}`}
+        >
+          Run: {runtimeModelLabel}
+        </span>
+      )}
       {hasAvailableModels && (
         <ModelSelector
           defaultModelName={defaultModelName}
@@ -1077,7 +1091,7 @@ export function ChatPage() {
           compact={isMobile}
         />
       )}
-    </>
+    </div>
   )
 
   return (

@@ -28,6 +28,7 @@ export interface DoctorReport {
 
 export interface DoctorOptions {
   strict?: boolean;
+  requireGo?: boolean;
   includeExternalChecks?: boolean;
   includeMigrations?: boolean;
   includeSecretScan?: boolean;
@@ -124,6 +125,24 @@ function summarize(checks: DoctorCheckResult[]): DoctorStatus {
   return "pass";
 }
 
+export function goDoctorCheck(
+  version: string | null,
+  required = false,
+): DoctorCheckResult {
+  if (version) {
+    return check("go_version", "Go", "pass", version, { required });
+  }
+  return check(
+    "go_version",
+    "Go",
+    required ? "fail" : "pass",
+    required
+      ? "Go is required but not available on PATH."
+      : "Go is optional for the Node.js runtime; Go CLI checks are skipped.",
+    { required },
+  );
+}
+
 export async function runDoctor(
   paths: RuntimePaths,
   options: DoctorOptions = {},
@@ -153,11 +172,9 @@ export async function runDoctor(
 
   const goVersion = commandVersion("go", ["version"]);
   checks.push(
-    check(
-      "go_version",
-      "Go",
-      goVersion ? "pass" : "warn",
-      goVersion || "Go is not available; Go backend tests/builds may fail.",
+    goDoctorCheck(
+      goVersion,
+      options.requireGo ?? process.env.MIKI_REQUIRE_GO === "true",
     ),
   );
 

@@ -733,6 +733,45 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
+  it("exposes only supported OAuth providers and never returns raw tokens", async () => {
+    await withLauncherCompatServer(async (request) => {
+      const fakeToken = "test-only-gemini-token-1234567890";
+      const login = await request("/oauth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "gemini",
+          method: "token",
+          token: fakeToken,
+        }),
+      });
+      expect(login.status).toBe(200);
+
+      const providers = await request("/oauth/providers");
+      const providerBody = await providers.json();
+      expect(providers.status).toBe(200);
+      expect(
+        providerBody.providers.map((item: { id: string }) => item.id),
+      ).toEqual(["gemini", "llama.cpp"]);
+
+      const unsupported = await request("/oauth/token/openai");
+      expect(unsupported.status).toBe(404);
+      expect(await unsupported.text()).not.toContain(fakeToken);
+
+      const tokenResponse = await request("/oauth/token/gemini");
+      const tokenText = await tokenResponse.text();
+      expect(tokenResponse.status).toBe(200);
+      expect(tokenText).not.toContain(fakeToken);
+      expect(JSON.parse(tokenText)).toEqual(
+        expect.objectContaining({
+          provider: "gemini",
+          configured: true,
+          auth_method: "token",
+          masked_token: "test...7890",
+        }),
+      );
+    });
+  });
+
   it("rejects invalid model identifiers at the API boundary", async () => {
     await withLauncherCompatServer(async (request) => {
       for (const modelName of [
@@ -804,61 +843,6 @@ describe("launcher compatibility config validation", () => {
       const body = await create.json();
       expect(body.error).toContain("credential is required");
     });
-  });
-
-  it("preflights OpenCode Zen when its models endpoint returns a top-level array", async () => {
-    const previousFetch = globalThis.fetch;
-    const previousKey = process.env.OPENCODE_API_KEY;
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("http://127.0.0.1")) return previousFetch(input, init);
-      if (url.endsWith("/models")) {
-        return new Response(JSON.stringify([{ id: "mimo-v2.5-free" }]), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.endsWith("/chat/completions")) {
-        return new Response(
-          JSON.stringify({
-            choices: [{ message: { content: "READY" }, finish_reason: "stop" }],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      return new Response("{}", { status: 200 });
-    }) as typeof fetch;
-    try {
-      await withLauncherCompatServer(async (request) => {
-        process.env.OPENCODE_API_KEY = "test-opencode-key";
-        const response = await request("/models/test-inline", {
-          method: "POST",
-          body: JSON.stringify({
-            provider: "opencode",
-            model: "opencode/mimo-v2.5-free",
-          }),
-        });
-        const body = await response.json();
-        expect(response.status).toBe(200);
-        expect(body).toEqual(
-          expect.objectContaining({
-            success: true,
-            status: "ready",
-            readiness_status: "ready",
-            verification_level: "completion",
-            completion_tested: true,
-            provider: "opencode",
-          }),
-        );
-      });
-    } finally {
-      globalThis.fetch = previousFetch;
-      if (previousKey === undefined) delete process.env.OPENCODE_API_KEY;
-      else process.env.OPENCODE_API_KEY = previousKey;
-    }
   });
 
   it("preflights Gemini with native model discovery and OpenAI-compatible completion auth", async () => {
@@ -1184,43 +1168,34 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
-  it("exposes installed plugin providers in launcher model provider options", async () => {
+  it("keeps launcher model provider options restricted to Gemini and llama.cpp", async () => {
     await withLauncherCompatServer(async (request, workspaceDir) => {
       await registerLauncherPluginContracts(workspaceDir, {
         providers: [
           {
-            name: "local-openai-compatible",
-            description: "Local OpenAI-compatible provider",
+            name: "unsupported-provider-plugin",
+            description: "Must not expand the active provider policy",
             metadata: {
               id: "local-ai",
-              display_name: "Local AI",
+              display_name: "Unsupported Local AI",
               base_url: "http://127.0.0.1:9000/v1",
               auth_method: "none",
               local: true,
-              supports_fetch: true,
-              models: ["local-chat", "local-reasoner"],
+              models: ["local-chat"],
             },
           },
         ],
       });
 
       const models = await request("/models").then((res) => res.json());
-
-      expect(models.provider_options).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            id: "local-ai",
-            display_name: "Local AI",
-            default_api_base: "http://127.0.0.1:9000/v1",
-            default_auth_method: "none",
-            empty_api_key_allowed: true,
-            supports_fetch: true,
-            local: true,
-            common_models: ["local-chat", "local-reasoner"],
-            source: "plugin",
-          }),
-        ]),
+      const providerIds = models.provider_options.map(
+        (provider: { id: string }) => provider.id,
       );
+
+      expect(providerIds).toEqual(["google", "llama.cpp"]);
+      expect(providerIds).not.toContain("local-ai");
+      expect(providerIds).not.toContain("openai");
+      expect(providerIds).not.toContain("opencode");
     });
   });
 
@@ -1392,28 +1367,14 @@ describe("launcher compatibility runtime apply", () => {
     );
   });
 
-  it("preserves provider prefixes for runtime model identities", () => {
+  it("preserves supported provider prefixes for runtime model identities", () => {
     expect(
       runtimeModelName({
-        model_name: "openai/gpt-4o-mini",
-        provider: "openai",
-        model: "gpt-4o-mini",
+        model_name: "gemini/gemini-2.5-flash",
+        provider: "gemini",
+        model: "gemini-2.5-flash",
       }),
-    ).toBe("openai/gpt-4o-mini");
-    expect(
-      runtimeModelName({
-        model_name: "opencode/mimo-v2.5-free",
-        provider: "opencode",
-        model: "mimo-v2.5-free",
-      }),
-    ).toBe("opencode/mimo-v2.5-free");
-    expect(
-      runtimeModelName({
-        model_name: "claude/claude-3-5-sonnet",
-        provider: "claude",
-        model: "claude-3-5-sonnet",
-      }),
-    ).toBe("claude/claude-3-5-sonnet");
+    ).toBe("gemini-2.5-flash");
     expect(
       runtimeModelName({
         model_name: "llama.cpp/local-test",
@@ -2881,9 +2842,9 @@ describe("provider tool readiness", () => {
         const response = await request("/models/test-tools-inline", {
           method: "POST",
           body: JSON.stringify({
-            provider: "opencode",
-            model: "opencode/mimo-v2.5-free",
-            api_key: "test-opencode-key",
+            provider: "gemini",
+            model: "gemini/gemini-2.5-flash",
+            api_key: "test-gemini-key",
           }),
         });
         const body = await response.json();
@@ -2897,7 +2858,7 @@ describe("provider tool readiness", () => {
             tools_tested: true,
             dry_run_executed: true,
             final_response_received: true,
-            provider: "opencode",
+            provider: "gemini",
           }),
         );
         expect(complete).toHaveBeenCalledTimes(2);

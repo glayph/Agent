@@ -55,6 +55,7 @@ type FileManagerSystemWritePolicy = boolean | (() => boolean);
 interface FileManagerRouterOptions {
   runtimePaths: RuntimePaths;
   allowSystemWrite?: FileManagerSystemWritePolicy;
+  allowSystemRead?: FileManagerSystemWritePolicy;
   /** @deprecated Use runtimePaths instead */
   workspaceDir?: string;
 }
@@ -207,12 +208,46 @@ function allowSystemWriteFromEnv(): boolean {
   return false;
 }
 
+function allowSystemReadFromEnv(): boolean {
+  const envVal = readMikiEnv("MIKI_FILE_MANAGER_ALLOW_SYSTEM_READ");
+  return envVal === "true";
+}
+
 function resolveAllowSystemWrite(
   policy: FileManagerSystemWritePolicy | undefined,
 ): boolean {
   if (typeof policy === "function") return policy();
   if (typeof policy === "boolean") return policy;
   return allowSystemWriteFromEnv();
+}
+
+function resolveAllowSystemRead(
+  policy: FileManagerSystemWritePolicy | undefined,
+): boolean {
+  if (typeof policy === "function") return policy();
+  if (typeof policy === "boolean") return policy;
+  return allowSystemReadFromEnv();
+}
+
+async function assertReadableScope(
+  targetPath: string,
+  runtimePaths: RuntimePaths,
+  allowSystemRead: boolean,
+): Promise<void> {
+  if (allowSystemRead) return;
+  const workspacePath = path.resolve(
+    runtimePaths.sourceDir ?? runtimePaths.dataDir,
+  );
+  const resolved = path.resolve(targetPath);
+  let realPath = resolved;
+  try {
+    realPath = await fsp.realpath(resolved);
+  } catch {
+    // The subsequent file/directory assertion will report a missing target.
+  }
+  if (!isPathInside(workspacePath, realPath)) {
+    throw new FileManagerError(403, "read outside workspace is not allowed");
+  }
 }
 
 async function assertMutableScope(
@@ -1050,6 +1085,7 @@ function rootCanWrite(
 function rootEntries(
   runtimePaths: RuntimePaths,
   allowSystemWrite: boolean,
+  allowSystemRead: boolean,
 ): FileRoot[] {
   const roots: FileRoot[] = [];
   const seen = new Set<string>();
@@ -1057,22 +1093,23 @@ function rootEntries(
     runtimePaths.sourceDir ?? process.cwd(),
   );
 
-  windowsQuickAccessFolders().forEach((folder, index) => {
-    const canWrite = rootCanWrite(
-      folder.path,
-      resolvedWorkspace,
-      allowSystemWrite,
-    );
-    pushRoot(roots, seen, {
-      id: `quick-access-${index}`,
-      label: folder.label,
-      path: folder.path,
-      kind: "quickAccess",
-      protected: false,
-      canWrite,
-      canRun: canWrite,
+  if (allowSystemRead)
+    windowsQuickAccessFolders().forEach((folder, index) => {
+      const canWrite = rootCanWrite(
+        folder.path,
+        resolvedWorkspace,
+        allowSystemWrite,
+      );
+      pushRoot(roots, seen, {
+        id: `quick-access-${index}`,
+        label: folder.label,
+        path: folder.path,
+        kind: "quickAccess",
+        protected: false,
+        canWrite,
+        canRun: canWrite,
+      });
     });
-  });
 
   pushRoot(roots, seen, {
     id: "workspace",
@@ -1083,6 +1120,8 @@ function rootEntries(
     canWrite: true,
     canRun: true,
   });
+
+  if (!allowSystemRead) return roots;
 
   const homeCanWrite = rootCanWrite(
     os.homedir(),
@@ -1271,23 +1310,35 @@ export function parseMultipartForm(
 export function createFileManagerRouter({
   runtimePaths,
   allowSystemWrite,
+  allowSystemRead,
 }: FileManagerRouterOptions): Router {
   const router = Router();
   const currentAllowSystemWrite = (): boolean =>
     resolveAllowSystemWrite(allowSystemWrite);
+  const currentAllowSystemRead = (): boolean =>
+    resolveAllowSystemRead(allowSystemRead);
+  const assertCurrentReadableScope = (targetPath: string): Promise<void> =>
+    assertReadableScope(targetPath, runtimePaths, currentAllowSystemRead());
   const assertCurrentMutableScope = (targetPath: string): Promise<void> =>
     assertMutableScope(targetPath, runtimePaths, currentAllowSystemWrite());
   const assertCurrentMutableTarget = (targetPath: string): Promise<void> =>
     assertMutableTarget(targetPath, runtimePaths, currentAllowSystemWrite());
 
   router.get("/roots", (_req, res) => {
-    res.json({ roots: rootEntries(runtimePaths, currentAllowSystemWrite()) });
+    res.json({
+      roots: rootEntries(
+        runtimePaths,
+        currentAllowSystemWrite(),
+        currentAllowSystemRead(),
+      ),
+    });
   });
 
   router.get(
     "/",
     asyncRoute(async (req, res) => {
       const targetPath = resolveInputPath(req.query.path);
+      await assertCurrentReadableScope(targetPath);
       await assertSafeFilesystemNode(targetPath);
       const stat = await fsp.stat(targetPath);
       if (!stat.isDirectory()) {
@@ -1314,6 +1365,7 @@ export function createFileManagerRouter({
     "/read",
     asyncRoute(async (req, res) => {
       const targetPath = resolveInputPath(req.query.path);
+      await assertCurrentReadableScope(targetPath);
       await assertSafeFilesystemNode(targetPath);
       const file = await readTextFile(targetPath);
       res.json({ path: targetPath, ...file });
@@ -1489,6 +1541,7 @@ export function createFileManagerRouter({
     "/download",
     asyncRoute(async (req, res) => {
       const targetPath = resolveInputPath(req.query.path);
+      await assertCurrentReadableScope(targetPath);
       await assertSafeFilesystemNode(targetPath);
       const stat = await assertRegularFile(targetPath);
       res.setHeader("Content-Length", String(stat.size));
@@ -1510,6 +1563,9 @@ export function createFileManagerRouter({
     "/download-archive",
     asyncRoute(async (req, res) => {
       const sourcePaths = resolveInputPaths(req.query.paths ?? req.query.path);
+      for (const sourcePath of sourcePaths) {
+        await assertCurrentReadableScope(sourcePath);
+      }
       await sendArchiveDownload(res, sourcePaths);
     }),
   );
@@ -1518,6 +1574,7 @@ export function createFileManagerRouter({
     "/preview",
     asyncRoute(async (req, res) => {
       const targetPath = resolveInputPath(req.query.path);
+      await assertCurrentReadableScope(targetPath);
       await sendPreviewFile(req, res, targetPath);
     }),
   );

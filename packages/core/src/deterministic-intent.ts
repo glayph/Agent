@@ -4,9 +4,11 @@ export interface DeterministicFileRequest {
 }
 
 export interface DeterministicIntent {
-  kind: "web_search" | "file_workflow";
+  kind: "web_search" | "file_workflow" | "math";
   query?: string;
   files?: DeterministicFileRequest[];
+  expression?: string;
+  answer?: string;
   verificationRequested: boolean;
 }
 
@@ -65,6 +67,68 @@ function parseFileRequests(message: string): DeterministicFileRequest[] {
   return requests;
 }
 
+function normalizeMathDigits(value: string): string {
+  const bengaliDigits = "০১২৩৪৫৬৭৮৯";
+  return value.replace(/[০-৯]/g, (digit) =>
+    String(bengaliDigits.indexOf(digit)),
+  );
+}
+
+function parseMathIntent(message: string): DeterministicIntent | null {
+  const normalized = normalizeMathDigits(message).trim();
+  const match = normalized.match(
+    /(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([-+*/%×÷])\s*(-?(?:\d+(?:\.\d+)?|\.\d+))/,
+  );
+  if (!match || match.index === undefined) return null;
+
+  const context = `${normalized.slice(0, match.index)} ${normalized.slice(
+    match.index + match[0].length,
+  )}`;
+  if (
+    context.length > 140 ||
+    /\b(create|write|search|browse|research|file|page|tool|run|execute|then|and|website|landing)\b|(?:ফাইল|ওয়েব|ওয়েব|সার্চ|রিসার্চ|তৈরি|লিখ|তারপর|ব্রাউজ)/i.test(
+      context,
+    )
+  ) {
+    return null;
+  }
+
+  const left = Number(match[1]);
+  const right = Number(match[3]);
+  const operator = match[2];
+  let answer: number;
+  switch (operator) {
+    case "+":
+      answer = left + right;
+      break;
+    case "-":
+      answer = left - right;
+      break;
+    case "*":
+    case "×":
+      answer = left * right;
+      break;
+    case "/":
+    case "÷":
+      if (right === 0) return null;
+      answer = left / right;
+      break;
+    case "%":
+      if (right === 0) return null;
+      answer = left % right;
+      break;
+    default:
+      return null;
+  }
+  if (!Number.isFinite(answer)) return null;
+  return {
+    kind: "math",
+    expression: match[0].replace(/×/g, "*").replace(/÷/g, "/"),
+    answer: String(answer),
+    verificationRequested: false,
+  };
+}
+
 function searchQueryFromMessage(message: string): string {
   const url = message.match(/https?:\/\/[^\s<>()]+/i)?.[0];
   if (url) return url.replace(/[.,;:]+$/, "");
@@ -87,6 +151,9 @@ export function detectDeterministicIntent(
     };
   }
 
+  const math = parseMathIntent(message);
+  if (math) return math;
+
   if (
     /\b(web\s+search|search\s+the\s+web|search\s+online|search\s+the\s+internet|look\s+it\s+up)\b/i.test(
       message,
@@ -103,6 +170,11 @@ export function detectDeterministicIntent(
   return null;
 }
 
+export function suppressVisibleStatusForIntent(message: string): boolean {
+  const intent = detectDeterministicIntent(message);
+  return intent?.kind === "math" && !intent.verificationRequested;
+}
+
 export function isExplicitToolIntent(
   message: string,
   toolName: string,
@@ -110,5 +182,8 @@ export function isExplicitToolIntent(
   const intent = detectDeterministicIntent(message);
   if (!intent) return false;
   if (intent.kind === "web_search") return toolName === "web_search";
-  return toolName === "file_write" || toolName === "file_read";
+  if (intent.kind === "file_workflow") {
+    return toolName === "file_write" || toolName === "file_read";
+  }
+  return false;
 }

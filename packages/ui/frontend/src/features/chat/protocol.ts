@@ -66,7 +66,24 @@ function parseAttachments(
     })
   }
 
-  return attachments.length > 0 ? attachments : undefined
+  return attachments
+}
+
+function providerForModel(modelName: string | undefined): string | undefined {
+  if (!modelName) return undefined
+  const normalized = modelName.toLowerCase()
+  if (normalized.startsWith("gemini/") || normalized.startsWith("google/")) {
+    return "gemini"
+  }
+  if (
+    normalized.startsWith("llama.cpp/") ||
+    normalized.startsWith("llama-cpp/") ||
+    normalized.startsWith("local/") ||
+    normalized.startsWith("local-llama/")
+  ) {
+    return "llama.cpp"
+  }
+  return undefined
 }
 
 function parseContextUsage(
@@ -182,6 +199,10 @@ export function handlemikiMessage(
               ? false
               : prev.isTyping,
           ...(contextUsage ? { contextUsage } : {}),
+          ...(modelName ? { activeRunModel: modelName } : {}),
+          ...(modelName
+            ? { activeRunProvider: providerForModel(modelName) }
+            : {}),
         }
       })
       break
@@ -224,7 +245,7 @@ export function handlemikiMessage(
               ...(runId ? { runId } : {}),
               ...(thoughtCategory ? { thoughtCategory } : {}),
               ...(inspectorOnly ? { inspectorOnly } : {}),
-              ...(attachments ? { attachments } : {}),
+              ...(attachments !== undefined ? { attachments } : {}),
             }
           })
           if (found) {
@@ -246,12 +267,16 @@ export function handlemikiMessage(
               ...(runId ? { runId } : {}),
               ...(thoughtCategory ? { thoughtCategory } : {}),
               ...(inspectorOnly ? { inspectorOnly } : {}),
-              ...(attachments ? { attachments } : {}),
+              ...(attachments !== undefined ? { attachments } : {}),
               timestamp,
             },
           ]
         })(),
         ...(contextUsage ? { contextUsage } : {}),
+        ...(modelName ? { activeRunModel: modelName } : {}),
+        ...(modelName
+          ? { activeRunProvider: providerForModel(modelName) }
+          : {}),
       }))
       break
     }
@@ -273,6 +298,12 @@ export function handlemikiMessage(
         typeof payload.run_id === "string" ? payload.run_id.trim() : ""
       updateChatStore({
         ...(runId ? { activeRunId: runId } : {}),
+        ...(parseModelName(payload)
+          ? { activeRunModel: parseModelName(payload) }
+          : {}),
+        ...(parseModelName(payload)
+          ? { activeRunProvider: providerForModel(parseModelName(payload)) }
+          : {}),
         runStatus: "running",
         runError: undefined,
       })
@@ -316,8 +347,13 @@ export function handlemikiMessage(
           : "failed"
       const error =
         typeof payload.error === "string" ? payload.error : undefined
+      const modelName = parseModelName(payload)
       updateChatStore({
         ...(runId ? { activeRunId: runId } : {}),
+        ...(modelName ? { activeRunModel: modelName } : {}),
+        ...(modelName
+          ? { activeRunProvider: providerForModel(modelName) }
+          : {}),
         runStatus: status,
         ...(error ? { runError: error } : { runError: undefined }),
         isTyping: false,

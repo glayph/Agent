@@ -4,7 +4,7 @@ import * as path from "path";
 import * as child_process from "child_process";
 import { SqliteAuditLog } from "../audit-log.js";
 import { BackupManager } from "./backup.js";
-import { runDoctor } from "./doctor.js";
+import { goDoctorCheck, runDoctor } from "./doctor.js";
 import { MigrationManager, type MigrationDefinition } from "./migrations.js";
 import { SafeModeManager } from "./safe-mode.js";
 import { scanSecrets } from "./secret-scan.js";
@@ -260,6 +260,47 @@ describe("safety and recovery modules", () => {
     );
   });
 
+  it("separates non-production fixture matches from runtime findings", () => {
+    const workspace = tempWorkspace("Miki-scan-fixtures-");
+    fs.writeFileSync(
+      path.join(workspace, ".env.example"),
+      "OPENAI_API_KEY=\n",
+      "utf-8",
+    );
+    const testsDir = path.join(workspace, "src", "__tests__");
+    fs.mkdirSync(testsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(testsDir, "fixture.test.ts"),
+      "const token = 'xoxb-test-secret-value-1234567890';\n",
+      "utf-8",
+    );
+    const report = scanSecrets(makePaths(workspace));
+    expect(report.findings).toHaveLength(0);
+    expect(report.fixtureFindings.length).toBeGreaterThanOrEqual(1);
+    const sourceDir = path.join(workspace, "src");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sourceDir, "runtime.ts"),
+      'const envKey = "TELEGRAM_BOT_TOKEN";\nconst localKey = "local-no-auth-required";\n',
+      "utf-8",
+    );
+    const withSafeRuntimeValues = scanSecrets(makePaths(workspace));
+    expect(withSafeRuntimeValues.findings).toHaveLength(0);
+    expect(withSafeRuntimeValues.fixtureFindings.length).toBeGreaterThanOrEqual(
+      1,
+    );
+
+    fs.writeFileSync(
+      path.join(workspace, ".env"),
+      "GEMINI_API_KEY=real-secret-value-1234567890\n",
+      "utf-8",
+    );
+    const withRealSecret = scanSecrets(makePaths(workspace));
+    expect(withRealSecret.findings.map((finding) => finding.file)).toContain(
+      ".env",
+    );
+  });
+
   it("skips symlinked and oversized secret-scan candidates", () => {
     const workspace = tempWorkspace("Miki-scan-safety-");
     const docsDir = path.join(workspace, "docs");
@@ -361,6 +402,23 @@ describe("safety and recovery modules", () => {
     expect(watchdog.status().services[0].failures).toBe(1);
     expect(watchdog.status().services[0].name).toBe("gateway");
     expect(watchdog.status().services[0].lastMessage).toBe("down");
+  });
+
+  it("treats Go as optional unless explicitly required", () => {
+    expect(goDoctorCheck(null)).toMatchObject({
+      id: "go_version",
+      status: "pass",
+      details: { required: false },
+    });
+    expect(goDoctorCheck(null, true)).toMatchObject({
+      id: "go_version",
+      status: "fail",
+      details: { required: true },
+    });
+    expect(goDoctorCheck("go version test")).toMatchObject({
+      id: "go_version",
+      status: "pass",
+    });
   });
 
   it("builds a doctor report with stable check ids", async () => {

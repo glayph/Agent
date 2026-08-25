@@ -162,6 +162,32 @@ describe("SqliteSessionHistoryStore", () => {
     ]);
   });
 
+  it("creates a consistent backup that can be reopened", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-session-history-backup-"),
+    );
+    tempDirs.push(directory);
+    const dbPath = path.join(directory, "session-history.db");
+    const backupPath = path.join(directory, "backups", "session-history.db");
+    const store = new SqliteSessionHistoryStore(dbPath);
+    openStores.push(store);
+    const message: ChatMessage = {
+      id: "backup-message-1",
+      created_at: "2026-08-21T00:00:00.000Z",
+      role: "user",
+      content: "backup me",
+    };
+    store.save("backup-session", [message], {
+      created: message.created_at!,
+      updated: message.created_at!,
+    });
+
+    await store.backup(backupPath);
+    const restored = new SqliteSessionHistoryStore(backupPath);
+    openStores.push(restored);
+    expect(restored.load().get("backup-session")?.messages).toEqual([message]);
+  });
+
   it("deletes a session and its messages durably", () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-session-history-"),

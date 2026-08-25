@@ -24,6 +24,10 @@ const modelRoot = path.resolve(
 const statePath = path.resolve(
   process.env.MIKI_STATE_PATH?.trim() || path.join(dataRoot, "data", "launcher-state.json"),
 );
+const serverPidPath = path.resolve(
+  process.env.MIKI_LLAMA_PID_PATH?.trim() ||
+    path.join(dataRoot, "data", "llama-server.pid.json"),
+);
 const configDir = path.resolve(
   process.env.MIKI_CONFIG_DIR?.trim() ||
     (fs.existsSync(path.join(projectRoot, "config", ".env.example"))
@@ -79,6 +83,38 @@ function writeJsonAtomic(file, value) {
     mode: 0o600,
   });
   fs.renameSync(temporary, file);
+}
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+function readServerPid() {
+  const record = readJson(serverPidPath, null);
+  if (!record || !processIsAlive(Number(record.pid))) {
+    if (record) {
+      try { fs.rmSync(serverPidPath, { force: true }); } catch { /* best effort */ }
+    }
+    return null;
+  }
+  return { ...record, pid: Number(record.pid) };
+}
+async function waitForLocalHealth(port, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(1_500),
+      });
+      if (response.ok) return true;
+    } catch { /* server is still starting */ }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return false;
 }
 function readEnv(file) {
   try {
@@ -253,6 +289,14 @@ async function start(model, record) {
   if (!executable) fail("llama-server was not found. Build the native runtime first or set MIKI_LLAMA_SERVER_BIN.");
   if (!fs.existsSync(executable)) fail(`llama-server does not exist: ${executable}`);
   const port = record?.local?.port || defaultPort;
+  const existing = readServerPid();
+  if (existing && Number(existing.port) === Number(port)) {
+    if (await waitForLocalHealth(port, 2_000)) {
+      log(`llama-server is already healthy on http://127.0.0.1:${port}/v1 (pid ${existing.pid}).`);
+      return;
+    }
+    try { process.kill(existing.pid, process.platform === "win32" ? undefined : "SIGTERM"); } catch { /* stale process */ }
+  }
   const child = spawn(executable, [
     "--model", path.join(modelRoot, model.filename),
     "--host", "127.0.0.1",
@@ -263,7 +307,20 @@ async function start(model, record) {
     "--chat-template-kwargs", '{"enable_thinking":false}',
   ], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
-  log(`Started llama-server in the background on http://127.0.0.1:${port}/v1 (pid ${child.pid}).`);
+  writeJsonAtomic(serverPidPath, {
+    pid: child.pid,
+    port,
+    model: model.id,
+    executable,
+    startedAt: new Date().toISOString(),
+  });
+  const healthy = await waitForLocalHealth(port);
+  if (!healthy) {
+    try { process.kill(child.pid, process.platform === "win32" ? undefined : "SIGTERM"); } catch { /* best effort */ }
+    try { fs.rmSync(serverPidPath, { force: true }); } catch { /* best effort */ }
+    fail(`llama-server did not become healthy on http://127.0.0.1:${port}`);
+  }
+  log(`Started healthy llama-server on http://127.0.0.1:${port}/v1 (pid ${child.pid}).`);
 }
 async function status() {
   console.log(JSON.stringify({
@@ -271,6 +328,8 @@ async function status() {
     model_dir: modelRoot,
     config: envPath,
     state: statePath,
+    server_pid: serverPidPath,
+    server_process: readServerPid(),
     runtime: llamaExecutable() || null,
     installed: installedModels().map((model) => ({ id: model.id, alias: model.alias, path: model.path, bytes: fs.statSync(model.path).size })),
   }, null, 2));

@@ -103,6 +103,13 @@ describe("artifact contract", () => {
         true,
       ),
     ).toBe("failed");
+    expect(
+      reconcileArtifactOutcome(
+        { ok: true, missing: [], invalid: [] },
+        false,
+        false,
+      ),
+    ).toBe("failed");
   });
 
   it("preserves artifact verification evidence across a queue restart", () => {
@@ -148,6 +155,29 @@ describe("artifact contract", () => {
         "worker-a",
       )?.result,
     ).toEqual({ artifactVerified: true, status: "completed" });
+  });
+
+  it("rejects artifacts reached through a workspace symlink to outside", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-artifact-"));
+    const outside = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-artifact-outside-"),
+    );
+    const outsideFile = path.join(outside, "report.md");
+    const linkedFile = path.join(workspace, "report.md");
+    fs.writeFileSync(outsideFile, "# outside artifact", "utf8");
+    try {
+      fs.symlinkSync(outsideFile, linkedFile, "file");
+    } catch {
+      return;
+    }
+
+    expect(
+      verifyArtifactContract({
+        root: workspace,
+        required: ["report.md"],
+        label: "file workflow",
+      }),
+    ).toEqual({ ok: false, missing: ["report.md"], invalid: [] });
   });
 
   it("does not report an empty or invalid index as completed", () => {

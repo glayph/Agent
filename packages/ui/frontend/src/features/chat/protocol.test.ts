@@ -72,6 +72,9 @@ describe("chat protocol flow", () => {
       used_tokens: 120,
       total_tokens: 1000,
     })
+    expect(state).toMatchObject({
+      activeRunModel: "gpt-4.1-mini",
+    })
     expect(state.messages).toHaveLength(1)
     expect(state.messages[0]).toMatchObject({
       id: "assistant-1",
@@ -89,6 +92,34 @@ describe("chat protocol flow", () => {
       ],
       timestamp: 1_700_000_000_000,
     })
+  })
+
+  it("clears stale attachments when the server sends an explicit empty list", () => {
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "assistant-attachment",
+          content: "with attachment",
+          attachments: [{ type: "file", url: "/files/a.txt" }],
+        },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.update",
+        session_id: "session-1",
+        payload: {
+          message_id: "assistant-attachment",
+          content: "without attachment",
+          attachments: [],
+        },
+      },
+      "session-1",
+    )
+    expect(getChatState().messages[0]?.attachments).toEqual([])
   })
 
   it("retains run links and safe thought metadata for Inspector grouping", () => {
@@ -194,12 +225,14 @@ describe("chat protocol flow", () => {
       {
         type: "node.run_start",
         session_id: "session-1",
-        payload: { run_id: "run-1" },
+        payload: { run_id: "run-1", model_name: "llama.cpp/lfm2.5-1.2b-instruct-q4_0" },
       },
       "session-1",
     )
     expect(getChatState()).toMatchObject({
       activeRunId: "run-1",
+      activeRunModel: "llama.cpp/lfm2.5-1.2b-instruct-q4_0",
+      activeRunProvider: "llama.cpp",
       runStatus: "running",
     })
 

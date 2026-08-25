@@ -43,7 +43,8 @@ export function getDirectProviderById(
   return DIRECT_PROVIDERS.find(
     (provider) =>
       provider.id.toLowerCase() === normalized ||
-      (provider.id === "gemini" && (normalized === "google" || normalized === "gemini")) ||
+      (provider.id === "gemini" &&
+        (normalized === "google" || normalized === "gemini")) ||
       (provider.id === "llama.cpp" &&
         ["llama-cpp", "llamacpp", "local-llama", "local"].includes(normalized)),
   );

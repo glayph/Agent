@@ -21,6 +21,7 @@ const requiredRuntimeFiles = [
 let runtimeRoot = resolveRuntimeRoot();
 let child = null;
 let memoryChild = null;
+let ownsMemoryChild = false;
 let shuttingDown = false;
 
 function exists(filePath) {
@@ -108,7 +109,19 @@ function ensureRuntime() {
   }
 }
 
-function start(argv) {
+async function memoryServiceHealthy() {
+  const port = Number(process.env.MIKI_MEMORY_PORT || process.env.MEMORY_PORT || 18700);
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/health`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function start(argv) {
   ensureRuntime();
 
   const executable = cliPath();
@@ -121,6 +134,16 @@ function start(argv) {
     MIKI_RUNTIME_LOADER: runtimePath("runtime-loader.mjs"),
     MIKI_NODE: process.execPath,
     MIKI_PACKAGE_VERSION: readPackage().version || "1.0.0",
+    // Keep the inner gateway budget aligned with the outer supervisor unless
+    // an explicit inner value was supplied for diagnostics.
+    CORE_MAX_RESTARTS:
+      process.env.CORE_MAX_RESTARTS ||
+      process.env.MIKI_24_7_MAX_RESTARTS ||
+      "5",
+    ALLOW_UNLIMITED_CORE_RESTARTS:
+      process.env.ALLOW_UNLIMITED_CORE_RESTARTS ||
+      process.env.MIKI_24_7_ALLOW_UNLIMITED_RESTARTS ||
+      "false",
     // Legacy env vars kept during transition
     Miki_RUNTIME_ROOT: runtimeRoot,
     Miki_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
@@ -129,7 +152,35 @@ function start(argv) {
     Miki_NODE: process.execPath,
   };
 
-  memoryChild = fork(path.join(PROJECT_ROOT, "packages", "memory", "src", "api", "server.js"));
+  if (!(await memoryServiceHealthy())) {
+    ownsMemoryChild = true;
+    memoryChild = fork(
+      path.join(PROJECT_ROOT, "packages", "memory", "src", "api", "server.js"),
+    );
+    memoryChild.once("error", (error) => {
+      ownsMemoryChild = false;
+      if (error?.code === "EADDRINUSE") {
+        console.warn("Miki memory service is already running; reusing the existing listener.");
+        return;
+      }
+      console.error(`Miki memory service failed: ${error.message}`);
+    });
+  } else {
+    console.log("Miki memory service is already healthy; reusing it.");
+  }
+
+  if (memoryChild && ownsMemoryChild) {
+    memoryChild.once("exit", (code, signal) => {
+      memoryChild = null;
+      ownsMemoryChild = false;
+      if (shuttingDown) return;
+      console.error(
+        `Miki memory service exited (code=${code}, signal=${signal}); stopping launcher for service-manager recovery.`,
+      );
+      if (child) terminateChildTree(false);
+      process.exit(1);
+    });
+  }
 
   child = spawn(executable, argv, {
     cwd: PROJECT_ROOT,
@@ -141,6 +192,11 @@ function start(argv) {
   child.on("error", (err) => fail(`Failed to start Miki: ${err.message}`));
   child.on("exit", (code, signal) => {
     child = null;
+    if (memoryChild && ownsMemoryChild) {
+      memoryChild.kill("SIGTERM");
+      memoryChild = null;
+      ownsMemoryChild = false;
+    }
     if (shuttingDown) process.exit(0);
     if (signal) {
       console.error(`Miki stopped by ${signal}.`);
@@ -153,7 +209,7 @@ function start(argv) {
 function stop() {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (memoryChild) memoryChild.kill();
+  if (memoryChild && ownsMemoryChild) memoryChild.kill();
   if (child) {
     terminateChildTree(false);
     setTimeout(() => {
@@ -165,9 +221,54 @@ function stop() {
   process.exit(0);
 }
 
+function descendantPids(rootPid) {
+  const descendants = [];
+  const pending = [rootPid];
+  while (pending.length > 0) {
+    const parentPid = pending.shift();
+    try {
+      const output = spawnSync("pgrep", ["-P", String(parentPid)], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      if (output.status !== 0) continue;
+      const children = String(output.stdout || "")
+        .split(/\s+/)
+        .map((value) => Number.parseInt(value, 10))
+        .filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+      descendants.push(...children);
+      pending.push(...children);
+    } catch {
+      // Minimal Windows/Linux installations may not provide pgrep; the direct
+      // child is still terminated below, and Windows uses taskkill /T.
+    }
+  }
+  return descendants.reverse();
+}
+
 function terminateChildTree(force) {
   if (!child?.pid) return;
-  child.kill(force ? "SIGKILL" : "SIGTERM");
+  if (process.platform === "win32") {
+    spawnSync(
+      "taskkill",
+      ["/T", ...(force ? ["/F"] : []), "/PID", String(child.pid)],
+      { stdio: "ignore", shell: false },
+    );
+    return;
+  }
+  const signal = force ? "SIGKILL" : "SIGTERM";
+  for (const pid of descendantPids(child.pid)) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if (error?.code !== "ESRCH") throw error;
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
 }
 
 function fail(message) {
@@ -216,4 +317,4 @@ if (argv[0] === "doctor") {
   process.exit(result.status ?? 1);
 }
 
-start(argv);
+void start(argv).catch((error) => fail(error instanceof Error ? error.message : String(error)));
