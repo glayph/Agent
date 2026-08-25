@@ -5,10 +5,10 @@ import {
 import type { DirectProviderConfig } from "./catalog.js";
 
 const provider: DirectProviderConfig = {
-  id: "opencode",
-  displayName: "OpenCode Zen",
-  baseUrl: "https://opencode.example/v1",
-  apiKeyEnv: "OPENCODE_API_KEY",
+  id: "gemini",
+  displayName: "Google Gemini",
+  baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+  apiKeyEnv: "GEMINI_API_KEY",
   emptyApiKeyAllowed: false,
 };
 
@@ -25,7 +25,7 @@ function input(
 ): CompletionHealthInput {
   return {
     provider,
-    model: "opencode/mimo-v2.5-free",
+    model: "gemini/gemini-3.5-flash-lite",
     apiKey: "test-key",
     ...overrides,
   };
@@ -53,14 +53,14 @@ describe("provider completion health", () => {
 
     expect(result.status).toBe("ready");
     expect(result.completionTested).toBe(true);
-    expect(result.modelId).toBe("mimo-v2.5-free");
+    expect(result.modelId).toBe("gemini-3.5-flash-lite");
     expect(result.responseShape).toEqual({
       choiceCount: 1,
       contentPresent: true,
       finishReason: "stop",
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://opencode.example/v1/chat/completions",
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       expect.objectContaining({ method: "POST" }),
     );
   });

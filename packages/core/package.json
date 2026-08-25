@@ -35,7 +35,6 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\""
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
     "@miki/config": "file:../config",
     "@miki/installer": "file:../installer",
     "@miki/memory": "file:../memory",

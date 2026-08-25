@@ -52,39 +52,27 @@ export interface TokenCountableMessage {
 export class TokenBudgetManager {
   private modelProfiles: Map<string, ModelProfile> = new Map([
     [
-      "openai/gpt-4.1-nano",
+      "gemini/gemini-3.5-flash-lite",
       {
-        name: "openai/gpt-4.1-nano",
-        costPer1kTokens: 0.0004,
+        name: "gemini/gemini-3.5-flash-lite",
+        costPer1kTokens: 0,
         speedRank: 1,
-        qualityRank: 5,
-        bestFor: ["simple_qa", "classification", "extraction"],
-        contextWindowTokens: 1_047_576,
-        maxOutputTokens: 32_768,
-      },
-    ],
-    [
-      "openai/gpt-4.1-mini",
-      {
-        name: "openai/gpt-4.1-mini",
-        costPer1kTokens: 0.0016,
-        speedRank: 2,
         qualityRank: 3,
-        bestFor: ["standard_reasoning", "summarization", "translation"],
-        contextWindowTokens: 1_047_576,
-        maxOutputTokens: 32_768,
+        bestFor: ["simple_qa", "classification", "extraction", "standard_reasoning"],
+        contextWindowTokens: 1_000_000,
+        maxOutputTokens: 8_192,
       },
     ],
     [
-      "openai/gpt-4.1",
+      "llama.cpp/local-model",
       {
-        name: "openai/gpt-4.1",
-        costPer1kTokens: 0.008,
-        speedRank: 3,
-        qualityRank: 1,
-        bestFor: ["complex_reasoning", "code_generation", "design"],
-        contextWindowTokens: 1_047_576,
-        maxOutputTokens: 32_768,
+        name: "llama.cpp/local-model",
+        costPer1kTokens: 0,
+        speedRank: 2,
+        qualityRank: 2,
+        bestFor: ["code_generation", "complex_reasoning", "debugging"],
+        contextWindowTokens: 128_000,
+        maxOutputTokens: 8_192,
       },
     ],
   ]);
@@ -150,25 +138,10 @@ export class TokenBudgetManager {
       };
     }
 
-    if (normalized.includes("gpt-4.1")) {
-      return { contextWindowTokens: 1_047_576, maxOutputTokens: 32_768 };
-    }
-    if (normalized.includes("gpt-4o") || normalized.includes("gpt-4-turbo")) {
-      return { contextWindowTokens: 128_000, maxOutputTokens: 16_384 };
-    }
-    if (normalized.includes("gpt-4")) {
-      return { contextWindowTokens: 8_192, maxOutputTokens: 8_192 };
-    }
-    if (normalized.includes("gemini-2.")) {
+    if (normalized.includes("gemini-")) {
       return { contextWindowTokens: 1_000_000, maxOutputTokens: 8_192 };
     }
-    if (normalized.includes("claude-3.")) {
-      return { contextWindowTokens: 200_000, maxOutputTokens: 8_192 };
-    }
-    if (normalized.includes("llama-4")) {
-      return { contextWindowTokens: 1_000_000, maxOutputTokens: 8_192 };
-    }
-    if (normalized.includes("llama-3")) {
+    if (normalized.includes("llama") || normalized.includes("local-model")) {
       return { contextWindowTokens: 128_000, maxOutputTokens: 8_192 };
     }
 
@@ -257,19 +230,19 @@ export class TokenBudgetManager {
     const budgets = {
       simple: {
         maxTokens: 300,
-        model: "openai/gpt-4.1-nano",
+        model: "gemini/gemini-3.5-flash-lite",
         estimatedCost: 0,
         tier: "simple" as const,
       },
       standard: {
         maxTokens: 1200,
-        model: "openai/gpt-4.1-mini",
+        model: "gemini/gemini-3.5-flash-lite",
         estimatedCost: 0,
         tier: "standard" as const,
       },
       complex: {
         maxTokens: 2400,
-        model: "openai/gpt-4.1",
+        model: "llama.cpp/local-model",
         estimatedCost: 0,
         tier: "complex" as const,
       },
@@ -383,11 +356,7 @@ export class TokenBudgetManager {
   }
 
   private normalizeModelName(model: string): string {
-    return model
-      .trim()
-      .toLowerCase()
-      .replace(/^openrouter\//, "")
-      .replace(/^gemini\//, "google/gemini/");
+    return model.trim().toLowerCase();
   }
 
   private stringifyForEstimate(value: unknown): string {

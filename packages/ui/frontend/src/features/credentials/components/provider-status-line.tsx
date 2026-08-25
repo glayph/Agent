@@ -1,9 +1,13 @@
 import { useTranslation } from "react-i18next"
 
-import type { OAuthProviderStatus } from "@/api/oauth"
+export type CredentialStatus =
+  | "connected"
+  | "needs_refresh"
+  | "expired"
+  | "not_logged_in"
 
 interface ProviderStatusLineProps {
-  status: OAuthProviderStatus["status"]
+  status: CredentialStatus
   authMethod?: string
 }
 

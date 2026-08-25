@@ -2,181 +2,57 @@ import OpenAI from "openai";
 import { resolveConfiguredSecret } from "@miki/config";
 import { isLocalModel } from "../local/local-runtime.js";
 
-export type DirectProviderId =
-  | "gemini"
-  | "openrouter"
-  | "openai"
-  | "claude"
-  | "ollama"
-  | "llama.cpp"
-  | "omniroute"
-  | "opencode";
+export type DirectProviderId = "gemini" | "llama.cpp";
 
 export interface DirectProviderConfig {
-  /** A known builtin id, or an arbitrary lowercase id for a custom
-   * OpenAI-compatible provider registered via registerCustomProviders(). */
-  id: DirectProviderId | string;
+  id: DirectProviderId;
   displayName: string;
   baseUrl: string;
   apiKeyEnv: string;
   emptyApiKeyAllowed: boolean;
 }
 
+/**
+ * Agent Miki intentionally supports exactly two providers. Provider-specific
+ * behavior lives in the corresponding plugin; this catalog only supplies the
+ * typed endpoint/auth metadata needed by the shared runtime.
+ */
 export const DIRECT_PROVIDERS: DirectProviderConfig[] = [
   {
     id: "gemini",
     displayName: "Google Gemini",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    baseUrl:
+      process.env.GEMINI_BASE_URL ||
+      "https://generativelanguage.googleapis.com/v1beta/openai/",
     apiKeyEnv: "GEMINI_API_KEY",
     emptyApiKeyAllowed: false,
   },
   {
-    id: "openai",
-    displayName: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
-    apiKeyEnv: "OPENAI_API_KEY",
-    emptyApiKeyAllowed: false,
-  },
-  {
-    id: "opencode",
-    displayName: "OpenCode Zen",
-    baseUrl: process.env.OPENCODE_BASE_URL || "https://opencode.ai/zen/v1",
-    apiKeyEnv: "OPENCODE_API_KEY",
-    emptyApiKeyAllowed: false,
-  },
-  {
-    id: "openrouter",
-    displayName: "OpenRouter",
-    baseUrl: "https://openrouter.ai/api/v1",
-    apiKeyEnv: "OPENROUTER_API_KEY",
-    emptyApiKeyAllowed: false,
-  },
-  {
-    // Anthropic's official OpenAI-compatible endpoint. Anthropic documents
-    // this as intended for testing/comparison rather than long-term
-    // production use (strict JSON-schema tool-call conformance isn't
-    // guaranteed, no prompt caching, no audio). It's used here as the fast,
-    // zero-extra-dependency default path since it fits this file's existing
-    // uniform "every provider is an OpenAI baseURL" design. If tool-calling
-    // reliability becomes a problem in practice, add a native adapter using
-    // @anthropic-ai/sdk that translates to/from this same LLMResponse shape
-    // (see providers/claude-native.ts for where that would live) without
-    // needing to change any caller of achatCompletion().
-    id: "claude",
-    displayName: "Anthropic Claude",
-    baseUrl: "https://api.anthropic.com/v1/",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    emptyApiKeyAllowed: false,
-  },
-  {
-    // Local models via Ollama's built-in OpenAI-compatible server. No API
-    // key is required for a local, unauthenticated Ollama instance.
-    id: "ollama",
-    displayName: "Local (Ollama)",
-    baseUrl: "http://localhost:11434/v1",
-    apiKeyEnv: "OLLAMA_API_KEY",
-    emptyApiKeyAllowed: true,
-  },
-  {
-    // Optional local OmniRoute gateway. It is never auto-started by Miki.
-    id: "omniroute",
-    displayName: "OmniRoute Local",
-    baseUrl: "http://127.0.0.1:20128/v1",
-    apiKeyEnv: "MIKI_OMNIROUTE_API_KEY",
-    emptyApiKeyAllowed: true,
-  },
-  {
-    // Managed or administrator-supplied llama-server on loopback.
     id: "llama.cpp",
     displayName: "llama.cpp Local",
-    baseUrl: "http://127.0.0.1:39200/v1",
+    baseUrl: process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1",
     apiKeyEnv: "LLAMA_CPP_API_KEY",
     emptyApiKeyAllowed: true,
   },
 ];
 
-/**
- * User-defined OpenAI-compatible endpoints (e.g. "OpenCode" itself is a
- * terminal agent that connects to *any* OpenAI-compatible provider via a
- * user-configured base URL + API key — there is no single fixed "OpenCode
- * API" to hardcode. The same mechanism covers LM Studio, a company-internal
- * gateway, or any other compatible endpoint not already listed above.
- *
- * Configure these under `model_providers` in config/agent.yaml:
- *
- *   model_providers:
- *     opencode:
- *       displayName: "OpenCode Gateway"
- *       baseUrl: "http://localhost:4096/v1"
- *       apiKeyEnv: "OPENCODE_API_KEY"
- *       emptyApiKeyAllowed: false
- *
- * Then reference models as "opencode/<model-id>".
- */
-let customProviders: Map<string, DirectProviderConfig> = new Map();
-
-export function registerCustomProviders(
-  raw: Record<string, unknown> | undefined | null,
-): void {
-  const next = new Map<string, DirectProviderConfig>();
-  if (raw && typeof raw === "object") {
-    for (const [id, value] of Object.entries(raw)) {
-      if (!value || typeof value !== "object") continue;
-      const v = value as Record<string, unknown>;
-      const baseUrl = typeof v.baseUrl === "string" ? v.baseUrl : undefined;
-      if (!baseUrl) continue; // baseUrl is the one truly required field
-      const normalizedId = id.trim().toLowerCase();
-      next.set(normalizedId, {
-        id: normalizedId,
-        displayName: typeof v.displayName === "string" ? v.displayName : id,
-        baseUrl,
-        apiKeyEnv:
-          typeof v.apiKeyEnv === "string"
-            ? v.apiKeyEnv
-            : `${normalizedId.toUpperCase()}_API_KEY`,
-        emptyApiKeyAllowed: v.emptyApiKeyAllowed === true,
-      });
-    }
-  }
-  customProviders = next;
-}
-
-export function getCustomProviderById(
-  id: string,
-): DirectProviderConfig | undefined {
-  return customProviders.get(id.trim().toLowerCase());
-}
-
-export function listCustomProviders(): DirectProviderConfig[] {
-  return Array.from(customProviders.values());
-}
-
 export function getDirectProviderById(
   id: string,
 ): DirectProviderConfig | undefined {
   const normalized = id.trim().toLowerCase();
-  const builtin = DIRECT_PROVIDERS.find(
-    (p) =>
-      p.id === normalized || (p.id === "gemini" && normalized === "google"),
+  return DIRECT_PROVIDERS.find(
+    (provider) =>
+      provider.id.toLowerCase() === normalized ||
+      (provider.id === "gemini" && (normalized === "google" || normalized === "gemini")) ||
+      (provider.id === "llama.cpp" &&
+        ["llama-cpp", "llamacpp", "local-llama", "local"].includes(normalized)),
   );
-  if (builtin) {
-    if (builtin.id === "ollama") {
-      const override = process.env["OLLAMA_BASE_URL"];
-      if (override) return { ...builtin, baseUrl: override };
-    }
-    if (builtin.id === "llama.cpp") {
-      const override = process.env["MIKI_LLAMA_BASE_URL"];
-      if (override) return { ...builtin, baseUrl: override };
-    }
-    return builtin;
-  }
-  return getCustomProviderById(normalized);
 }
 
 export function directProviderForModel(
   model: string,
 ): DirectProviderConfig | undefined {
-  const lower = model.toLowerCase();
+  const lower = model.trim().toLowerCase();
   if (
     lower.startsWith("google/") ||
     lower.startsWith("gemini/") ||
@@ -184,55 +60,17 @@ export function directProviderForModel(
   ) {
     return getDirectProviderById("gemini");
   }
-  if (lower.startsWith("openai/") || lower.startsWith("gpt-")) {
-    return getDirectProviderById("openai");
-  }
-  if (lower.startsWith("opencode/")) {
-    return getDirectProviderById("opencode");
-  }
-  if (
-    lower.startsWith("claude/") ||
-    lower.startsWith("anthropic/") ||
-    lower.startsWith("claude-")
-  ) {
-    return getDirectProviderById("claude");
-  }
-  if (lower.startsWith("ollama/")) {
-    return getDirectProviderById("ollama");
-  }
-  if (lower.startsWith("omniroute/")) {
-    return getDirectProviderById("omniroute");
-  }
   if (
     lower.startsWith("llama.cpp/") ||
     lower.startsWith("llama-cpp/") ||
     lower.startsWith("llamacpp/") ||
-    lower.startsWith("local-llama/")
+    lower.startsWith("local-llama/") ||
+    lower.startsWith("local/") ||
+    isLocalModel(model)
   ) {
     return getDirectProviderById("llama.cpp");
   }
-  if (lower.startsWith("local/")) {
-    return getDirectProviderById("ollama");
-  }
-  if (lower.startsWith("openrouter/")) {
-    return getDirectProviderById("openrouter");
-  }
-  // Friendly aliases saved by the dashboard (for example
-  // qwen2-5-coder-1-5b-local) are resolved from the configured local-model
-  // registry before the generic OpenRouter fallback.
-  if (isLocalModel(model)) {
-    return getDirectProviderById("llama.cpp");
-  }
-  // Custom OpenAI-compatible providers (OpenCode, LM Studio, internal
-  // gateways, ...) registered via agent.yaml's model_providers block, e.g.
-  // model "opencode/some-model" routes to the "opencode" custom provider.
-  const slashIndex = lower.indexOf("/");
-  if (slashIndex > 0) {
-    const prefix = lower.slice(0, slashIndex);
-    const custom = getCustomProviderById(prefix);
-    if (custom) return custom;
-  }
-  return getDirectProviderById("openrouter");
+  return undefined;
 }
 
 export function normalizeDirectModelName(
@@ -242,40 +80,14 @@ export function normalizeDirectModelName(
   const provider = getDirectProviderById(providerId);
   if (!provider) return model;
   if (provider.id === "gemini") {
-    // Google's OpenAI-compatible endpoint expects the bare model id
-    // (for example `gemini-2.0-flash`), not the internal routing prefix
-    // (`gemini/gemini-2.0-flash`). The prefix is used only to select the
-    // provider locally and must not be sent over the wire.
-    return model.replace(/^google\//, "").replace(/^gemini\//, "");
+    return model.replace(/^google\//i, "").replace(/^gemini\//i, "");
   }
-  if (provider.id === "openrouter") {
-    return model.startsWith("openrouter/") ? model : `openrouter/${model}`;
-  }
-  if (provider.id === "opencode") {
-    return model.replace(/^opencode\//, "");
-  }
-  if (provider.id === "claude") {
-    return model.replace(/^claude\//, "").replace(/^anthropic\//, "");
-  }
-  if (provider.id === "ollama") {
-    return model.replace(/^ollama\//, "").replace(/^local\//, "");
-  }
-  if (provider.id === "omniroute") {
-    return model.replace(/^omniroute\//, "");
-  }
-  if (provider.id === "llama.cpp") {
-    return model
-      .replace(/^llama\.cpp\//, "")
-      .replace(/^llama-cpp\//, "")
-      .replace(/^llamacpp\//, "")
-      .replace(/^local-llama\//, "");
-  }
-  if (getCustomProviderById(provider.id)) {
-    // Custom providers keep their own id as the routing prefix (matching
-    // how the model was configured, e.g. "opencode/glm-4.6" -> "glm-4.6").
-    return model.replace(new RegExp(`^${provider.id}/`), "");
-  }
-  return model.replace(/^openai\//, "");
+  return model
+    .replace(/^llama\.cpp\//i, "")
+    .replace(/^llama-cpp\//i, "")
+    .replace(/^llamacpp\//i, "")
+    .replace(/^local-llama\//i, "")
+    .replace(/^local\//i, "");
 }
 
 export function resolveProviderApiKey(
@@ -293,11 +105,6 @@ export function directProviderClient(
   apiKey: string,
   timeoutMs?: number,
 ): OpenAI {
-  // The openai SDK throws OpenAIError on construction if apiKey is an empty
-  // string (it does not fall back to emptyApiKeyAllowed semantics — that
-  // flag only exists in this codebase, not the SDK). Local/unauthenticated
-  // endpoints like Ollama don't check the key at all, so a placeholder is
-  // safe and never sent anywhere meaningful.
   const effectiveKey =
     apiKey || (provider.emptyApiKeyAllowed ? "local-no-auth-required" : apiKey);
   return new OpenAI({
@@ -318,9 +125,6 @@ function isGeminiProvider(provider: DirectProviderConfig): boolean {
 }
 
 function geminiModelsURL(provider: DirectProviderConfig): string {
-  // Chat uses Google's OpenAI-compatible endpoint, while model discovery is
-  // served by the native Gemini REST resource. Keep this distinction explicit
-  // so the two endpoints cannot silently receive the wrong auth contract.
   return `${provider.baseUrl
     .replace(/\/v1beta\/openai\/?$/i, "/v1beta")
     .replace(/\/+$/, "")}/models`;

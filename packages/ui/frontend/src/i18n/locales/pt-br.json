@@ -299,14 +299,7 @@
   "credentials": {
     "description": "Gerencie credenciais OAuth e baseadas em token para os provedores suportados.",
     "loading": "Carregando credenciais…",
-    "providers": {
-      "openai": {
-        "description": "Suporta OAuth via navegador, device code e login por token."
-      },
-      "antigravity": {
-        "description": "Usa uma chave de API Gemini para o Google Cloud Code Assist."
-      }
-    },
+    "providers": {},
     "status": {
       "connected": "Conectado",
       "needsRefresh": "Precisa atualizar",
@@ -325,7 +318,6 @@
       "description": "Isso removerá sua credencial salva para {{provider}}."
     },
     "fields": {
-      "openaiToken": "Token OpenAI",
       "antigravityToken": "Chave de API Gemini"
     },
     "labels": {
@@ -348,14 +340,6 @@
       "success": "Autenticação bem-sucedida",
       "error": "Falha na autenticação",
       "expired": "Sessão de autenticação expirada"
-    },
-    "device": {
-      "title": "Login por Device do OpenAI",
-      "description": "Abra a página de verificação e digite o código abaixo. Esta página será atualizada automaticamente.",
-      "code": "Código do Usuário",
-      "url": "URL de Verificação",
-      "polling": "Verificando status do login…",
-      "open": "Abrir Página de Verificação"
     }
   },
   "models": {
@@ -536,12 +520,12 @@
       "leadingSlash": "Não deve começar com /",
       "consecutiveSlash": "Não deve conter // consecutivos",
       "useProvider": "Usará \"{{provider}}\" como provider",
-      "defaultToOpenAI": "Nenhum provider especificado, o padrão será OpenAI",
       "emptyModel": "O nome do modelo não pode estar vazio",
       "shouldUse": "\"{{provider}}\" deve usar \"{{alias}}\"",
       "didYouMean": "Você quis dizer \"{{closest}}\"?",
       "unknownProvider": "Provider desconhecido \"{{provider}}\"",
-      "parsed": "provider={{provider}}, model={{model}}"
+      "parsed": "provider={{provider}}, model={{model}}",
+      "defaultToGemini": "Nenhum provider especificado, o padrão será Gemini"
     },
     "combobox": {
       "selectProvider": "Selecionar provider…",

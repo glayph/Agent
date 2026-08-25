@@ -7,10 +7,10 @@ import type { OpenAICompatibleAdapter } from "./openai-compatible-adapter.js";
 import type { DirectProviderConfig } from "./catalog.js";
 
 const provider: DirectProviderConfig = {
-  id: "opencode",
-  displayName: "OpenCode Zen",
-  baseUrl: "https://opencode.example/v1",
-  apiKeyEnv: "OPENCODE_API_KEY",
+  id: "gemini",
+  displayName: "Google Gemini",
+  baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+  apiKeyEnv: "GEMINI_API_KEY",
   emptyApiKeyAllowed: false,
 };
 
@@ -54,7 +54,7 @@ describe("provider tool capability health", () => {
     const result = await probeProviderTools(
       {
         provider,
-        model: "opencode/mimo-v2.5-free",
+        model: "gemini/gemini-3.5-flash-lite",
         apiKey: "test-key",
       },
       adapter,
@@ -62,7 +62,7 @@ describe("provider tool capability health", () => {
 
     expect(result).toMatchObject({
       status: "agent_ready",
-      modelId: "mimo-v2.5-free",
+      modelId: "gemini-3.5-flash-lite",
       toolTested: true,
       dryRunExecuted: true,
       finalResponseReceived: true,
@@ -80,7 +80,7 @@ describe("provider tool capability health", () => {
     });
 
     const result = await probeProviderTools(
-      { provider, model: "opencode/mimo-v2.5-free", apiKey: "test-key" },
+      { provider, model: "gemini/gemini-3.5-flash-lite", apiKey: "test-key" },
       adapter,
     );
 
@@ -92,13 +92,13 @@ describe("provider tool capability health", () => {
   it("preserves a typed rate-limit outcome without retrying the probe", async () => {
     const { adapter, complete } = adapterWith(
       new LLMRateLimitError("quota reached", {
-        providerId: "opencode",
+        providerId: "gemini",
         status: 429,
       }),
     );
 
     const result = await probeProviderTools(
-      { provider, model: "opencode/mimo-v2.5-free", apiKey: "test-key" },
+      { provider, model: "gemini/gemini-3.5-flash-lite", apiKey: "test-key" },
       adapter,
     );
 

@@ -100,6 +100,7 @@ import {
 import { buildPluginMarketplaceReadinessReport } from "../plugins/plugin-marketplace-readiness.js";
 import { listRuntimePluginProviderMetadata } from "../plugins/plugin-provider-adapter.js";
 import { providerRegistry } from "../llm/provider/registry.js";
+import type { DirectProviderId } from "../llm/provider/catalog.js";
 import {
   probeProviderCompletion,
   type CompletionHealthResult,
@@ -614,21 +615,6 @@ export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] = [
 
 const PROVIDER_OPTIONS: ProviderOption[] = [
   {
-    id: "openai",
-    display_name: "OpenAI",
-    icon_slug: "openai",
-    domain: "openai.com",
-    default_api_base: "https://api.openai.com/v1",
-    empty_api_key_allowed: false,
-    create_allowed: true,
-    default_model_allowed: true,
-    supports_fetch: true,
-    default_auth_method: "api_key",
-    priority: 100,
-    common_models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
-    aliases: ["openai"],
-  },
-  {
     id: "google",
     display_name: "Google Gemini",
     icon_slug: "google",
@@ -640,40 +626,13 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     default_model_allowed: true,
     supports_fetch: true,
     default_auth_method: "api_key",
-    priority: 80,
-    // Keep fallback suggestions aligned with the current Gemini API model
-    // catalog. Actual readiness still requires a live model-list and
-    // completion probe for the user's project/key.
+    priority: 100,
     common_models: [
-      "gemini-3.7-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
       "gemini-3.5-flash-lite",
+      "gemini-3.5-flash",
+      "gemini-3.6-flash",
     ],
     aliases: ["gemini"],
-  },
-  {
-    id: "opencode",
-    display_name: "OpenCode Zen",
-    icon_slug: "opencode",
-    domain: "opencode.ai",
-    default_api_base: "https://opencode.ai/zen/v1",
-    empty_api_key_allowed: false,
-    create_allowed: true,
-    default_model_allowed: true,
-    supports_fetch: true,
-    default_auth_method: "api_key",
-    priority: 85,
-    common_models: [
-      "mimo-v2.5-free",
-      "deepseek-v4-flash-free",
-      "x-preview-f-free",
-      "muse-spark-1.2-contributor-free",
-      "nemotron-3-ultra-free",
-      "nemotron-3.5-lightning-free",
-      "laguna-s-2.1-free",
-    ],
-    aliases: ["open-code", "open-code-zen", "zen"],
   },
   {
     id: "llama.cpp",
@@ -688,29 +647,9 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     default_auth_method: "none",
     auth_method_locked: true,
     local: true,
-    priority: 75,
+    priority: 90,
     common_models: ["local-model"],
-    aliases: ["llama-cpp", "llamacpp", "local-llama"],
-  },
-  {
-    id: "openrouter",
-    display_name: "OpenRouter",
-    icon_slug: "openrouter",
-    domain: "openrouter.ai",
-    default_api_base: "https://openrouter.ai/api/v1",
-    empty_api_key_allowed: false,
-    create_allowed: true,
-    default_model_allowed: true,
-    supports_fetch: true,
-    default_auth_method: "api_key",
-    priority: 70,
-    common_models: [
-      "anthropic/claude-3.5-sonnet",
-      "openai/gpt-4o",
-      "google/gemini-2.0-flash",
-      "meta-llama/llama-3.1-405b",
-    ],
-    aliases: ["open-router"],
+    aliases: ["llama-cpp", "llamacpp", "local-llama", "local"],
   },
 ];
 
@@ -2378,21 +2317,11 @@ function setPlatformAutostart(paths: RuntimePaths, enabled: boolean): void {
 }
 
 function apiKeyEnvForProvider(provider: string): string {
-  switch (provider) {
-    case "openai":
-      return "OPENAI_API_KEY";
-    case "google":
-    case "gemini":
-      return "GEMINI_API_KEY";
-    case "openrouter":
-      return "OPENROUTER_API_KEY";
-    case "opencode":
-      return "OPENCODE_API_KEY";
-    case "omniroute":
-      return "MIKI_OMNIROUTE_API_KEY";
-    default:
-      return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
+  if (provider === "google" || provider === "gemini") return "GEMINI_API_KEY";
+  if (["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(provider)) {
+    return "LLAMA_CPP_API_KEY";
   }
+  return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
 }
 
 function oauthSecretEnvForProvider(provider: string): string {
@@ -2447,15 +2376,11 @@ async function launcherProviderOptions(
       return {
         id: dashboardId,
         display_name: descriptor.manifest.displayName,
-        icon_slug: descriptor.manifest.id === "omniroute" ? "route" : "plugin",
+        icon_slug: descriptor.manifest.id === "llama.cpp" ? "llama" : "google",
         default_api_base:
-          descriptor.manifest.id === "omniroute"
-            ? process.env.MIKI_OMNIROUTE_BASE_URL || "http://127.0.0.1:20128/v1"
-            : descriptor.manifest.id === "ollama"
-              ? process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434/v1"
-              : descriptor.manifest.id === "claude"
-                ? "https://api.anthropic.com/v1/"
-                : "",
+          descriptor.manifest.id === "gemini"
+            ? process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/"
+            : process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1",
         empty_api_key_allowed: descriptor.auth.allowEmptyKey,
         create_allowed: true,
         default_model_allowed: true,
@@ -2473,6 +2398,9 @@ async function launcherProviderOptions(
   const pluginOptions = (
     await listRuntimePluginProviderMetadata(paths.sourceDir ?? paths.configDir)
   )
+    .filter((provider) =>
+      ["gemini", "google", "llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(provider.id),
+    )
     .filter((provider) => !seen.has(provider.id))
     .map((provider): ProviderOption => {
       seen.add(provider.id);
@@ -2525,23 +2453,19 @@ function normalizeProvider(
   options: ProviderOption[] = PROVIDER_OPTIONS,
 ): string {
   const raw = (provider || "").trim().toLowerCase();
-  if (raw === "gemini") return "google";
-  if (raw && getProviderOption(raw, options).id === raw) return raw;
-  if (raw && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(raw)) return raw;
+  if (raw === "gemini" || raw === "google") return "google";
+  if (["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(raw)) return "llama.cpp";
+  if (raw && options.some((item) => item.id === raw || item.aliases?.includes(raw))) return raw;
   const name = modelName.toLowerCase();
-  if (name.startsWith("openai/") || name.startsWith("gpt-")) return "openai";
   if (name.startsWith("google/") || name.startsWith("gemini")) return "google";
-  const slash = name.indexOf("/");
-  if (slash > 0) {
-    const prefix = name.slice(0, slash);
-    const option = options.find(
-      (item) => item.id === prefix || item.aliases?.includes(prefix),
-    );
-    return option?.id || "openrouter";
-  }
-  return settings.provider === "google"
-    ? "google"
-    : settings.provider || "openrouter";
+  if (
+    name.startsWith("llama.cpp/") ||
+    name.startsWith("llama-cpp/") ||
+    name.startsWith("llamacpp/") ||
+    name.startsWith("local-llama/") ||
+    name.startsWith("local/")
+  ) return "llama.cpp";
+  return "google";
 }
 
 function modelBodyName(modelName: string, provider: string): string {
@@ -2550,7 +2474,6 @@ function modelBodyName(modelName: string, provider: string): string {
   if (provider === "google" && modelName.startsWith("gemini/")) {
     return modelName.slice("gemini/".length);
   }
-  if (provider === "openrouter") return modelName;
   const slash = modelName.indexOf("/");
   return slash > 0 ? modelName.slice(slash + 1) : modelName;
 }
@@ -2570,14 +2493,7 @@ export function runtimeModelName(stored: StoredModel): string {
   // provider router treats an unprefixed model id as a legacy cloud/OpenRouter
   // identifier, so dropping a provider prefix can silently route a request to
   // the wrong adapter after model selection or restart.
-  const preservePrefix = new Set([
-    "openai",
-    "opencode",
-    "omniroute",
-    "llama.cpp",
-    "ollama",
-    "claude",
-  ]);
+  const preservePrefix = new Set(["llama.cpp"]);
   if (preservePrefix.has(provider)) {
     return modelId.startsWith(`${provider}/`)
       ? modelId
@@ -2750,7 +2666,7 @@ function normalizeStoredModel(
   const slash = stored.model_name.indexOf("/");
   const providerMismatch =
     slash > 0 &&
-    inferredProvider === "openrouter" &&
+    inferredProvider !== provider &&
     !stored.model_name.toLowerCase().startsWith(`${provider}/`);
   const normalizedProvider = providerMismatch ? inferredProvider : provider;
   const option = getProviderOption(normalizedProvider, options);
@@ -6010,7 +5926,14 @@ export function createLauncherCompatRouter({
     model: string,
     apiKey: string,
   ): Promise<CompletionHealthResult> {
-    const directProviderId = provider === "google" ? "gemini" : provider;
+    const directProviderId: DirectProviderId =
+      provider === "google" || provider === "gemini"
+        ? "gemini"
+        : provider === "llama.cpp"
+          ? "llama.cpp"
+          : (() => {
+              throw new Error(`Unsupported provider: ${provider}`);
+            })();
     const option = getProviderOption(provider);
     return probeProviderCompletion({
       provider: {
@@ -6031,7 +5954,14 @@ export function createLauncherCompatRouter({
     model: string,
     apiKey: string,
   ): Promise<ToolHealthResult> {
-    const directProviderId = provider === "google" ? "gemini" : provider;
+    const directProviderId: DirectProviderId =
+      provider === "google" || provider === "gemini"
+        ? "gemini"
+        : provider === "llama.cpp"
+          ? "llama.cpp"
+          : (() => {
+              throw new Error(`Unsupported provider: ${provider}`);
+            })();
     const option = getProviderOption(provider);
     return probeProviderTools({
       provider: {

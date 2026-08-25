@@ -25,15 +25,8 @@ const ENV_PATH = (candidates.find((p) => {
 dotenv.config({ path: ENV_PATH });
 
 export const BUILTIN_MODELS = [
-  "openai/gpt-4o",
-  "openai/gpt-4o-mini",
-  "openai/gpt-4o-2024-08-06",
-  "anthropic/claude-3.5-sonnet",
-  "anthropic/claude-opus-4-8",
-  "anthropic/claude-sonnet-5",
-  "google/gemini-2.0-flash-001",
-  "meta-llama/llama-3.3-70b-instruct",
-  "ollama/llama3.3",
+  "gemini/gemini-3.5-flash-lite",
+  "llama.cpp/local-model",
 ];
 
 export function shouldWarnMissingApiKeys(
@@ -54,30 +47,9 @@ export class Settings {
     return Settings._instance;
   }
 
-  get openrouterApiKey(): string {
-    return resolveConfiguredSecret(
-      "OPENROUTER_API_KEY",
-      readMikiEnv("MIKI_WORKSPACE_DIR"),
-    );
-  }
-
   get geminiApiKey(): string {
     return resolveConfiguredSecret(
       "GEMINI_API_KEY",
-      readMikiEnv("MIKI_WORKSPACE_DIR"),
-    );
-  }
-
-  get googleApiKey(): string {
-    return resolveConfiguredSecret(
-      "GOOGLE_API_KEY",
-      readMikiEnv("MIKI_WORKSPACE_DIR"),
-    );
-  }
-
-  get anthropicApiKey(): string {
-    return resolveConfiguredSecret(
-      "ANTHROPIC_API_KEY",
       readMikiEnv("MIKI_WORKSPACE_DIR"),
     );
   }
@@ -86,7 +58,7 @@ export class Settings {
     return (
       process.env["DEFAULT_MODEL"] ||
       process.env["MIKI_MODEL"] ||
-      "gemini/gemini-3.7-flash"
+      "gemini/gemini-3.5-flash-lite"
     );
   }
 
@@ -194,7 +166,7 @@ export class Settings {
   }
 
   get llmBaseUrl(): string {
-    return process.env["LLM_BASE_URL"] || "https://openrouter.ai/api/v1";
+    return process.env["GEMINI_BASE_URL"] || "https://generativelanguage.googleapis.com/v1beta/openai/";
   }
 
   get telegramBotToken(): string {
@@ -205,23 +177,23 @@ export class Settings {
   }
 
   get provider(): string {
-    const model = this.defaultModel;
-    if (model.startsWith("openrouter/")) return "openrouter";
-    if (model.startsWith("gemini/") || model.startsWith("google/"))
-      return "google";
-    if (model.startsWith("anthropic/")) return "anthropic";
-    if (model.startsWith("openai/")) return "openai";
-    return "openrouter";
+    const model = this.defaultModel.toLowerCase();
+    if (
+      model.startsWith("llama.cpp/") ||
+      model.startsWith("llama-cpp/") ||
+      model.startsWith("local/")
+    ) return "llama.cpp";
+    return "google";
   }
 
   get keysConfigured(): boolean {
-    return !!(this.openrouterApiKey || this.geminiApiKey || this.googleApiKey);
+    return Boolean(this.geminiApiKey || process.env.MIKI_LLAMA_BASE_URL);
   }
 
   validate(): void {
     if (!this.keysConfigured && shouldWarnMissingApiKeys()) {
       console.warn(
-        "No provider API keys configured. Add your own key in the dashboard or set OPENROUTER_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY.",
+        "No Gemini API key or llama.cpp local runtime is configured. Add a Gemini key in the dashboard or configure a local llama-server.",
       );
     }
   }

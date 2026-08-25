@@ -71,8 +71,8 @@ export function validateModelField(
     }
     return {
       level: "warning",
-      messageKey: "models.validation.defaultToOpenAI",
-      fix: `openai/${trimmed}`,
+      messageKey: "models.validation.defaultToGemini",
+      fix: `gemini/${trimmed}`,
     }
   }
 

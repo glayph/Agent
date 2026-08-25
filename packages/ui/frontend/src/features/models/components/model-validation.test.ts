@@ -4,13 +4,23 @@ import { validateModelField } from "./model-validation"
 
 const providerOptions = [
   {
-    id: "openai",
-    display_name: "OpenAI",
-    default_api_base: "https://api.openai.com/v1",
+    id: "google",
+    display_name: "Google Gemini",
+    default_api_base:
+      "https://generativelanguage.googleapis.com/v1beta/openai/",
     empty_api_key_allowed: false,
     create_allowed: true,
     default_model_allowed: true,
-    aliases: ["oai"],
+    aliases: ["gemini"],
+  },
+  {
+    id: "llama.cpp",
+    display_name: "llama.cpp Local",
+    default_api_base: "http://127.0.0.1:39200/v1",
+    empty_api_key_allowed: true,
+    create_allowed: true,
+    default_model_allowed: true,
+    aliases: ["llama-cpp", "local"],
   },
 ]
 
@@ -20,46 +30,53 @@ describe("model validation", () => {
       level: "success",
       messageKey: "",
     })
-    expect(validateModelField("gpt-4.1-mini", "openai")).toMatchObject({
+    expect(validateModelField("gemini-3.5-flash-lite", "google")).toMatchObject({
       level: "success",
       messageKey: "models.validation.parsed",
-      messageParams: { provider: "openai", model: "gpt-4.1-mini" },
+      messageParams: { provider: "google", model: "gemini-3.5-flash-lite" },
     })
   })
 
   it("returns actionable fixes for invalid separators", () => {
-    expect(validateModelField("openai gpt-4.1-mini")).toMatchObject({
+    expect(validateModelField("gemini gemini-3.5-flash-lite")).toMatchObject({
       level: "error",
       messageKey: "models.validation.whitespace",
-      fix: "openai/gpt-4.1-mini",
+      fix: "gemini/gemini-3.5-flash-lite",
     })
-    expect(validateModelField("/openai/gpt-4.1-mini")).toMatchObject({
+    expect(validateModelField("/gemini/gemini-3.5-flash-lite")).toMatchObject({
       level: "error",
       messageKey: "models.validation.leadingSlash",
-      fix: "openai/gpt-4.1-mini",
+      fix: "gemini/gemini-3.5-flash-lite",
     })
-    expect(validateModelField("openai//gpt-4.1-mini")).toMatchObject({
+    expect(validateModelField("gemini//gemini-3.5-flash-lite")).toMatchObject({
       level: "error",
       messageKey: "models.validation.consecutiveSlash",
-      fix: "openai/gpt-4.1-mini",
+      fix: "gemini/gemini-3.5-flash-lite",
     })
   })
 
-  it("suggests a default provider when no provider is selected", () => {
-    expect(validateModelField("gpt-4.1-mini")).toMatchObject({
+  it("suggests Gemini when no provider is selected", () => {
+    expect(validateModelField("gemini-3.5-flash-lite")).toMatchObject({
       level: "warning",
-      messageKey: "models.validation.defaultToOpenAI",
-      fix: "openai/gpt-4.1-mini",
+      messageKey: "models.validation.defaultToGemini",
+      fix: "gemini/gemini-3.5-flash-lite",
     })
   })
 
   it("accepts known provider-prefixed model identifiers", () => {
     expect(
-      validateModelField("openai/gpt-4.1-mini", undefined, providerOptions),
+      validateModelField(
+        "google/gemini-3.5-flash-lite",
+        undefined,
+        providerOptions,
+      ),
     ).toMatchObject({
       level: "success",
       messageKey: "models.validation.parsed",
-      messageParams: { provider: "openai", model: "gpt-4.1-mini" },
+      messageParams: {
+        provider: "google",
+        model: "gemini-3.5-flash-lite",
+      },
     })
   })
 })

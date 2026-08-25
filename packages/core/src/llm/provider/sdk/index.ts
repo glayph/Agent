@@ -5,8 +5,7 @@ export const MIKI_PROVIDER_PLUGIN_API_VERSION = "1.0";
 export type ProviderInputKind = "text" | "image" | "audio";
 export type ProviderAuthMode =
   "api-key" | "oauth" | "none" | "local" | "placeholder";
-export type ProviderApiKind =
-  "openai-completions" | "openai-responses" | "gemini" | "anthropic" | "local";
+export type ProviderApiKind = "openai-completions" | "gemini" | "local";
 
 export interface MikiProviderCapabilities {
   chat: boolean;

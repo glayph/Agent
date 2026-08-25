@@ -6,10 +6,6 @@ import {
   resolveProviderApiKey,
   type DirectProviderConfig,
 } from "./catalog.js";
-import {
-  claudeNativeCompletion,
-  clearAnthropicClientCache,
-} from "./anthropic-adapter.js";
 import { openAICompatibleAdapter } from "./openai-compatible-adapter.js";
 import type {
   LLMProviderAdapter,
@@ -18,17 +14,9 @@ import type {
   ProviderModel,
 } from "./contracts.js";
 import { LLMMissingCredentialError, LLMAPIError } from "./errors.js";
-import { ensureLocalRuntime } from "../local/local-runtime.js";
 import { ProviderPluginRegistry } from "./sdk/registry.js";
 import { builtinProviderPlugins } from "./sdk/builtin.js";
 import type { MikiProviderMessage } from "./sdk/index.js";
-
-function nativeClaudeEnabled(): boolean {
-  const value = process.env.CLAUDE_NATIVE;
-  return (
-    value === undefined || (value !== "0" && value.toLowerCase() !== "false")
-  );
-}
 
 function workspaceDir(): string {
   return (
@@ -36,23 +24,6 @@ function workspaceDir(): string {
     readMikiEnv("MIKI_WORKSPACE_DIR") ||
     process.cwd()
   );
-}
-
-class AnthropicNativeAdapter implements LLMProviderAdapter {
-  readonly providerId = "claude";
-
-  complete(request: ProviderCompletionRequest): Promise<LLMResponse> {
-    return claudeNativeCompletion(
-      request.messages as Parameters<typeof claudeNativeCompletion>[0],
-      request.model,
-      request.apiKey,
-      request.extra,
-    );
-  }
-
-  clearCache(): void {
-    clearAnthropicClientCache();
-  }
 }
 
 /**
@@ -65,7 +36,6 @@ export class ProviderRegistry {
 
   constructor() {
     this.register(openAICompatibleAdapter);
-    this.register(new AnthropicNativeAdapter());
     this.pluginRegistry = new ProviderPluginRegistry({
       workspaceDir: workspaceDir(),
       configDir: workspaceDir(),
@@ -88,12 +58,8 @@ export class ProviderRegistry {
     this.adapters.set(adapter.providerId, adapter);
   }
 
-  adapterFor(provider: DirectProviderConfig): LLMProviderAdapter {
-    return (
-      this.adapters.get(
-        provider.id === "claude" ? "claude" : "openai-compatible",
-      ) ?? openAICompatibleAdapter
-    );
+  adapterFor(_provider: DirectProviderConfig): LLMProviderAdapter {
+    return this.adapters.get("openai-compatible") ?? openAICompatibleAdapter;
   }
 
   resolve(model: string): DirectProviderConfig | undefined {
@@ -138,23 +104,16 @@ export class ProviderRegistry {
     }
 
     const plugin = this.pluginRegistry.get(provider.id);
-    if (plugin && !(provider.id === "claude" && !nativeClaudeEnabled())) {
-      return this.pluginRegistry.complete(model, messages, { extra });
+    if (plugin) {
+      const pluginModel =
+        provider.id === "llama.cpp" && !model.includes("/")
+          ? `${provider.id}/${model}`
+          : model;
+      return this.pluginRegistry.complete(pluginModel, messages, { extra });
     }
 
-    // Local llama.cpp routing is deliberately resolved before any remote
-    // credential lookup. A local request may start a managed loopback server,
-    // but it must never resolve or transmit a Gemini/OpenAI/etc. secret.
-    if (provider.id === "llama.cpp") {
-      const runtime = await ensureLocalRuntime(model);
-      return openAICompatibleAdapter.complete({
-        provider: { ...provider, baseUrl: runtime.baseUrl },
-        model: runtime.model,
-        apiKey: "local-no-auth-required",
-        messages: messages as never,
-        extra,
-      });
-    }
+    // No legacy or arbitrary provider fallback exists in the two-provider
+    // runtime. A model must resolve to a registered Gemini or llama.cpp plugin.
 
     const apiKey = resolveProviderApiKey(provider, workspaceDir());
     if (!apiKey && !provider.emptyApiKeyAllowed) {
@@ -172,11 +131,7 @@ export class ProviderRegistry {
       extra,
     };
 
-    const adapter = this.adapterFor(provider);
-    if (provider.id === "claude" && !nativeClaudeEnabled()) {
-      return openAICompatibleAdapter.complete(request);
-    }
-    return adapter.complete(request);
+    return this.adapterFor(provider).complete(request);
   }
 
   listModels(

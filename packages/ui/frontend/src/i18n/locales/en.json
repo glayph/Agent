@@ -299,14 +299,7 @@
   "credentials": {
     "description": "Manage OAuth and token-based credentials for supported providers.",
     "loading": "Loading credentials…",
-    "providers": {
-      "openai": {
-        "description": "Supports browser OAuth, device code, and token login."
-      },
-      "antigravity": {
-        "description": "Uses a Gemini API key for Google Cloud Code Assist."
-      }
-    },
+    "providers": {},
     "status": {
       "connected": "Connected",
       "needsRefresh": "Needs refresh",
@@ -325,7 +318,6 @@
       "description": "This will remove your saved credential for {{provider}}."
     },
     "fields": {
-      "openaiToken": "OpenAI token",
       "antigravityToken": "Gemini API key"
     },
     "labels": {
@@ -348,14 +340,6 @@
       "success": "Authentication successful",
       "error": "Authentication failed",
       "expired": "Authentication session expired"
-    },
-    "device": {
-      "title": "OpenAI Device Login",
-      "description": "Open the verification page and enter the code below. This page will refresh automatically.",
-      "code": "User Code",
-      "url": "Verification URL",
-      "polling": "Polling login status…",
-      "open": "Open Verification Page"
     }
   },
   "models": {
@@ -536,12 +520,12 @@
       "leadingSlash": "Should not start with /",
       "consecutiveSlash": "Should not contain consecutive /",
       "useProvider": "Will use \"{{provider}}\" as provider",
-      "defaultToOpenAI": "No provider specified, defaults to OpenAI",
       "emptyModel": "Model name cannot be empty",
       "shouldUse": "\"{{provider}}\" should use \"{{alias}}\"",
       "didYouMean": "Did you mean \"{{closest}}\"?",
       "unknownProvider": "Unknown provider \"{{provider}}\"",
-      "parsed": "provider={{provider}}, model={{model}}"
+      "parsed": "provider={{provider}}, model={{model}}",
+      "defaultToGemini": "No provider specified, defaults to Gemini"
     },
     "combobox": {
       "selectProvider": "Select provider…",

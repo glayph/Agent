@@ -647,7 +647,6 @@ export class AgentControlService {
             plan.capability === "models"
               ? {
                   models: stateConfig.models,
-                  model_providers: stateConfig.model_providers,
                 }
               : state,
           evidence,

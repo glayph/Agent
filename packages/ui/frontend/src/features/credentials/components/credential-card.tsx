@@ -1,13 +1,11 @@
 import type { ReactNode } from "react"
 
-import type { OAuthProviderStatus } from "@/api/oauth"
-
-import { ProviderStatusLine } from "./provider-status-line"
+import { ProviderStatusLine, type CredentialStatus } from "./provider-status-line"
 
 interface CredentialCardProps {
   title: ReactNode
   description: string
-  status: OAuthProviderStatus["status"]
+  status: CredentialStatus
   authMethod?: string
   details?: ReactNode
   actions: ReactNode

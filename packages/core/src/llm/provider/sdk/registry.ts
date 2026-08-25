@@ -153,7 +153,7 @@ export class ProviderPluginRegistry {
       )
         return plugin;
     }
-    return this.plugins.get("openrouter");
+    return undefined;
   }
 
   async loadExternalPlugins(

@@ -112,11 +112,7 @@ export const DEFAULT_GEMINI_MODEL = "gemini/gemini-3.5-flash-lite";
 export const DEFAULT_GEMINI_PROVIDER = "gemini";
 
 const SECRET_KEYS = [
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "OPENROUTER_API_KEY",
   "MIKI_API_KEY",
   "TELEGRAM_BOT_TOKEN",
   "DISCORD_BOT_TOKEN",
@@ -134,8 +130,8 @@ export const settings: RuntimeConfig & {
   coreHost: string;
 } = {
   dataDir: process.env.MIKI_DATA_DIR || "./data",
-  // Gemini is the safe, explicit default. MIKI_MODEL remains an intentional
-  // override for OpenAI, Anthropic, OpenRouter, Ollama, or custom providers.
+  // Gemini is the safe, explicit default. MIKI_MODEL may select Gemini or
+  // the local llama.cpp plugin only.
   model: process.env.MIKI_MODEL || DEFAULT_GEMINI_MODEL,
   defaultModel: process.env.MIKI_MODEL || DEFAULT_GEMINI_MODEL,
   temperature: 0.2,
@@ -150,11 +146,7 @@ export const settings: RuntimeConfig & {
       DEFAULT_GEMINI_MODEL,
       "gemini/gemini-3.6-flash",
       "gemini/gemini-3.5-flash",
-      "gemini/gemini-3.5-flash-lite",
-      "openai/gpt-4o-mini",
-      "openai/gpt-4o",
-      "claude/claude-3-5-sonnet",
-      "claude/claude-3-opus",
+      "llama.cpp/local-model",
     ];
   },
   setModel(model: string) {
