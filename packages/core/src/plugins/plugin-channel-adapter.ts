@@ -186,13 +186,19 @@ function envForProbeMode(
 ): NodeJS.ProcessEnv {
   const nextEnv: NodeJS.ProcessEnv = { ...(env || process.env) };
   if (mode === "live") {
+    nextEnv.MIKI_CHANNEL_LIVE_PROBES = "true";
     nextEnv.Miki_CHANNEL_LIVE_PROBES = "true";
+    delete nextEnv.MIKI_CHANNEL_SANDBOX_PROBES;
     delete nextEnv.Miki_CHANNEL_SANDBOX_PROBES;
   } else if (mode === "sandbox") {
+    nextEnv.MIKI_CHANNEL_SANDBOX_PROBES = "true";
     nextEnv.Miki_CHANNEL_SANDBOX_PROBES = "true";
+    delete nextEnv.MIKI_CHANNEL_LIVE_PROBES;
     delete nextEnv.Miki_CHANNEL_LIVE_PROBES;
   } else if (mode === "mock") {
+    delete nextEnv.MIKI_CHANNEL_LIVE_PROBES;
     delete nextEnv.Miki_CHANNEL_LIVE_PROBES;
+    delete nextEnv.MIKI_CHANNEL_SANDBOX_PROBES;
     delete nextEnv.Miki_CHANNEL_SANDBOX_PROBES;
   }
   return nextEnv;
@@ -200,7 +206,9 @@ function envForProbeMode(
 
 function executableProbeEnabled(env: NodeJS.ProcessEnv): boolean {
   return (
+    env.MIKI_CHANNEL_LIVE_PROBES === "true" ||
     env.Miki_CHANNEL_LIVE_PROBES === "true" ||
+    env.MIKI_CHANNEL_SANDBOX_PROBES === "true" ||
     env.Miki_CHANNEL_SANDBOX_PROBES === "true"
   );
 }
@@ -359,8 +367,11 @@ export function createRuntimePluginChannelAdapter(
   };
 
   if (descriptor.contract.readiness.entrypointPath) {
-    adapter.liveValidate = (context) =>
+    const probe = (context: ChannelAdapterContext) =>
       runExecutableChannelProbe(workspaceDir, descriptor, context, options);
+    adapter.mockValidate = probe;
+    adapter.sandboxValidate = probe;
+    adapter.liveValidate = probe;
   }
 
   return adapter;

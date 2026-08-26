@@ -50,6 +50,13 @@ export interface PlatformDescriptor {
   officialUrl: string;
   connectionMode: "oauth" | "bot_token" | "api_key" | "browser_bridge";
   implementation: "planned" | "partial" | "ready";
+  /**
+   * Channel runtime status is intentionally separate from the platform
+   * connection/publishing implementation. A channel adapter may be usable
+   * while the browser/OAuth publishing surface remains blocked.
+   */
+  channel_runtime_status?: "functional" | "partial" | "unavailable";
+  channel_runtime_note?: string;
   capabilities: PlatformCapability[];
   requiredScopes: string[];
   setupSteps: string[];
@@ -106,6 +113,9 @@ const PROVIDERS: PlatformDescriptor[] = [
     officialUrl: "https://developers.facebook.com/",
     connectionMode: "oauth",
     implementation: "planned",
+    channel_runtime_status: "unavailable",
+    channel_runtime_note:
+      "No Facebook Pages adapter is wired; Page publishing remains blocked.",
     requiredScopes: ["pages_manage_posts", "pages_read_engagement"],
     capabilities: [
       {
@@ -130,6 +140,9 @@ const PROVIDERS: PlatformDescriptor[] = [
     officialUrl: "https://console.cloud.google.com/",
     connectionMode: "oauth",
     implementation: "planned",
+    channel_runtime_status: "unavailable",
+    channel_runtime_note:
+      "No YouTube upload adapter is wired; video publishing remains blocked.",
     requiredScopes: ["https://www.googleapis.com/auth/youtube.upload"],
     capabilities: [
       {
@@ -178,6 +191,9 @@ const PROVIDERS: PlatformDescriptor[] = [
     officialUrl: "https://t.me/BotFather",
     connectionMode: "bot_token",
     implementation: "planned",
+    channel_runtime_status: "functional",
+    channel_runtime_note:
+      "The Telegram bot channel adapter is present; platform-connection publishing is still gated by validation.",
     requiredScopes: ["bot_message_send"],
     capabilities: [
       {
@@ -202,6 +218,9 @@ const PROVIDERS: PlatformDescriptor[] = [
     officialUrl: "https://developers.facebook.com/docs/whatsapp/cloud-api/",
     connectionMode: "oauth",
     implementation: "planned",
+    channel_runtime_status: "partial",
+    channel_runtime_note:
+      "A bridge-based WhatsApp channel exists; native Cloud API publishing is not wired.",
     requiredScopes: ["whatsapp_business_messaging"],
     capabilities: [
       {
@@ -275,6 +294,9 @@ const PROVIDERS: PlatformDescriptor[] = [
     officialUrl: "https://discord.com/developers/applications",
     connectionMode: "oauth",
     implementation: "planned",
+    channel_runtime_status: "functional",
+    channel_runtime_note:
+      "The Discord bot channel adapter is present; platform-connection publishing is still gated by validation.",
     requiredScopes: ["bot", "applications.commands"],
     capabilities: [
       {
@@ -300,6 +322,9 @@ const PROVIDERS: PlatformDescriptor[] = [
     officialUrl: "https://api.slack.com/apps",
     connectionMode: "oauth",
     implementation: "planned",
+    channel_runtime_status: "functional",
+    channel_runtime_note:
+      "The Slack Socket Mode channel adapter is present; platform-connection publishing is still gated by validation.",
     requiredScopes: ["chat:write"],
     capabilities: [
       {

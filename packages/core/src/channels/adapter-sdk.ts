@@ -20,6 +20,12 @@ export interface ChannelAdapter {
   liveValidate?(
     context: ChannelAdapterContext,
   ): Promise<ChannelRuntimeProbeCheck[]>;
+  sandboxValidate?(
+    context: ChannelAdapterContext,
+  ): Promise<ChannelRuntimeProbeCheck[]>;
+  mockValidate?(
+    context: ChannelAdapterContext,
+  ): Promise<ChannelRuntimeProbeCheck[]>;
 }
 
 export const REDACTED_CHANNEL_SECRET = "[redacted]";
@@ -108,10 +114,16 @@ export async function runChannelAdapterProbe(
 ): Promise<ChannelRuntimeProbe> {
   const startedAt = Date.now();
   const configChecks = adapter.validateConfig(context);
-  const liveChecks = adapter.liveValidate
-    ? await adapter.liveValidate(context)
-    : [];
-  const checks = [...configChecks, ...liveChecks];
+  const checkMode = resolveAdapterProbeMode(context.env || process.env);
+  const modeChecks =
+    checkMode === "live" && adapter.liveValidate
+      ? await adapter.liveValidate(context)
+      : checkMode === "sandbox" && adapter.sandboxValidate
+        ? await adapter.sandboxValidate(context)
+        : checkMode === "mock" && adapter.mockValidate
+          ? await adapter.mockValidate(context)
+          : [];
+  const checks = [...configChecks, ...modeChecks];
   const missingFields = configChecks
     .filter(
       (check) => check.status === "fail" && check.id.startsWith("required:"),
@@ -120,7 +132,6 @@ export async function runChannelAdapterProbe(
   const failed = checks.some((check) => check.status === "fail");
   const warned = checks.some((check) => check.status === "warn");
   const runtimeStatus = adapter.metadata.runtime_status || "config_only";
-  const checkMode = resolveAdapterProbeMode(context.env || process.env);
   const failureCode = checks.find((check) => check.status === "fail")?.id;
 
   return {
@@ -158,8 +169,16 @@ export async function runChannelAdapterProbe(
 }
 
 function resolveAdapterProbeMode(env: NodeJS.ProcessEnv) {
-  if (env.Miki_CHANNEL_LIVE_PROBES === "true") return "live" as const;
-  if (env.Miki_CHANNEL_SANDBOX_PROBES === "true") return "sandbox" as const;
+  if (
+    env.MIKI_CHANNEL_LIVE_PROBES === "true" ||
+    env.Miki_CHANNEL_LIVE_PROBES === "true"
+  )
+    return "live" as const;
+  if (
+    env.MIKI_CHANNEL_SANDBOX_PROBES === "true" ||
+    env.Miki_CHANNEL_SANDBOX_PROBES === "true"
+  )
+    return "sandbox" as const;
   return "mock" as const;
 }
 

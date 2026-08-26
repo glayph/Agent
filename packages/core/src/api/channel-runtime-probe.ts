@@ -552,8 +552,16 @@ function classifyFailedProbe(
 }
 
 function resolveProbeMode(env: NodeJS.ProcessEnv): ChannelProbeMode {
-  if (env.Miki_CHANNEL_LIVE_PROBES === "true") return "live";
-  if (env.Miki_CHANNEL_SANDBOX_PROBES === "true") return "sandbox";
+  if (
+    env.MIKI_CHANNEL_LIVE_PROBES === "true" ||
+    env.Miki_CHANNEL_LIVE_PROBES === "true"
+  )
+    return "live";
+  if (
+    env.MIKI_CHANNEL_SANDBOX_PROBES === "true" ||
+    env.Miki_CHANNEL_SANDBOX_PROBES === "true"
+  )
+    return "sandbox";
   return "mock";
 }
 
@@ -591,7 +599,10 @@ function buildMockSendCheck({
       latency_ms: Date.now() - startedAt,
     };
   }
-  if (mode === "live" && env.Miki_CHANNEL_ALLOW_LIVE_SEND !== "true") {
+  const liveSendAllowed =
+    env.MIKI_CHANNEL_ALLOW_LIVE_SEND === "true" ||
+    env.Miki_CHANNEL_ALLOW_LIVE_SEND === "true";
+  if (mode === "live" && !liveSendAllowed) {
     return {
       status: "skipped",
       mode,
