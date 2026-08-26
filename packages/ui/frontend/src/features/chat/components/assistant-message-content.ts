@@ -15,6 +15,7 @@ export function preservesFullAssistantContent(content: string): boolean {
   const trimmed = content.trim()
   if (!trimmed) return false
   if (trimmed.startsWith("``")) return true
+  if (/\[[^\]]+\]\(https?:\/\/[^)]+\)/i.test(trimmed)) return true
   if (/^(?:def|function)\s+[A-Za-z_]\w*\s*\(/.test(trimmed)) {
     return true
   }

@@ -63,6 +63,13 @@ function isSafeForAmbiguousTurn(name: string): boolean {
   );
 }
 
+function isExplicitMediaRequest(userMessage: string): boolean {
+  const normalized = normalize(userMessage);
+  return /browser_play_media|video|media|play|muted|readystate|paused|ভিডিও|প্লে|মিডিয়া/.test(
+    normalized,
+  );
+}
+
 function maxToolsFor(profile: AgentTaskProfile): number {
   if (
     profile.verificationDepth === "release" ||
@@ -115,7 +122,14 @@ export function selectAdaptiveCapabilities(
         "browser_screenshot",
       ]
     : [];
-  const requiredTools = new Set([...explicitTools, ...requiredArtifactTools]);
+  const requiredMediaTools = isExplicitMediaRequest(userMessage)
+    ? ["browser_navigate", "browser_play_media"]
+    : [];
+  const requiredTools = new Set([
+    ...explicitTools,
+    ...requiredArtifactTools,
+    ...requiredMediaTools,
+  ]);
   const ambiguousTurn =
     profile.complexity === "simple" && profile.verificationDepth === "none";
 
@@ -196,6 +210,9 @@ export function selectAdaptiveCapabilities(
   ];
   if (requiredTools.size > 0) {
     rationale.push(`required_tools:${[...requiredTools].join(",")}`);
+  }
+  if (requiredMediaTools.length > 0) {
+    rationale.push("explicit_media_request");
   }
   if (
     preferredTools.some((item) =>

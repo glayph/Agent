@@ -11,6 +11,7 @@ import {
 
 export type IsolatedBrowserCommand =
   | "navigate"
+  | "playMedia"
   | "click"
   | "type"
   | "invoke"
@@ -63,12 +64,17 @@ const modulePath = process.env.MIKI_BROWSER_MODULE;
 const dataDir = process.env.MIKI_BROWSER_DATA_DIR;
 if (!modulePath || !dataDir) throw new Error("Browser worker environment is incomplete");
 const { BrowserTool } = await import(modulePath);
-const tool = new BrowserTool(true, dataDir, undefined, { clearStateEveryN: 5 });
+const tool = new BrowserTool(true, dataDir, undefined, {
+  clearStateEveryN: 5,
+  allowMedia: process.env.MIKI_BROWSER_ALLOW_MEDIA !== "false",
+  chromePath: process.env.MIKI_BROWSER_CHROME_PATH || undefined,
+});
 const readline = (await import("node:readline")).createInterface({ input: process.stdin, crlfDelay: Infinity });
 const safeString = (value) => typeof value === "string" ? value : "";
 const execute = async (command, args = {}) => {
   switch (command) {
     case "navigate": return tool.navigate(safeString(args.url), Number(args.retries ?? 0));
+    case "playMedia": return tool.playMedia(args.url ? safeString(args.url) : undefined);
     case "click": return tool.click(safeString(args.selector));
     case "type": return tool.type(safeString(args.text), safeString(args.selector));
     case "invoke": return tool.invoke(args.target || {});

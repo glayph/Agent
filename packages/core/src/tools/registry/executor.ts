@@ -8,6 +8,7 @@ import {
   handleFileWrite,
   handleFileDelete,
   handleBrowserNavigate,
+  handleBrowserPlayMedia,
   handleBrowserClick,
   handleBrowserType,
   handleBrowserInvoke,
@@ -379,6 +380,10 @@ export class ToolRegistry {
     this.registerHandler("file_write", handleFileWrite.bind(this));
     this.registerHandler("file_delete", handleFileDelete.bind(this));
     this.registerHandler("browser_navigate", handleBrowserNavigate.bind(this));
+    this.registerHandler(
+      "browser_play_media",
+      handleBrowserPlayMedia.bind(this),
+    );
     this.registerHandler("browser_click", handleBrowserClick.bind(this));
     this.registerHandler("browser_type", handleBrowserType.bind(this));
     this.registerHandler("browser_invoke", handleBrowserInvoke.bind(this));

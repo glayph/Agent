@@ -10,6 +10,7 @@ export class BrowserTool {
   constructor() {}
   async getUrl() { return 'https://worker.local/'; }
   async navigate(url) { return 'navigated:' + url; }
+  async playMedia(url) { return JSON.stringify({ verified: true, media: { tag: 'video', src: url, readyState: 4, paused: false, duration: 5 } }); }
   async close() { return 'closed'; }
 }
 `;
@@ -37,6 +38,35 @@ describe("IsolatedBrowserWorker", () => {
     );
     await worker.close();
     expect(fs.existsSync(worker.profilePath)).toBe(false);
+  });
+
+  it("forwards playMedia and preserves the verified JSON result", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-browser-media-worker-"),
+    );
+    const modulePath = path.join(directory, "fake-browser.mjs");
+    fs.writeFileSync(modulePath, FAKE_BROWSER_MODULE, "utf8");
+    const worker = new IsolatedBrowserWorker({
+      dataDir: directory,
+      runId: "run-media",
+      browserModulePath: modulePath,
+      retainProfile: false,
+    });
+
+    const result = await worker.execute({
+      command: "playMedia",
+      args: { url: "https://media.test/flower.mp4" },
+    });
+    expect(JSON.parse(String(result))).toMatchObject({
+      verified: true,
+      media: {
+        tag: "video",
+        src: "https://media.test/flower.mp4",
+        readyState: 4,
+        paused: false,
+      },
+    });
+    await worker.close();
   });
 
   it("blocks a browser side effect until the approval inbox records an approval", async () => {

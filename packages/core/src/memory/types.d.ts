@@ -110,6 +110,105 @@ export interface SelectiveMemoryContext {
   };
 }
 
+export interface LearningExperience {
+  id: string;
+  scopeKey: string;
+  runId: string | null;
+  sessionId: string | null;
+  taskId: string | null;
+  taskClass: string;
+  contextHash: string;
+  contextSummary: string;
+  actionKey: string;
+  actionPayload: Record<string, unknown>;
+  outcome: string;
+  reward: number;
+  rewardComponents: Record<string, number>;
+  modelId: string | null;
+  policyVersion: number;
+  createdAt: string;
+  idempotencyKey: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface LearningPolicyState {
+  scope: {
+    agentId: string;
+    ownerId: string;
+    workspaceId: string;
+    scopeKey: string;
+  };
+  policyVersion: number;
+  mode: "observe" | "draft" | "apply";
+  actionStats: Record<string, unknown>;
+  totalDecisions: number;
+  averageReward: number;
+  baselineAction: string | null;
+  updatedAt: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface LearningStore {
+  normalizeScope(scope?: Record<string, string>): {
+    agentId: string;
+    ownerId: string;
+    workspaceId: string;
+    scopeKey: string;
+  };
+  recordExperience(input: Record<string, unknown>): {
+    stored: boolean;
+    duplicate: boolean;
+    row: LearningExperience;
+  };
+  listExperiences(
+    scope?: Record<string, string>,
+    options?: Record<string, unknown>,
+  ): LearningExperience[];
+  getExperienceStats(
+    scope?: Record<string, string>,
+    options?: Record<string, unknown>,
+  ): Record<string, unknown>;
+  readPolicyState(scope?: Record<string, string>): LearningPolicyState;
+  upsertPolicyState(
+    scope?: Record<string, string>,
+    state?: Record<string, unknown>,
+  ): LearningPolicyState;
+  startCycle(
+    scope: Record<string, string> | undefined,
+    cycleType: string,
+    metadata?: Record<string, unknown>,
+  ): Record<string, unknown>;
+  finishCycle(
+    cycleId: string,
+    result?: Record<string, unknown>,
+  ): Record<string, unknown>;
+  countCyclesSince(
+    scope: Record<string, string> | undefined,
+    cycleType: string,
+    since?: string,
+  ): number;
+  lastCycle(
+    scope: Record<string, string> | undefined,
+    cycleType: string,
+  ): Record<string, unknown> | null;
+  createProposal(
+    input?: Record<string, unknown>,
+  ): Record<string, unknown> | null;
+  getProposal(
+    scope: Record<string, string> | undefined,
+    proposalId: string,
+  ): Record<string, unknown> | null;
+  updateProposal(
+    scope: Record<string, string> | undefined,
+    proposalId: string,
+    patch?: Record<string, unknown>,
+  ): Record<string, unknown> | null;
+  listProposals(
+    scope: Record<string, string> | undefined,
+    options?: Record<string, unknown>,
+  ): Array<Record<string, unknown> | null>;
+}
+
 export interface TemporalKnowledgeGraph {
   initialize(): Promise<void>;
   initializeSync(): void;
@@ -183,6 +282,7 @@ export interface TemporalKnowledgeGraph {
   _now(): string;
   _uuid(): string;
   MEMORY_CATEGORIES: MemoryCategory[];
+  learningStore: LearningStore | null;
   db: import("better-sqlite3").Database;
 }
 
@@ -234,6 +334,10 @@ export interface MikiMemoryModule {
   AgentMemoryIntegration: new (
     tkg: TemporalKnowledgeGraph,
   ) => AgentMemoryIntegration;
+  LearningStore: new (
+    db: import("better-sqlite3").Database,
+    options?: { scope?: Record<string, string> },
+  ) => LearningStore;
   MemoryConsolidationDaemon: new (
     tkg: TemporalKnowledgeGraph,
     options?: {

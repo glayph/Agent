@@ -10,6 +10,7 @@ export interface BrowserConfig {
   maxRetries?: number;
   clearStateEveryN?: number;
   chromePath?: string | null;
+  allowMedia?: boolean;
 }
 
 export interface BrowserSemanticTarget {
@@ -104,6 +105,33 @@ interface VirtualCursorGlobal {
   scrollY: number;
 }
 
+interface BrowserMediaElement {
+  tagName: string;
+  currentSrc: string;
+  src: string;
+  controls: boolean;
+  playsInline: boolean;
+  muted: boolean;
+  style?: { maxWidth: string };
+  readyState: number;
+  paused: boolean;
+  currentTime: number;
+  duration: number;
+  load?: () => void;
+  play?: () => Promise<void>;
+  addEventListener?: (
+    type: string,
+    listener: () => void,
+    options?: { once?: boolean },
+  ) => void;
+}
+
+interface BrowserMediaDocument {
+  querySelector(selector: string): BrowserMediaElement | null;
+  createElement(tagName: string): BrowserMediaElement;
+  body: { appendChild(child: BrowserMediaElement): void };
+}
+
 export class BrowserTool {
   private browser: BrowserContext | null = null;
   private context: BrowserContext | null = null;
@@ -120,6 +148,7 @@ export class BrowserTool {
   private profileDir: string = "";
   private _maxRetries: number = 3;
   private _chromePath: string | null = null;
+  private _allowMedia = true;
   private workspacePreviewServer: Server | null = null;
   private workspacePreviewRoot: string | null = null;
   private workspacePreviewPort: number | null = null;
@@ -143,6 +172,7 @@ export class BrowserTool {
       if (config.clearStateEveryN != null)
         this.maxNavigationsBeforeClear = config.clearStateEveryN;
       if (config.chromePath) this._chromePath = config.chromePath;
+      if (config.allowMedia != null) this._allowMedia = config.allowMedia;
     }
   }
 
@@ -216,7 +246,7 @@ export class BrowserTool {
       if (
         isAd ||
         resourceType === "image" ||
-        resourceType === "media" ||
+        (resourceType === "media" && !this._allowMedia) ||
         resourceType === "font"
       ) {
         await route.abort();
@@ -687,6 +717,83 @@ export class BrowserTool {
     );
   }
 
+  public async playMedia(url?: string): Promise<string> {
+    await this.ensureLaunched();
+    try {
+      const page = this.activePage;
+      const mediaUrl = url ? normalizeBrowserUrl(url) : page.url();
+      if (url) {
+        await page.goto(mediaUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: NAVIGATION_TIMEOUT,
+        });
+      }
+      const state = await page.evaluate(async (source) => {
+        const doc = (
+          globalThis as unknown as { document: BrowserMediaDocument }
+        ).document;
+        const win = globalThis as unknown as {
+          setTimeout(handler: () => void, timeout: number): number;
+          clearTimeout(handle: number): void;
+        };
+        let media = doc.querySelector("video, audio");
+        if (!media) {
+          media = doc.createElement("video");
+          media.controls = true;
+          media.playsInline = true;
+          media.muted = true;
+          if (media.style) media.style.maxWidth = "100%";
+          doc.body.appendChild(media);
+        }
+        if (source && media.currentSrc !== source && media.src !== source) {
+          media.src = source;
+          media.load?.();
+        }
+        media.muted = true;
+        if (typeof media.play !== "function") {
+          throw new Error(
+            "Current page does not expose a playable media element",
+          );
+        }
+        await media.play();
+        if (media.readyState < 2) {
+          await new Promise<void>((resolve, reject) => {
+            const timer = win.setTimeout(
+              () => reject(new Error("Media did not become ready to play")),
+              10000,
+            );
+            if (typeof media?.addEventListener !== "function") {
+              reject(new Error("Media readiness events are unavailable"));
+              return;
+            }
+            media.addEventListener(
+              "canplay",
+              () => {
+                win.clearTimeout(timer);
+                resolve();
+              },
+              { once: true },
+            );
+          });
+        }
+        return {
+          tag: media.tagName.toLowerCase(),
+          src: media.currentSrc || media.src,
+          readyState: media.readyState,
+          paused: media.paused,
+          currentTime: media.currentTime,
+          duration: Number.isFinite(media.duration) ? media.duration : null,
+        };
+      }, mediaUrl);
+      if (state.readyState < 2 || state.paused) {
+        throw new Error("Media did not reach a verified playing state");
+      }
+      return JSON.stringify({ verified: true, media: state });
+    } catch (e: unknown) {
+      return JSON.stringify({ verified: false, error: getErrorMessage(e) });
+    }
+  }
+
   public async invoke(target: BrowserSemanticTarget): Promise<string> {
     await this.ensureLaunched();
     try {
@@ -844,11 +951,40 @@ export class BrowserTool {
     }
   }
 
+  private resolveChromePath(): string | undefined {
+    if (this._chromePath) return this._chromePath;
+    const candidates =
+      process.platform === "win32"
+        ? [
+            process.env.PROGRAMFILES
+              ? path.join(
+                  process.env.PROGRAMFILES,
+                  "Google/Chrome/Application/chrome.exe",
+                )
+              : "",
+            process.env.LOCALAPPDATA
+              ? path.join(
+                  process.env.LOCALAPPDATA,
+                  "Google/Chrome/Application/chrome.exe",
+                )
+              : "",
+          ]
+        : [
+            "/usr/bin/chromium",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+          ];
+    return candidates.find(
+      (candidate) => candidate && fs.existsSync(candidate),
+    );
+  }
+
   private async _launchPlaywright(): Promise<BrowserContext> {
     const { chromium } = await import("playwright");
-    // Playwright recommends launchPersistentContext for using a specific user data directory
+    // Prefer a configured/system browser when the Playwright-managed binary is absent.
     return await chromium.launchPersistentContext(this.profileDir, {
       headless: this.headless,
+      executablePath: this.resolveChromePath(),
       viewport: this.viewport,
       userAgent: this.userAgent,
       args: [

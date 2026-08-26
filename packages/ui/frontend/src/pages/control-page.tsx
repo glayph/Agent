@@ -15,6 +15,7 @@ import {
   planControlOperation,
 } from "@/api/control"
 import { getModels } from "@/api/models"
+import { getImprovementStatus, type ImprovementStatus } from "@/api/improvement"
 import { PageHeader } from "@/app/layout/page-header"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
@@ -41,6 +42,7 @@ export function ControlPage() {
   const [operations, setOperations] = useState<Array<Record<string, unknown>>>([])
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [models, setModels] = useState<Array<{ model_name: string; is_default?: boolean; available?: boolean; status?: string }>>([])
+  const [improvement, setImprovement] = useState<ImprovementStatus | null>(null)
   const [pendingOperations, setPendingOperations] = useState<Record<string, { capability: string; action: string; input: Record<string, unknown>; plan: ControlPlan }>>({})
   const [loading, setLoading] = useState(true)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -48,19 +50,21 @@ export function ControlPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [capabilityResponse, stateResponse, operationResponse, approvalResponse, modelResponse] =
+      const [capabilityResponse, stateResponse, operationResponse, approvalResponse, modelResponse, improvementResponse] =
         await Promise.all([
           getControlCapabilities(),
           getControlState(),
           getControlOperations(),
           getApprovalRequests(),
           getModels(),
+          getImprovementStatus(),
         ])
       setCapabilities(capabilityResponse.capabilities)
       setState(stateResponse.state)
       setOperations(operationResponse.operations)
       setApprovals(approvalResponse.requests.filter((request) => request.status === "pending" && request.resource.startsWith("control:")))
       setModels(modelResponse.models.map((model) => ({ model_name: model.model_name, is_default: model.is_default, available: model.available, status: model.status })))
+      setImprovement(improvementResponse.self_improvement)
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -210,6 +214,42 @@ export function ControlPage() {
                 </div>
               </SectionPanel>
             )}
+            <SectionPanel
+              title="Self-improvement learning"
+              description="Durable contextual-bandit state is observed here. Runtime behavior changes only in the configured apply mode."
+            >
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Card size="sm">
+                  <CardHeader><CardTitle>Learning mode</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <Badge variant={improvement?.degraded ? "destructive" : "secondary"}>{improvement?.degraded ? "Degraded" : improvement?.behaviorLearning?.mode || "observe"}</Badge>
+                    <p className="text-muted-foreground">Policy v{improvement?.behaviorLearning?.policyVersion || 1}</p>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardHeader><CardTitle>Decisions</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <p className="text-2xl font-semibold">{improvement?.behaviorLearning?.decisions || 0}</p>
+                    <p className="text-muted-foreground">Average reward {(improvement?.behaviorLearning?.averageReward || 0).toFixed(3)}</p>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardHeader><CardTitle>Pending drafts</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <p className="text-2xl font-semibold">{improvement?.accumulatedTunings || 0}</p>
+                    <p className="text-muted-foreground">No draft is applied automatically.</p>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardHeader><CardTitle>Cycle state</CardTitle></CardHeader>
+                  <CardContent className="space-y-1 text-sm">
+                    <p>Reflection: {improvement?.latestCycles?.reflection?.status || "not run"}</p>
+                    <p>Optimization: {improvement?.latestCycles?.optimization?.status || "not run"}</p>
+                    {improvement?.circuitBreaker?.tripped && <Badge variant="destructive">Circuit breaker tripped</Badge>}
+                  </CardContent>
+                </Card>
+              </div>
+            </SectionPanel>
             <SectionPanel
               title="Safe controls"
               description="These controls use the same validated dashboard controller as the existing Config and Tools pages."

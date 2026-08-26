@@ -240,6 +240,14 @@ export async function handlePlatformConnectionRevoke(
   });
 }
 
+export async function handleBrowserPlayMedia(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const url = typeof args["url"] === "string" ? args["url"] : undefined;
+  return await this.browser.playMedia(url);
+}
+
 export async function handleBrowserClick(
   this: ToolHandlerContext,
   args: Record<string, unknown>,

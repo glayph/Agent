@@ -76,6 +76,30 @@ describe("adaptive capability selector", () => {
     expect(selection.rationale.join(" ")).toContain("required_tools");
   });
 
+  it("retains the explicit media playback tool for verified video requests", () => {
+    const message =
+      "Use browser_play_media to play this public video with muted playback and report verified=true only after readyState >= 2 and paused=false";
+    const profile = classifyAgentTask(message);
+    const decision = routeAgentTask(message, {}, profile);
+    const selection = selectAdaptiveCapabilities(
+      message,
+      [
+        tool("browser_navigate", "Open a browser page"),
+        tool(
+          "browser_play_media",
+          "Play media and verify readyState and paused state",
+        ),
+        tool("browser_extract", "Extract browser content"),
+      ],
+      decision,
+      profile,
+    );
+
+    expect(selection.selectedToolNames).toContain("browser_navigate");
+    expect(selection.selectedToolNames).toContain("browser_play_media");
+    expect(selection.rationale).toContain("explicit_media_request");
+  });
+
   it("keeps an available read-only fallback when the request is ambiguous", () => {
     const message = "Help me with this";
     const profile = classifyAgentTask(message);

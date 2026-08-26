@@ -218,6 +218,24 @@ export class ToolRegistrySchemas {
       {
         type: "function",
         function: {
+          name: "browser_play_media",
+          description:
+            "Open and play a public audio/video URL or the first media element on the current page. Returns verified media metadata; never claim success without readyState and playing checks.",
+          parameters: {
+            type: "object",
+            properties: {
+              url: {
+                type: "string",
+                description: "Optional public http(s) media URL.",
+              },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
           name: "browser_click",
           description:
             "Click an element. Supports CSS selectors, text=Visible Text, or xpath=//path. Uses human-like delays.",

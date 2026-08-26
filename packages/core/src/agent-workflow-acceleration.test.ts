@@ -355,6 +355,44 @@ describe("AgentOrchestrator workflow acceleration", () => {
     );
   });
 
+  it("finalizes a concise response without appending a safe-stop fallback", async () => {
+    workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-agent-concise-final-"),
+    );
+    orchestrator = new AgentOrchestrator(makeRuntimePaths(workspaceDir));
+    const internal = orchestrator as unknown as {
+      _callLlmApi: () => Promise<unknown>;
+    };
+    internal._callLlmApi = async () => ({
+      choices: [
+        {
+          message: {
+            content:
+              "[Big Buck Bunny on YouTube](https://www.youtube.com/watch?v=aqz-KE-bpKQ)",
+          },
+        },
+      ],
+    });
+
+    const events: Array<Record<string, unknown>> = [];
+    for await (const rawEvent of orchestrator.runAgentLoop(
+      "concise-final-session",
+      "Return the verified link.",
+    )) {
+      events.push(JSON.parse(rawEvent) as Record<string, unknown>);
+    }
+
+    const streamed = events
+      .filter((event) => event.type === "stream_chunk")
+      .map((event) => String(event.content ?? ""))
+      .join("\n");
+    expect(streamed).toContain("Big Buck Bunny on YouTube");
+    expect(streamed).not.toContain("I could not produce a final answer");
+    expect(events.filter((event) => event.type === "stream_done")).toHaveLength(
+      1,
+    );
+  });
+
   it("finalizes a bounded tool-only loop with a safe summary", async () => {
     workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "Miki-agent-tool-only-finalization-"),

@@ -1,15 +1,16 @@
-'use strict';
+"use strict";
 
-const TemporalKnowledgeGraph = require('./temporal-knowledge-graph');
-const WorkingMemoryAnchor = require('./working-memory-anchor');
-const SpecialEventHighlighter = require('./special-event-highlighter');
-const MemoryConsolidationDaemon = require('./memory-consolidation-daemon');
-const AgentMemoryIntegration = require('./agent-memory-integration');
-const TemporaryMemory = require('./temporary-memory');
-const MultiHopRetriever = require('./multi-hop-retriever');
-const NodeGraph = require('./node-graph');
-const GraphCognitiveMemory = require('./graph-cognitive-memory');
-const SelectiveMemoryEngine = require('./selective-memory-engine');
+const TemporalKnowledgeGraph = require("./temporal-knowledge-graph");
+const WorkingMemoryAnchor = require("./working-memory-anchor");
+const SpecialEventHighlighter = require("./special-event-highlighter");
+const MemoryConsolidationDaemon = require("./memory-consolidation-daemon");
+const AgentMemoryIntegration = require("./agent-memory-integration");
+const TemporaryMemory = require("./temporary-memory");
+const MultiHopRetriever = require("./multi-hop-retriever");
+const NodeGraph = require("./node-graph");
+const GraphCognitiveMemory = require("./graph-cognitive-memory");
+const SelectiveMemoryEngine = require("./selective-memory-engine");
+const LearningStore = require("./learning-store");
 const {
   REGIONS,
   ALL_REGIONS,
@@ -19,13 +20,13 @@ const {
   CANONICAL_REGIONS,
   REGION_ALIASES,
   canonicalRegion,
-} = require('./regions');
+} = require("./regions");
 const {
   HashEmbeddingProvider,
   NoopEmbeddingProvider,
   createEmbeddingProvider,
   cosineSimilarity,
-} = require('./embedding-provider');
+} = require("./embedding-provider");
 
 module.exports = {
   TemporalKnowledgeGraph,
@@ -38,6 +39,7 @@ module.exports = {
   NodeGraph,
   GraphCognitiveMemory,
   SelectiveMemoryEngine,
+  LearningStore,
   REGIONS,
   ALL_REGIONS,
   REGION_LABELS,

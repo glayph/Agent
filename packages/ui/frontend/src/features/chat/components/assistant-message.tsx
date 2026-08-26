@@ -12,6 +12,7 @@ import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
+import { LinkPreviewCards } from "@/features/chat/components/link-preview-cards"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { MessageCodeBlock } from "@/features/chat/components/message-code-block"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
@@ -335,6 +336,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                   >
                     <MarkdownRenderer content={visibleContent} />
                   </Suspense>
+                  {!isThought && <LinkPreviewCards content={content} />}
                 </div>
               )}
           </div>

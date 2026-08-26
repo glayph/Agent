@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
+import * as crypto from "node:crypto";
 import * as yaml from "js-yaml";
 import {
   settings,
@@ -13,11 +14,13 @@ import {
 } from "@miki/config";
 import { ToolRegistry } from "./tools/index.js";
 import { HeartbeatEngine, type IOrchestrator } from "./heartbeat.js";
-import { SelfImprovementEngine } from "./self-improvement/engine.js";
-import type { SelfImprovementConfig } from "./self-improvement/engine.js";
+import {
+  SelfImprovementEngine,
+  calculateReward,
+} from "./self-improvement/engine.js";
 import type {
+  SelfImprovementConfig,
   LLMCallFn,
-  Memory as SelfImprovementMemory,
 } from "./self-improvement/engine.js";
 import { SkillGovernanceEngine } from "./skill-governance/engine.js";
 import {
@@ -459,6 +462,7 @@ interface AgentBrowserConfig {
   max_retries?: number;
   clear_state_every_n_navigations?: number;
   chrome_path?: string | null;
+  allow_media?: boolean;
 }
 
 interface AgentRuntimeConfig {
@@ -900,6 +904,7 @@ export class AgentOrchestrator {
         clearStateEveryN:
           browserCfg.clear_state_every_n_navigations ?? undefined,
         chromePath: browserCfg.chrome_path ?? null,
+        allowMedia: browserCfg.allow_media ?? true,
       },
     );
     this.tools.setOrchestrator(this);
@@ -912,51 +917,12 @@ export class AgentOrchestrator {
     this.tools.setPlatformConnectionStore(this.platformConnectionStore);
 
     const siConfig = asAgentConfig(this.config).self_improvement || {};
-    const siDb = new Database(":memory:");
-    // Keep scheduler state separate from self-improvement state and persist it
-    // under the runtime data directory so Automation Center schedules survive
-    // gateway/core restarts and can be recovered by TaskScheduler.start().
+    // Scheduler state is durable and independent from learning state. Both
+    // stores live under the runtime data directory and survive restarts.
     fs.mkdirSync(runtimePaths.dataDir, { recursive: true });
     const schedulerDb = new Database(
       path.join(runtimePaths.dataDir, "scheduled-tasks.db"),
     );
-    siDb.exec(`
-      CREATE TABLE IF NOT EXISTS agent_runs (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        status TEXT,
-        created_at TEXT,
-        updated_at TEXT
-      )
-    `);
-    siDb.exec(`
-      CREATE TABLE IF NOT EXISTS agent_run_steps (
-        run_id TEXT,
-        step_id TEXT,
-        status TEXT,
-        evidence TEXT,
-        PRIMARY KEY (run_id, step_id)
-      )
-    `);
-    const selfImprovementMemory: SelfImprovementMemory & {
-      db: Database.Database;
-    } = {
-      db: siDb,
-      saveFact: (
-        _fact: string,
-        _category: string,
-        _confidence: number,
-      ): number => {
-        return 0;
-      },
-      searchKeyword: (_query: string) => [],
-      upsertProfile: (
-        _key: string,
-        _value: string,
-        _category: string,
-        _confidence: number,
-      ): void => {},
-    };
     const selfImprovementLlmCall: LLMCallFn = async (messages) => {
       const response = await this._callLlmApi(messages as ChatMessage[]);
       return {
@@ -967,8 +933,24 @@ export class AgentOrchestrator {
       };
     };
 
+    // Initialize the temporal memory system. The DB lives alongside other
+    // agent runtime files. initMemory() is idempotent - safe across restarts.
+    const dataDir = path.resolve(
+      path.join(runtimePaths.configDir, "..", "data"),
+    );
+    let memoryIntegration = null;
+    try {
+      memoryIntegration = initMemory(dataDir);
+    } catch (memErr) {
+      // Memory init failure must never prevent the agent from starting.
+      console.error(
+        "[Agent] Memory bridge init failed (continuing without memory):",
+        (memErr as Error).message,
+      );
+    }
+
     this.selfImprovement = new SelfImprovementEngine(
-      selfImprovementMemory,
+      memoryIntegration,
       paths,
       selfImprovementLlmCall,
       siConfig,
@@ -979,20 +961,7 @@ export class AgentOrchestrator {
 
     this.heartbeat = this._createHeartbeatEngine();
 
-    // Initialize the temporal memory system. The DB lives alongside other
-    // agent runtime files. initMemory() is idempotent - safe across restarts.
-    const dataDir = path.resolve(
-      path.join(runtimePaths.configDir, "..", "data"),
-    );
-    try {
-      initMemory(dataDir);
-    } catch (memErr) {
-      // Memory init failure must never prevent the agent from starting.
-      console.error(
-        "[Agent] Memory bridge init failed (continuing without memory):",
-        (memErr as Error).message,
-      );
-    }
+    // Memory already initialized above for self-improvement engine.
 
     const maxConcurrent = this.concurrencyConfig.maxConcurrentTasks ?? 3;
     const queueSize = this.concurrencyConfig.taskQueueSize ?? 50;
@@ -1292,7 +1261,7 @@ export class AgentOrchestrator {
       typeof routing?.complex_model === "string"
         ? routing.complex_model.trim()
         : "";
-    const preferred =
+    let preferred =
       requested ||
       (routing && routing.enabled !== false
         ? complexity === "complex" && complexModel
@@ -1300,6 +1269,26 @@ export class AgentOrchestrator {
           : localModel
         : "") ||
       this.modelName;
+
+    // Learned routing is observe/draft by default. Only an explicit apply mode
+    // may select a persisted model action, and never overrides a user request.
+    if (!requested && this.selfImprovement) {
+      const candidates = [
+        ...new Set([localModel, complexModel, this.modelName].filter(Boolean)),
+      ];
+      const decision = this.selfImprovement.chooseAction({
+        context: complexity,
+        candidates,
+        baselineAction: preferred,
+      });
+      const mode = (
+        this.selfImprovement.getStatus().behaviorLearning as
+          { mode?: string } | undefined
+      )?.mode;
+      if (mode === "apply" && candidates.includes(decision.actionKey)) {
+        preferred = decision.actionKey;
+      }
+    }
 
     const readiness = await providerRegistry.isModelReady(preferred);
     if (readiness.available) return preferred;
@@ -1675,12 +1664,50 @@ export class AgentOrchestrator {
     sessionId: string,
     userMessage: string,
     agentResponse: string,
+    options: {
+      taskClass?: string;
+      outcome?: string;
+      rewardInput?: Parameters<typeof calculateReward>[0];
+      modelId?: string;
+    } = {},
   ): void {
     if (!agentResponse.trim()) return;
     const memory = getMemory();
     if (!memory) return;
     try {
       memory.logInteraction(userMessage, agentResponse, { sessionId });
+
+      // Durable learning experience tracking.
+      // Records the turn context, action (model/routing), and outcome reward.
+      if (this.selfImprovement) {
+        const modelId = options.modelId || this.modelName || "unknown";
+        const inferredFailure =
+          /could not|failed|error|unavailable|timed out|cancelled|stopped safely/i.test(
+            agentResponse,
+          );
+        const outcome =
+          options.outcome || (inferredFailure ? "failure" : "success");
+        this.selfImprovement.recordExperience({
+          sessionId,
+          taskClass: options.taskClass,
+          context: userMessage,
+          actionKey: `model:${modelId}`,
+          outcome,
+          rewardInput: options.rewardInput || {
+            completionQuality: outcome === "success" ? 1 : 0,
+            taskSuccess: outcome === "success" ? 1 : 0,
+            verificationSuccess: outcome === "success" ? 1 : 0,
+            latencyScore: 0.5,
+            outcome,
+          },
+          modelId,
+          idempotencyKey: `${sessionId}:${crypto
+            .createHash("sha256")
+            .update(userMessage + agentResponse)
+            .digest("hex")
+            .slice(0, 16)}`,
+        });
+      }
     } catch (memErr) {
       console.error("[Agent] Memory write failed:", (memErr as Error).message);
     }
@@ -2473,6 +2500,16 @@ export class AgentOrchestrator {
           yield event;
         }
         continue;
+      }
+
+      // A model response without tool calls is already a final assistant
+      // response, even when it does not contain a literal completion phrase.
+      // The old path fell through to a generic safe-stop message for concise
+      // answers such as a single Markdown link.
+      if (content) {
+        this._logMemoryInteraction(sessionId, userMessage, content);
+        yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
+        return;
       }
 
       const completionGuard = options.completionGuard?.();
@@ -3594,5 +3631,3 @@ export function createAgentFactory(paths: RuntimePaths | string): AgentFactory {
     },
   };
 }
-
-import * as crypto from "crypto";

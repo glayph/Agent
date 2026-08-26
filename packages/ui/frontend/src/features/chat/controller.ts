@@ -522,9 +522,21 @@ function extractPlatformToken(content: string): string | null {
 
 export function isPlatformConnectionIntent(content: string): boolean {
   // Only explicit connection/setup actions should leave Chat. Informational
-  // questions such as "what is a Telegram bot token?" must be answered by
-  // the agent rather than being intercepted as credential setup.
-  return /(?:connect|সংযোগ|কানেক্ট|যোগ|link|লিংক|setup|সেটআপ|configure|কনফিগার|authorize|অনুমতি|integrat|ইন্টিগ্রেট)/i.test(
+  // questions, ordinary link sharing, and explicit "do not connect" clauses
+  // must stay in the agent loop.
+  const hasConnectionNegation =
+    /\b(?:do not|don't|no|without|avoid|never)\b[^.!?\n]{0,100}\b(?:connect|connection|setup|configure|authorize|integrat)\b/i.test(
+      content,
+    )
+  if (hasConnectionNegation) return false
+  if (
+    /(?:\bconnect\b|সংযোগ|কানেক্ট|যোগ|\bsetup\b|সেটআপ|\bconfigure\b|কনফিগার|\bauthorize\b|অনুমতি|\bintegrat\w*\b|ইন্টিগ্রেট)/i.test(
+      content,
+    )
+  ) {
+    return true
+  }
+  return /(?:link|লিংক)\s+(?:my|your|the)?\s*(?:account|channel|profile|platform|service|integration|অ্যাকাউন্ট|চ্যানেল|প্রোফাইল)/i.test(
     content,
   )
 }

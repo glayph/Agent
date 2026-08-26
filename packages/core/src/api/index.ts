@@ -114,6 +114,7 @@ import {
   type SearchMode,
 } from "../search/local-first-search.js";
 import { createMemoryRouter } from "./memory-router.js";
+import { createLinkPreviewRouter } from "./link-preview.js";
 import { createVoiceRouter } from "./voice-router.js";
 import { normalizeChatSessionId } from "./chat-session.js";
 import { supportsAudioModel } from "../llm.js";
@@ -983,6 +984,7 @@ async function handleSearchRequest(req: Request, res: Response): Promise<void> {
 app.get("/api/search", requireHttpAuth, handleSearchRequest);
 app.post("/api/search", requireHttpAuth, handleSearchRequest);
 app.use("/api/memory", requireHttpAuth, memoryRouter);
+app.use("/api/link-preview", requireHttpAuth, createLinkPreviewRouter());
 app.use(
   "/api/voice",
   requireHttpAuth,
@@ -3426,7 +3428,7 @@ async function handleChatRequest(req: Request, res: Response): Promise<void> {
 app.post("/chat", requireHttpAuth, handleChatRequest);
 
 // ... rest of the endpoints remain the same but with requestId added
-app.get("/improvement/status", requireHttpAuth, (_req, res) => {
+app.get("/api/improvement/status", requireHttpAuth, (_req, res) => {
   try {
     const si = orchestrator.selfImprovement.getStatus();
     const sg = orchestrator.skillGovernance.getStatus();
@@ -3440,7 +3442,7 @@ app.get("/improvement/status", requireHttpAuth, (_req, res) => {
   }
 });
 
-app.get("/improvement/tunings", requireHttpAuth, (_req, res) => {
+app.get("/api/improvement/tunings", requireHttpAuth, (_req, res) => {
   try {
     const tunings = orchestrator.selfImprovement.getAccumulatedTunings();
     res.json({
@@ -3453,7 +3455,7 @@ app.get("/improvement/tunings", requireHttpAuth, (_req, res) => {
 });
 
 app.post(
-  "/improvement/force-reflection",
+  "/api/improvement/force-reflection",
   requireHttpAuth,
   async (_req, res) => {
     try {
@@ -3461,7 +3463,8 @@ app.post(
         force: true,
       });
       res.json({
-        success: result !== null && result !== undefined,
+        success: result?.status === "completed",
+        status: result?.status || "unknown",
         result,
         requestId: (_req as AuthenticatedRequest).requestId,
       });
@@ -3472,7 +3475,7 @@ app.post(
 );
 
 app.post(
-  "/improvement/force-optimization",
+  "/api/improvement/force-optimization",
   requireHttpAuth,
   async (_req, res) => {
     try {
@@ -3482,7 +3485,8 @@ app.post(
         apply: body["apply"] === true || body["apply_code"] === true,
       });
       res.json({
-        success: result !== null && result !== undefined,
+        success: result?.status === "completed",
+        status: result?.status || "unknown",
         result,
         requestId: (_req as AuthenticatedRequest).requestId,
       });
@@ -3492,20 +3496,25 @@ app.post(
   },
 );
 
-app.post("/improvement/force-tuning", requireHttpAuth, async (_req, res) => {
-  try {
-    const tuning = await orchestrator.selfImprovement.runPromptTuningCycle({
-      force: true,
-    });
-    res.json({
-      success: tuning !== null && tuning !== undefined,
-      tuning,
-      requestId: (_req as AuthenticatedRequest).requestId,
-    });
-  } catch (e: unknown) {
-    res.status(500).json({ detail: getErrorMessage(e) });
-  }
-});
+app.post(
+  "/api/improvement/force-tuning",
+  requireHttpAuth,
+  async (_req, res) => {
+    try {
+      const tuning = await orchestrator.selfImprovement.runPromptTuningCycle({
+        force: true,
+      });
+      res.json({
+        success: tuning?.status === "completed",
+        status: tuning?.status || "unknown",
+        tuning,
+        requestId: (_req as AuthenticatedRequest).requestId,
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ detail: getErrorMessage(e) });
+    }
+  },
+);
 
 // ── Task Queue Endpoints ─────────────────────────────────────────────────
 app.get("/tasks", requireHttpAuth, (_req, res) => {

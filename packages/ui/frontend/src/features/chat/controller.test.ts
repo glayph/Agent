@@ -135,7 +135,9 @@ describe("chat controller active-session hydration", () => {
   })
 
   it("coalesces concurrent hydration calls into one history request", async () => {
-    let resolveHistory: ((value: Awaited<ReturnType<typeof getSessionHistory>>) => void) | undefined
+    let resolveHistory:
+      | ((value: Awaited<ReturnType<typeof getSessionHistory>>) => void)
+      | undefined
     mockedGetSessionHistory.mockReturnValue(
       new Promise((resolve) => {
         resolveHistory = resolve
@@ -269,6 +271,24 @@ describe("chat controller platform intent detection", () => {
       isPlatformConnectionIntent("Configure the YouTube integration"),
     ).toBe(true)
     expect(isPlatformConnectionIntent("OAuth setup for Instagram")).toBe(true)
+  })
+
+  it("does not intercept ordinary social-link sharing requests", () => {
+    expect(
+      isPlatformConnectionIntent(
+        "Share this public social-media link: https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+      ),
+    ).toBe(false)
+    expect(
+      isPlatformConnectionIntent(
+        "Return the direct link to the official MDN video page",
+      ),
+    ).toBe(false)
+    expect(
+      isPlatformConnectionIntent(
+        "Share this YouTube link. Do not open a connection setup or log in.",
+      ),
+    ).toBe(false)
   })
 })
 

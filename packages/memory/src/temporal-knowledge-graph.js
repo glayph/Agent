@@ -9,6 +9,7 @@ const { createEmbeddingProvider } = require('./embedding-provider');
 const NodeGraph = require('./node-graph');
 const GraphCognitiveMemory = require('./graph-cognitive-memory');
 const SelectiveMemoryEngine = require('./selective-memory-engine');
+const LearningStore = require('./learning-store');
 
 class TemporalKnowledgeGraph {
   constructor(dbPath) {
@@ -16,6 +17,7 @@ class TemporalKnowledgeGraph {
     this.db = null;
     this.nodeGraph = null;
     this.selectiveMemory = null;
+    this.learningStore = null;
     this.initialized = false;
     // Regex-pattern-based importance scoring, used by writeEvent() in place
     // of a cruder inline keyword-substring check. Constructed here (not
@@ -231,6 +233,16 @@ class TemporalKnowledgeGraph {
       embeddingProvider: this._embeddingProvider,
     });
     this.selectiveMemory.initializeSync();
+
+    // Durable contextual-bandit/RL state shares the same SQLite connection.
+    this.learningStore = new LearningStore(this.db, {
+      scope: {
+        agentId: process.env.MIKI_AGENT_ID || 'miki',
+        ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
+        workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
+      },
+    });
+    this.learningStore.initializeSync();
   }
 
   /**
