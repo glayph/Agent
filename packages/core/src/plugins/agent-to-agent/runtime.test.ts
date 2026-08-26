@@ -2,7 +2,7 @@ import {
   formatAgentRouteDecision,
   routeAgentTask,
   summarizeAgentRoute,
-} from "./agent-router.js";
+} from "./runtime.js";
 
 describe("agent router", () => {
   it("routes implementation requests through Miki", () => {

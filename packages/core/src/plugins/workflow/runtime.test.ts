@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { createProjectWorkflow } from "./project-workflow.js";
-import { ToolRegistrySchemas } from "./registry/schemas.js";
+import { createProjectWorkflow } from "./runtime.js";
+import { ToolRegistrySchemas } from "../../tools/registry/schemas.js";
 
 function tempWorkspace(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "project-workflow-test-"));

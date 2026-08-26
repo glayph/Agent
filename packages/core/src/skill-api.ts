@@ -20,6 +20,8 @@ import {
   probeRuntimePluginProvider,
 } from "./plugins/plugin-provider-adapter.js";
 import { buildPluginMarketplaceReadinessReport } from "./plugins/plugin-marketplace-readiness.js";
+import { listBuiltinPluginManifests } from "./plugins/builtin-plugin-catalog.js";
+import type { CoreCapabilityPluginHost } from "./plugins/core-host.js";
 import {
   registerRuntimePluginTools,
   type PluginToolRegistrationResult,
@@ -66,6 +68,7 @@ interface RegistrySearchResponse {
 
 interface CreateSkillsRouterOptions {
   toolRegistry?: ToolRegistry;
+  capabilityHost?: CoreCapabilityPluginHost;
 }
 
 async function discoverInstalledSkillIds(
@@ -272,6 +275,20 @@ export function createSkillsRouter(
         });
         return res.json(
           createSuccessResponse({ contracts, total: contracts.length }),
+        );
+      }
+      if (action === "capabilities") {
+        const manifests = listBuiltinPluginManifests();
+        return res.json(
+          createSuccessResponse({ manifests, total: manifests.length }),
+        );
+      }
+      if (action === "capability-health") {
+        const health = options.capabilityHost
+          ? await options.capabilityHost.health()
+          : {};
+        return res.json(
+          createSuccessResponse({ health, total: Object.keys(health).length }),
         );
       }
       if (action === "channels") {

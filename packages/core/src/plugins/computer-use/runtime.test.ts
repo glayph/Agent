@@ -1,7 +1,7 @@
-import { normalizeBrowserUrl } from "./browser.js";
-import { normalizeHotkeyForSendKeys } from "./computer.js";
-import { drawGridOverlay } from "./computer-grid.js";
-import { ToolRegistrySchemas } from "./registry/executor.js";
+import { normalizeBrowserUrl } from "../browser/runtime.js";
+import { normalizeHotkeyForSendKeys } from "./runtime.js";
+import { drawGridOverlay } from "./grid.js";
+import { ToolRegistrySchemas } from "../../tools/registry/executor.js";
 
 describe("computer-use tools", () => {
   it("normalizes browser URLs and rejects unsafe protocols", () => {

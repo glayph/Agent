@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import { createServer, type Server } from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
-import { BrowserTool, rewriteWorkspacePreviewUrl } from "./browser.js";
+import { BrowserTool, rewriteWorkspacePreviewUrl } from "./runtime.js";
 
 describe("workspace browser preview server", () => {
   let blocker: Server | undefined;

@@ -94,6 +94,7 @@ import {
 } from "./workflow-accelerator.js";
 import type { ContextUsageSnapshot } from "./token-budget-manager.js";
 import { registerRuntimePluginTools } from "./plugins/plugin-tool-registration.js";
+import { CoreCapabilityPluginHost } from "./plugins/core-host.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
 import {
   SqliteSessionHistoryStore,
@@ -649,6 +650,7 @@ export class AgentOrchestrator {
   public taskQueue: TaskQueue;
   public concurrentManager: ConcurrentTaskManager;
   public taskScheduler: TaskScheduler;
+  public capabilityPlugins: CoreCapabilityPluginHost;
   public toolLockManager: ToolResourceLockManager;
   public toolConcurrencyMetrics: ToolConcurrencyMetrics;
   /**
@@ -1033,6 +1035,21 @@ export class AgentOrchestrator {
       path.join(runtimePaths.dataDir, "agent-runs.db"),
       this,
     );
+    this.capabilityPlugins = new CoreCapabilityPluginHost({
+      paths: runtimePaths,
+      services: () => ({
+        providerRegistry,
+        toolRegistry: this.tools,
+        browser: this.tools.browser,
+        computer: this.tools.computer,
+        runtimeFetcher: this.tools.runtimeFetcher,
+        memory: getMemory(),
+        scheduler: this.taskScheduler,
+        workflow: this,
+      }),
+      log: (event, details) =>
+        console.info(`[CapabilityPlugin] ${event}`, details || {}),
+    });
 
     this._bgStarted = false;
     this._messageHistory = new Map<string, ChatMessage[]>();
@@ -1098,6 +1115,7 @@ export class AgentOrchestrator {
     // tasks and must not depend on the command-cron permission gate, which is
     // reserved for the cron tool's command execution capability.
     this._startTaskScheduler();
+    tasks.push(this.capabilityPlugins.start());
 
     return Promise.all(tasks).then(() => {});
   }
@@ -1187,6 +1205,7 @@ export class AgentOrchestrator {
       // The command-cron permission gate does not control these application
       // schedules.
       this.taskScheduler.start();
+      await this.capabilityPlugins.reload();
     }
   }
 
@@ -1195,6 +1214,7 @@ export class AgentOrchestrator {
     if (this.heartbeat) tasks.push(this.heartbeat.stop());
 
     this.taskScheduler.stop();
+    tasks.push(this.capabilityPlugins.stop());
     this._bgStarted = false;
 
     return Promise.allSettled(tasks).then(() => {});

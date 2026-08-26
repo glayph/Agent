@@ -437,6 +437,7 @@ const channelRuntimeManager = new ChannelPluginLifecycleManager(
 const skillLoader = initSkillLoader(runtimePaths);
 const skillsRouter = createSkillsRouter(skillLoader, runtimePaths, {
   toolRegistry: orchestrator.tools,
+  capabilityHost: orchestrator.capabilityPlugins,
 });
 let launcherRuntimeAuth: LauncherRuntimeAuthBridge | null = null;
 let agentControlService: AgentControlService | undefined;

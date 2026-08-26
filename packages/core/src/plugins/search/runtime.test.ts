@@ -3,7 +3,7 @@ import {
   LocalFirstSearchRouter,
   LocalSearchProvider,
   type FetchLike,
-} from "./local-first-search.js";
+} from "./runtime.js";
 
 function mockFetch(
   handler: (input: RequestInfo | URL, init?: RequestInit) => Response,
