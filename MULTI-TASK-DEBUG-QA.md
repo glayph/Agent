@@ -54,3 +54,6 @@ A safe-failure integration task asked Agent Miki to inspect `https://example.inv
 
 
 A browser navigation/extraction task was verified end to end. Agent Miki used `browser_navigate` on the official MDN `<video>` page and returned the extracted page title `<video> HTML video embed element - HTML | MDN` plus the fact that the element embeds a media player for video playback. Inspector marked Browser Navigate completed and the run finished Ready.
+
+
+Final post-merge runtime restart was completed after the plugin-architecture merge. The gateway health endpoint returned HTTP 200, the supervisor, gateway, core, and memory processes were all present, and the dashboard loaded the login page as expected. After re-authentication, the dashboard restored the persisted chat history and showed Ready with zero active agents. The final source build and runtime checks therefore match the published merge commit.
