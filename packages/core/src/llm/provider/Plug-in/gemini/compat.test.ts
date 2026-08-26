@@ -1,7 +1,4 @@
-import {
-  normalizeGeminiExtra,
-  normalizeGeminiMessages,
-} from "./gemini-compat.js";
+import { normalizeGeminiExtra, normalizeGeminiMessages } from "./compat.js";
 
 describe("normalizeGeminiExtra", () => {
   it("removes OpenAI-only automatic tool_choice while preserving tools", () => {

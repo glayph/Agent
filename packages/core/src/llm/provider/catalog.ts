@@ -1,100 +1,115 @@
-import OpenAI from "openai";
 import { resolveConfiguredSecret } from "@miki/config";
-import { isLocalModel } from "../local/local-runtime.js";
+import { builtinProviderPlugins } from "./sdk/builtin.js";
+import { providerClient, type ProviderTransportConfig } from "./transport.js";
+import type OpenAI from "openai";
 
-export type DirectProviderId = "gemini" | "llama.cpp";
+export type DirectProviderId = string;
+export type DirectProviderConfig = ProviderTransportConfig;
 
-export interface DirectProviderConfig {
-  id: DirectProviderId;
-  displayName: string;
-  baseUrl: string;
-  apiKeyEnv: string;
-  emptyApiKeyAllowed: boolean;
+function endpointForPlugin(
+  plugin: (typeof builtinProviderPlugins)[number],
+): DirectProviderConfig {
+  return {
+    id: plugin.manifest.id,
+    displayName: plugin.manifest.displayName,
+    baseUrl: plugin.manifest.ui?.defaultApiBase || "",
+    apiKeyEnv: plugin.auth.envVars?.[0] || "",
+    emptyApiKeyAllowed: plugin.auth.allowEmptyKey,
+    local: plugin.manifest.capabilities.local,
+  };
 }
 
 /**
- * Agent Miki intentionally supports exactly two providers. Provider-specific
- * behavior lives in the corresponding plugin; this catalog only supplies the
- * typed endpoint/auth metadata needed by the shared runtime.
+ * Compatibility view for older core callers. The canonical provider registry
+ * is the Plug-in registry; this array contains no provider implementation or
+ * vendor-specific behavior and is derived from built-in Plug-in manifests.
  */
-export const DIRECT_PROVIDERS: DirectProviderConfig[] = [
-  {
-    id: "gemini",
-    displayName: "Google Gemini",
-    baseUrl:
-      process.env.GEMINI_BASE_URL ||
-      "https://generativelanguage.googleapis.com/v1beta/openai/",
-    apiKeyEnv: "GEMINI_API_KEY",
-    emptyApiKeyAllowed: false,
-  },
-  {
-    id: "llama.cpp",
-    displayName: "llama.cpp Local",
-    baseUrl: process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1",
-    apiKeyEnv: "LLAMA_CPP_API_KEY",
-    emptyApiKeyAllowed: true,
-  },
-];
+export const DIRECT_PROVIDERS: DirectProviderConfig[] =
+  builtinProviderPlugins.map(endpointForPlugin);
+
+function pluginMatchesProvider(
+  plugin: (typeof builtinProviderPlugins)[number],
+  value: string,
+): boolean {
+  const normalized = value.trim().toLowerCase();
+  const manifest = plugin.manifest;
+  return (
+    manifest.id.toLowerCase() === normalized ||
+    (manifest.aliases || []).some(
+      (alias) => alias.toLowerCase() === normalized,
+    ) ||
+    (manifest.modelPrefixes || []).some(
+      (prefix) => prefix.toLowerCase() === normalized,
+    )
+  );
+}
+
+function pluginForProvider(value: string) {
+  return builtinProviderPlugins.find((plugin) =>
+    pluginMatchesProvider(plugin, value),
+  );
+}
+
+function pluginForModel(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return builtinProviderPlugins.find((plugin) => {
+    const manifest = plugin.manifest;
+    return (
+      manifest.modelIds?.some((id) => id.toLowerCase() === normalized) ||
+      manifest.modelPrefixes?.some((prefix) => {
+        const candidate = prefix.toLowerCase();
+        return (
+          normalized === candidate ||
+          normalized.startsWith(`${candidate}/`) ||
+          normalized.startsWith(`${candidate}-`)
+        );
+      })
+    );
+  });
+}
 
 export function getDirectProviderById(
   id: string,
 ): DirectProviderConfig | undefined {
-  const normalized = id.trim().toLowerCase();
-  return DIRECT_PROVIDERS.find(
-    (provider) =>
-      provider.id.toLowerCase() === normalized ||
-      (provider.id === "gemini" &&
-        (normalized === "google" || normalized === "gemini")) ||
-      (provider.id === "llama.cpp" &&
-        ["llama-cpp", "llamacpp", "local-llama", "local"].includes(normalized)),
-  );
+  const plugin = pluginForProvider(id);
+  return plugin ? endpointForPlugin(plugin) : undefined;
 }
 
 export function directProviderForModel(
   model: string,
 ): DirectProviderConfig | undefined {
-  const lower = model.trim().toLowerCase();
-  if (
-    lower.startsWith("google/") ||
-    lower.startsWith("gemini/") ||
-    lower.startsWith("gemini-")
-  ) {
-    return getDirectProviderById("gemini");
-  }
-  if (
-    lower.startsWith("llama.cpp/") ||
-    lower.startsWith("llama-cpp/") ||
-    lower.startsWith("llamacpp/") ||
-    lower.startsWith("local-llama/") ||
-    lower.startsWith("local/") ||
-    isLocalModel(model)
-  ) {
-    return getDirectProviderById("llama.cpp");
-  }
-  return undefined;
+  const plugin = pluginForModel(model);
+  return plugin ? endpointForPlugin(plugin) : undefined;
 }
 
 export function normalizeDirectModelName(
   providerId: string,
   model: string,
 ): string {
-  const provider = getDirectProviderById(providerId);
-  if (!provider) return model;
-  if (provider.id === "gemini") {
-    return model.replace(/^google\//i, "").replace(/^gemini\//i, "");
+  const plugin = pluginForProvider(providerId);
+  if (!plugin) return model;
+  const prefixes = [
+    plugin.manifest.id,
+    ...(plugin.manifest.aliases || []),
+    ...(plugin.manifest.modelPrefixes || []),
+  ]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  let normalized = model.trim();
+  for (const prefix of prefixes) {
+    if (normalized.toLowerCase().startsWith(`${prefix.toLowerCase()}/`)) {
+      normalized = normalized.slice(prefix.length + 1);
+      break;
+    }
   }
-  return model
-    .replace(/^llama\.cpp\//i, "")
-    .replace(/^llama-cpp\//i, "")
-    .replace(/^llamacpp\//i, "")
-    .replace(/^local-llama\//i, "")
-    .replace(/^local\//i, "");
+  return normalized;
 }
 
 export function resolveProviderApiKey(
   provider: DirectProviderConfig,
   workspaceDir?: string,
 ): string {
+  if (!provider.apiKeyEnv) return "";
   return (
     resolveConfiguredSecret(provider.apiKeyEnv, workspaceDir) ||
     resolveConfiguredSecret(provider.apiKeyEnv)
@@ -106,14 +121,7 @@ export function directProviderClient(
   apiKey: string,
   timeoutMs?: number,
 ): OpenAI {
-  const effectiveKey =
-    apiKey || (provider.emptyApiKeyAllowed ? "local-no-auth-required" : apiKey);
-  return new OpenAI({
-    baseURL: provider.baseUrl,
-    apiKey: effectiveKey,
-    timeout: timeoutMs ?? 120000,
-    maxRetries: 0,
-  });
+  return providerClient(provider, apiKey, timeoutMs);
 }
 
 export interface DirectProviderModel {
@@ -121,93 +129,12 @@ export interface DirectProviderModel {
   owned_by?: string;
 }
 
-function isGeminiProvider(provider: DirectProviderConfig): boolean {
-  return provider.id === "gemini";
-}
-
-function geminiModelsURL(provider: DirectProviderConfig): string {
-  return `${provider.baseUrl
-    .replace(/\/v1beta\/openai\/?$/i, "/v1beta")
-    .replace(/\/+$/, "")}/models`;
-}
-
-async function fetchGeminiModels(
-  provider: DirectProviderConfig,
-  apiKey: string,
-  timeoutMs?: number,
-): Promise<DirectProviderModel[]> {
-  const headers: Record<string, string> = {};
-  if (apiKey) headers["x-goog-api-key"] = apiKey;
-  const response = await fetch(geminiModelsURL(provider), {
-    headers,
-    signal: AbortSignal.timeout(timeoutMs ?? 10_000),
-  });
-  const text = await response.text();
-  let body: unknown = {};
-  try {
-    body = text.trim() ? (JSON.parse(text) as unknown) : {};
-  } catch {
-    body = text;
-  }
-  if (!response.ok) {
-    const detail =
-      typeof body === "string"
-        ? body
-        : body && typeof body === "object" && "error" in body
-          ? JSON.stringify((body as { error?: unknown }).error)
-          : `HTTP ${response.status}`;
-    throw new Error(`Gemini model discovery failed: ${detail}`);
-  }
-  const rawModels =
-    body &&
-    typeof body === "object" &&
-    Array.isArray((body as { models?: unknown }).models)
-      ? (body as { models: unknown[] }).models
-      : [];
-  return rawModels.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const record = item as {
-      name?: unknown;
-      baseModelId?: unknown;
-      owned_by?: unknown;
-      supportedGenerationMethods?: unknown;
-    };
-    const supported = Array.isArray(record.supportedGenerationMethods)
-      ? record.supportedGenerationMethods
-      : [];
-    if (
-      supported.length > 0 &&
-      !supported.some((method) => method === "generateContent")
-    ) {
-      return [];
-    }
-    const rawId =
-      typeof record.baseModelId === "string"
-        ? record.baseModelId
-        : typeof record.name === "string"
-          ? record.name.replace(/^models\//i, "")
-          : "";
-    const id = rawId.trim();
-    if (!id) return [];
-    return [
-      {
-        id,
-        ...(typeof record.owned_by === "string"
-          ? { owned_by: record.owned_by }
-          : {}),
-      },
-    ];
-  });
-}
-
+/** Generic OpenAI-compatible model discovery retained for compatibility. */
 export async function fetchDirectProviderModels(
   provider: DirectProviderConfig,
   apiKey: string,
   timeoutMs?: number,
 ): Promise<DirectProviderModel[]> {
-  if (isGeminiProvider(provider)) {
-    return fetchGeminiModels(provider, apiKey, timeoutMs);
-  }
   const client = directProviderClient(provider, apiKey, timeoutMs);
   const response = await client.models.list();
   return (response.data || []).map((item) => {
@@ -228,11 +155,11 @@ export async function testDirectProviderConnection(
   try {
     await fetchDirectProviderModels(provider, apiKey, timeoutMs);
     return { ok: true, latencyMs: Date.now() - started };
-  } catch (err) {
+  } catch (error) {
     return {
       ok: false,
       latencyMs: Date.now() - started,
-      error: err instanceof Error ? err.message : String(err),
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }

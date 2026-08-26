@@ -2,7 +2,7 @@ import {
   normalizeGeminiExtra,
   normalizeGeminiSchema,
   normalizeGeminiTools,
-} from "../../src/llm/provider/gemini-compat.js";
+} from "../../src/llm/provider/Plug-in/gemini/compat.js";
 
 describe("Gemini OpenAI compatibility", () => {
   it("rewrites oneOf into a supported schema branch", () => {

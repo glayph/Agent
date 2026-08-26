@@ -439,6 +439,7 @@ interface EphemeralAudioPayload {
 interface SendChatMessageInput {
   content: string
   attachments?: ChatAttachment[]
+  requestedModel?: string
   voice?: ChatVoiceMetadata
   audio?: EphemeralAudioPayload
 }
@@ -462,6 +463,7 @@ function sendmikiMessage(
   requestId: string,
   content: string,
   attachments: ChatAttachment[],
+  requestedModel?: string,
   voice?: ChatVoiceMetadata,
   audio?: EphemeralAudioPayload,
 ) {
@@ -472,6 +474,7 @@ function sendmikiMessage(
       payload: {
         content,
         media: attachments.map((attachment) => attachment.url),
+        ...(requestedModel?.trim() ? { requested_model: requestedModel.trim() } : {}),
         ...(voice ? { voice } : {}),
         ...(audio ? { audio } : {}),
       },
@@ -588,6 +591,7 @@ async function handlePlatformConnectionIntent(
 export async function sendChatMessage({
   content,
   attachments = [],
+  requestedModel,
   voice,
   audio,
 }: SendChatMessageInput): Promise<boolean> {
@@ -638,6 +642,7 @@ export async function sendChatMessage({
       id,
       normalizedContent,
       normalizedAttachments,
+      requestedModel,
       voice,
       audio,
     )

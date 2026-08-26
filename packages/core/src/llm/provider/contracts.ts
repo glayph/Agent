@@ -1,12 +1,12 @@
 import type OpenAI from "openai";
 import type { LLMResponse } from "@miki/config";
-import type { DirectProviderConfig } from "./catalog.js";
+import type { ProviderTransportConfig } from "./transport.js";
 
 export type ProviderMessage =
   OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 export interface ProviderCompletionRequest {
-  provider: DirectProviderConfig;
+  provider: ProviderTransportConfig;
   model: string;
   apiKey: string;
   messages: ProviderMessage[];
@@ -28,12 +28,12 @@ export interface LLMProviderAdapter {
   readonly providerId: string;
   complete(request: ProviderCompletionRequest): Promise<LLMResponse>;
   listModels?(
-    provider: DirectProviderConfig,
+    provider: ProviderTransportConfig,
     apiKey: string,
     timeoutMs?: number,
   ): Promise<ProviderModel[]>;
   testConnection?(
-    provider: DirectProviderConfig,
+    provider: ProviderTransportConfig,
     apiKey: string,
     timeoutMs?: number,
   ): Promise<ProviderConnectionResult>;

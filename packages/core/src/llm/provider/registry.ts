@@ -1,15 +1,14 @@
 import { readMikiEnv } from "@miki/config";
-import type { LLMResponse } from "@miki/config";
+import { resolveConfiguredSecret, type LLMResponse } from "@miki/config";
+import path from "node:path";
 import {
   directProviderForModel,
   normalizeDirectModelName,
-  resolveProviderApiKey,
   type DirectProviderConfig,
 } from "./catalog.js";
 import { openAICompatibleAdapter } from "./openai-compatible-adapter.js";
 import type {
   LLMProviderAdapter,
-  ProviderCompletionRequest,
   ProviderConnectionResult,
   ProviderModel,
 } from "./contracts.js";
@@ -39,11 +38,14 @@ export class ProviderRegistry {
     this.pluginRegistry = new ProviderPluginRegistry({
       workspaceDir: workspaceDir(),
       configDir: workspaceDir(),
-      resolveCredentials: (auth, providerId) => {
+      resolveCredentials: (auth) => {
         if (auth.mode === "local" || auth.mode === "none") return {};
-        const provider = directProviderForModel(`${providerId}/model`);
-        const apiKey = provider
-          ? resolveProviderApiKey(provider, workspaceDir())
+        const envVar = auth.envVars?.[0];
+        const apiKey = envVar
+          ? [workspaceDir(), path.join(workspaceDir(), "config")]
+              .map((root) => resolveConfiguredSecret(envVar, root))
+              .find((value): value is string => Boolean(value?.trim())) ||
+            resolveConfiguredSecret(envVar)
           : "";
         return apiKey ? { apiKey } : {};
       },
@@ -63,7 +65,44 @@ export class ProviderRegistry {
   }
 
   resolve(model: string): DirectProviderConfig | undefined {
+    const plugin = this.pluginRegistry.resolve(model);
+    if (plugin) {
+      return {
+        id: plugin.manifest.id,
+        displayName: plugin.manifest.displayName,
+        baseUrl: plugin.manifest.ui?.defaultApiBase || "",
+        apiKeyEnv: plugin.auth.envVars?.[0] || "",
+        emptyApiKeyAllowed: plugin.auth.allowEmptyKey,
+        local: plugin.manifest.capabilities.local,
+      };
+    }
     return directProviderForModel(model);
+  }
+
+  async isModelReady(
+    model: string,
+  ): Promise<{ available: boolean; reason?: string }> {
+    const plugin = this.pluginRegistry.resolve(model);
+    if (!plugin) {
+      return {
+        available: false,
+        reason: `No provider plugin matches ${model}.`,
+      };
+    }
+    // Remote credential validation remains in the provider completion path so
+    // the user receives its precise authentication error. Local plugins expose
+    // a truthful runtime health probe and must pass it before routing.
+    if (!plugin.manifest.capabilities.local) return { available: true };
+    const connection = await this.pluginRegistry.testConnection(
+      plugin.manifest.id,
+    );
+    return connection.ok
+      ? { available: true }
+      : {
+          available: false,
+          reason:
+            connection.error || `${plugin.manifest.id} runtime is not ready.`,
+        };
   }
 
   async supportsAudio(model: string): Promise<boolean | undefined> {
@@ -86,10 +125,10 @@ export class ProviderRegistry {
     messages: MikiProviderMessage[],
     extra?: Record<string, unknown>,
   ): Promise<LLMResponse> {
-    const provider = this.resolve(model);
-    if (!provider) {
+    const plugin = this.pluginRegistry.resolve(model);
+    if (!plugin) {
       throw new LLMMissingCredentialError(
-        `No supported provider matches model "${model}".`,
+        `No supported provider plugin matches model "${model}".`,
       );
     }
 
@@ -98,65 +137,45 @@ export class ProviderRegistry {
       if (audioSupport === false) {
         throw new LLMAPIError(
           `The selected cloud model "${model}" does not support audio input. Choose an audio-capable model or install a local voice model.`,
-          { providerId: provider.id },
+          { providerId: plugin.manifest.id },
         );
       }
     }
 
-    const plugin = this.pluginRegistry.get(provider.id);
-    if (plugin) {
-      const pluginModel =
-        provider.id === "llama.cpp" && !model.includes("/")
-          ? `${provider.id}/${model}`
-          : model;
-      return this.pluginRegistry.complete(pluginModel, messages, { extra });
-    }
-
-    // No legacy or arbitrary provider fallback exists in the two-provider
-    // runtime. A model must resolve to a registered Gemini or llama.cpp plugin.
-
-    const apiKey = resolveProviderApiKey(provider, workspaceDir());
-    if (!apiKey && !provider.emptyApiKeyAllowed) {
-      throw new LLMMissingCredentialError(
-        `No API key is configured for ${provider.displayName}.`,
-        { providerId: provider.id },
-      );
-    }
-
-    const request: ProviderCompletionRequest = {
-      provider,
-      model: normalizeDirectModelName(provider.id, model),
-      apiKey: apiKey ?? "",
-      messages: messages as never,
-      extra,
-    };
-
-    return this.adapterFor(provider).complete(request);
+    const pluginModel =
+      plugin.manifest.capabilities.local && !model.includes("/")
+        ? `${plugin.manifest.id}/${model}`
+        : model;
+    return this.pluginRegistry.complete(pluginModel, messages, { extra });
   }
 
-  listModels(
+  async listModels(
     provider: DirectProviderConfig,
     apiKey: string,
-    timeoutMs?: number,
+    _timeoutMs?: number,
   ): Promise<ProviderModel[]> {
-    const adapter = this.adapterFor(provider);
-    if (!adapter.listModels) return Promise.resolve([]);
-    return adapter.listModels(provider, apiKey, timeoutMs);
+    const plugin = this.pluginRegistry.get(provider.id);
+    if (!plugin?.listModels) return [];
+    const models = await this.pluginRegistry.listModels(provider.id, {
+      apiKey,
+    });
+    return models.map((item) => ({ id: item.id }));
   }
 
-  testConnection(
+  async testConnection(
     provider: DirectProviderConfig,
     apiKey: string,
-    timeoutMs?: number,
+    _timeoutMs?: number,
   ): Promise<ProviderConnectionResult> {
-    const adapter = this.adapterFor(provider);
-    if (!adapter.testConnection)
-      return Promise.resolve({
+    const plugin = this.pluginRegistry.get(provider.id);
+    if (!plugin?.testConnection) {
+      return {
         ok: false,
         latencyMs: 0,
-        error: "Connection testing is not supported.",
-      });
-    return adapter.testConnection(provider, apiKey, timeoutMs);
+        error: "Connection testing is not supported by this provider plugin.",
+      };
+    }
+    return this.pluginRegistry.testConnection(provider.id, { apiKey });
   }
 
   clearCaches(): void {

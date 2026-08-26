@@ -71,19 +71,22 @@ function parseAttachments(
 
 function providerForModel(modelName: string | undefined): string | undefined {
   if (!modelName) return undefined
-  const normalized = modelName.toLowerCase()
-  if (normalized.startsWith("gemini/") || normalized.startsWith("google/")) {
-    return "gemini"
-  }
-  if (
-    normalized.startsWith("llama.cpp/") ||
-    normalized.startsWith("llama-cpp/") ||
-    normalized.startsWith("local/") ||
-    normalized.startsWith("local-llama/")
-  ) {
-    return "llama.cpp"
-  }
-  return undefined
+  const normalized = modelName.trim()
+  const separator = normalized.indexOf("/")
+  return separator > 0 ? normalized.slice(0, separator) : undefined
+}
+
+function isStaleRun(
+  activeRunId: string | undefined,
+  runStatus: string | undefined,
+  eventRunId: string | undefined,
+): boolean {
+  return Boolean(
+    eventRunId &&
+    activeRunId &&
+    activeRunId !== eventRunId &&
+    runStatus === "running",
+  )
 }
 
 function parseContextUsage(
@@ -322,14 +325,19 @@ export function handlemikiMessage(
               outcome.status === "sending"
             ? "running"
             : "failed"
-      updateChatStore({
-        activeRunId: outcome.runId,
-        runStatus,
-        deliveryOutcome: outcome,
-        ...(outcome.nextAction
-          ? { runError: outcome.nextAction }
-          : { runError: undefined }),
-        isTyping: false,
+      updateChatStore((prev) => {
+        if (isStaleRun(prev.activeRunId, prev.runStatus, outcome.runId)) {
+          return prev
+        }
+        return {
+          activeRunId: outcome.runId,
+          runStatus,
+          deliveryOutcome: outcome,
+          ...(outcome.nextAction
+            ? { runError: outcome.nextAction }
+            : { runError: undefined }),
+          isTyping: false,
+        }
       })
       break
     }
@@ -348,15 +356,20 @@ export function handlemikiMessage(
       const error =
         typeof payload.error === "string" ? payload.error : undefined
       const modelName = parseModelName(payload)
-      updateChatStore({
-        ...(runId ? { activeRunId: runId } : {}),
-        ...(modelName ? { activeRunModel: modelName } : {}),
-        ...(modelName
-          ? { activeRunProvider: providerForModel(modelName) }
-          : {}),
-        runStatus: status,
-        ...(error ? { runError: error } : { runError: undefined }),
-        isTyping: false,
+      updateChatStore((prev) => {
+        if (isStaleRun(prev.activeRunId, prev.runStatus, runId)) {
+          return prev
+        }
+        return {
+          ...(runId ? { activeRunId: runId } : {}),
+          ...(modelName ? { activeRunModel: modelName } : {}),
+          ...(modelName
+            ? { activeRunProvider: providerForModel(modelName) }
+            : {}),
+          runStatus: status,
+          ...(error ? { runError: error } : { runError: undefined }),
+          isTyping: false,
+        }
       })
       break
     }
@@ -365,9 +378,15 @@ export function handlemikiMessage(
       updateChatStore({ isTyping: true })
       break
 
-    case "typing.stop":
-      updateChatStore({ isTyping: false })
+    case "typing.stop": {
+      const runId = parseRunId(payload)
+      updateChatStore((prev) =>
+        isStaleRun(prev.activeRunId, prev.runStatus, runId)
+          ? prev
+          : { isTyping: false },
+      )
       break
+    }
 
     case "error": {
       const requestId =

@@ -115,6 +115,7 @@ import { globalAgentAggregator } from "./agent-aggregator.js";
 import { globalAgentPlanner } from "./agent-planner.js";
 import type { AgentControlService } from "./control/index.js";
 import type { MikiProviderAudio } from "./llm/provider/sdk/index.js";
+import { providerRegistry } from "./llm/provider/registry.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 12;
@@ -182,9 +183,36 @@ function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
     }
   }
 
-  if (results.length === 0) return "";
-  const sourceCount = results.length;
-  return `আমি বিষয়টি খুঁজে দেখেছি, তবে এখনই নিশ্চিত synthesis দিতে পারছি না। ${sourceCount}টি source lead Inspector-এর Work/Thoughts-এ রাখা আছে—সেগুলো cross-check না করে কোনো leak বা rumor-কে confirmed তথ্য হিসেবে ধরবেন না।`;
+  if (results.length > 0) {
+    const sourceCount = results.length;
+    return `আমি বিষয়টি খুঁজে দেখেছি, তবে এখনই নিশ্চিত synthesis দিতে পারছি না। ${sourceCount}টি source lead Inspector-এর Work/Thoughts-এ রাখা আছে—সেগুলো cross-check না করে কোনো leak বা rumor-কে confirmed তথ্য হিসেবে ধরবেন না।`;
+  }
+
+  const toolNames = new Set<string>();
+  const failedToolNames = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "tool" || !message.name) continue;
+    const toolName = message.name.trim();
+    if (!toolName) continue;
+    toolNames.add(toolName);
+    if (
+      typeof message.content === "string" &&
+      /^Error executing tool|Task cancelled/i.test(message.content.trim())
+    ) {
+      failedToolNames.add(toolName);
+    }
+  }
+  if (toolNames.size === 0) return "";
+  const completedToolNames = [...toolNames].filter(
+    (toolName) => !failedToolNames.has(toolName),
+  );
+  const completedSummary = completedToolNames.length
+    ? `Completed tool steps: ${completedToolNames.join(", ")}.`
+    : "The requested tool steps did not complete successfully.";
+  const failedSummary = failedToolNames.size
+    ? ` Failed steps: ${[...failedToolNames].join(", ")}.`
+    : "";
+  return `I completed the available execution steps, but the model did not return a final narrative summary. ${completedSummary}${failedSummary}`;
 }
 
 function buildDeterministicSearchResponse(output: string): string {
@@ -1179,20 +1207,65 @@ export class AgentOrchestrator {
     }
   }
 
-  private _resolveTurnModel(complexity: AgentTaskComplexity): string {
+  private async _resolveTurnModel(
+    complexity: AgentTaskComplexity,
+    requestedModel?: string,
+  ): Promise<string> {
     const routing = asAgentConfig(this.config).agent?.model_routing;
-    if (!routing || routing.enabled === false) return this.modelName;
+    const requested = requestedModel?.trim() || "";
     const localModel =
-      typeof routing.local_model === "string" ? routing.local_model.trim() : "";
+      typeof routing?.local_model === "string"
+        ? routing.local_model.trim()
+        : "";
     const complexModel =
-      typeof routing.complex_model === "string"
+      typeof routing?.complex_model === "string"
         ? routing.complex_model.trim()
         : "";
-    // Keep both simple and standard conversational work on the local model;
-    // reserve Gemini for genuinely complex multi-step tasks.
-    if (complexity === "complex" && complexModel) return complexModel;
-    if (localModel) return localModel;
-    return this.modelName;
+    const preferred =
+      requested ||
+      (routing && routing.enabled !== false
+        ? complexity === "complex" && complexModel
+          ? complexModel
+          : localModel
+        : "") ||
+      this.modelName;
+
+    const readiness = await providerRegistry.isModelReady(preferred);
+    if (readiness.available) return preferred;
+
+    // An explicit remote model error should remain targeted. An unavailable
+    // local model, however, is a normal first-run state: use the configured
+    // complex/default remote model rather than repeatedly calling a missing
+    // GGUF runtime and making the Web UI appear hung.
+    if (!isLocalModelName(preferred)) {
+      throw new LLMMissingCredentialError(
+        `The selected model "${preferred}" is unavailable. ${readiness.reason || "Configure a compatible provider plugin."}`,
+      );
+    }
+
+    const fallbacks = [
+      complexity === "complex" ? complexModel : "",
+      complexModel,
+      this.modelName,
+    ].filter(
+      (candidate, index, values): candidate is string =>
+        Boolean(candidate) &&
+        candidate !== preferred &&
+        values.indexOf(candidate) === index,
+    );
+    for (const fallback of fallbacks) {
+      const fallbackReadiness = await providerRegistry.isModelReady(fallback);
+      if (fallbackReadiness.available) {
+        console.warn(
+          `[Agent] Provider fallback: ${preferred} unavailable (${readiness.reason || "not ready"}); using ${fallback}.`,
+        );
+        return fallback;
+      }
+    }
+
+    throw new LLMMissingCredentialError(
+      `No available model could serve this turn. Selected "${preferred}" is unavailable: ${readiness.reason || "provider runtime is not ready"}.`,
+    );
   }
 
   private async _callLlmApi(
@@ -1623,6 +1696,8 @@ export class AgentOrchestrator {
       imageUrls?: string[];
       /** Stable ID of the user message supplied by the WebSocket client. */
       messageId?: string;
+      /** Optional model selected explicitly by the Web UI for this turn. */
+      requestedModel?: string;
       /** Safe voice transcription provenance; raw audio is never part of history. */
       voice?: VoiceMessageMetadata;
       /** Ephemeral audio for a cloud model that explicitly accepts audio input. */
@@ -1680,7 +1755,10 @@ export class AgentOrchestrator {
       turnProfile.historyMode,
       resource.messageHistoryLimit,
     );
-    const turnModel = this._resolveTurnModel(taskProfile.complexity);
+    const turnModel = await this._resolveTurnModel(
+      taskProfile.complexity,
+      options.requestedModel,
+    );
     const localModel = isLocalModelName(turnModel);
     const runDeadline =
       Date.now() +
@@ -2199,18 +2277,18 @@ export class AgentOrchestrator {
         if (!content) consecutiveToolOnly++;
 
         if (consecutiveToolOnly >= MAX_AGENT_TURNS_NO_OUTPUT) {
-          const warnMsg =
-            "Agent exceeded max consecutive tool-call turns without a text response.";
-          const warningMessage = `\n\n${warnMsg}`;
+          const fallbackContent =
+            buildToolOnlyFallbackResponse(llmMessages) ||
+            "I completed the available execution steps, but the model did not return a final narrative summary.";
           await this._saveAssistantHistoryMessage(
             sessionId,
-            warningMessage,
+            fallbackContent,
             options.responseMessageId,
           );
-          this._logMemoryInteraction(sessionId, userMessage, warningMessage);
+          this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
           yield JSON.stringify({
             type: "stream_chunk",
-            content: warningMessage,
+            content: fallbackContent,
             model_name: turnModel,
             ...(latestContextUsage
               ? { context_usage: latestContextUsage }

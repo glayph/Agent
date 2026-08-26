@@ -6,10 +6,7 @@ import {
   LLMTimeoutError,
   LLMMissingCredentialError,
 } from "./errors.js";
-import {
-  normalizeDirectModelName,
-  type DirectProviderConfig,
-} from "./catalog.js";
+import type { ProviderTransportConfig } from "./transport.js";
 import {
   openAICompatibleAdapter,
   type OpenAICompatibleAdapter,
@@ -38,7 +35,7 @@ export interface ToolHealthResult {
 }
 
 export interface ToolHealthInput {
-  provider: DirectProviderConfig;
+  provider: ProviderTransportConfig;
   model: string;
   apiKey: string;
   timeoutMs?: number;
@@ -114,7 +111,7 @@ export async function probeProviderTools(
   adapter: OpenAICompatibleAdapter = openAICompatibleAdapter,
 ): Promise<ToolHealthResult> {
   const started = Date.now();
-  const modelId = normalizeDirectModelName(input.provider.id, input.model);
+  const modelId = input.model.trim().split("/").pop() || input.model.trim();
   const base: Omit<ToolHealthResult, "status" | "latencyMs"> = {
     providerId: input.provider.id,
     modelId,

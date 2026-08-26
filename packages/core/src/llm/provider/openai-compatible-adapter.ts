@@ -1,12 +1,7 @@
 import OpenAI from "openai";
 import { randomUUID } from "node:crypto";
 import type { LLMResponse } from "@miki/config";
-import {
-  directProviderClient,
-  type DirectProviderConfig,
-  fetchDirectProviderModels,
-  testDirectProviderConnection,
-} from "./catalog.js";
+import { providerClient, type ProviderTransportConfig } from "./transport.js";
 import {
   LLMAPIError,
   LLMRateLimitError,
@@ -15,22 +10,15 @@ import {
   LLMEntitlementError,
   type LLMProviderDiagnostic,
 } from "./errors.js";
-import type { MikiProviderMessage } from "./sdk/index.js";
 import type {
   LLMProviderAdapter,
   ProviderCompletionRequest,
-  ProviderConnectionResult,
-  ProviderModel,
 } from "./contracts.js";
-import {
-  normalizeGeminiExtra,
-  normalizeGeminiMessages,
-} from "./gemini-compat.js";
 
 const clientCache = new Map<string, OpenAI>();
 
-export function defaultTimeoutMs(provider: DirectProviderConfig): number {
-  if (provider.id === "llama.cpp") {
+export function defaultTimeoutMs(provider: ProviderTransportConfig): number {
+  if (provider.local) {
     const configured = Number.parseInt(
       process.env.MIKI_LOCAL_LLM_TIMEOUT_MS || "90000",
       10,
@@ -43,7 +31,7 @@ export function defaultTimeoutMs(provider: DirectProviderConfig): number {
 }
 
 function getClient(
-  provider: DirectProviderConfig,
+  provider: ProviderTransportConfig,
   apiKey: string,
   timeoutMs?: number,
 ): OpenAI {
@@ -51,7 +39,7 @@ function getClient(
   const cacheKey = `${provider.id}:${apiKey}:${effectiveTimeout}`;
   const existing = clientCache.get(cacheKey);
   if (existing) return existing;
-  const client = directProviderClient(provider, apiKey, effectiveTimeout);
+  const client = providerClient(provider, apiKey, effectiveTimeout);
   clientCache.set(cacheKey, client);
   return client;
 }
@@ -247,12 +235,7 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
   async complete(request: ProviderCompletionRequest): Promise<LLMResponse> {
     const { provider, model, apiKey, extra } = request;
     const serializedMessages = serializeMultimodalMessages(request.messages);
-    const messages =
-      provider.id === "gemini"
-        ? normalizeGeminiMessages(
-            serializedMessages as unknown as MikiProviderMessage[],
-          )
-        : serializedMessages;
+    const messages = serializedMessages;
     if (!apiKey && !provider.emptyApiKeyAllowed) {
       throw new LLMMissingCredentialError(
         `No API key is configured for ${provider.displayName}.`,
@@ -272,14 +255,12 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
           JSON.stringify({
             model,
             messages,
-            extra:
-              provider.id === "gemini" ? normalizeGeminiExtra(extra) : extra,
+            extra: extra ?? {},
           }),
         ),
       },
     };
-    const providerExtra =
-      provider.id === "gemini" ? normalizeGeminiExtra(extra) : (extra ?? {});
+    const providerExtra = extra ?? {};
     let requestBody: Record<string, unknown> = {
       model,
       messages,
@@ -290,7 +271,6 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
     }
 
     let lastError: unknown;
-    let geminiToolFallbackAttempted = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await getClient(
@@ -302,52 +282,6 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
         lastError = error;
         const message = errorMessage(error).toLowerCase();
         const status = statusCode(error);
-        if (provider.id === "gemini" && status === 400) {
-          console.warn(
-            "[GeminiDiagnostic] HTTP 400 request shape",
-            JSON.stringify({
-              attempt,
-              model,
-              requestKeys: Object.keys(requestBody).sort(),
-              messageRoles: messages.map((item) => item.role),
-              assistantToolCallCounts: messages.map((item) =>
-                Array.isArray(item.tool_calls) ? item.tool_calls.length : 0,
-              ),
-              toolMessageCount: messages.filter((item) => item.role === "tool")
-                .length,
-              toolNames: Array.isArray(requestBody.tools)
-                ? requestBody.tools
-                    .map((tool) =>
-                      typeof tool === "object" && tool !== null
-                        ? (tool as { function?: { name?: unknown } }).function
-                            ?.name
-                        : undefined,
-                    )
-                    .filter((name): name is string => typeof name === "string")
-                : [],
-            }),
-          );
-        }
-        if (
-          provider.id === "gemini" &&
-          status === 400 &&
-          !geminiToolFallbackAttempted &&
-          Array.isArray(requestBody.tools) &&
-          requestBody.tools.length > 0
-        ) {
-          // Some Gemini OpenAI-compatible model versions reject function
-          // declarations even after schema normalization. Retry once as a
-          // plain completion so the user receives an honest limitation instead
-          // of an opaque repeated 400; artifact contracts still prevent false
-          // task completion when no files were produced.
-          geminiToolFallbackAttempted = true;
-          const plainBody = { ...requestBody };
-          delete plainBody.tools;
-          delete plainBody.tool_choice;
-          delete plainBody.response_format;
-          requestBody = plainBody;
-          continue;
-        }
         const retryable =
           status === 408 ||
           status >= 500 ||
@@ -363,22 +297,6 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
       }
     }
     classifyError(lastError, provider.id, diagnostic);
-  }
-
-  listModels(
-    provider: DirectProviderConfig,
-    apiKey: string,
-    timeoutMs?: number,
-  ): Promise<ProviderModel[]> {
-    return fetchDirectProviderModels(provider, apiKey, timeoutMs);
-  }
-
-  testConnection(
-    provider: DirectProviderConfig,
-    apiKey: string,
-    timeoutMs?: number,
-  ): Promise<ProviderConnectionResult> {
-    return testDirectProviderConnection(provider, apiKey, timeoutMs);
   }
 
   clearCache(): void {

@@ -225,7 +225,10 @@ describe("chat protocol flow", () => {
       {
         type: "node.run_start",
         session_id: "session-1",
-        payload: { run_id: "run-1", model_name: "llama.cpp/lfm2.5-1.2b-instruct-q4_0" },
+        payload: {
+          run_id: "run-1",
+          model_name: "llama.cpp/lfm2.5-1.2b-instruct-q4_0",
+        },
       },
       "session-1",
     )
@@ -266,6 +269,80 @@ describe("chat protocol flow", () => {
       activeRunId: "run-2",
       runStatus: "failed",
       runError: "artifact verification failed",
+    })
+  })
+
+  it("ignores late lifecycle and typing events from an older active run", () => {
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-old", model_name: "old/model" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-new", model_name: "new/model" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "typing.start",
+        session_id: "session-1",
+        payload: { run_id: "run-new" },
+      },
+      "session-1",
+    )
+
+    handlemikiMessage(
+      {
+        type: "node.run_end",
+        session_id: "session-1",
+        payload: { run_id: "run-old", status: "failed", error: "stale" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "typing.stop",
+        session_id: "session-1",
+        payload: { run_id: "run-old" },
+      },
+      "session-1",
+    )
+
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-new",
+      activeRunModel: "new/model",
+      runStatus: "running",
+      runError: undefined,
+      isTyping: true,
+    })
+
+    handlemikiMessage(
+      {
+        type: "typing.stop",
+        session_id: "session-1",
+        payload: { run_id: "run-new" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "node.run_end",
+        session_id: "session-1",
+        payload: { run_id: "run-new", status: "completed" },
+      },
+      "session-1",
+    )
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-new",
+      runStatus: "completed",
+      isTyping: false,
     })
   })
 

@@ -565,6 +565,7 @@ export function ChatPage() {
           }
           sent = await sendMessage({
             content: transcript,
+            requestedModel: defaultModelName,
             voice: {
               source,
               provider: result.provider,
@@ -579,6 +580,7 @@ export function ChatPage() {
           const cloudResult = result as VoiceCloudAudioResult
           sent = await sendMessage({
             content: "",
+            requestedModel: defaultModelName,
             voice: {
               source,
               provider: "cloud",
@@ -877,6 +879,7 @@ export function ChatPage() {
       await sendMessage({
         content: input,
         attachments,
+        requestedModel: defaultModelName,
       })
     ) {
       setInput("")

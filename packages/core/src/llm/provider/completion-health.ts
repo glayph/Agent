@@ -7,10 +7,7 @@ import {
   LLMTimeoutError,
   LLMMissingCredentialError,
 } from "./errors.js";
-import {
-  normalizeDirectModelName,
-  type DirectProviderConfig,
-} from "./catalog.js";
+import type { ProviderTransportConfig } from "./transport.js";
 import { classifyError } from "./openai-compatible-adapter.js";
 
 export type CompletionHealthStatus =
@@ -37,7 +34,7 @@ export interface CompletionHealthResult {
 }
 
 export interface CompletionHealthInput {
-  provider: DirectProviderConfig;
+  provider: ProviderTransportConfig;
   model: string;
   apiKey: string;
   timeoutMs?: number;
@@ -80,7 +77,7 @@ function timeoutSignal(timeoutMs: number): AbortSignal {
   return AbortSignal.timeout(timeoutMs);
 }
 
-function providerHeaders(provider: DirectProviderConfig, apiKey: string) {
+function providerHeaders(provider: ProviderTransportConfig, apiKey: string) {
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
@@ -124,7 +121,7 @@ export async function probeProviderCompletion(
   input: CompletionHealthInput,
 ): Promise<CompletionHealthResult> {
   const started = Date.now();
-  const modelId = normalizeDirectModelName(input.provider.id, input.model);
+  const modelId = input.model.trim().split("/").pop() || input.model.trim();
   const diagnostic: LLMProviderDiagnostic = {
     correlationId: randomUUID(),
     providerId: input.provider.id,

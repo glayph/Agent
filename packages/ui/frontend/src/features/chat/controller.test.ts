@@ -315,13 +315,20 @@ describe("chat controller WebSocket dependency injection", () => {
     await connectChat()
     createdSockets[0].simulateOpen()
 
-    const sent = await sendChatMessage({ content: "  Hello from the test  " })
+    const sent = await sendChatMessage({
+      content: "  Hello from the test  ",
+      requestedModel: "google/gemini-3.5-flash-lite",
+    })
 
     expect(sent).toBe(true)
     expect(createdSockets[0].sentData).toHaveLength(1)
     expect(JSON.parse(createdSockets[0].sentData[0])).toMatchObject({
       type: "message.send",
-      payload: { content: "Hello from the test", media: [] },
+      payload: {
+        content: "Hello from the test",
+        media: [],
+        requested_model: "google/gemini-3.5-flash-lite",
+      },
     })
     expect(
       getChatState().messages.filter(

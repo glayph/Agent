@@ -117,7 +117,7 @@ import { createMemoryRouter } from "./memory-router.js";
 import { createVoiceRouter } from "./voice-router.js";
 import { normalizeChatSessionId } from "./chat-session.js";
 import { supportsAudioModel } from "../llm.js";
-import { directProviderForModel } from "../llm/provider/catalog.js";
+import { providerRegistry } from "../llm/provider/registry.js";
 import {
   subscribeDeliveryOutcome,
   type DeliveryOutcomeEvent,
@@ -174,26 +174,32 @@ bootstrapWorkspaceEnv(runtimePaths.configDir);
 if (process.env.MIKI_MODEL || process.env.DEFAULT_MODEL) {
   const bootModel = process.env.MIKI_MODEL || process.env.DEFAULT_MODEL!;
   settings.setModel(bootModel);
-  const bootProvider = directProviderForModel(bootModel);
+  const bootProvider = providerRegistry.resolve(bootModel);
+  const bootDescriptor = bootProvider
+    ? providerRegistry
+        .pluginDescriptors()
+        .find((descriptor) => descriptor.manifest.id === bootProvider.id)
+    : undefined;
   settings.provider =
     process.env.MIKI_PROVIDER ||
-    (bootProvider?.id === "gemini"
-      ? "google"
-      : bootProvider?.id === "llama.cpp"
-        ? "llama.cpp"
-        : "unknown");
+    bootDescriptor?.manifest.ui?.dashboardId ||
+    bootProvider?.id ||
+    "unknown";
 }
 
 const chatRunQueues = new Map<string, Promise<void>>();
 const activeRunIds = new Map<string, string>();
 const pendingFeedback = new Map<string, string[]>();
 
-// Helper function for model switching
+// Helper function for model switching. Provider identity and display metadata
+// come from the registered Plug-in manifest, not from a shared vendor table.
 function getProviderForModel(model: string): string {
-  const provider = directProviderForModel(model);
-  if (provider?.id === "gemini") return "Google Gemini";
-  if (provider?.id === "llama.cpp") return "llama.cpp Local";
-  return "Unsupported provider";
+  const provider = providerRegistry.resolve(model);
+  if (!provider) return "Unsupported provider";
+  const descriptor = providerRegistry
+    .pluginDescriptors()
+    .find((item) => item.manifest.id === provider.id);
+  return descriptor?.manifest.displayName || provider.displayName;
 }
 
 function artifactContentType(relativePath: string): string | undefined {
@@ -1917,6 +1923,25 @@ mikiWss.on("connection", (ws, req) => {
         : crypto.randomUUID();
     const content =
       typeof payload.content === "string" ? payload.content.trim() : "";
+    const requestedModel =
+      typeof payload.requested_model === "string"
+        ? payload.requested_model.trim().slice(0, 160)
+        : "";
+    if (
+      requestedModel &&
+      !providerRegistry.getPluginRegistry().resolve(requestedModel)
+    ) {
+      _sendmiki(ws, {
+        type: "error",
+        session_id: sessionId,
+        payload: {
+          request_id: requestId,
+          code: "unsupported_model",
+          message: `The selected model "${requestedModel}" is not provided by a registered provider plugin.`,
+        },
+      });
+      return;
+    }
     const media = Array.isArray(payload.media)
       ? payload.media.filter((item): item is string => typeof item === "string")
       : [];
@@ -1990,7 +2015,9 @@ mikiWss.on("connection", (ws, req) => {
     }
 
     if (ephemeralAudio && rawVoice.provider === "cloud") {
-      const audioSupport = await supportsAudioModel(orchestrator.modelName);
+      const audioSupport = await supportsAudioModel(
+        requestedModel || orchestrator.modelName,
+      );
       if (audioSupport === false) {
         _sendmiki(ws, {
           type: "error",
@@ -2052,7 +2079,7 @@ mikiWss.on("connection", (ws, req) => {
         const assistantMessageId = `assistant-${requestId}`;
         activeRunIds.set(sessionId, assistantMessageId);
         let fullResponse = "";
-        let resolvedRunModel = orchestrator.modelName;
+        let resolvedRunModel = requestedModel || orchestrator.modelName;
         let artifactContract: ArtifactContract | null = null;
         let lastContextUsage: mikiContextUsage | null = null;
         let providerFailureDetected = false;
@@ -2091,7 +2118,11 @@ mikiWss.on("connection", (ws, req) => {
         }
 
         if (streaming.enabled) {
-          _sendmiki(ws, { type: "typing.start", session_id: sessionId });
+          _sendmiki(ws, {
+            type: "typing.start",
+            session_id: sessionId,
+            payload: { run_id: assistantMessageId },
+          });
           _sendmiki(ws, {
             type: "message.create",
             id: crypto.randomUUID(),
@@ -2157,6 +2188,7 @@ mikiWss.on("connection", (ws, req) => {
               },
               imageUrls: media,
               messageId: requestId,
+              ...(requestedModel ? { requestedModel } : {}),
               ...(voiceMetadata ? { voice: voiceMetadata } : {}),
               ...(ephemeralAudio && rawVoice.provider === "cloud"
                 ? { audio: ephemeralAudio }
@@ -2643,7 +2675,11 @@ mikiWss.on("connection", (ws, req) => {
             progressTimer = null;
           }
           if (streaming.enabled) {
-            _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+            _sendmiki(ws, {
+              type: "typing.stop",
+              session_id: sessionId,
+              payload: { run_id: assistantMessageId },
+            });
           }
           _sendmiki(ws, {
             type: "node.run_end",
@@ -2687,7 +2723,11 @@ mikiWss.on("connection", (ws, req) => {
             },
           });
           if (streaming.enabled) {
-            _sendmiki(ws, { type: "typing.stop", session_id: sessionId });
+            _sendmiki(ws, {
+              type: "typing.stop",
+              session_id: sessionId,
+              payload: { run_id: assistantMessageId },
+            });
           }
           _sendmiki(ws, {
             type: "error",

@@ -25,6 +25,18 @@ export interface MikiProviderManifest {
   capabilities: MikiProviderCapabilities;
   modelPrefixes?: string[];
   modelIds?: string[];
+  aliases?: string[];
+  ui?: {
+    /** Optional legacy/dashboard-facing identifier; canonical provider id remains `id`. */
+    dashboardId?: string;
+    iconSlug?: string;
+    domain?: string;
+    defaultApiBase?: string;
+    priority?: number;
+    commonModels?: string[];
+    supportsFetch?: boolean;
+    authMethodLocked?: boolean;
+  };
   permissions?: Array<"network" | "filesystem" | "shell" | "secrets">;
 }
 
@@ -55,6 +67,8 @@ export interface MikiProviderContext {
   workspaceDir: string;
   configDir: string;
   mikiVersion: string;
+  /** Credentials resolved for this plugin invocation only; never serialized in descriptors or logs. */
+  credentials?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   log(event: string, details?: Record<string, unknown>): void;
 }

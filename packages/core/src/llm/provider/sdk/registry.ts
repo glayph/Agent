@@ -8,6 +8,7 @@ import {
   type MikiProviderMessage,
   type MikiProviderPlugin,
   type ProviderPluginDescriptor,
+  type ProviderConnectionResult,
 } from "./index.js";
 import { LLMAPIError } from "../errors.js";
 import { ProviderPluginLoader, validateProviderManifest } from "./loader.js";
@@ -72,11 +73,14 @@ export class ProviderPluginRegistry {
     };
   }
 
-  private context(): MikiProviderContext {
+  private context(
+    credentials?: Readonly<Record<string, string>>,
+  ): MikiProviderContext {
     return {
       workspaceDir: this.options.workspaceDir,
       configDir: this.options.configDir,
       mikiVersion: this.options.mikiVersion,
+      credentials,
       log: (event, details) => {
         this.options.logger?.(event, { providerRegistry: true, ...details });
       },
@@ -199,6 +203,32 @@ export class ProviderPluginRegistry {
     const plugin = this.get(providerId);
     if (!plugin) return null;
     return plugin.catalog(this.context());
+  }
+
+  async listModels(
+    providerId: string,
+    credentials: Readonly<Record<string, string>> = {},
+  ): Promise<
+    Awaited<ReturnType<NonNullable<MikiProviderPlugin["listModels"]>>>
+  > {
+    const plugin = this.get(providerId);
+    if (!plugin?.listModels) return [];
+    return plugin.listModels(this.context(credentials));
+  }
+
+  async testConnection(
+    providerId: string,
+    credentials: Readonly<Record<string, string>> = {},
+  ): Promise<ProviderConnectionResult> {
+    const plugin = this.get(providerId);
+    if (!plugin?.testConnection) {
+      return {
+        ok: false,
+        latencyMs: 0,
+        error: "Connection testing is not supported by this provider plugin.",
+      };
+    }
+    return plugin.testConnection(this.context(credentials));
   }
 
   async complete(

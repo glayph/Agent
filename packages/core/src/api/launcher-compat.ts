@@ -101,11 +101,6 @@ import { buildPluginMarketplaceReadinessReport } from "../plugins/plugin-marketp
 import { listRuntimePluginProviderMetadata } from "../plugins/plugin-provider-adapter.js";
 import { providerRegistry } from "../llm/provider/registry.js";
 import {
-  DIRECT_PROVIDERS,
-  getDirectProviderById,
-  type DirectProviderId,
-} from "../llm/provider/catalog.js";
-import {
   probeProviderCompletion,
   type CompletionHealthResult,
 } from "../llm/provider/completion-health.js";
@@ -288,11 +283,6 @@ const CHANNEL_SECRET_ENV_KEYS: Record<string, Record<string, string>> = {
 
 const SECRET_REF_FIELD_PATTERN =
   /(?:api[_-]?key|token|secret|password|credential|authorization)/i;
-
-interface ProviderModelsResponse {
-  data?: unknown[];
-  models?: unknown[];
-}
 
 interface ProviderModelResult {
   id: string;
@@ -617,45 +607,43 @@ export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] = [
   },
 ];
 
-const PROVIDER_OPTIONS: ProviderOption[] = [
-  {
-    id: "google",
-    display_name: "Google Gemini",
-    icon_slug: "google",
-    domain: "ai.google.dev",
-    default_api_base:
-      "https://generativelanguage.googleapis.com/v1beta/openai/",
-    empty_api_key_allowed: false,
+function providerOptionFromDescriptor(
+  descriptor: ReturnType<typeof providerRegistry.pluginDescriptors>[number],
+): ProviderOption {
+  const manifest = descriptor.manifest;
+  const ui = manifest.ui || {};
+  const dashboardId = ui.dashboardId || manifest.id;
+  const aliases = Array.from(new Set(manifest.aliases || []));
+  return {
+    id: dashboardId,
+    display_name: manifest.displayName,
+    icon_slug: ui.iconSlug || "plugin",
+    domain: ui.domain,
+    default_api_base: ui.defaultApiBase || "",
+    empty_api_key_allowed: descriptor.auth.allowEmptyKey,
     create_allowed: true,
     default_model_allowed: true,
-    supports_fetch: true,
-    default_auth_method: "api_key",
-    priority: 100,
-    common_models: [
-      "gemini-3.5-flash-lite",
-      "gemini-3.5-flash",
-      "gemini-3.6-flash",
-    ],
-    aliases: ["gemini"],
-  },
-  {
-    id: "llama.cpp",
-    display_name: "llama.cpp Local",
-    icon_slug: "llama",
-    domain: "127.0.0.1",
-    default_api_base: "http://127.0.0.1:39200/v1",
-    empty_api_key_allowed: true,
-    create_allowed: true,
-    default_model_allowed: true,
-    supports_fetch: false,
-    default_auth_method: "none",
-    auth_method_locked: true,
-    local: true,
-    priority: 90,
-    common_models: ["local-model"],
-    aliases: ["llama-cpp", "llamacpp", "local-llama", "local"],
-  },
-];
+    supports_fetch: ui.supportsFetch ?? manifest.capabilities.chat,
+    default_auth_method:
+      descriptor.auth.mode === "api-key" ? "api_key" : descriptor.auth.mode,
+    auth_method_locked:
+      ui.authMethodLocked ??
+      (descriptor.auth.mode === "local" || descriptor.auth.mode === "none"),
+    local: manifest.capabilities.local,
+    priority: ui.priority ?? 20,
+    common_models: ui.commonModels || manifest.modelIds || [],
+    aliases,
+    source: descriptor.source === "external" ? "plugin" : "builtin",
+  };
+}
+
+/**
+ * The built-in provider catalog is derived from Plug-in manifests. This is a
+ * compatibility-shaped view for launcher APIs, not a second provider registry.
+ */
+const PROVIDER_OPTIONS: ProviderOption[] = providerRegistry
+  .pluginDescriptors()
+  .map(providerOptionFromDescriptor);
 
 const WEB_SEARCH_DEFAULT = {
   execution_mode: "local" as const,
@@ -2320,26 +2308,33 @@ function setPlatformAutostart(paths: RuntimePaths, enabled: boolean): void {
   }
 }
 
+function descriptorForProvider(provider: string) {
+  const raw = provider.trim().toLowerCase();
+  return providerRegistry.pluginDescriptors().find((descriptor) => {
+    const manifest = descriptor.manifest;
+    return (
+      manifest.id.toLowerCase() === raw ||
+      (manifest.aliases || []).some((alias) => alias.toLowerCase() === raw) ||
+      (manifest.modelPrefixes || []).some(
+        (prefix) => prefix.toLowerCase() === raw,
+      )
+    );
+  });
+}
+
 function apiKeyEnvForProvider(provider: string): string {
-  if (provider === "google" || provider === "gemini") return "GEMINI_API_KEY";
-  if (
-    ["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(
-      provider,
-    )
-  ) {
-    return "LLAMA_CPP_API_KEY";
-  }
-  return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
+  return (
+    descriptorForProvider(provider)?.auth.envVars?.[0] ||
+    `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`
+  );
 }
 
 function oauthSecretEnvForProvider(provider: string): string {
   return apiKeyEnvForProvider(provider);
 }
 
-function normalizeOAuthProvider(
-  provider: string,
-): DirectProviderId | undefined {
-  return getDirectProviderById(provider)?.id;
+function normalizeOAuthProvider(provider: string): string | undefined {
+  return descriptorForProvider(provider)?.manifest.id;
 }
 
 function maskSecret(value: string): string {
@@ -2356,99 +2351,89 @@ function getProviderOption(
   provider: string,
   options: ProviderOption[] = PROVIDER_OPTIONS,
 ): ProviderOption {
+  const raw = provider.trim().toLowerCase();
   return (
     options.find(
       (item) =>
-        item.id === provider ||
-        item.aliases?.includes(provider) ||
-        (provider === "gemini" && item.id === "google"),
-    ) || PROVIDER_OPTIONS[0]
+        item.id.toLowerCase() === raw ||
+        item.aliases?.some((alias) => alias.toLowerCase() === raw),
+    ) ||
+    [...options].sort(
+      (left, right) => (right.priority || 0) - (left.priority || 0),
+    )[0]
   );
 }
 
 async function launcherProviderOptions(
   paths: RuntimePaths,
 ): Promise<ProviderOption[]> {
-  const builtIns = PROVIDER_OPTIONS.map((option) => ({
-    ...option,
-    source: option.source || ("builtin" as const),
-  }));
+  const descriptors = providerRegistry.pluginDescriptors();
+  const builtIns = descriptors
+    .filter((descriptor) => descriptor.source === "builtin")
+    .map(providerOptionFromDescriptor);
   const seen = new Set(builtIns.map((option) => option.id));
-  const builtinPluginOptions = providerRegistry
-    .pluginDescriptors()
-    .filter((descriptor) => {
-      const dashboardId =
-        descriptor.manifest.id === "gemini" ? "google" : descriptor.manifest.id;
-      return !seen.has(dashboardId);
-    })
-    .map((descriptor): ProviderOption => {
-      const dashboardId =
-        descriptor.manifest.id === "gemini" ? "google" : descriptor.manifest.id;
-      seen.add(dashboardId);
-      return {
-        id: dashboardId,
-        display_name: descriptor.manifest.displayName,
-        icon_slug: descriptor.manifest.id === "llama.cpp" ? "llama" : "google",
-        default_api_base:
-          descriptor.manifest.id === "gemini"
-            ? process.env.GEMINI_BASE_URL ||
-              "https://generativelanguage.googleapis.com/v1beta/openai/"
-            : process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1",
-        empty_api_key_allowed: descriptor.auth.allowEmptyKey,
-        create_allowed: true,
-        default_model_allowed: true,
-        supports_fetch: Boolean(descriptor.manifest.capabilities.chat),
-        default_auth_method:
-          descriptor.auth.mode === "api-key" ? "api_key" : descriptor.auth.mode,
-        auth_method_locked:
-          descriptor.auth.mode === "local" || descriptor.auth.mode === "none",
-        local: descriptor.manifest.capabilities.local,
-        priority: 20,
-        common_models: descriptor.manifest.modelIds || [],
-        source: "builtin",
-      };
-    });
   const pluginOptions = (
     await listRuntimePluginProviderMetadata(paths.sourceDir ?? paths.configDir)
   )
-    .filter((provider) =>
-      [
-        "gemini",
-        "google",
-        "llama.cpp",
-        "llama-cpp",
-        "llamacpp",
-        "local",
-        "local-llama",
-      ].includes(provider.id),
-    )
-    .filter((provider) => !seen.has(provider.id))
+    .filter((provider) => {
+      const descriptor = descriptors.find((candidate) => {
+        const manifest = candidate.manifest;
+        const id = provider.id.toLowerCase();
+        return (
+          manifest.id.toLowerCase() === id ||
+          manifest.aliases?.some((alias) => alias.toLowerCase() === id) ||
+          manifest.modelPrefixes?.some((prefix) => prefix.toLowerCase() === id)
+        );
+      });
+      const dashboardId = descriptor?.manifest.ui?.dashboardId || provider.id;
+      return Boolean(descriptor) && !seen.has(dashboardId);
+    })
     .map((provider): ProviderOption => {
-      seen.add(provider.id);
+      const descriptor = descriptors.find((candidate) => {
+        const manifest = candidate.manifest;
+        const id = provider.id.toLowerCase();
+        return (
+          manifest.id.toLowerCase() === id ||
+          manifest.aliases?.some((alias) => alias.toLowerCase() === id) ||
+          manifest.modelPrefixes?.some((prefix) => prefix.toLowerCase() === id)
+        );
+      });
+      const manifest = descriptor?.manifest;
+      const ui = manifest?.ui || {};
+      const dashboardId = ui.dashboardId || provider.id;
+      seen.add(dashboardId);
       return {
-        id: provider.id,
-        display_name: provider.displayName,
-        icon_slug: "plugin",
-        default_api_base: provider.baseUrl,
+        id: dashboardId,
+        display_name: manifest?.displayName || provider.displayName,
+        icon_slug: ui.iconSlug || "plugin",
+        domain: ui.domain,
+        default_api_base: provider.baseUrl || ui.defaultApiBase || "",
         empty_api_key_allowed:
-          provider.authMethod === "none" || provider.local === true,
+          descriptor?.auth.allowEmptyKey ??
+          (provider.authMethod === "none" || provider.local === true),
         create_allowed: true,
         default_model_allowed: true,
-        supports_fetch: provider.supportsFetch,
-        default_auth_method: provider.authMethod,
-        local: provider.local,
-        priority: 10,
-        common_models: provider.models,
+        supports_fetch: ui.supportsFetch ?? provider.supportsFetch,
+        default_auth_method: descriptor?.auth.mode || provider.authMethod,
+        auth_method_locked: ui.authMethodLocked,
+        local: manifest?.capabilities.local ?? provider.local,
+        priority: ui.priority ?? 10,
+        common_models: ui.commonModels || provider.models,
+        aliases: manifest?.aliases,
         source: "plugin",
       };
     });
-  const allOptions = [...builtIns, ...builtinPluginOptions, ...pluginOptions];
-  const descriptors = providerRegistry.pluginDescriptors();
+  const allOptions = [...builtIns, ...pluginOptions];
   return allOptions.map((option) => {
-    const pluginId = option.id === "google" ? "gemini" : option.id;
-    const descriptor = descriptors.find(
-      (item) => item.manifest.id === pluginId,
-    );
+    const descriptor = descriptors.find((item) => {
+      const manifest = item.manifest;
+      const id = option.id.toLowerCase();
+      return (
+        manifest.id.toLowerCase() === id ||
+        manifest.ui?.dashboardId?.toLowerCase() === id ||
+        manifest.aliases?.some((alias) => alias.toLowerCase() === id)
+      );
+    });
     if (!descriptor) return option;
     return {
       ...option,
@@ -2474,34 +2459,33 @@ function normalizeProvider(
   options: ProviderOption[] = PROVIDER_OPTIONS,
 ): string {
   const raw = (provider || "").trim().toLowerCase();
-  if (raw === "gemini" || raw === "google") return "google";
-  if (
-    ["llama.cpp", "llama-cpp", "llamacpp", "local", "local-llama"].includes(raw)
-  )
-    return "llama.cpp";
-  if (
-    raw &&
-    options.some((item) => item.id === raw || item.aliases?.includes(raw))
-  )
-    return raw;
+  const direct = options.find(
+    (item) =>
+      item.id.toLowerCase() === raw ||
+      item.aliases?.some((alias) => alias.toLowerCase() === raw),
+  );
+  if (direct) return direct.id;
+
   const name = modelName.toLowerCase();
-  if (name.startsWith("google/") || name.startsWith("gemini")) return "google";
-  if (
-    name.startsWith("llama.cpp/") ||
-    name.startsWith("llama-cpp/") ||
-    name.startsWith("llamacpp/") ||
-    name.startsWith("local-llama/") ||
-    name.startsWith("local/")
-  )
-    return "llama.cpp";
-  return "google";
+  const byPrefix = options.find((item) =>
+    item.plugin?.model_prefixes.some(
+      (prefix) => name === prefix || name.startsWith(`${prefix}/`),
+    ),
+  );
+  if (byPrefix) return byPrefix.id;
+
+  return getProviderOption("", options).id;
 }
 
 function modelBodyName(modelName: string, provider: string): string {
-  const prefix = `${provider}/`;
-  if (modelName.startsWith(prefix)) return modelName.slice(prefix.length);
-  if (provider === "google" && modelName.startsWith("gemini/")) {
-    return modelName.slice("gemini/".length);
+  const option = getProviderOption(provider);
+  const prefixes = [provider, ...(option.plugin?.model_prefixes || [])]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  for (const prefix of prefixes) {
+    if (modelName.startsWith(`${prefix}/`)) {
+      return modelName.slice(prefix.length + 1);
+    }
   }
   const slash = modelName.indexOf("/");
   return slash > 0 ? modelName.slice(slash + 1) : modelName;
@@ -2522,8 +2506,8 @@ export function runtimeModelName(stored: StoredModel): string {
   // provider router treats an unprefixed model id as a legacy cloud/OpenRouter
   // identifier, so dropping a provider prefix can silently route a request to
   // the wrong adapter after model selection or restart.
-  const preservePrefix = new Set(["llama.cpp"]);
-  if (preservePrefix.has(provider)) {
+  const option = getProviderOption(provider);
+  if (option.local) {
     return modelId.startsWith(`${provider}/`)
       ? modelId
       : `${provider}/${modelId}`;
@@ -2607,7 +2591,7 @@ function localModelCapabilityWarning(
   provider: string,
   stored: StoredModel,
 ): string | undefined {
-  if (provider !== "llama.cpp") return undefined;
+  if (!getProviderOption(provider).local) return undefined;
   const identity = `${stored.model_name} ${stored.model || ""}`.toLowerCase();
   const contextSize = stored.local?.context_size;
   if (/(?:^|[^0-9])(300|350|0\.3)\s*m|(?:^|[^0-9])0\.3b/.test(identity)) {
@@ -2632,16 +2616,15 @@ function modelInfoFromStored(
   );
   const option = getProviderOption(provider, options);
   const modelName = stored.model_name;
-  const localHealth =
-    provider === "llama.cpp" ? getLocalRuntimeHealth(modelName) : undefined;
-  const apiKey =
-    provider === "llama.cpp"
-      ? ""
-      : resolveConfiguredSecret(apiKeyEnvForProvider(provider), configDir);
-  const available =
-    provider === "llama.cpp"
-      ? Boolean(localHealth?.configured)
-      : Boolean(option.empty_api_key_allowed || apiKey);
+  const localHealth = option.local
+    ? getLocalRuntimeHealth(modelName)
+    : undefined;
+  const apiKey = option.local
+    ? ""
+    : resolveConfiguredSecret(apiKeyEnvForProvider(provider), configDir);
+  const available = option.local
+    ? Boolean(localHealth?.configured)
+    : Boolean(option.empty_api_key_allowed || apiKey);
   return {
     index,
     model_name: modelName,
@@ -2720,10 +2703,9 @@ function normalizeStoredModel(
   return {
     ...stored,
     provider: normalizedProvider,
-    local:
-      normalizedProvider === "llama.cpp"
-        ? normalizeLocalModelConfig(stored.local, stored.local)
-        : undefined,
+    local: getProviderOption(normalizedProvider, options).local
+      ? normalizeLocalModelConfig(stored.local, stored.local)
+      : undefined,
     model:
       stored.model?.trim() ||
       modelBodyName(stored.model_name, normalizedProvider),
@@ -2751,13 +2733,12 @@ function normalizeIncomingModel(
     options,
   );
   const option = getProviderOption(provider, options);
-  const local =
-    provider === "llama.cpp"
-      ? normalizeLocalModelConfig(
-          "local" in input ? input.local : existing?.local,
-          existing?.local,
-        )
-      : undefined;
+  const local = getProviderOption(provider, options).local
+    ? normalizeLocalModelConfig(
+        "local" in input ? input.local : existing?.local,
+        existing?.local,
+      )
+    : undefined;
   // Helper: treat null as explicit clear; string/number keep value; missing keeps existing.
   const strOrClear = (key: string, fallback?: string): string | undefined => {
     if (!(key in input)) return fallback;
@@ -3310,73 +3291,23 @@ async function fetchModelsFromProvider(
   apiKey: string,
 ): Promise<ProviderModelResult[]> {
   const option = getProviderOption(provider);
-  const base = apiBase || option.default_api_base;
-  if (!base) {
-    return (option.common_models || []).map((id) => ({ id }));
-  }
-  const isGoogleProvider =
-    option.id === "google" || provider === "google" || provider === "gemini";
-  const normalizedBase = base.replace(/\/+$/, "");
-  // Gemini exposes chat completions through its OpenAI-compatible endpoint,
-  // but model discovery remains on the native /v1beta/models endpoint.
-  const googleModelsBase = normalizedBase.replace(
-    /\/v1beta\/openai$/i,
-    "/v1beta",
+  const descriptor = descriptorForProvider(provider);
+  const fallback = (option.common_models || []).map((id) => ({ id }));
+  if (!descriptor) return fallback;
+  const configuredProvider = {
+    id: descriptor.manifest.id,
+    displayName: descriptor.manifest.displayName,
+    baseUrl: apiBase || option.default_api_base,
+    apiKeyEnv: descriptor.auth.envVars?.[0],
+    emptyApiKeyAllowed: descriptor.auth.allowEmptyKey,
+    local: descriptor.manifest.capabilities.local,
+  };
+  const models = await providerRegistry.listModels(
+    configuredProvider,
+    apiKey,
+    10_000,
   );
-  const url = `${isGoogleProvider ? googleModelsBase : normalizedBase}/models`;
-  const headers: Record<string, string> = {};
-  if (apiKey) {
-    if (isGoogleProvider) {
-      headers["x-goog-api-key"] = apiKey;
-    } else {
-      headers.Authorization = `Bearer ${apiKey}`;
-    }
-  }
-  const started = Date.now();
-  const response = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!response.ok) {
-    throw new Error(`Provider returned ${response.status}`);
-  }
-  const elapsed = Date.now() - started;
-  const body = (await response.json()) as ProviderModelsResponse | unknown[];
-  const rawModels = Array.isArray(body)
-    ? body
-    : Array.isArray(body.data)
-      ? body.data
-      : Array.isArray(body.models)
-        ? body.models
-        : [];
-  const models = rawModels
-    .map((item: unknown): ProviderModelResult =>
-      typeof item === "string"
-        ? { id: item }
-        : item && typeof item === "object"
-          ? {
-              id: String(
-                (item as { id?: unknown; name?: unknown }).id ||
-                  (item as { id?: unknown; name?: unknown }).name ||
-                  "",
-              ).replace(/^models\//, ""),
-              owned_by:
-                typeof (item as { owned_by?: unknown }).owned_by === "string"
-                  ? (item as { owned_by: string }).owned_by
-                  : undefined,
-              extra: item as JsonRecord,
-            }
-          : {
-              id: "",
-            },
-    )
-    .filter((item: { id: string }) => item.id);
-  return models.length > 0
-    ? models
-    : (option.common_models || []).map((id) => ({
-        id,
-        extra: { latency_ms: elapsed },
-      }));
+  return models.length > 0 ? models : fallback;
 }
 
 function oauthProviderStatus(
@@ -5701,7 +5632,11 @@ export function createLauncherCompatRouter({
       const hadExistingProviderKey = Boolean(
         resolveProviderApiKey(model.provider || "", paths),
       );
-      if (apiKey && !isMaskedSecret(apiKey) && model.provider !== "llama.cpp") {
+      if (
+        apiKey &&
+        !isMaskedSecret(apiKey) &&
+        !getProviderOption(model.provider || "", providerOptions).local
+      ) {
         updateEnvVar(paths, apiKeyEnvForProvider(model.provider || ""), apiKey);
       }
       const duplicateIndex = (state.models || []).findIndex(
@@ -5793,7 +5728,11 @@ export function createLauncherCompatRouter({
           error: `A credential is required before saving a ${model.provider || "provider"} model.`,
         });
       }
-      if (apiKey && !isMaskedSecret(apiKey) && model.provider !== "llama.cpp") {
+      if (
+        apiKey &&
+        !isMaskedSecret(apiKey) &&
+        !getProviderOption(model.provider || "", providerOptions).local
+      ) {
         updateEnvVar(paths, apiKeyEnvForProvider(model.provider || ""), apiKey);
       }
       state.models![index] = model;
@@ -5975,19 +5914,13 @@ export function createLauncherCompatRouter({
     model: string,
     apiKey: string,
   ): Promise<CompletionHealthResult> {
-    const directProviderId: DirectProviderId =
-      provider === "google" || provider === "gemini"
-        ? "gemini"
-        : provider === "llama.cpp"
-          ? "llama.cpp"
-          : (() => {
-              throw new Error(`Unsupported provider: ${provider}`);
-            })();
+    const descriptor = descriptorForProvider(provider);
+    if (!descriptor) throw new Error(`Unsupported provider: ${provider}`);
     const option = getProviderOption(provider);
     return probeProviderCompletion({
       provider: {
-        id: directProviderId,
-        displayName: option.display_name || provider,
+        id: descriptor.manifest.id,
+        displayName: option.display_name || descriptor.manifest.displayName,
         baseUrl: apiBase || option.default_api_base,
         apiKeyEnv: apiKeyEnvForProvider(provider),
         emptyApiKeyAllowed: option.empty_api_key_allowed,
@@ -6003,19 +5936,13 @@ export function createLauncherCompatRouter({
     model: string,
     apiKey: string,
   ): Promise<ToolHealthResult> {
-    const directProviderId: DirectProviderId =
-      provider === "google" || provider === "gemini"
-        ? "gemini"
-        : provider === "llama.cpp"
-          ? "llama.cpp"
-          : (() => {
-              throw new Error(`Unsupported provider: ${provider}`);
-            })();
+    const descriptor = descriptorForProvider(provider);
+    if (!descriptor) throw new Error(`Unsupported provider: ${provider}`);
     const option = getProviderOption(provider);
     return probeProviderTools({
       provider: {
-        id: directProviderId,
-        displayName: option.display_name || provider,
+        id: descriptor.manifest.id,
+        displayName: option.display_name || descriptor.manifest.displayName,
         baseUrl: apiBase || option.default_api_base,
         apiKeyEnv: apiKeyEnvForProvider(provider),
         emptyApiKeyAllowed: option.empty_api_key_allowed,
@@ -6371,14 +6298,16 @@ export function createLauncherCompatRouter({
 
   router.get("/oauth/providers", (_req, res) => {
     res.json({
-      providers: DIRECT_PROVIDERS.map((provider) =>
-        oauthProviderStatus(
-          provider.id,
-          provider.displayName,
-          ["token"],
-          paths,
+      providers: providerRegistry
+        .pluginDescriptors()
+        .map((descriptor) =>
+          oauthProviderStatus(
+            descriptor.manifest.id,
+            descriptor.manifest.displayName,
+            ["token"],
+            paths,
+          ),
         ),
-      ),
     });
   });
 
