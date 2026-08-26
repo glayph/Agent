@@ -12,8 +12,6 @@ import * as os from "os";
 import * as path from "path";
 import * as zlib from "zlib";
 import * as yaml from "js-yaml";
-import QRCode from "qrcode";
-import { ProxyAgent } from "undici";
 
 function positiveIntFromEnv(key: string, fallback: number): number {
   const raw = process.env[key];
@@ -87,6 +85,27 @@ import {
   type SupportedChannelMetadata,
 } from "./channel-runtime-probe.js";
 import {
+  builtinChannelRegistry,
+  SUPPORTED_BUILTIN_CHANNELS,
+} from "../plugins/channels/builtin-channel-registry.js";
+import {
+  channelProxyFromConfig,
+  isTerminalQrStatus,
+  qrBindingFlowResponse,
+  QR_BINDING_FLOW_GC_MS,
+  type QrBindingChannel,
+  type QrBindingFlow,
+  type QrBindingFlowResponse,
+} from "../plugins/channels/_shared/qr-binding.js";
+import {
+  startWeixinQrBindingFlow as startWeixinQrBindingFlowPlugin,
+  pollWeixinQrBindingFlow as pollWeixinQrBindingFlowPlugin,
+} from "../plugins/channels/weixin/qr-binding.js";
+import {
+  startWecomQrBindingFlow as startWecomQrBindingFlowPlugin,
+  pollWecomQrBindingFlow as pollWecomQrBindingFlowPlugin,
+} from "../plugins/channels/wecom/qr-binding.js";
+import {
   getSessionPermissionState,
   getSessionPermissions,
   setSessionPermissions,
@@ -130,82 +149,6 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-type QrBindingChannel = "weixin" | "wecom";
-type QrBindingStatus = "wait" | "scaned" | "confirmed" | "expired" | "error";
-
-interface QrBindingFlow {
-  id: string;
-  channel: QrBindingChannel;
-  status: QrBindingStatus;
-  qrDataURI?: string;
-  qrcode?: string;
-  scode?: string;
-  accountId?: string;
-  botId?: string;
-  error?: string;
-  pollBaseURL?: string;
-  createdAt: number;
-  updatedAt: number;
-  expiresAt: number;
-}
-
-interface QrBindingFlowResponse {
-  flow_id: string;
-  status: QrBindingStatus;
-  qr_data_uri?: string;
-  account_id?: string;
-  bot_id?: string;
-  error?: string;
-}
-
-interface WeixinQrResponse {
-  errcode?: number;
-  errmsg?: string;
-  qrcode?: string;
-  qrcode_img_content?: string;
-}
-
-interface WeixinQrStatusResponse {
-  errcode?: number;
-  errmsg?: string;
-  status?: string;
-  bot_token?: string;
-  ilink_bot_id?: string;
-  baseurl?: string;
-  ilink_user_id?: string;
-  redirect_host?: string;
-}
-
-interface WecomQrGenerateResponse {
-  errcode?: number;
-  errmsg?: string;
-  data?: {
-    scode?: string;
-    auth_url?: string;
-  };
-}
-
-interface WecomQrQueryResponse {
-  errcode?: number;
-  errmsg?: string;
-  data?: {
-    status?: string;
-    bot_info?: {
-      botid?: string;
-      secret?: string;
-    };
-  };
-}
-
-const QR_BINDING_FLOW_TTL_MS = 5 * 60 * 1000;
-const QR_BINDING_FLOW_GC_MS = 30 * 60 * 1000;
-const WEIXIN_BASE_URL = "https://ilinkai.weixin.qq.com";
-const WEIXIN_BOT_TYPE = "3";
-const WECOM_QR_SOURCE_ID = "Miki";
-const WECOM_QR_GENERATE_URL = "https://work.weixin.qq.com/ai/qc/generate";
-const WECOM_QR_QUERY_URL = "https://work.weixin.qq.com/ai/qc/query_result";
-const WECOM_DEFAULT_WEBSOCKET_URL = "wss://openws.work.weixin.qq.com";
-
 type ResolvedChannel =
   | {
       source: "builtin";
@@ -219,67 +162,27 @@ type ResolvedChannel =
       secretFields: string[];
     };
 
-const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
-  weixin: ["token", "encoding_aes_key"],
-  telegram: ["token"],
-  discord: ["token"],
-  slack: ["bot_token", "app_token", "signing_secret"],
-  feishu: ["app_secret", "encrypt_key", "verification_token"],
-  dingtalk: ["webhook_url", "client_secret"],
-  line: ["token", "channel_secret"],
-  qq: ["token"],
-  onebot: ["access_token"],
-  whatsapp: ["webhook_token"],
-  wecom: ["secret", "corp_secret", "webhook_url"],
-  miki: ["token"],
-  matrix: ["access_token"],
-  irc: ["password", "nickserv_password", "sasl_password"],
-  mqtt: ["username", "password"],
-};
+const CHANNEL_SECRET_FIELDS: Record<string, string[]> = Object.fromEntries(
+  SUPPORTED_BUILTIN_CHANNELS.map((channel) => [
+    channel.name,
+    [
+      ...(builtinChannelRegistry.get(channel.name)?.manifest.secret_fields ||
+        []),
+    ],
+  ]),
+);
 
-const CHANNEL_SECRET_ENV_KEYS: Record<string, Record<string, string>> = {
-  telegram: { token: "TELEGRAM_BOT_TOKEN" },
-  discord: { token: "DISCORD_BOT_TOKEN" },
-  slack: {
-    bot_token: "SLACK_BOT_TOKEN",
-    app_token: "SLACK_APP_TOKEN",
-  },
-  feishu: {
-    app_secret: "FEISHU_APP_SECRET",
-    encrypt_key: "FEISHU_ENCRYPT_KEY",
-    verification_token: "FEISHU_VERIFICATION_TOKEN",
-  },
-  dingtalk: {
-    webhook_url: "DINGTALK_WEBHOOK_URL",
-    client_secret: "DINGTALK_CLIENT_SECRET",
-  },
-  line: {
-    token: "LINE_CHANNEL_ACCESS_TOKEN",
-    channel_secret: "LINE_CHANNEL_SECRET",
-  },
-  qq: { token: "QQ_BOT_TOKEN" },
-  onebot: { access_token: "ONEBOT_ACCESS_TOKEN" },
-  whatsapp: { webhook_token: "WHATSAPP_WEBHOOK_TOKEN" },
-  weixin: {
-    token: "WEIXIN_TOKEN",
-    encoding_aes_key: "WEIXIN_ENCODING_AES_KEY",
-  },
-  wecom: {
-    secret: "WECOM_SECRET",
-    corp_secret: "WECOM_CORP_SECRET",
-    webhook_url: "WECOM_WEBHOOK_URL",
-  },
-  matrix: { access_token: "MATRIX_ACCESS_TOKEN" },
-  irc: {
-    password: "IRC_PASSWORD",
-    nickserv_password: "IRC_NICKSERV_PASSWORD",
-    sasl_password: "IRC_SASL_PASSWORD",
-  },
-  mqtt: {
-    username: "MQTT_USERNAME",
-    password: "MQTT_PASSWORD",
-  },
-};
+const CHANNEL_SECRET_ENV_KEYS: Record<
+  string,
+  Record<string, string>
+> = Object.fromEntries(
+  SUPPORTED_BUILTIN_CHANNELS.map((channel) => [
+    channel.name,
+    {
+      ...(builtinChannelRegistry.get(channel.name)?.manifest.env_fields || {}),
+    },
+  ]),
+);
 
 const SECRET_REF_FIELD_PATTERN =
   /(?:api[_-]?key|token|secret|password|credential|authorization)/i;
@@ -472,140 +375,8 @@ const MAX_FAILED_LOGINS = 8;
 const activeSessions = new Map<string, number>();
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 
-const CHANNEL_RUNTIME_NOTES = {
-  miki: "Verified WebUI chat path through the gateway WebSocket proxy.",
-  telegram: "Node Telegram adapter exists; requires a valid bot token.",
-  discord:
-    "Node Discord Gateway adapter supports inbound messages, outbound replies, filtering, reconnect, and API error surfacing.",
-  slack:
-    "Node Slack Socket Mode adapter supports events, acknowledgements, threaded replies, filtering, reconnect, and API error surfacing.",
-  line: "Node LINE webhook adapter verifies signatures, filters events, and sends bounded replies.",
-  feishu:
-    "Node Feishu/Lark webhook adapter supports token-verified callbacks, URL verification, inbound text events, bounded replies, filtering, and API error surfacing.",
-  dingtalk:
-    "Node DingTalk webhook adapter supports signed robot webhooks, inbound text events, outbound robot replies, filtering, and API error surfacing.",
-  qq: "Node QQ webhook adapter supports inbound message callbacks, bounded outbound replies, filtering, and API error surfacing.",
-  matrix:
-    "Node Matrix sync adapter supports sync polling, outbound room messages, filtering, and retry.",
-  irc: "Node IRC socket adapter supports TLS/plain sockets, joins, mentions, DMs, outbound replies, and reconnect.",
-  onebot:
-    "Node OneBot v11 adapter supports WebSocket inbound events, HTTP replies, filtering, mentions, and reconnect.",
-  mqtt: "Node MQTT 3.1.1 adapter supports broker auth, request/response topics, QoS 0/1 packets, keepalive, and reconnect.",
-  whatsapp:
-    "Node WhatsApp bridge adapter verifies shared tokens, parses common bridge payloads, filters events, and sends bounded outbound replies.",
-  partial:
-    "Configuration is stored, but the default Node gateway does not currently prove an end-to-end bot runtime for this channel.",
-} as const;
-
-export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] = [
-  {
-    name: "telegram",
-    display_name: "Telegram",
-    config_key: "telegram",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.telegram,
-  },
-  {
-    name: "discord",
-    display_name: "Discord",
-    config_key: "discord",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.discord,
-  },
-  {
-    name: "slack",
-    display_name: "Slack",
-    config_key: "slack",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.slack,
-  },
-  {
-    name: "feishu",
-    display_name: "Feishu",
-    config_key: "feishu",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.feishu,
-  },
-  {
-    name: "dingtalk",
-    display_name: "DingTalk",
-    config_key: "dingtalk",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.dingtalk,
-  },
-  {
-    name: "qq",
-    display_name: "QQ",
-    config_key: "qq",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.qq,
-  },
-  {
-    name: "weixin",
-    display_name: "WeChat",
-    config_key: "weixin",
-    runtime_status: "partial",
-    runtime_note:
-      "QR binding is available, but no production inbound/outbound WeChat adapter is mounted in the Node runtime.",
-  },
-  {
-    name: "wecom",
-    display_name: "WeCom",
-    config_key: "wecom",
-    runtime_status: "partial",
-    runtime_note:
-      "QR binding is available, but no production inbound/outbound WeCom adapter is mounted in the Node runtime.",
-  },
-  {
-    name: "line",
-    display_name: "LINE",
-    config_key: "line",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.line,
-  },
-  {
-    name: "onebot",
-    display_name: "OneBot",
-    config_key: "onebot",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.onebot,
-  },
-  {
-    name: "whatsapp",
-    display_name: "WhatsApp",
-    config_key: "whatsapp",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.whatsapp,
-  },
-  {
-    name: "miki",
-    display_name: "miki",
-    config_key: "miki",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.miki,
-  },
-  {
-    name: "matrix",
-    display_name: "Matrix",
-    config_key: "matrix",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.matrix,
-  },
-  {
-    name: "irc",
-    display_name: "IRC",
-    config_key: "irc",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.irc,
-  },
-  {
-    name: "mqtt",
-    display_name: "MQTT",
-    config_key: "mqtt",
-    runtime_status: "functional",
-    runtime_note: CHANNEL_RUNTIME_NOTES.mqtt,
-  },
-];
+export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] =
+  SUPPORTED_BUILTIN_CHANNELS.map((channel) => ({ ...channel }));
 
 function providerOptionFromDescriptor(
   descriptor: ReturnType<typeof providerRegistry.pluginDescriptors>[number],
@@ -1390,144 +1161,6 @@ function stringOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function qrBindingFlowID(channel: QrBindingChannel): string {
-  const prefix = channel === "weixin" ? "wx" : "wc";
-  return `${prefix}_${crypto.randomBytes(12).toString("hex")}`;
-}
-
-function isTerminalQrStatus(status: QrBindingStatus): boolean {
-  return status === "confirmed" || status === "expired" || status === "error";
-}
-
-function normalizeQrBindingStatus(value: unknown): QrBindingStatus {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
-  switch (normalized) {
-    case "wait":
-      return "wait";
-    case "scaned":
-    case "scanned":
-    case "scaned_but_redirect":
-      return "scaned";
-    case "confirmed":
-    case "success":
-      return "confirmed";
-    case "expired":
-      return "expired";
-    case "error":
-      return "error";
-    default:
-      return "wait";
-  }
-}
-
-function qrBindingFlowResponse(flow: QrBindingFlow): QrBindingFlowResponse {
-  const response: QrBindingFlowResponse = {
-    flow_id: flow.id,
-    status: flow.status,
-  };
-  if (flow.status === "wait" || flow.status === "scaned") {
-    response.qr_data_uri = flow.qrDataURI;
-  }
-  if (flow.accountId) response.account_id = flow.accountId;
-  if (flow.botId) response.bot_id = flow.botId;
-  if (flow.error) response.error = flow.error;
-  return response;
-}
-
-async function generateQrDataURI(content: string): Promise<string> {
-  return QRCode.toDataURL(content, {
-    errorCorrectionLevel: "L",
-    margin: 2,
-    width: 240,
-  });
-}
-
-const qrProxyAgents = new Map<string, ProxyAgent>();
-
-function getQrProxyAgent(proxyURL?: string): ProxyAgent | undefined {
-  const normalized = proxyURL?.trim();
-  if (!normalized) return undefined;
-  const parsed = new URL(normalized);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("QR binding proxy must use an http:// or https:// URL.");
-  }
-  let agent = qrProxyAgents.get(normalized);
-  if (!agent) {
-    agent = new ProxyAgent(normalized);
-    qrProxyAgents.set(normalized, agent);
-  }
-  return agent;
-}
-
-async function fetchJson<T>(
-  targetURL: string,
-  timeoutMs: number,
-  options: { proxy?: string } = {},
-): Promise<T> {
-  const dispatcher = getQrProxyAgent(options.proxy);
-  const response = await fetch(targetURL, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(timeoutMs),
-    ...(dispatcher ? ({ dispatcher } as Record<string, unknown>) : {}),
-  } as RequestInit);
-  const text = await response.text();
-  let body: unknown = null;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    throw new Error(
-      `Provider returned non-JSON response: ${text.slice(0, 256)}`,
-    );
-  }
-  if (!response.ok) {
-    throw new Error(
-      `Provider HTTP ${response.status}: ${redactSecrets(text.slice(0, 512))}`,
-    );
-  }
-  return body as T;
-}
-
-function urlWithQuery(
-  rawURL: string,
-  query: Record<string, string | number>,
-): string {
-  const parsed = new URL(rawURL);
-  for (const [key, value] of Object.entries(query)) {
-    parsed.searchParams.set(key, String(value));
-  }
-  return parsed.toString();
-}
-
-function weixinApiURL(
-  baseURL: string,
-  pathName: string,
-  query: Record<string, string>,
-): string {
-  const parsed = new URL(
-    pathName,
-    baseURL.endsWith("/") ? baseURL : `${baseURL}/`,
-  );
-  for (const [key, value] of Object.entries(query)) {
-    parsed.searchParams.set(key, value);
-  }
-  return parsed.toString();
-}
-
-function wecomPlatformCode(): number {
-  switch (process.platform) {
-    case "darwin":
-      return 1;
-    case "win32":
-      return 2;
-    case "linux":
-      return 3;
-    default:
-      return 0;
-  }
 }
 
 function isHttpUrlValue(value: string): boolean {
@@ -4438,14 +4071,6 @@ export function createLauncherCompatRouter({
     flow.updatedAt = Date.now();
   };
 
-  const getConfiguredChannelProxy = (channel: QrBindingChannel): string => {
-    const channels = recordOrEmpty(state.config?.channels);
-    const channelConfig = recordOrEmpty(channels[channel]);
-    const settings = recordOrEmpty(channelConfig.settings);
-    const proxy = settings.proxy ?? channelConfig.proxy;
-    return typeof proxy === "string" ? proxy.trim() : "";
-  };
-
   const saveQrBoundChannel = async (
     channel: QrBindingChannel,
     settingsPatch: JsonRecord,
@@ -4474,199 +4099,31 @@ export function createLauncherCompatRouter({
     });
   };
 
-  const fetchWeixinQrCode = async (): Promise<WeixinQrResponse> => {
-    const body = await fetchJson<WeixinQrResponse>(
-      weixinApiURL(WEIXIN_BASE_URL, "/ilink/bot/get_bot_qrcode", {
-        bot_type: WEIXIN_BOT_TYPE,
-      }),
-      15_000,
-      { proxy: getConfiguredChannelProxy("weixin") },
-    );
-    if (body.errcode != null && body.errcode !== 0) {
-      throw new Error(`Weixin QR error ${body.errcode}: ${body.errmsg || ""}`);
-    }
-    if (!body.qrcode || !body.qrcode_img_content) {
-      throw new Error("Weixin QR response missing qrcode or image content.");
-    }
-    return body;
-  };
-
-  const pollWeixinQrStatus = async (
-    flow: QrBindingFlow,
-  ): Promise<WeixinQrStatusResponse> => {
-    if (!flow.qrcode) {
-      throw new Error("Weixin QR flow is missing qrcode token.");
-    }
-    const body = await fetchJson<WeixinQrStatusResponse>(
-      weixinApiURL(
-        flow.pollBaseURL || WEIXIN_BASE_URL,
-        "/ilink/bot/get_qrcode_status",
-        {
-          qrcode: flow.qrcode,
-        },
-      ),
-      10_000,
-      { proxy: getConfiguredChannelProxy("weixin") },
-    );
-    if (body.errcode != null && body.errcode !== 0) {
-      throw new Error(
-        `Weixin status error ${body.errcode}: ${body.errmsg || ""}`,
-      );
-    }
-    return body;
-  };
-
-  const fetchWecomQrCode = async (): Promise<WecomQrGenerateResponse> => {
-    const body = await fetchJson<WecomQrGenerateResponse>(
-      urlWithQuery(WECOM_QR_GENERATE_URL, {
-        source: WECOM_QR_SOURCE_ID,
-        sourceID: WECOM_QR_SOURCE_ID,
-        plat: wecomPlatformCode(),
-      }),
-      15_000,
-    );
-    if (body.errcode != null && body.errcode !== 0) {
-      throw new Error(`WeCom QR error ${body.errcode}: ${body.errmsg || ""}`);
-    }
-    if (!body.data?.scode || !body.data.auth_url) {
-      throw new Error("WeCom QR response missing scode or auth_url.");
-    }
-    return body;
-  };
-
-  const pollWecomQrStatus = async (
-    flow: QrBindingFlow,
-  ): Promise<WecomQrQueryResponse> => {
-    if (!flow.scode) {
-      throw new Error("WeCom QR flow is missing scode.");
-    }
-    const body = await fetchJson<WecomQrQueryResponse>(
-      urlWithQuery(WECOM_QR_QUERY_URL, { scode: flow.scode }),
-      10_000,
-    );
-    if (body.errcode != null && body.errcode !== 0) {
-      throw new Error(
-        `WeCom status error ${body.errcode}: ${body.errmsg || ""}`,
-      );
-    }
-    return body;
-  };
-
   const startWeixinQrBindingFlow = async (): Promise<QrBindingFlowResponse> => {
-    const qrResponse = await fetchWeixinQrCode();
-    const now = Date.now();
-    const flow: QrBindingFlow = {
-      id: qrBindingFlowID("weixin"),
-      channel: "weixin",
-      status: "wait",
-      qrcode: qrResponse.qrcode,
-      qrDataURI: await generateQrDataURI(qrResponse.qrcode_img_content || ""),
-      pollBaseURL: WEIXIN_BASE_URL,
-      createdAt: now,
-      updatedAt: now,
-      expiresAt: now + QR_BINDING_FLOW_TTL_MS,
-    };
+    const flow = await startWeixinQrBindingFlowPlugin(
+      channelProxyFromConfig(state.config || {}, "weixin"),
+    );
     storeQrBindingFlow(flow);
     return qrBindingFlowResponse(flow);
   };
+
+  const pollWeixinQrBindingFlow = (flow: QrBindingFlow) =>
+    pollWeixinQrBindingFlowPlugin(
+      flow,
+      channelProxyFromConfig(state.config || {}, "weixin"),
+      (settingsPatch) => saveQrBoundChannel("weixin", settingsPatch),
+    );
 
   const startWecomQrBindingFlow = async (): Promise<QrBindingFlowResponse> => {
-    const qrResponse = await fetchWecomQrCode();
-    const now = Date.now();
-    const flow: QrBindingFlow = {
-      id: qrBindingFlowID("wecom"),
-      channel: "wecom",
-      status: "wait",
-      scode: qrResponse.data?.scode,
-      qrDataURI: await generateQrDataURI(qrResponse.data?.auth_url || ""),
-      createdAt: now,
-      updatedAt: now,
-      expiresAt: now + QR_BINDING_FLOW_TTL_MS,
-    };
+    const flow = await startWecomQrBindingFlowPlugin();
     storeQrBindingFlow(flow);
     return qrBindingFlowResponse(flow);
   };
 
-  const pollWeixinQrBindingFlow = async (
-    flow: QrBindingFlow,
-  ): Promise<QrBindingFlowResponse> => {
-    if (isTerminalQrStatus(flow.status)) return qrBindingFlowResponse(flow);
-    try {
-      const statusResponse = await pollWeixinQrStatus(flow);
-      const status = normalizeQrBindingStatus(statusResponse.status);
-      if (statusResponse.redirect_host) {
-        flow.pollBaseURL = statusResponse.redirect_host.includes("://")
-          ? statusResponse.redirect_host
-          : `https://${statusResponse.redirect_host}`;
-      }
-      if (status === "confirmed") {
-        if (!statusResponse.bot_token || !statusResponse.ilink_bot_id) {
-          setQrBindingFlowError(
-            flow,
-            "Weixin login confirmed but response is missing bot credentials.",
-          );
-        } else {
-          await saveQrBoundChannel("weixin", {
-            token: statusResponse.bot_token,
-            account_id: statusResponse.ilink_bot_id,
-            ...(statusResponse.baseurl
-              ? { base_url: statusResponse.baseurl }
-              : {}),
-            ...(statusResponse.ilink_user_id
-              ? { ilink_user_id: statusResponse.ilink_user_id }
-              : {}),
-          });
-          flow.status = "confirmed";
-          flow.accountId = statusResponse.ilink_bot_id;
-          flow.updatedAt = Date.now();
-          delete flow.qrDataURI;
-        }
-      } else if (status === "expired" || status === "scaned") {
-        flow.status = status;
-        flow.updatedAt = Date.now();
-      }
-    } catch {
-      // Provider polling can time out while a QR session is still valid.
-      flow.updatedAt = Date.now();
-    }
-    return qrBindingFlowResponse(flow);
-  };
-
-  const pollWecomQrBindingFlow = async (
-    flow: QrBindingFlow,
-  ): Promise<QrBindingFlowResponse> => {
-    if (isTerminalQrStatus(flow.status)) return qrBindingFlowResponse(flow);
-    try {
-      const statusResponse = await pollWecomQrStatus(flow);
-      const status = normalizeQrBindingStatus(statusResponse.data?.status);
-      if (status === "confirmed") {
-        const botID = statusResponse.data?.bot_info?.botid;
-        const secret = statusResponse.data?.bot_info?.secret;
-        if (!botID || !secret) {
-          setQrBindingFlowError(
-            flow,
-            "WeCom login confirmed but response is missing bot credentials.",
-          );
-        } else {
-          await saveQrBoundChannel("wecom", {
-            bot_id: botID,
-            secret,
-            websocket_url: WECOM_DEFAULT_WEBSOCKET_URL,
-          });
-          flow.status = "confirmed";
-          flow.botId = botID;
-          flow.updatedAt = Date.now();
-          delete flow.qrDataURI;
-        }
-      } else if (status === "expired" || status === "scaned") {
-        flow.status = status;
-        flow.updatedAt = Date.now();
-      }
-    } catch {
-      flow.updatedAt = Date.now();
-    }
-    return qrBindingFlowResponse(flow);
-  };
+  const pollWecomQrBindingFlow = (flow: QrBindingFlow) =>
+    pollWecomQrBindingFlowPlugin(flow, (settingsPatch) =>
+      saveQrBoundChannel("wecom", settingsPatch),
+    );
 
   router.use((_req, res, next) => {
     res.setHeader("Referrer-Policy", "no-referrer");

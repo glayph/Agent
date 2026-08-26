@@ -29,28 +29,28 @@ import {
   normalizeDiscordPrompt,
   resolveDiscordRuntimeConfig,
   shouldHandleDiscordMessage,
-} from "../channels/discord.js";
+} from "../plugins/channels/discord/index.js";
 import {
   normalizeSlackPrompt,
   resolveSlackRuntimeConfig,
   shouldHandleSlackEvent,
-} from "../channels/slack.js";
+} from "../plugins/channels/slack/index.js";
 import {
   resolveLineRuntimeConfig,
   shouldHandleLineEvent,
   verifyLineSignature,
-} from "../channels/line.js";
+} from "../plugins/channels/line/index.js";
 import {
   normalizeIrcPrompt,
   parseIrcLine,
   resolveIrcRuntimeConfig,
   shouldHandleIrcMessage,
-} from "../channels/irc.js";
+} from "../plugins/channels/irc/index.js";
 import {
   normalizeOneBotPrompt,
   resolveOneBotRuntimeConfig,
   shouldHandleOneBotEvent,
-} from "../channels/onebot.js";
+} from "../plugins/channels/onebot/index.js";
 import {
   buildMqttPublishPacket,
   mqttRequestInfo,
@@ -58,13 +58,13 @@ import {
   parseMqttPublishPacket,
   parseMqttRequestPayload,
   resolveMqttRuntimeConfig,
-} from "../channels/mqtt.js";
+} from "../plugins/channels/mqtt/index.js";
 import {
   parseWhatsAppBridgeEvent,
   resolveWhatsAppBridgeRuntimeConfig,
   shouldHandleWhatsAppBridgeEvent,
   whatsappSessionId,
-} from "../channels/whatsapp.js";
+} from "../plugins/channels/whatsapp/index.js";
 import {
   dingTalkSessionId,
   parseDingTalkWebhookEvent,
@@ -72,7 +72,7 @@ import {
   shouldHandleDingTalkEvent,
   signDingTalkWebhookUrl,
   verifyDingTalkSignature,
-} from "../channels/dingtalk.js";
+} from "../plugins/channels/dingtalk/index.js";
 import {
   feishuChallengeResponse,
   feishuSessionId,
@@ -81,14 +81,14 @@ import {
   resolveFeishuRuntimeConfig,
   shouldHandleFeishuEvent,
   verifyFeishuToken,
-} from "../channels/feishu.js";
+} from "../plugins/channels/feishu/index.js";
 import {
   normalizeQqPrompt,
   parseQqWebhookEvent,
   qqSessionId,
   resolveQqRuntimeConfig,
   shouldHandleQqEvent,
-} from "../channels/qq.js";
+} from "../plugins/channels/qq/index.js";
 import {
   clearSessionPermissions,
   getToolPermissionDecision,

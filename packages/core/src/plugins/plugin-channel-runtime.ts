@@ -7,7 +7,7 @@ import { SqliteAuditLog } from "../audit-log.js";
 import {
   collectAgentResponse,
   splitOutboundMessageForOrchestrator,
-} from "../channels/agent-response.js";
+} from "./channels/_shared/agent-response.js";
 import {
   listRuntimePluginChannelDescriptors,
   type RuntimePluginChannelDescriptor,
