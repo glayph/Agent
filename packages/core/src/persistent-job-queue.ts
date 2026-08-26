@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { normalizeAgentError, type NormalizedAgentError } from "./errors.js";
+import { stableEventFingerprint } from "./event-envelope.js";
 
 export type JobStatus =
   "queued" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
@@ -33,6 +34,7 @@ export interface PersistentJob {
   runAfter: number;
   progress: number;
   idempotencyKey?: string;
+  payloadFingerprint?: string;
   leaseOwner?: string;
   leaseUntil?: number;
   checkpoint?: PersistentJobCheckpoint;
@@ -72,6 +74,7 @@ export class PersistentJobQueue {
     options: EnqueueJobOptions = {},
   ): PersistentJob {
     const idempotencyKey = normalizeOptionalString(options.idempotencyKey);
+    const payloadFingerprint = stableEventFingerprint({ type, payload });
     if (idempotencyKey) {
       const existing = [...this.jobs.values()].find(
         (job) =>
@@ -79,7 +82,20 @@ export class PersistentJobQueue {
           job.status !== "dead_letter" &&
           job.status !== "cancelled",
       );
-      if (existing) return { ...existing };
+      if (existing) {
+        const existingFingerprint =
+          existing.payloadFingerprint ||
+          stableEventFingerprint({
+            type: existing.type,
+            payload: existing.payload,
+          });
+        if (existingFingerprint !== payloadFingerprint) {
+          throw new Error(
+            "Idempotency key is already bound to a different job payload",
+          );
+        }
+        return { ...existing };
+      }
     }
 
     const now = new Date().toISOString();
@@ -96,6 +112,7 @@ export class PersistentJobQueue {
       runAfter: Date.now() + normalizeNonNegativeInt(options.delayMs, 0),
       progress: 0,
       ...(idempotencyKey ? { idempotencyKey } : {}),
+      payloadFingerprint,
       recovery: { retryCount: 0 },
     };
     this.jobs.set(job.id, job);
@@ -381,6 +398,9 @@ function isRecovery(value: unknown): value is PersistentJobRecovery {
 function normalizeLoadedJob(job: PersistentJob): PersistentJob {
   return {
     ...job,
+    payloadFingerprint:
+      job.payloadFingerprint ||
+      stableEventFingerprint({ type: job.type, payload: job.payload }),
     recovery: isRecovery(job.recovery) ? job.recovery : { retryCount: 0 },
   };
 }

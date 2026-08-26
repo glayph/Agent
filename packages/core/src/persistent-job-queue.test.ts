@@ -121,12 +121,33 @@ describe("persistent job queue", () => {
     );
     const duplicate = queue.enqueue(
       "channel.send",
-      { body: "duplicate" },
+      { body: "once" },
       { idempotencyKey: "event-123" },
     );
 
     expect(duplicate.id).toBe(first.id);
     expect(queue.list()).toHaveLength(1);
+  });
+
+  it("rejects reusing an idempotency key for a different payload", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-"));
+    try {
+      const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
+      queue.enqueue(
+        "channel.send",
+        { body: "first" },
+        { idempotencyKey: "conflict-key" },
+      );
+      expect(() =>
+        queue.enqueue(
+          "channel.send",
+          { body: "different" },
+          { idempotencyKey: "conflict-key" },
+        ),
+      ).toThrow(/different job payload/);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("requires the current worker lease to complete and persists checkpoints", () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ChannelName } from "./event-envelope.js";
@@ -21,6 +22,7 @@ export interface DeliveryReceipt {
   destination: string;
   body: string;
   idempotencyKey: string;
+  requestFingerprint?: string;
   status: DeliveryStatus;
   attempts: number;
   maxAttempts: number;
@@ -77,15 +79,24 @@ export class DeliveryQueue {
     > &
       Partial<Pick<DeliveryReceipt, "maxAttempts">>,
   ): DeliveryReceipt {
+    const requestFingerprint = deliveryFingerprint(input);
     const existing = [...this.receipts.values()].find(
-      (receipt) =>
-        receipt.idempotencyKey === input.idempotencyKey &&
-        receipt.status !== "dead_letter",
+      (receipt) => receipt.idempotencyKey === input.idempotencyKey,
     );
-    if (existing) return { ...existing };
+    if (existing) {
+      const existingFingerprint =
+        existing.requestFingerprint || deliveryFingerprint(existing);
+      if (existingFingerprint !== requestFingerprint) {
+        throw new Error(
+          "Idempotency key is already bound to a different delivery request",
+        );
+      }
+      return { ...existing };
+    }
     const now = new Date().toISOString();
     const receipt: DeliveryReceipt = {
       ...input,
+      requestFingerprint,
       id: crypto.randomUUID(),
       status: input.approvalRequired ? "waiting_approval" : "pending",
       attempts: 0,
@@ -142,11 +153,7 @@ export class DeliveryQueue {
 
   claim(now = Date.now()): DeliveryReceipt | null {
     const receipt = [...this.receipts.values()]
-      .filter(
-        (item) =>
-          (item.status === "pending" || item.status === "sending") &&
-          item.nextAttemptAt <= now,
-      )
+      .filter((item) => item.status === "pending" && item.nextAttemptAt <= now)
       .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt)[0];
     if (!receipt) return null;
     receipt.status = "sending";
@@ -160,7 +167,7 @@ export class DeliveryQueue {
     const receipt = this.receipts.get(receiptId);
     if (
       !receipt ||
-      !["pending", "sending"].includes(receipt.status) ||
+      receipt.status !== "pending" ||
       receipt.nextAttemptAt > now
     ) {
       return null;
@@ -179,6 +186,9 @@ export class DeliveryQueue {
   ): DeliveryReceipt | null {
     const receipt = this.receipts.get(receiptId);
     if (!receipt) return null;
+    if (receipt.status === "sent" || receipt.status === "unknown_outcome") {
+      return { ...receipt };
+    }
     receipt.providerMessageId =
       result.providerMessageId ?? receipt.providerMessageId;
     receipt.lastError = result.error;
@@ -269,10 +279,13 @@ export class DeliveryQueue {
     try {
       const result = await sender(receipt, signal);
       return this.settle(receipt.id, result);
-    } catch (error: unknown) {
+    } catch {
       return this.settle(receipt.id, {
-        status: "failed",
-        error: error instanceof Error ? error.message : String(error),
+        status: "unknown_outcome",
+        error:
+          "Delivery sender failed after dispatch; provider outcome must be reconciled",
+        errorClass: "unknown_side_effect",
+        nextAction: "reconcile provider outcome before replay",
       });
     }
   }
@@ -289,6 +302,20 @@ export class DeliveryQueue {
           )
           .map((item) => [item.id, item]),
       );
+      let recoveredInFlight = false;
+      for (const receipt of this.receipts.values()) {
+        if (receipt.status === "sending") {
+          receipt.status = "unknown_outcome";
+          receipt.replayAllowed = false;
+          receipt.errorClass = "unknown_side_effect";
+          receipt.lastError =
+            "Process ended while delivery was in flight; provider outcome must be reconciled";
+          receipt.nextAction = "reconcile provider outcome before replay";
+          receipt.updatedAt = new Date().toISOString();
+          recoveredInFlight = true;
+        }
+      }
+      if (recoveredInFlight) this.save();
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -310,4 +337,38 @@ export class DeliveryQueue {
     }
     fs.renameSync(temp, this.filePath);
   }
+}
+
+function deliveryFingerprint(
+  input: Pick<
+    DeliveryReceipt,
+    | "runId"
+    | "eventId"
+    | "stepId"
+    | "correlationId"
+    | "channel"
+    | "destination"
+    | "body"
+    | "approvalRequired"
+    | "approvalAction"
+    | "approvalRisk"
+    | "approvalTarget"
+    | "previewHash"
+  >,
+): string {
+  const canonical = JSON.stringify({
+    runId: input.runId ?? null,
+    eventId: input.eventId ?? null,
+    stepId: input.stepId ?? null,
+    correlationId: input.correlationId ?? null,
+    channel: input.channel,
+    destination: input.destination,
+    body: input.body,
+    approvalRequired: input.approvalRequired ?? false,
+    approvalAction: input.approvalAction ?? null,
+    approvalRisk: input.approvalRisk ?? null,
+    approvalTarget: input.approvalTarget ?? null,
+    previewHash: input.previewHash ?? null,
+  });
+  return createHash("sha256").update(canonical).digest("hex");
 }

@@ -782,3 +782,7 @@ For remote dashboard access, keep Agent Miki’s Node gateway and core on loopba
 Remote/LAN mode requires `MIKI_ALLOW_PUBLIC_BIND=true`, a restricted `MIKI_ALLOWED_CIDRS` value, and exact `MIKI_ALLOWED_ORIGINS`. The core API has a separate `MIKI_ALLOW_PUBLIC_CORE=true` gate and should normally remain loopback-only. Do not expose ports `8000`, `18700`, `18800`, or `39200` directly to the Internet.
 
 Before remote exposure, enable API-key authentication with a unique 16+ character `API_KEY_SECRET`. For rotation, put the new key in `API_KEY_SECRET`, retain the old key temporarily in `API_KEY_SECRET_PREVIOUS`, restart the protected service, migrate clients, then remove the previous key and restart again. The application accepts both keys only during this explicit overlap window.
+
+## External side-effect idempotency
+
+External delivery is durable and keyed, but an arbitrary provider cannot be assumed to offer exactly-once execution. Read `docs/idempotency.md` before integrating a real sender. Every logical side effect must use one stable, non-secret `idempotencyKey`; reuse with a different payload is rejected, and an in-flight delivery recovered after process restart becomes `unknown_outcome` instead of being automatically resent. Reconcile with the provider before creating a new replay lineage.
