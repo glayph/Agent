@@ -27,6 +27,7 @@
     "start": "node bin/miki.js",
     "runtime:24-7": "node scripts/miki-24-7.mjs",
     "runtime:24-7:check": "node scripts/miki-24-7.mjs --check",
+    "soak": "node scripts/soak-agent.mjs",
     "test": "npm run test --workspaces --if-present",
     "verify": "node scripts/run-verify.mjs",
     "benchmark:score": "node scripts/benchmark-score-gate.mjs --write",

@@ -122,10 +122,16 @@ import {
   subscribeDeliveryOutcome,
   type DeliveryOutcomeEvent,
 } from "../approval-delivery.js";
+import { createResourceMonitor } from "../observability/resource-monitor.js";
+import { createAlertBackend } from "../observability/alert-backend.js";
 
 globalStartupTimer.start("core.process_start");
 
 const runtimePaths = resolveRuntimePaths();
+const alertBackend = createAlertBackend();
+const resourceMonitor = createResourceMonitor({
+  onAlert: (alert) => alertBackend.notify(alert),
+});
 // The dashboard stores provider credentials in the runtime config vault. Make
 // that location explicit before AgentOrchestrator constructs its LLM path so
 // live requests do not fall back to the legacy source workspace.
@@ -3858,6 +3864,10 @@ server.listen(settings.corePort, settings.coreHost, () => {
     );
 
   persistentJobRunner.start();
+  resourceMonitor.start();
+  console.log(
+    `Resource monitor started${alertBackend.isConfigured() ? " with HTTPS alert webhook" : " without external alert webhook"}`,
+  );
   console.log("Persistent job worker started");
 
   channelRuntimeManager.startAll();
@@ -3873,6 +3883,7 @@ async function shutdown() {
   if (shutdownInProgress) return;
   shutdownInProgress = true;
   console.log("Shutting down...");
+  resourceMonitor.stop();
   _clearWSPing();
   unsubscribeDeliveryOutcome();
   await Promise.all([closeWebSocketServer(wss), closeWebSocketServer(mikiWss)]);
