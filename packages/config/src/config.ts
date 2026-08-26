@@ -25,6 +25,8 @@ const ENV_PATH = (candidates.find((p) => {
 dotenv.config({ path: ENV_PATH });
 
 export const BUILTIN_MODELS = [
+  "openai/gpt-5-nano",
+  "openai/gpt-5-mini",
   "openai/gpt-4o",
   "openai/gpt-4o-mini",
   "openai/gpt-4o-2024-08-06",
@@ -86,7 +88,7 @@ export class Settings {
     return (
       process.env["DEFAULT_MODEL"] ||
       process.env["MIKI_MODEL"] ||
-      "gemini/gemini-3.7-flash"
+      "gemini/gemini-3.5-flash-lite"
     );
   }
 

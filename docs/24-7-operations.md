@@ -156,3 +156,38 @@ A release is not considered fully validated until the target-host operator attac
 ## Stop conditions and rollback
 
 If the gateway repeatedly crashes, the supervisor writes a restart-exhaustion marker when a finite restart limit is configured. Stop the service, preserve `data\supervisor.log` or the systemd journal, correct the underlying configuration, and restart deliberately. Do not delete queue, audit, or receipt files as a first response; they are the evidence needed to reconcile incomplete side effects.
+
+## Production-readiness remediation additions
+
+The OpenAI-compatible adapter now normalizes orphan `tool` results before dispatch. If a provider result is missing its preceding assistant `tool_calls` message because of a retry or context compaction, the result is preserved as user-visible context instead of being sent as an invalid OpenAI message sequence. The adapter also honors `OPENAI_BASE_URL` and `OPENAI_API_BASE`, and the supported low-cost GPT models include `openai/gpt-5-nano` and `openai/gpt-5-mini`.
+
+Run the substantive task quality gate after every regression batch:
+
+```bash
+npm run task:quality -- data/task-results
+```
+
+A terminal `completed` event is not enough to declare success; the quality gate checks final normal response length, provider-error markers, and terminal status.
+
+The new health watcher can run once or continuously:
+
+```bash
+npm run health:watch -- --once
+MIKI_ALERT_FILE="$PWD/data/alerts.jsonl" npm run health:watch
+```
+
+Alerts are JSONL records with cooldown and secret redaction. An optional `MIKI_ALERT_WEBHOOK` may be configured on a target host. Install the watcher as a separate systemd user service with `deploy/linux/install-health-watch.sh` or as a Windows logon task with `deploy/windows/install-health-watch-task.ps1`. The runtime and watcher should use separate service identities where the host policy permits it.
+
+Rotate provider credentials without shell-history exposure:
+
+```bash
+MIKI_NEW_SECRET='new-value' npm run rotate:secret -- --name GEMINI_API_KEY
+```
+
+The value must come from a protected process environment or secret manager and is never accepted as a command-line argument. Restart the runtime, run the relevant model smoke test, and remove the old credential from the provider after the new path is verified.
+
+The gateway is loopback-only by default. A non-loopback bind refuses to start unless `MIKI_TLS_TERMINATED=true` is set behind a trusted TLS reverse proxy, or `MIKI_ALLOW_INSECURE_PUBLIC_BIND=true` is explicitly set for a controlled lab network. Production network qualification must still verify certificate renewal, proxy headers, firewall rules, CIDR allowlists, and that the core API is not externally reachable.
+
+Credentialed channel delivery, external MCP authentication/reconnect, whisper.cpp microphone/upload STT, native Windows llama.cpp, real reboot recovery, disk-full drills, and provider-side exactly-once side effects remain target-host acceptance checks. Generated scripts and local tests do not certify those claims.
+
+For Windows alert monitoring, `deploy/windows/install-health-watch-task.ps1` creates a protected `data\health-watch.cmd` wrapper so the scheduled process receives the configured health URL and JSONL alert path. Treat that wrapper as runtime state, do not commit it, and remove the task with the same operational change window used for the main runtime.

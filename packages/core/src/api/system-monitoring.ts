@@ -1,5 +1,6 @@
 import os from "os";
 import { performance } from "perf_hooks";
+import fs from "fs";
 
 export interface SystemStats {
   timestamp: number;
@@ -36,6 +37,25 @@ function getCpuUsage(): NodeJS.CpuUsage {
   return process.cpuUsage();
 }
 
+function getDiskStats(): SystemStats["disk"] {
+  const target = process.env.MIKI_DISK_PATH || process.cwd();
+  try {
+    const stats = fs.statfsSync(target);
+    const blockSize = Number(stats.bsize);
+    const total = Number(stats.blocks) * blockSize;
+    const free = Number(stats.bavail) * blockSize;
+    const used = Math.max(0, total - free);
+    return {
+      total,
+      used,
+      free,
+      percentage: total > 0 ? Math.round((used / total) * 100) : 0,
+    };
+  } catch {
+    return { total: 0, used: 0, free: 0, percentage: 0 };
+  }
+}
+
 export function getSystemStats(): SystemStats {
   const now = performance.now();
   const timeDiff = (now - lastMeasureTime) / 1000; // convert to seconds
@@ -70,12 +90,7 @@ export function getSystemStats(): SystemStats {
       free: memFree,
       percentage: Math.round((memUsed / memStats) * 100),
     },
-    disk: {
-      total: 0, // Not easily available cross-platform
-      used: 0,
-      free: 0,
-      percentage: 0,
-    },
+    disk: getDiskStats(),
     uptime: os.uptime(),
     processMemory: {
       rss: processMemory.rss,

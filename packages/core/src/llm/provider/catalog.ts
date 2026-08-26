@@ -33,7 +33,10 @@ export const DIRECT_PROVIDERS: DirectProviderConfig[] = [
   {
     id: "openai",
     displayName: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
+    baseUrl:
+      process.env.OPENAI_BASE_URL ||
+      process.env.OPENAI_API_BASE ||
+      "https://api.openai.com/v1",
     apiKeyEnv: "OPENAI_API_KEY",
     emptyApiKeyAllowed: false,
   },

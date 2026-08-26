@@ -859,7 +859,25 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
+function validateGatewayExposure(): void {
+  const normalizedHost = config.gatewayHost.trim().toLowerCase();
+  const loopback =
+    normalizedHost === "127.0.0.1" ||
+    normalizedHost === "localhost" ||
+    normalizedHost === "::1";
+  if (
+    !loopback &&
+    process.env.MIKI_TLS_TERMINATED !== "true" &&
+    process.env.MIKI_ALLOW_INSECURE_PUBLIC_BIND !== "true"
+  ) {
+    throw new Error(
+      `Refusing non-loopback gateway bind on ${config.gatewayHost} without TLS termination. Set MIKI_TLS_TERMINATED=true behind a trusted reverse proxy, or explicitly set MIKI_ALLOW_INSECURE_PUBLIC_BIND=true only for a controlled lab network.`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
+  validateGatewayExposure();
   log.info(`Core target: 127.0.0.1:${config.corePort}`);
   coreProcess = startCore();
 

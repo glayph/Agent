@@ -58,8 +58,33 @@ function timestampId(date = new Date()): string {
   ].join("");
 }
 
-function assertInsideWorkspace(_workspaceDir: string, _target: string): void {
-  return;
+function assertInsideWorkspace(workspaceDir: string, target: string): void {
+  const root = path.resolve(workspaceDir);
+  const resolved = path.resolve(target);
+  const relative = path.relative(root, resolved);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`Path escapes the allowed workspace: ${target}`);
+  }
+
+  // Existing symlinked paths are resolved as well. New destination paths are
+  // checked lexically above because they do not exist until after copying.
+  for (const candidate of [root, resolved]) {
+    if (!fs.existsSync(candidate)) continue;
+    const realRoot = fs.realpathSync.native(root);
+    const realTarget = fs.realpathSync.native(candidate);
+    const realRelative = path.relative(realRoot, realTarget);
+    if (
+      realRelative === ".." ||
+      realRelative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(realRelative)
+    ) {
+      throw new Error(`Path escapes the real workspace: ${target}`);
+    }
+  }
 }
 
 function fileHash(filePath: string): string {

@@ -22,6 +22,7 @@ import type {
   ProviderModel,
 } from "./contracts.js";
 import { normalizeGeminiExtra } from "./gemini-compat.js";
+import { normalizeToolMessageSequence } from "./message-normalizer.js";
 
 const clientCache = new Map<string, OpenAI>();
 
@@ -242,7 +243,9 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
 
   async complete(request: ProviderCompletionRequest): Promise<LLMResponse> {
     const { provider, model, apiKey, extra } = request;
-    const messages = serializeMultimodalMessages(request.messages);
+    const messages = serializeMultimodalMessages(
+      normalizeToolMessageSequence(request.messages),
+    );
     if (!apiKey && !provider.emptyApiKeyAllowed) {
       throw new LLMMissingCredentialError(
         `No API key is configured for ${provider.displayName}.`,

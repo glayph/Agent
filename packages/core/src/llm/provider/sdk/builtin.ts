@@ -178,10 +178,15 @@ export const geminiProviderPlugin = openAIPlugin({
 export const openAIProviderPlugin = openAIPlugin({
   id: "openai",
   displayName: "OpenAI",
-  baseUrl: "https://api.openai.com/v1",
+  baseUrl:
+    process.env.OPENAI_BASE_URL ||
+    process.env.OPENAI_API_BASE ||
+    "https://api.openai.com/v1",
   apiKeyEnv: "OPENAI_API_KEY",
   prefixes: ["openai", "gpt-"],
   models: [
+    model("gpt-5-nano", "GPT-5 Nano", 128_000, 8_192, true),
+    model("gpt-5-mini", "GPT-5 Mini", 128_000, 16_384, true),
     model("gpt-4o", "GPT-4o"),
     model("gpt-4.1", "GPT-4.1", 1_047_576, 32_768, true),
     model(
