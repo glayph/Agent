@@ -18,7 +18,8 @@ param(
     [int]$ReadyTimeoutSec = -1,
     [int]$RestartDelayMs = -1,
     [int]$RestartResetAfterSec = -1,
-    [string]$EnvironmentFile = ""
+    [string]$EnvironmentFile = "",
+    [string]$NodeExecutable = ""
 )
 
 Set-StrictMode -Version Latest
@@ -43,6 +44,14 @@ $LogFile = Join-Path $DataDir "supervisor.log"
 $StopFile = Join-Path $DataDir "SUPERVISOR_STOP"
 $ExhaustedFile = Join-Path $DataDir "RESTART_EXHAUSTED"
 $GatewayPort = [int]($env:GATEWAY_PORT ?? "18800")
+if (-not $NodeExecutable) { $NodeExecutable = $env:MIKI_NODE }
+if (-not $NodeExecutable) {
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($nodeCommand) { $NodeExecutable = $nodeCommand.Source }
+}
+if (-not $NodeExecutable -or -not (Test-Path $NodeExecutable)) {
+    throw "Node executable not found; set MIKI_NODE or pass -NodeExecutable with an absolute path."
+}
 $GatewayEntry = $env:MIKI_GATEWAY_ENTRY
 if (-not $GatewayEntry) {
     $GatewayEntry = Join-Path $RepoRoot "packages\gateway\dist\index.js"
@@ -119,7 +128,7 @@ function Start-Gateway {
 
     if (Test-Path $GatewayEntry) {
         Write-Log "Launching gateway from built entry"
-        return Start-Process -FilePath "node.exe" -ArgumentList @($GatewayEntry) `
+        return Start-Process -FilePath $NodeExecutable -ArgumentList @($GatewayEntry) `
             -WorkingDirectory $RepoRoot -PassThru -NoNewWindow
     }
 

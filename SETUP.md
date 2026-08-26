@@ -716,6 +716,33 @@ For permission and disk-full drills, use an isolated test workspace or a tempora
 
 A reboot drill is complete only when the machine is actually rebooted and the post-boot evidence shows `is-enabled=enabled`, `is-active=active`, a new main PID, current journal entries, and all health probes returning `200`. A sandbox start/restart test is useful evidence for the unit and supervisor but is not a substitute for a clean-host reboot.
 
+### 15.2 Windows Task Scheduler deployment and recovery validation
+
+Run these commands from an elevated PowerShell after `npm run build:all`. The installer requires a built gateway/core distribution and records the absolute Node executable in the protected environment file. This avoids depending on the interactive user PATH when Task Scheduler starts the service account at boot.
+
+```powershell
+$repo = (Get-Location).Path
+$node = (Get-Command node.exe -ErrorAction Stop).Source
+.\deploy\windows\Install-AgentMiki.ps1 `
+  -RepoRoot $repo `
+  -WorkspaceDir "$env:ProgramData\Agent Miki" `
+  -NodeExecutable $node
+Get-ScheduledTask -TaskName "Agent-Miki"
+Get-ScheduledTaskInfo -TaskName "Agent-Miki"
+```
+
+Confirm the gateway, core, and memory health endpoints after the task reports running:
+
+```powershell
+(Invoke-WebRequest http://127.0.0.1:18800/gateway/health -UseBasicParsing).StatusCode
+(Invoke-WebRequest http://127.0.0.1:8000/health -UseBasicParsing).StatusCode
+(Invoke-WebRequest http://127.0.0.1:18700/health -UseBasicParsing).StatusCode
+```
+
+For a crash drill, identify the gateway process, terminate its process tree, and confirm that the supervisor restarts it, reaches readiness, and does not create orphaned gateway/core descendants. For the restart-budget drill, use a disposable test copy and an intentionally invalid gateway entry; confirm `RESTART_EXHAUSTED` and the non-zero supervisor result, then restore the valid entry and rerun the task. For rollback, run `Uninstall-AgentMiki.ps1` without `-RemoveData`, confirm that the scheduled task is absent and the workspace data remains, then remove data only in a disposable test workspace.
+
+A Windows reboot drill is complete only when the machine is actually restarted and post-boot evidence shows the scheduled task is registered, its last run completed or is running, the task's service account can read the repository and protected environment file, the gateway/core/memory health checks return `200`, and the new process tree has no stale pre-reboot descendants. The Linux sandbox cannot substitute for this Windows evidence.
+
 A local GGUF model can require substantial memory and sustained CPU/GPU resources. Begin with a small model, verify a short prompt, and only then increase context length, concurrency, or model size. The project-level `MIKI_LLAMA_BUILD_JOBS` controls compilation parallelism; it does not determine model inference performance.
 
 ## 16. Clean-install verification checklist

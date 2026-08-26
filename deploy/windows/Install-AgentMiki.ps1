@@ -19,6 +19,7 @@ param(
     [string]$RunAs = "NT AUTHORITY\LOCAL SERVICE",
     [int]$MaxRestarts = 5,
     [int]$ReadyTimeoutSec = 45,
+    [string]$NodeExecutable = "",
     [switch]$DryRun
 )
 
@@ -33,6 +34,26 @@ $RepoRoot = [IO.Path]::GetFullPath($RepoRoot)
 $WorkspaceDir = [IO.Path]::GetFullPath($WorkspaceDir)
 $Supervisor = Join-Path $RepoRoot "bin\supervisor.ps1"
 if (-not (Test-Path $Supervisor)) { throw "Supervisor not found: $Supervisor" }
+if (-not $NodeExecutable) {
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($nodeCommand) { $NodeExecutable = $nodeCommand.Source }
+}
+if (-not $NodeExecutable -or -not (Test-Path $NodeExecutable)) {
+    throw "Node executable not found; pass -NodeExecutable with an absolute path or install Node.js system-wide."
+}
+$requiredArtifacts = @(
+    "packages\gateway\dist\index.js",
+    "packages\core\dist\api\index.js",
+    "packages\config\dist\index.js",
+    "packages\installer\dist\index.js",
+    "packages\skills\dist\index.js",
+    "packages\ui\frontend\dist\index.html"
+)
+foreach ($artifact in $requiredArtifacts) {
+    if (-not (Test-Path (Join-Path $RepoRoot $artifact))) {
+        throw "Missing build artifact: $(Join-Path $RepoRoot $artifact). Run npm run build:all first."
+    }
+}
 if ($MaxRestarts -lt 1) { throw "MaxRestarts must be at least 1; use the explicit supervisor override for diagnostics only." }
 if ($ReadyTimeoutSec -lt 5) { throw "ReadyTimeoutSec must be at least 5 seconds." }
 
@@ -44,6 +65,7 @@ function Show-Plan {
     Write-Host "Supervisor      : $Supervisor"
     Write-Host "Max restarts    : $MaxRestarts"
     Write-Host "Ready timeout   : ${ReadyTimeoutSec}s"
+    Write-Host "Node executable : $NodeExecutable"
 }
 
 Show-Plan
@@ -66,6 +88,7 @@ if (-not (Test-Path $envFile)) {
     @"
 MIKI_SOURCE_ROOT=$RepoRoot
 MIKI_RUNTIME_ROOT=$RepoRoot
+MIKI_NODE=$NodeExecutable
 MIKI_WORKSPACE_DIR=$WorkspaceDir
 GATEWAY_PORT=18800
 SUPERVISOR_MAX_RESTARTS=$MaxRestarts
@@ -91,7 +114,8 @@ $arguments = @(
     "-WorkspaceDir", "`"$WorkspaceDir`"",
     "-MaxRestarts", "$MaxRestarts",
     "-ReadyTimeoutSec", "$ReadyTimeoutSec",
-    "-EnvironmentFile", "`"$envFile`""
+    "-EnvironmentFile", "`"$envFile`"",
+    "-NodeExecutable", "`"$NodeExecutable`""
 ) -join " "
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -AtStartup

@@ -38,12 +38,18 @@ An isolated service instance was installed with a dedicated service account, app
 
 The probe found and fixed three deployment defects: hardcoded `/usr/bin/node` did not work with version-manager-only Node, `MIKI_RUNTIME_ROOT` was incorrectly pointed at mutable state instead of the packaged distribution, and relocated Node CLI fallback was spawned through a shebang that required a `node` PATH entry. It also found that `StartLimitIntervalSec` and `StartLimitBurst` belonged in `[Unit]`, not `[Service]`, and that `PrivateTmp=true` is incompatible with `ReadWritePaths` under `/tmp`.
 
+## Windows Task Scheduler remediation
+
+The Windows installer now requires the built gateway/core distribution, resolves or accepts an absolute Node executable through `-NodeExecutable`/`MIKI_NODE`, persists that path in the protected environment file, and passes it explicitly to the supervisor. The supervisor no longer depends on the Task Scheduler service account PATH for the gateway launch. `SETUP.md` documents the elevated PowerShell install, health checks, crash/process-tree drill, restart-budget drill, rollback and reboot acceptance criteria.
+
+This repository-side hardening was reviewed on Linux, but PowerShell parsing, Task Scheduler cmdlets, Windows service-account ACLs, Windows reboot behavior, process-tree cleanup and native Windows llama.cpp still require a real Windows host.
+
 ## Target-host validation still required
 
 The following cannot be honestly certified from a Linux sandbox alone:
 
 1. Real clean Linux host-এ systemd install, boot start এবং actual machine reboot recovery; sandbox-এ install, crash restart, permission failure, disk-full এবং rollback probes already completed.
-2. Windows PowerShell parsing, Task Scheduler registration, boot start, reboot recovery, process-tree cleanup and native Windows llama.cpp.
+2. Windows PowerShell parsing, Task Scheduler registration, boot start, reboot recovery, process-tree cleanup and native Windows llama.cpp; repository-side installer/supervisor preflight is updated, but no Windows runtime is available in the current sandbox.
 3. Real channel delivery for Telegram, Discord, Slack, WhatsApp or other integrations, because credentials and provider endpoints are environment-specific.
 4. Facebook/YouTube automation, because adapters, scopes, quotas and credentials are not configured by default.
 5. Voice/STT, because a whisper.cpp model and runtime must be installed and exercised on the target host.
