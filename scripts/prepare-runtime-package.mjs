@@ -26,7 +26,13 @@ function shouldCopyRuntimeFile(source) {
   return path.extname(source).toLowerCase() !== ".map";
 }
 
-function copyRecursive(source, destination) {
+function copyRecursive(source, destination, options = {}) {
+  if (
+    options.excludeSecrets &&
+    (path.basename(source) === ".env" || path.basename(source) === "data")
+  ) {
+    return;
+  }
   if (!fs.existsSync(source)) {
     throw new Error(
       `Required build artifact is missing: ${path.relative(root, source)}`,
@@ -39,6 +45,7 @@ function copyRecursive(source, destination) {
       copyRecursive(
         path.join(source, entry.name),
         path.join(destination, entry.name),
+        options,
       );
     }
     return;
@@ -300,6 +307,7 @@ fs.writeFileSync(
 copyRecursive(
   path.join(root, "config"),
   path.join(stagingRoot, "config"),
+  { excludeSecrets: true },
 );
 
 const envSrc = path.join(root, ".env.example");

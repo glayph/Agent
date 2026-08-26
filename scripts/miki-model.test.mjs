@@ -22,7 +22,7 @@ test("lists a pinned catalog entry without network access", () => {
   assert.equal(result.status, 0, result.stderr);
   const data = JSON.parse(result.stdout);
   assert.equal(data.catalog.length, 1);
-  assert.equal(data.catalog[0].id, "gemma-4-E2B-it-Q4_0");
+  assert.equal(data.catalog[0].id, "lfm2.5-1.2b-instruct-q4_0");
   assert.match(data.catalog[0].sha256, /^[a-f0-9]{64}$/);
   assert.equal(data.catalog[0].installed, false);
 });

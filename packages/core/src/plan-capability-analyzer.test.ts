@@ -68,7 +68,9 @@ describe("plan capability analyzer", () => {
       "standard/medium",
     );
 
-    expect(report.missing).toContain("web-development");
+    expect(report.missing.some((item) => item.id === "web-development")).toBe(
+      true,
+    );
     expect(
       report.requirements.some((item) => item.id === "plugin-or-library"),
     ).toBe(true);
@@ -90,4 +92,3 @@ describe("plan capability analyzer", () => {
     expect(formatted).toContain("No installation or download is authorized");
   });
 });
-EOF;

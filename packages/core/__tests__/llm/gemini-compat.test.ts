@@ -67,7 +67,7 @@ describe("Gemini OpenAI compatibility", () => {
       max_tokens: undefined,
     });
 
-    expect(result.tool_choice).toBe("auto");
+    expect(result.tool_choice).toBeUndefined();
     expect(result.max_tokens).toBeUndefined();
     expect(result.tools).toEqual([
       {

@@ -81,7 +81,11 @@ export function normalizeInboundEvent(input: InboundEventInput): InboundEvent {
   const channel = normalizeChannel(input.channel);
   const senderId = normalizeRequired(input.sender?.id, "sender.id");
   const sessionId = normalizeRequired(input.sessionId, "sessionId", senderId);
-  const eventId = normalizeOptional(input.eventId) ?? crypto.randomUUID();
+  const suppliedIdempotencyKey = normalizeOptional(input.idempotencyKey);
+  const eventId =
+    normalizeOptional(input.eventId) ??
+    suppliedIdempotencyKey ??
+    crypto.randomUUID();
   const receivedAt =
     normalizeOptional(input.receivedAt) ?? new Date().toISOString();
   const correlationId = normalizeOptional(input.correlationId) ?? eventId;
@@ -90,8 +94,7 @@ export function normalizeInboundEvent(input: InboundEventInput): InboundEvent {
     input.replyRoute?.address ?? senderId,
     "replyRoute.address",
   );
-  const idempotencyKey =
-    normalizeOptional(input.idempotencyKey) ?? `${channel}:${eventId}`;
+  const idempotencyKey = suppliedIdempotencyKey ?? `${channel}:${eventId}`;
   return {
     eventId,
     idempotencyKey,
@@ -187,6 +190,7 @@ function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   const record = value as Record<string, unknown>;
   return `{${Object.keys(record)
+    .filter((key) => key !== "receivedAt")
     .sort()
     .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
     .join(",")}}`;

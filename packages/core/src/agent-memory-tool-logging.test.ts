@@ -14,12 +14,12 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { AgentOrchestrator } from "./agent.js";
+import { jest } from "@jest/globals";
 import { type RuntimePaths } from "./paths.js";
 
 const logToolCall = jest.fn();
 
-jest.mock("./memory/memory-bridge.js", () => ({
+jest.unstable_mockModule("./memory/memory-bridge.js", () => ({
   initMemory: () => null,
   closeMemory: () => {},
   getMemory: () => ({
@@ -28,6 +28,8 @@ jest.mock("./memory/memory-bridge.js", () => ({
     getEnhancedSystemPrompt: (userMessage: string) => userMessage,
   }),
 }));
+
+const { AgentOrchestrator } = await import("./agent.js");
 
 function makeRuntimePaths(workspaceDir: string): RuntimePaths {
   return {

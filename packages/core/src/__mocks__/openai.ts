@@ -8,3 +8,5 @@ export class OpenAI {
     },
   };
 }
+
+export default OpenAI;

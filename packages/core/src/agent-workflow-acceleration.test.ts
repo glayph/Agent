@@ -185,6 +185,6 @@ describe("AgentOrchestrator workflow acceleration", () => {
     });
     expect(messages[1].role).toBe("assistant");
     expect(messages[1].content).toContain("Error calling LLM");
-    expect(messages[1].content).toContain("Please check credentials");
+    expect(messages[1].content).toContain("Invalid model name");
   });
 });

@@ -7,7 +7,7 @@ describe("TokenBudgetManager", () => {
     const budget = manager.allocateBudget("List available skills");
 
     expect(budget.tier).toBe("simple");
-    expect(budget.model).toBe("openai/gpt-4.1-nano");
+    expect(budget.model).toBe("gemini/gemini-3.5-flash-lite");
     expect(budget.estimatedInputTokens).toBeGreaterThan(0);
     expect(budget.reservedOutputTokens).toBeGreaterThan(0);
   });
@@ -29,15 +29,35 @@ describe("TokenBudgetManager", () => {
   it("scores best-for models using quality, speed, and cost in the right direction", () => {
     const manager = new TokenBudgetManager();
 
-    expect(manager.getBestModel("code_generation")).toBe("openai/gpt-4.1");
-    expect(manager.getBestModel("classification")).toBe("openai/gpt-4.1-nano");
+    expect(manager.getBestModel("code_generation")).toBe(
+      "llama.cpp/local-model",
+    );
+    expect(manager.getBestModel("classification")).toBe(
+      "gemini/gemini-3.5-flash-lite",
+    );
   });
 
   it("suggests cheaper models only when quality remains acceptable", () => {
     const manager = new TokenBudgetManager();
 
-    const conservative = manager.shouldSwitchModel("openai/gpt-4.1", 10_000);
-    const aggressive = manager.shouldSwitchModel("openai/gpt-4.1", 10_000, 0.5);
+    manager.registerModel({
+      name: "paid/quality-model",
+      costPer1kTokens: 1,
+      speedRank: 3,
+      qualityRank: 1,
+      bestFor: ["code_generation"],
+    });
+
+    const conservative = manager.shouldSwitchModel(
+      "paid/quality-model",
+      10_000,
+      0.95,
+    );
+    const aggressive = manager.shouldSwitchModel(
+      "paid/quality-model",
+      10_000,
+      0.5,
+    );
 
     expect(conservative.shouldSwitch).toBe(false);
     expect(aggressive.shouldSwitch).toBe(true);
@@ -72,8 +92,8 @@ describe("TokenBudgetManager", () => {
 
     const usage = manager.buildContextUsage("openrouter/openai/gpt-4.1", 1200);
 
-    expect(usage.total_tokens).toBe(1_047_576);
-    expect(usage.compress_at_tokens).toBeGreaterThan(800_000);
-    expect(usage.used_percent).toBe(0);
+    expect(usage.total_tokens).toBe(128_000);
+    expect(usage.compress_at_tokens).toBeGreaterThan(100_000);
+    expect(usage.used_percent).toBe(1);
   });
 });

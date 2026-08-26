@@ -51,13 +51,21 @@ export function buildAgentTokenBudget({
   const adaptiveBudget = manager.allocateBudget(userMessage, contextText);
   const inputTokens = manager.estimateMessagesTokens(messages, toolsSchema);
   const limits = manager.getModelLimits(modelName);
+  const configuredContextWindow = Number(contextWindowTokens);
+  const effectiveContextWindow =
+    Number.isFinite(configuredContextWindow) && configuredContextWindow > 0
+      ? Math.max(
+          1_024,
+          Math.min(1_000_000, Math.floor(configuredContextWindow)),
+        )
+      : limits.contextWindowTokens;
   const contextReserve = Math.max(
     256,
-    Math.min(4_096, Math.ceil(limits.contextWindowTokens * 0.02)),
+    Math.min(4_096, Math.ceil(effectiveContextWindow * 0.02)),
   );
   const contextAvailableForOutput = Math.max(
     0,
-    limits.contextWindowTokens - inputTokens - contextReserve,
+    effectiveContextWindow - inputTokens - contextReserve,
   );
 
   const effectiveCycleBudget = CostCalibrator.effectiveBudget(

@@ -1,5 +1,6 @@
 import { normalizeBrowserUrl } from "../../src/tools/browser.js";
 import { normalizeHotkeyForSendKeys } from "../../src/tools/computer.js";
+import { drawGridOverlay } from "../../src/tools/computer-grid.js";
 import { ToolRegistrySchemas } from "../../src/tools/registry/executor.js";
 
 describe("computer-use tools", () => {
@@ -29,7 +30,6 @@ describe("computer-use tools", () => {
   });
 
   it("draws PNG grid overlay cleanly", () => {
-    const { drawGridOverlay } = require("./computer-grid.js");
     const width = 200;
     const height = 100;
     const rgba = Buffer.alloc(width * height * 4);

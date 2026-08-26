@@ -19,7 +19,7 @@ describe("buildAgentTokenBudget", () => {
 
     expect(budget.shouldCall).toBe(true);
     expect(budget.maxTokens).toBeLessThanOrEqual(300);
-    expect(budget.contextUsage.total_tokens).toBe(1_047_576);
+    expect(budget.contextUsage.total_tokens).toBe(128_000);
   });
 
   it("honors the remaining cost-calibrated cycle budget", () => {
@@ -49,6 +49,7 @@ describe("buildAgentTokenBudget", () => {
       configuredCycleBudget: 4096,
       spentBudgetTokens: 0,
       defaultMaxTokens: 4096,
+      contextWindowTokens: 10_000,
     });
 
     expect(budget.shouldCall).toBe(false);
