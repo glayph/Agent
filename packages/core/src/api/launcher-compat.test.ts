@@ -1392,6 +1392,29 @@ describe("launcher compatibility runtime apply", () => {
     );
   });
 
+  it("materializes a runtime default missing from the saved model catalog", async () => {
+    await withLauncherCompatServer(async (request) => {
+      const defaultResponse = await request("/models/default", {
+        method: "POST",
+        body: JSON.stringify({ model_name: "openai/gpt-5-nano" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      const modelsResponse = await request("/models");
+      const modelsBody = await modelsResponse.json();
+      expect(modelsBody.default_model).toBe("openai/gpt-5-nano");
+      expect(modelsBody.models).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            model_name: "openai/gpt-5-nano",
+            provider: "openai",
+            is_default: true,
+          }),
+        ]),
+      );
+    });
+  });
+
   it("preserves provider prefixes for runtime model identities", () => {
     expect(
       runtimeModelName({

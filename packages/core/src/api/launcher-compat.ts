@@ -5716,6 +5716,27 @@ export function createLauncherCompatRouter({
       saveState();
     }
     const providerOptions = await launcherProviderOptions(paths);
+    const runtimeDefault = settings.defaultModel.trim();
+    const hasRuntimeDefault =
+      runtimeDefault === "__cloud__" ||
+      state.models.some((model) => runtimeModelName(model) === runtimeDefault);
+    if (!hasRuntimeDefault && runtimeDefault) {
+      const provider = normalizeProvider(
+        undefined,
+        runtimeDefault,
+        providerOptions,
+      );
+      state.models.unshift({
+        model_name: runtimeDefault,
+        provider,
+        model: modelBodyName(runtimeDefault, provider),
+        api_base: getProviderOption(provider, providerOptions).default_api_base,
+        enabled: true,
+      });
+      configureLocalModels(state.models);
+      saveSupportedModels(paths, state.models);
+      saveState();
+    }
     const models = state.models.map((model, index) =>
       modelInfoFromStored(model, index, paths.configDir, providerOptions),
     );

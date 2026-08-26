@@ -586,24 +586,40 @@ if (configuredAllowedCidrs.length > 0) {
 
 // ── Static routes ────────────────────────────────────────────────────────────
 
-// Serve the React dashboard build from the frontend package.
-const webDir = runtimePath("packages", "ui", "frontend", "dist");
-const webIndexPath = path.join(webDir, "index.html");
-let cachedIndexHtml: { mtimeMs: number; html: string } | null = null;
+// Serve the React dashboard build from a packaged runtime first, then the
+// source checkout. MIKI_RUNTIME_ROOT is commonly a data-only directory, so
+// using it as the sole static root makes a healthy source deployment look like
+// a missing dashboard after a restart.
+const webDirs = [
+  runtimePath("packages", "ui", "frontend", "dist"),
+  sourcePath("packages", "ui", "frontend", "dist"),
+].filter((dir, index, all) => all.indexOf(dir) === index);
+let cachedIndexHtml: {
+  filePath: string;
+  mtimeMs: number;
+  html: string;
+} | null = null;
 
 function loadIndexHtml(): string | null {
-  try {
-    const stat = fs.statSync(webIndexPath);
-    if (cachedIndexHtml?.mtimeMs === stat.mtimeMs) {
-      return cachedIndexHtml.html;
+  for (const webDir of webDirs) {
+    const webIndexPath = path.join(webDir, "index.html");
+    try {
+      const stat = fs.statSync(webIndexPath);
+      if (
+        cachedIndexHtml?.filePath === webIndexPath &&
+        cachedIndexHtml.mtimeMs === stat.mtimeMs
+      ) {
+        return cachedIndexHtml.html;
+      }
+      const html = fs.readFileSync(webIndexPath, "utf-8");
+      cachedIndexHtml = { filePath: webIndexPath, mtimeMs: stat.mtimeMs, html };
+      return html;
+    } catch {
+      // Try the next candidate.
     }
-    const html = fs.readFileSync(webIndexPath, "utf-8");
-    cachedIndexHtml = { mtimeMs: stat.mtimeMs, html };
-    return html;
-  } catch {
-    cachedIndexHtml = null;
-    return null;
   }
+  cachedIndexHtml = null;
+  return null;
 }
 
 function sendDashboardHtml(res: express.Response): void {
@@ -626,8 +642,10 @@ function sendDashboardHtml(res: express.Response): void {
   res.type("html").send(html);
 }
 
-app.use(express.static(webDir));
-app.use("/web", express.static(webDir));
+for (const webDir of webDirs) {
+  app.use(express.static(webDir));
+  app.use("/web", express.static(webDir));
+}
 app.get(["/", "/web"], (_req, res) => {
   sendDashboardHtml(res);
 });

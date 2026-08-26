@@ -132,6 +132,11 @@ function isLocalModelName(model: string): boolean {
   );
 }
 
+export function buildEmptyModelResponse(modelName: string): string {
+  const model = modelName.trim() || "the selected model";
+  return `The ${model} model returned an empty response. No assistant answer was produced; please retry or choose a different configured model.`;
+}
+
 function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
   const results: Array<{ title: string; url: string; snippet?: string }> = [];
   const seen = new Set<string>();
@@ -2006,7 +2011,19 @@ export class AgentOrchestrator {
 
       const choice = response.choices?.[0];
       if (!choice) {
-        yield streamDoneEvent(0);
+        const emptyContent = buildEmptyModelResponse(this.modelName);
+        this._saveAssistantHistoryMessage(
+          sessionId,
+          emptyContent,
+          options.responseMessageId,
+        );
+        yield JSON.stringify({
+          type: "stream_chunk",
+          content: emptyContent,
+          model_name: this.modelName,
+          ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+        });
+        yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
         return;
       }
 
@@ -2187,20 +2204,18 @@ export class AgentOrchestrator {
     let finalContent = response?.choices?.[0]?.message?.content || "";
     if (!finalContent.trim()) {
       const fallbackContent = buildToolOnlyFallbackResponse(llmMessages);
-      if (fallbackContent) {
-        finalContent = fallbackContent;
-        this._saveAssistantHistoryMessage(
-          sessionId,
-          fallbackContent,
-          options.responseMessageId,
-        );
-        yield JSON.stringify({
-          type: "stream_chunk",
-          content: fallbackContent,
-          model_name: this.modelName,
-          ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
-        });
-      }
+      finalContent = fallbackContent || buildEmptyModelResponse(this.modelName);
+      this._saveAssistantHistoryMessage(
+        sessionId,
+        finalContent,
+        options.responseMessageId,
+      );
+      yield JSON.stringify({
+        type: "stream_chunk",
+        content: finalContent,
+        model_name: this.modelName,
+        ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+      });
     }
     this._logMemoryInteraction(sessionId, userMessage, finalContent);
     yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
