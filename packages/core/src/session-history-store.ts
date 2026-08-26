@@ -19,6 +19,16 @@ export interface PersistedSession {
   metadata: SessionMetadata;
 }
 
+export interface SessionSummary {
+  id: string;
+  title: string;
+  preview: string;
+  message_count: number;
+  created: string;
+  updated: string;
+  pinned: boolean;
+}
+
 interface SessionRow {
   id: string;
   created_at: string;
@@ -314,6 +324,59 @@ export class SqliteSessionHistoryStore {
       });
     });
     transaction();
+  }
+
+  listSummaries(offset = 0, limit = 20): SessionSummary[] {
+    const safeOffset = Math.max(0, Math.floor(offset));
+    const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
+    const rows = this.db
+      .prepare(
+        `SELECT
+           s.id,
+           s.created_at,
+           s.updated_at,
+           s.title,
+           s.pinned,
+           COUNT(m.position) AS message_count,
+           COALESCE(
+             (SELECT content FROM session_messages
+              WHERE session_id = s.id AND role = 'user'
+              ORDER BY position ASC LIMIT 1), s.id
+           ) AS first_user_content,
+           COALESCE(
+             (SELECT content FROM session_messages
+              WHERE session_id = s.id
+              ORDER BY position DESC LIMIT 1), ''
+           ) AS last_content
+         FROM sessions s
+         LEFT JOIN session_messages m ON m.session_id = s.id
+         GROUP BY s.id
+         ORDER BY s.updated_at DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(safeLimit, safeOffset) as Array<{
+      id: string;
+      created_at: string;
+      updated_at: string;
+      title: string | null;
+      pinned: number;
+      message_count: number;
+      first_user_content: string;
+      last_content: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      title: String(row.title || row.first_user_content || row.id)
+        .trim()
+        .slice(0, 80),
+      preview: String(row.last_content || "")
+        .trim()
+        .slice(0, 160),
+      message_count: Number(row.message_count) || 0,
+      created: row.created_at,
+      updated: row.updated_at,
+      pinned: row.pinned === 1,
+    }));
   }
 
   delete(sessionId: string): boolean {

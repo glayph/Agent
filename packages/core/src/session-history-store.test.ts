@@ -188,6 +188,70 @@ describe("SqliteSessionHistoryStore", () => {
     expect(restored.load().get("backup-session")?.messages).toEqual([message]);
   });
 
+  it("paginates SQL-backed summaries without returning full transcripts", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-session-summary-"),
+    );
+    tempDirs.push(directory);
+    const store = new SqliteSessionHistoryStore(
+      path.join(directory, "session-history.db"),
+    );
+    openStores.push(store);
+    store.save(
+      "session-a",
+      [
+        {
+          id: "a1",
+          created_at: "2026-01-01T00:00:00.000Z",
+          role: "user",
+          content: "First question",
+        },
+        {
+          id: "a2",
+          created_at: "2026-01-01T00:00:01.000Z",
+          role: "assistant",
+          content: "First answer",
+        },
+      ],
+      {
+        created: "2026-01-01T00:00:00.000Z",
+        updated: "2026-01-01T00:00:01.000Z",
+      },
+    );
+    store.save(
+      "session-b",
+      [
+        {
+          id: "b1",
+          created_at: "2026-01-02T00:00:00.000Z",
+          role: "user",
+          content: "Second question",
+        },
+      ],
+      {
+        created: "2026-01-02T00:00:00.000Z",
+        updated: "2026-01-02T00:00:00.000Z",
+      },
+    );
+
+    expect(store.listSummaries(0, 1)).toEqual([
+      expect.objectContaining({
+        id: "session-b",
+        title: "Second question",
+        preview: "Second question",
+        message_count: 1,
+      }),
+    ]);
+    expect(store.listSummaries(1, 1)).toEqual([
+      expect.objectContaining({
+        id: "session-a",
+        title: "First question",
+        preview: "First answer",
+        message_count: 2,
+      }),
+    ]);
+  });
+
   it("deletes a session and its messages durably", () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-session-history-"),

@@ -3684,9 +3684,35 @@ app.get("/metrics", (_req, res) => {
       external: used.external,
     },
     uptime,
-    activeSessions: 0,
+    activeSessions: orchestrator.listSessionIds().length,
+    collector: globalMetricsCollector.getReport(),
     requestId: (_req as AuthenticatedRequest).requestId,
   });
+});
+
+app.get("/metrics/prometheus", requireHttpAuth, (_req, res) => {
+  const report = globalMetricsCollector.getReport();
+  const lines: string[] = [];
+  const metricName = (key: string) =>
+    `miki_${key.replace(/[^a-zA-Z0-9_:]/g, "_")}`;
+  for (const [key, value] of Object.entries(report.counters)) {
+    lines.push(`${metricName(key)} ${value}`);
+  }
+  for (const [key, value] of Object.entries(report.gauges)) {
+    lines.push(`${metricName(key)} ${value}`);
+  }
+  for (const [key, stats] of Object.entries(report.histograms)) {
+    lines.push(`${metricName(key)}_count ${stats.count}`);
+    lines.push(`${metricName(key)}_min ${stats.min}`);
+    lines.push(`${metricName(key)}_max ${stats.max}`);
+    lines.push(`${metricName(key)}_mean ${stats.mean}`);
+    lines.push(`${metricName(key)}_p50 ${stats.p50}`);
+    lines.push(`${metricName(key)}_p95 ${stats.p95}`);
+    lines.push(`${metricName(key)}_p99 ${stats.p99}`);
+  }
+  lines.push(`miki_process_uptime_seconds ${process.uptime()}`);
+  lines.push(`miki_active_sessions ${orchestrator.listSessionIds().length}`);
+  res.type("text/plain").send(`${lines.join("\\n")}\\n`);
 });
 
 // ── System Monitoring Endpoints ──────────────────────────────────────────────

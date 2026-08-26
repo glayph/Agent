@@ -5014,32 +5014,7 @@ export function createLauncherCompatRouter({
       1,
       Math.min(100, Number.parseInt(String(req.query.limit || "20"), 10) || 20),
     );
-    const summaries = orchestrator
-      .listSessionIds()
-      .map((id) => {
-        const messages = orchestrator.getSessionMessages(id) || [];
-        const metadata = orchestrator.getSessionMetadata(id);
-        const firstUser = messages.find((message) => message.role === "user");
-        const last = messages[messages.length - 1];
-        const title =
-          String(metadata?.title || firstUser?.content || id)
-            .trim()
-            .slice(0, 80) || id;
-        const preview = String(last?.content || "")
-          .trim()
-          .slice(0, 160);
-        return {
-          id,
-          title,
-          preview,
-          message_count: messages.length,
-          created: metadata?.created || new Date(0).toISOString(),
-          updated: metadata?.updated || new Date(0).toISOString(),
-          pinned: metadata?.pinned === true,
-        };
-      })
-      .sort((a, b) => b.updated.localeCompare(a.updated));
-    res.json(summaries.slice(offset, offset + limit));
+    res.json(orchestrator.listSessionSummaries(offset, limit));
   });
 
   router.get("/sessions/:id/permissions", (req, res) => {

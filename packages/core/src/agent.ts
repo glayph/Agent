@@ -98,6 +98,7 @@ import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
 import {
   SqliteSessionHistoryStore,
   type SessionMetadata,
+  type SessionSummary,
 } from "./session-history-store.js";
 import { initMemory, getMemory } from "./memory/memory-bridge.js";
 import {
@@ -1278,6 +1279,10 @@ export class AgentOrchestrator {
   private _checkBudget(usage: LLMResponse | null): number {
     if (!usage?.usage) return 0;
     return Math.max(0, Math.floor(Number(usage.usage.completion_tokens || 0)));
+  }
+
+  public listSessionSummaries(offset = 0, limit = 20): SessionSummary[] {
+    return this._sessionHistoryStore.listSummaries(offset, limit);
   }
 
   public listSessionIds(): string[] {
