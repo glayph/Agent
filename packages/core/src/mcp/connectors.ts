@@ -10,6 +10,7 @@ import type {
   McpCatalogEntry,
   McpRuntimeConfig,
   McpServerConfig,
+  McpToolSafety,
 } from "./types.js";
 import type { ToolDefinition } from "./contracts/tools.js";
 
@@ -28,8 +29,10 @@ function connectionFingerprint(config: McpServerConfig): string {
     command: config.command ?? null,
     args: config.args ?? [],
     headers: config.headers ?? {},
+    headerEnv: config.headerEnv ?? {},
     env: config.env ?? {},
     enabled: config.enabled,
+    allowSideEffects: config.allowSideEffects === true,
   });
 }
 
@@ -77,10 +80,92 @@ function mergeEnv(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+export function resolveMcpHeaders(
+  config: McpServerConfig,
+  environment: NodeJS.ProcessEnv = process.env,
+): Record<string, string> | undefined {
+  const headers: Record<string, string> = { ...(config.headers || {}) };
+  for (const [headerName, environmentName] of Object.entries(
+    config.headerEnv || {},
+  )) {
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(headerName)) continue;
+    const value = environment[environmentName];
+    if (typeof value === "string" && value.length > 0)
+      headers[headerName] = value;
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 function requestInit(
   headers?: Record<string, string>,
 ): RequestInit | undefined {
   return headers && Object.keys(headers).length > 0 ? { headers } : undefined;
+}
+
+function validatedRemoteUrl(config: McpServerConfig): URL {
+  if (!config.url) throw new Error(`MCP server ${config.name} needs url`);
+  let url: URL;
+  try {
+    url = new URL(config.url);
+  } catch {
+    throw new Error(`MCP server ${config.name} has an invalid url`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(
+      `MCP server ${config.name} only supports http or https URLs`,
+    );
+  }
+  if (url.username || url.password) {
+    throw new Error(
+      `MCP server ${config.name} must not embed credentials in its URL; use headers or environment variables instead`,
+    );
+  }
+  return url;
+}
+
+function toolSafety(tool: {
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+  };
+}): McpToolSafety {
+  const annotations = tool.annotations;
+  if (
+    annotations?.readOnlyHint === false ||
+    annotations?.destructiveHint === true ||
+    annotations?.idempotentHint === true
+  ) {
+    return "side_effect";
+  }
+  if (annotations?.readOnlyHint === true) return "read_only";
+  return "unknown";
+}
+
+export function isExternalMcpToolExecutionAllowed(
+  server: McpServerConfig,
+  safety: McpToolSafety,
+): boolean {
+  return (
+    safety === "read_only" ||
+    (safety === "side_effect" && server.allowSideEffects === true)
+  );
+}
+
+function externalMcpFailurePrefix(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    /401|unauthori[sz]ed|forbidden|invalid token|authentication/i.test(message)
+  ) {
+    return "External MCP authentication failed.";
+  }
+  if (/timeout|timed out|abort/i.test(message)) {
+    return "External MCP server timed out.";
+  }
+  if (/econn|enotfound|network|fetch failed|connect/i.test(message)) {
+    return "External MCP server is unavailable.";
+  }
+  return "External MCP request failed.";
 }
 
 function toolDefinitionFromExternal(
@@ -89,16 +174,57 @@ function toolDefinitionFromExternal(
     name: string;
     description?: string;
     inputSchema?: Record<string, unknown>;
+    annotations?: {
+      readOnlyHint?: boolean;
+      destructiveHint?: boolean;
+      idempotentHint?: boolean;
+    };
   },
+  safety: McpToolSafety,
 ): ToolDefinition {
   return {
     type: "function",
+    ...(safety === "read_only"
+      ? {}
+      : {
+          risk: {
+            level: "high" as const,
+            label: "External MCP side effect",
+            reason:
+              safety === "side_effect"
+                ? "This external MCP tool is not read-only and requires allow_side_effects: true on its server configuration."
+                : "This external MCP tool did not declare a read-only annotation and is blocked by default.",
+          },
+        }),
     function: {
       name: namespaceExternalMcpToolName(serverName, tool.name),
       description: tool.description || `External MCP tool ${tool.name}`,
       parameters: tool.inputSchema || { type: "object", properties: {} },
     },
   };
+}
+
+export async function executeMcpToolWithReconnect<T>(
+  safety: McpToolSafety,
+  invoke: () => Promise<T>,
+  reconnect: () => Promise<void>,
+): Promise<T> {
+  try {
+    return await invoke();
+  } catch (firstError) {
+    await reconnect();
+    if (safety !== "read_only") {
+      throw new Error(
+        `${externalMcpFailurePrefix(firstError)} Side-effect outcome is unknown; automatic retry is blocked to prevent duplicate execution.`,
+      );
+    }
+    try {
+      return await invoke();
+    } catch (secondError) {
+      await reconnect();
+      throw new Error(externalMcpFailurePrefix(secondError));
+    }
+  }
 }
 
 export class ExternalMcpConnectorManager {
@@ -150,15 +276,13 @@ export class ExternalMcpConnectorManager {
 
   private createTransport(config: McpServerConfig): Transport {
     if (config.type === "http") {
-      if (!config.url) throw new Error(`MCP server ${config.name} needs url`);
-      return new StreamableHTTPClientTransport(new URL(config.url), {
-        requestInit: requestInit(config.headers),
+      return new StreamableHTTPClientTransport(validatedRemoteUrl(config), {
+        requestInit: requestInit(resolveMcpHeaders(config)),
       });
     }
     if (config.type === "sse") {
-      if (!config.url) throw new Error(`MCP server ${config.name} needs url`);
-      return new SSEClientTransport(new URL(config.url), {
-        requestInit: requestInit(config.headers),
+      return new SSEClientTransport(validatedRemoteUrl(config), {
+        requestInit: requestInit(resolveMcpHeaders(config)),
       });
     }
     if (!config.command) {
@@ -198,18 +322,30 @@ export class ExternalMcpConnectorManager {
     for (const server of this.enabledServers()) {
       if (server.deferred && !includeDeferred) continue;
       try {
-        const client = await this.getClient(server);
-        const result = await client.listTools();
+        const result = await executeMcpToolWithReconnect(
+          "read_only",
+          async () => {
+            const client = await this.getClient(server);
+            return client.listTools();
+          },
+          () => this.closeClient(server.name),
+        );
         for (const tool of result.tools) {
           const namespacedName = namespaceExternalMcpToolName(
             server.name,
             tool.name,
           );
-          const definition = toolDefinitionFromExternal(server.name, tool);
+          const safety = toolSafety(tool);
+          const definition = toolDefinitionFromExternal(
+            server.name,
+            tool,
+            safety,
+          );
           this.toolRefs.set(namespacedName, {
             serverName: server.name,
             toolName: tool.name,
             namespacedName,
+            safety,
           });
           entries.push({
             name: namespacedName,
@@ -219,13 +355,12 @@ export class ExternalMcpConnectorManager {
             kind: "external",
             definition,
             deferred: server.deferred === true,
+            safety,
           });
         }
       } catch (err) {
         console.warn(
-          `[MCP] external server ${server.name} unavailable: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `[MCP] external server ${server.name} unavailable: ${externalMcpFailurePrefix(err)}`,
         );
       }
     }
@@ -240,11 +375,24 @@ export class ExternalMcpConnectorManager {
     if (!ref) throw new Error(`Unknown external MCP tool '${namespacedName}'`);
     const server = this.runtimeConfig.servers[ref.serverName];
     if (!server) throw new Error(`Unknown MCP server '${ref.serverName}'`);
-    const client = await this.getClient(server);
-    return client.callTool({
-      name: ref.toolName,
-      arguments: args,
-    });
+    if (!isExternalMcpToolExecutionAllowed(server, ref.safety)) {
+      throw new Error(
+        ref.safety === "unknown"
+          ? `External MCP tool '${namespacedName}' is blocked because it did not declare a read-only safety annotation.`
+          : `External MCP tool '${namespacedName}' is blocked until allow_side_effects: true is configured for server '${server.name}'.`,
+      );
+    }
+
+    const invoke = async () => {
+      const client = await this.getClient(server);
+      return client.callTool({
+        name: ref.toolName,
+        arguments: args,
+      });
+    };
+    return executeMcpToolWithReconnect(ref.safety, invoke, () =>
+      this.closeClient(server.name),
+    );
   }
 
   async close(): Promise<void> {

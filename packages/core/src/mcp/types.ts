@@ -8,17 +8,23 @@ export interface McpDiscoveryConfig {
   useRegex: boolean;
 }
 
+export type McpToolSafety = "read_only" | "side_effect" | "unknown";
+
 export interface McpServerConfig {
   name: string;
   enabled: boolean;
   type: "stdio" | "http" | "sse";
   url?: string;
   headers?: Record<string, string>;
+  /** Header name -> process environment variable name; values never enter config files. */
+  headerEnv?: Record<string, string>;
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   envFile?: string;
   deferred?: boolean | null;
+  /** External tools are read-only by default; side effects need an explicit gate. */
+  allowSideEffects?: boolean;
 }
 
 export interface McpRuntimeConfig {
@@ -35,6 +41,7 @@ export interface McpCatalogEntry {
   kind: "local" | "external" | "discovery";
   definition: ToolDefinition;
   deferred?: boolean;
+  safety?: McpToolSafety;
 }
 
 export interface McpDiscoveryResult {
@@ -52,6 +59,7 @@ export interface ExternalMcpToolRef {
   serverName: string;
   toolName: string;
   namespacedName: string;
+  safety: McpToolSafety;
 }
 
 export type McpToolExecutor = (

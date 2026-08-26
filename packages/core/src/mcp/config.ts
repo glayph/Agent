@@ -60,6 +60,7 @@ function normalizeServer(name: string, value: unknown): McpServerConfig {
     type,
     url: typeof record.url === "string" ? record.url : undefined,
     headers: asStringMap(record.headers),
+    headerEnv: asStringMap(record.header_env) || asStringMap(record.headerEnv),
     command: typeof record.command === "string" ? record.command : undefined,
     args: asStringArray(record.args),
     env: asStringMap(record.env),
@@ -70,6 +71,8 @@ function normalizeServer(name: string, value: unknown): McpServerConfig {
           ? record.envFile
           : undefined,
     deferred: typeof record.deferred === "boolean" ? record.deferred : null,
+    allowSideEffects:
+      record.allow_side_effects === true || record.allowSideEffects === true,
   };
 }
 
