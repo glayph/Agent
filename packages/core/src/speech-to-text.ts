@@ -218,6 +218,22 @@ function looksLikeMp3(data: Buffer): boolean {
   );
 }
 
+function isWhisperReadyWav(data: Buffer): boolean {
+  if (
+    data.length < 44 ||
+    data.subarray(0, 4).toString("ascii") !== "RIFF" ||
+    data.subarray(8, 12).toString("ascii") !== "WAVE"
+  ) {
+    return false;
+  }
+  return (
+    data.readUInt16LE(20) === 1 &&
+    data.readUInt16LE(22) === 1 &&
+    data.readUInt32LE(24) === 16_000 &&
+    data.readUInt16LE(34) === 16
+  );
+}
+
 function validateAudioSignature(
   data: Buffer,
   mimeType: string,
@@ -339,6 +355,95 @@ async function fetchJsonWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function ffmpegExecutable(): string {
+  return (
+    envValue("MIKI_FFMPEG_EXECUTABLE", "FFMPEG_EXECUTABLE") ||
+    (process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg")
+  );
+}
+
+async function normalizeAudioForWhisper(
+  executable: string,
+  inputPath: string,
+  outputPath: string,
+  timeoutMs: number,
+): Promise<void> {
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    inputPath,
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    outputPath,
+  ];
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: path.dirname(inputPath),
+      windowsHide: true,
+      shell: false,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      child.kill("SIGKILL");
+      reject(
+        new SpeechToTextError(
+          504,
+          "audio_conversion_timeout",
+          "Audio conversion timed out before whisper.cpp could run.",
+        ),
+      );
+    }, timeoutMs);
+    child.stderr?.on("data", () => {
+      // Decoder diagnostics are intentionally not returned or logged because
+      // they may contain local filenames or provider-supplied metadata.
+    });
+    child.once("error", (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      const code =
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? "audio_decoder_missing"
+          : "audio_conversion_failed";
+      reject(
+        new SpeechToTextError(
+          503,
+          code,
+          code === "audio_decoder_missing"
+            ? "ffmpeg is required to normalize microphone or compressed audio for whisper.cpp."
+            : "The audio decoder could not be started.",
+        ),
+      );
+    });
+    child.once("close", (code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(
+          new SpeechToTextError(
+            415,
+            "audio_conversion_failed",
+            "The uploaded audio could not be decoded into a whisper.cpp-compatible WAV file.",
+          ),
+        );
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 async function runWhisperCli(
@@ -575,14 +680,32 @@ export class WhisperCppService {
           `transcript-${crypto.randomUUID()}`,
         );
         await fsp.writeFile(audioPath, input.data, { mode: 0o600 });
-        transcript = await runWhisperCli(
-          settings.executable!,
-          settings.model!,
-          audioPath,
-          outputBase,
-          settings.language,
-          settings.timeout_ms,
-        );
+        const whisperAudioPath = path.join(tempDir, "whisper-input.wav");
+        if (isWhisperReadyWav(input.data)) {
+          transcript = await runWhisperCli(
+            settings.executable!,
+            settings.model!,
+            audioPath,
+            outputBase,
+            settings.language,
+            settings.timeout_ms,
+          );
+        } else {
+          await normalizeAudioForWhisper(
+            ffmpegExecutable(),
+            audioPath,
+            whisperAudioPath,
+            settings.timeout_ms,
+          );
+          transcript = await runWhisperCli(
+            settings.executable!,
+            settings.model!,
+            whisperAudioPath,
+            outputBase,
+            settings.language,
+            settings.timeout_ms,
+          );
+        }
         transport = "cli";
         model = path.basename(settings.model!);
       }

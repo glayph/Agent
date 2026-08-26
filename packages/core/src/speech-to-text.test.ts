@@ -127,4 +127,53 @@ describe("WhisperCppService", () => {
       code: "audio_too_large",
     });
   });
+
+  it("normalizes compressed audio before invoking the whisper CLI", async () => {
+    const configDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-whisper-conversion-test-"),
+    );
+    const executable = path.join(configDir, "fake-whisper-cli.mjs");
+    const ffmpeg = path.join(configDir, "fake-ffmpeg.mjs");
+    const model = path.join(configDir, "model.bin");
+    const shebang = "#!/usr/bin/env node\n";
+    fs.writeFileSync(
+      ffmpeg,
+      `${shebang}import fs from "node:fs";\nconst output = process.argv.at(-1);\nconst header = Buffer.alloc(44);\nheader.write("RIFF", 0, "ascii");\nheader.write("WAVE", 8, "ascii");\nheader.writeUInt32LE(16, 16);\nheader.writeUInt16LE(1, 20);\nheader.writeUInt16LE(1, 22);\nheader.writeUInt32LE(16000, 24);\nheader.writeUInt32LE(32000, 28);\nheader.writeUInt16LE(2, 32);\nheader.writeUInt16LE(16, 34);\nheader.write("data", 36, "ascii");\nfs.writeFileSync(output, header);\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      executable,
+      `${shebang}import fs from "node:fs";\nconst args = process.argv.slice(2);\nconst output = args[args.indexOf("-of") + 1];\nfs.writeFileSync(output + ".txt", "converted local transcript");\n`,
+      "utf8",
+    );
+    fs.chmodSync(executable, 0o755);
+    fs.chmodSync(ffmpeg, 0o755);
+    fs.writeFileSync(model, "test model", "utf8");
+    const previousFfmpeg = process.env.MIKI_FFMPEG_EXECUTABLE;
+    process.env.MIKI_FFMPEG_EXECUTABLE = ffmpeg;
+    try {
+      const service = new WhisperCppService(
+        makeConfig(
+          [
+            "speech_to_text:",
+            "  enabled: true",
+            `  executable: ${executable}`,
+            `  model: ${model}`,
+          ].join("\n"),
+        ),
+      );
+      const result = await service.transcribe({
+        data: Buffer.from("OggScompressed-audio", "ascii"),
+        filename: "voice.ogg",
+        mimeType: "audio/ogg",
+      });
+      expect(result.transcript).toBe("converted local transcript");
+      expect(result.transport).toBe("cli");
+    } finally {
+      if (previousFfmpeg === undefined)
+        delete process.env.MIKI_FFMPEG_EXECUTABLE;
+      else process.env.MIKI_FFMPEG_EXECUTABLE = previousFfmpeg;
+      fs.rmSync(configDir, { recursive: true, force: true });
+    }
+  });
 });

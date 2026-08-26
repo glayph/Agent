@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import * as fs from "node:fs";
 import { promises as fsp } from "node:fs";
@@ -125,6 +126,54 @@ function defaultState(): VoiceRuntimeState {
   return { activeModelId: null, models: {}, runtime: {} };
 }
 
+function probeWhisperExecutable(
+  executable: string,
+): Promise<{ ok: boolean; reason: string }> {
+  return new Promise((resolve) => {
+    let finished = false;
+    const child = spawn(executable, ["--help"], {
+      cwd: path.dirname(executable),
+      windowsHide: true,
+      shell: false,
+      stdio: "ignore",
+    });
+    const finish = (result: { ok: boolean; reason: string }) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({
+        ok: false,
+        reason:
+          "The configured whisper.cpp executable did not respond to --help.",
+      });
+    }, 5_000);
+    child.once("error", (error) => {
+      finish({
+        ok: false,
+        reason:
+          (error as NodeJS.ErrnoException).code === "ENOENT"
+            ? "The configured whisper.cpp executable is missing."
+            : "The configured whisper.cpp executable could not be started.",
+      });
+    });
+    child.once("close", (code) => {
+      finish(
+        code === 0
+          ? { ok: true, reason: "whisper.cpp executable responded to --help." }
+          : {
+              ok: false,
+              reason:
+                "The configured whisper.cpp executable failed its --help check.",
+            },
+      );
+    });
+  });
+}
+
 function sha1File(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash("sha1");
@@ -241,6 +290,8 @@ export class VoiceRuntimeManager {
         "A local model is installed, but no whisper.cpp endpoint or executable is configured.";
     } else if (installed && state.runtime.lastHealth?.ok === false) {
       reason = state.runtime.lastHealth.reason;
+    } else if (installed && state.runtime.lastHealth?.ok === true) {
+      reason = state.runtime.lastHealth.reason;
     } else if (healthy) {
       reason = "Local voice-to-text model is installed and ready.";
     }
@@ -352,6 +403,10 @@ export class VoiceRuntimeManager {
         ok = false;
         reason = "The configured local voice endpoint is unavailable.";
       }
+    } else if (ok && status.executable) {
+      const executableCheck = await probeWhisperExecutable(status.executable);
+      ok = executableCheck.ok;
+      reason = executableCheck.reason;
     }
     state.runtime.lastHealth = {
       ok,
