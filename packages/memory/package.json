@@ -1,0 +1,39 @@
+{
+  "name": "@miki/memory",
+  "version": "2.0.0",
+  "description": "Miki Temporal Knowledge Graph & Event-Driven Stream Architecture — persistent memory for 24/7 autonomous agents",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./temporal-knowledge-graph": "./src/temporal-knowledge-graph.js",
+    "./working-memory-anchor": "./src/working-memory-anchor.js",
+    "./special-event-highlighter": "./src/special-event-highlighter.js",
+    "./memory-consolidation-daemon": "./src/memory-consolidation-daemon.js",
+    "./agent-memory-integration": "./src/agent-memory-integration.js",
+    "./regions": "./src/regions.js",
+    "./temporary-memory": "./src/temporary-memory.js",
+    "./multi-hop-retriever": "./src/multi-hop-retriever.js",
+    "./graph-cognitive-memory": "./src/graph-cognitive-memory.js"
+  },
+  "scripts": {
+    "build": "echo 'No build step needed'",
+    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js && node src/test/selective-memory-engine.test.js && node --test src/test/memory-prompt-budget.test.js"
+  },
+  "keywords": [
+    "miki",
+    "memory",
+    "agentic-ai",
+    "knowledge-graph",
+    "temporal",
+    "event-driven",
+    "autonomous-agent",
+    "rag"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1"
+  },
+  "turbo": {
+    "outputs": []
+  }
+}

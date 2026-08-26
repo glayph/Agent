@@ -1,0 +1,28 @@
+{
+  "project": "Agent Miki",
+  "date": "2026-08-20",
+  "baseline": { "weightedScore5": 3.33, "percent": 66.6 },
+  "target": { "weightedScore5": 4.04, "percent": 80.8 },
+  "implementedWave": "R0-R1",
+  "gates": [
+    { "name": "canonical score arithmetic", "status": "PASS", "command": "node scripts/benchmark-score-gate.mjs --write", "artifact": "benchmark/score-gate-output.json" },
+    { "name": "approval and browser module strict typecheck", "status": "PASS", "command": "tsc -p benchmark/tsconfig.phase4.json" },
+    { "name": "approval API router strict typecheck", "status": "PASS", "command": "tsc -p benchmark/tsconfig.router.json" },
+    { "name": "targeted approval/browser/lease tests", "status": "PASS", "passed": 9, "failed": 0 },
+    { "name": "full monorepo build", "status": "PASS", "command": "pnpm run build" },
+    { "name": "full workspace tests", "status": "BLOCKED", "reason": "better-sqlite3 native addon was unavailable in the runtime; source rebuild requires a compatible native CI image" }
+  ],
+  "remainingScoreClosure": {
+    "execution_environment": "+1 point",
+    "memory": "+1 point",
+    "skills": "+1 point",
+    "connectors": "+2 points",
+    "minimumTargetPercent": 80.8
+  },
+  "securityNotes": [
+    "Approval worker tokens are persisted only as hashes.",
+    "Operator decisions use authenticated operator methods.",
+    "Raw approval tokens are not stored in browser run job payloads.",
+    "Browser runs use per-run profiles and a separate child process."
+  ]
+}

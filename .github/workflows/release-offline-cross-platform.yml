@@ -1,0 +1,210 @@
+name: Cross-platform offline release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "New GitHub Release tag, for example v1.3.6-offline"
+        required: true
+        type: string
+      source_ref:
+        description: "Branch, tag, or commit to build"
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.23.2"
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} offline package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: windows-x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Agent Miki
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Enable MSVC developer environment
+        if: matrix.platform == 'windows-x64'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Linux native build dependencies
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config
+
+      - name: Install Windows native build dependencies
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' --no-progress -y
+
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native JavaScript addons
+        run: npm rebuild better-sqlite3
+
+      - name: Build workspace type declarations
+        shell: bash
+        run: |
+          npm run build --workspace=@miki/config
+          npm run build --workspace=@miki/installer
+          npm run build --workspace=@miki/skills
+          npm run build --workspace=@miki/gateway
+
+      - name: Configure release inputs (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'MIKI_RELEASE_DIR=%s\n' "$RUNNER_TEMP/agent-miki-linux-x64-offline"
+            printf 'MIKI_LLAMA_BUILD_JOBS=2\n'
+          } >> "$GITHUB_ENV"
+
+      - name: Configure release inputs (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          "MIKI_RELEASE_DIR=$(Join-Path $env:RUNNER_TEMP 'agent-miki-windows-x64-offline')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MIKI_LLAMA_BUILD_JOBS=2" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run repository verification
+        run: npm run verify
+
+      - name: Build offline package
+        run: npm run build:release:offline
+
+      - name: Assert no answer or voice model is bundled (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -d "$MIKI_RELEASE_DIR/package/runtime/models"
+          ! find "$MIKI_RELEASE_DIR/package/runtime" -type f -iname '*.gguf' -print -quit | grep -q .
+          test ! -d "$MIKI_RELEASE_DIR/package/runtime/voice"
+          ! find "$MIKI_RELEASE_DIR/package/runtime" -type f \( -iname '*whisper*' -o -iname '*ggml-tiny*' -o -iname '*ggml-base*' -o -iname '*ggml-small*' \) -print -quit | grep -q .
+          (cd "$MIKI_RELEASE_DIR" && sha256sum -c SHA256SUMS)
+          cp "$MIKI_RELEASE_DIR/SHA256SUMS" "$MIKI_RELEASE_DIR/SHA256SUMS-linux-x64"
+
+      - name: Assert no answer or voice model is bundled (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $modelDir = Join-Path $env:MIKI_RELEASE_DIR "package\runtime\models"
+          if (Test-Path $modelDir) { throw "Answer-model directory was bundled" }
+          $gguf = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Filter *.gguf -Recurse -ErrorAction SilentlyContinue
+          if ($gguf) { throw "Answer-model GGUF was bundled: $($gguf.FullName)" }
+          $voiceDir = Join-Path $env:MIKI_RELEASE_DIR "package\runtime\voice"
+          if (Test-Path $voiceDir) { throw "Voice runtime/model directory was bundled" }
+          $voiceAssets = Get-ChildItem -Path (Join-Path $env:MIKI_RELEASE_DIR "package\runtime") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'whisper|ggml-(tiny|base|small)' }
+          if ($voiceAssets) { throw "Voice runtime/model assets were bundled: $($voiceAssets.FullName -join ', ')" }
+          $releaseZips = Get-ChildItem -Path $env:MIKI_RELEASE_DIR -Filter 'agent-miki-windows-x64-offline-*.zip' -File
+          if ($releaseZips.Count -ne 1) { throw "Expected exactly one Windows release ZIP, found $($releaseZips.Count)" }
+          $zipBytes = [System.IO.File]::ReadAllBytes($releaseZips[0].FullName)
+          if ($zipBytes.Length -lt 4 -or $zipBytes[0] -ne 0x50 -or $zipBytes[1] -ne 0x4B -or $zipBytes[2] -ne 0x03 -or $zipBytes[3] -ne 0x04) { throw "Windows release archive is not a valid ZIP: $($releaseZips[0].FullName)" }
+          Push-Location $env:MIKI_RELEASE_DIR
+          try { Get-Content .\SHA256SUMS | ForEach-Object { if ($_ -match '^([a-f0-9]{64})\s+(.+)$') { if ((Get-FileHash $Matches[2] -Algorithm SHA256).Hash.ToLower() -ne $Matches[1]) { throw "Checksum mismatch: $($Matches[2])" } } } }
+          finally { Pop-Location }
+          Copy-Item (Join-Path $env:MIKI_RELEASE_DIR "SHA256SUMS") (Join-Path $env:MIKI_RELEASE_DIR "SHA256SUMS-windows-x64")
+
+      - name: Upload Linux artifacts
+        if: matrix.platform == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-miki-linux-x64-offline
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tar.gz
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/SHA256SUMS-linux-x64
+
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-miki-windows-x64-offline
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.zip
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/SHA256SUMS-windows-x64
+
+  publish:
+    name: Publish cross-platform offline release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          mapfile -t assets < <(
+            find release-assets -type f \( \
+              -name 'SHA256SUMS-linux-x64' -o \
+              -name 'agent-miki-linux-x64-offline-*.tar.gz' -o \
+              -name 'agent-miki-linux-x64-offline-*.tgz' -o \
+              -name 'SHA256SUMS-windows-x64' -o \
+              -name 'agent-miki-windows-x64-offline-*.zip' -o \
+              -name 'agent-miki-windows-x64-offline-*.tgz' \
+            \) -print | sort
+          )
+          if [ "${#assets[@]}" -ne 6 ]; then
+            printf 'Expected exactly 6 allow-listed release assets, found %s:\n' "${#assets[@]}" >&2
+            printf '%s\n' "${assets[@]}" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+            --title "Agent Miki ${RELEASE_TAG} — Windows x64 + Linux x64 offline" \
+            --notes "This release contains separate Windows x64 and Linux x64 offline packages. The embedded Node.js runtime, dashboard, gateway, core, memory, skills, llama.cpp server executable, and production dependencies are included for each platform. No answer-model GGUF or voice-to-text runtime/model is bundled; configure user-provided local assets or use an approved audio-capable cloud model. Each platform has its own SHA256 manifest."

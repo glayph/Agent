@@ -1,0 +1,42 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": [
+      "node",
+      "jest"
+    ],
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/llm/local/vendor",
+    "src/**/__tests__",
+    "src/**/*.test.ts",
+    "src/**/__mocks__/**"
+  ],
+  "references": [
+    {
+      "path": "../config"
+    },
+    {
+      "path": "../installer"
+    },
+    {
+      "path": "../skills"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+document.addEventListener('DOMContentLoaded',function(){var btn=document.getElementById('greetBtn');var msg=document.getElementById('greetMsg');btn.addEventListener('click',function(){msg.textContent='তোমার জন্য শুভেচ্ছা — Hello, World!';btn.setAttribute('aria-pressed','true');setTimeout(()=>{msg.textContent=''},4000)})});

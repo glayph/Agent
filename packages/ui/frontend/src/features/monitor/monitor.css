@@ -1,0 +1,57 @@
+/**
+ * Scoped React Flow styling for Miki's connected workflow canvas.
+ * All colors inherit from the shared Material Orange theme tokens.
+ */
+
+.agent-monitor-flow {
+  background: var(--background);
+}
+
+.agent-monitor-flow .react-flow__renderer {
+  background: transparent;
+}
+
+.agent-monitor-flow .react-flow__selection {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.agent-monitor-flow .react-flow__edge-path {
+  stroke-linecap: round;
+  stroke-width: 2.25;
+}
+
+.agent-monitor-flow .react-flow__handle {
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--card) 72%, transparent);
+}
+
+.agent-monitor-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.agent-monitor-flow .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.agent-monitor-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.agent-monitor-flow .react-flow__controls-button {
+  border-bottom-color: color-mix(in srgb, var(--border) 62%, transparent);
+  background: transparent;
+  color: var(--foreground);
+}
+
+.agent-monitor-flow .react-flow__controls-button:hover {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.agent-monitor-flow .react-flow__attribution {
+  display: none;
+}

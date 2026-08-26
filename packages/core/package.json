@@ -1,0 +1,70 @@
+{
+  "name": "@miki/core",
+  "version": "1.0.0",
+  "description": "Core agent engine for Miki - orchestrator, memory, LLM, tools, self-improvement, and governance",
+  "type": "module",
+  "main": "dist/api/index.js",
+  "types": "dist/api/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/api/index.js",
+      "types": "./dist/api/index.d.ts"
+    },
+    "./agent": {
+      "import": "./dist/agent.js",
+      "types": "./dist/agent.d.ts"
+    },
+    "./safety": {
+      "import": "./dist/safety/index.js",
+      "types": "./dist/safety/index.d.ts"
+    },
+    "./llm/provider": {
+      "import": "./dist/llm/provider/index.js",
+      "types": "./dist/llm/provider/index.d.ts"
+    },
+    "./control": {
+      "import": "./dist/control/index.js",
+      "types": "./dist/control/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "start": "node dist/api/index.js",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@miki/config": "file:../config",
+    "@miki/installer": "file:../installer",
+    "@miki/memory": "file:../memory",
+    "@miki/skills": "file:../skills",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.10.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.0",
+    "https-proxy-agent": "^5.0.1",
+    "js-yaml": "^4.2.1",
+    "openai": "^4.52.0",
+    "playwright": "^1.44.0",
+    "qrcode": "^1.5.4",
+    "telegraf": "^4.16.0",
+    "turndown": "^7.2.4",
+    "undici": "^8.10.0",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/turndown": "^5.0.6",
+    "@types/ws": "^8.5.10"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  }
+}

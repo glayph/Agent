@@ -1,0 +1,21 @@
+{
+  "provider": "llama.cpp",
+  "artifact": "llama-server",
+  "platform": "linux",
+  "architecture": "x64",
+  "mode": "bundled",
+  "source_commit": null,
+  "web_ui": "disabled",
+  "build_flags": [
+    "LLAMA_BUILD_SERVER=ON",
+    "LLAMA_BUILD_UI=OFF",
+    "LLAMA_USE_PREBUILT_UI=OFF",
+    "LLAMA_BUILD_TESTS=OFF",
+    "LLAMA_BUILD_EXAMPLES=OFF",
+    "LLAMA_BUILD_TOOLS=ON",
+    "LLAMA_BUILD_APP=OFF",
+    "LLAMA_OPENSSL=OFF",
+    "GGML_NATIVE=OFF"
+  ],
+  "generated_at": "2026-08-26T08:49:51.516Z"
+}

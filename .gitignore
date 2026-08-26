@@ -1,0 +1,86 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/install-state.gz
+
+# Build and compiler output
+/dist/
+/build/
+/coverage/
+**/dist/
+**/build/
+**/coverage/
+*.tsbuildinfo
+.turbo/
+.vite/
+.nyc_output/
+
+# Local runtime state and generated application data
+/data/
+**/data/
+/config/data/
+**/cache/
+**/output/
+**/logs/
+**/tmp/
+**/temp/
+*.pid
+*.sock
+
+# Local databases and database journals
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+config/.env
+config/.env.*
+!config/.env.example
+!config/.env.sample
+
+# Runtime logs and diagnostic dumps
+*.log
+*.log.*
+
+# Generated archives and release bundles
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Native/CMake generated output
+**/cmake-build-*/
+**/.cmake/
+
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test and tool artifacts
+playwright-report/
+test-results/
+**/playwright-report/
+**/test-results/
+.nyc_output/
+**/.nyc_output/
+.eslintcache
+
+# Local visual QA captures and design evidence
+/gemini-default-evidence/
+/hover-interruption-evidence/
+/miki-thinking-evidence/
+/webui-chat-screenshots/
+/webui-sequential-chat-screenshots/
+/automation-center-multiview-redesign.png
