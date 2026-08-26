@@ -240,7 +240,7 @@ function startCore(): child_process.ChildProcess {
 
   const coreEntry = sourcePath("packages", "core", "dist", "api", "index.js");
   const proc = child_process.spawn(
-    "node",
+    process.env.MIKI_NODE || process.execPath,
     [...runtimeLoaderArgs(), coreEntry],
     {
       cwd: config.workspaceDir,
