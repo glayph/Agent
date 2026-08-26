@@ -2,6 +2,7 @@
  * Security helpers used by gateway and core API.
  */
 
+import * as crypto from "node:crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { isIP } from "node:net";
@@ -12,6 +13,7 @@ type SecurityOptions = {
   env?: NodeJS.ProcessEnv;
   workspaceDir?: string;
   weakValues?: readonly string[];
+  minLength?: number;
 };
 
 function securityOptions(value: unknown): SecurityOptions {
@@ -55,7 +57,115 @@ export function getRequiredEnvSecret(
   if (options.weakValues?.some((weakValue) => value === weakValue)) {
     throw new Error(`Secret ${name} uses unsafe default`);
   }
+  if (options.minLength && value.length < options.minLength) {
+    throw new Error(
+      `Secret ${name} must be at least ${options.minLength} characters`,
+    );
+  }
   return value;
+}
+
+const API_KEY_SECRET_REQUIREMENTS = {
+  weakValues: ["Miki-dev-key", "sk-anything"],
+  minLength: 16,
+} as const;
+
+export function timingSafeStringEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  const length = Math.max(left.length, right.length);
+  const paddedLeft = Buffer.alloc(length);
+  const paddedRight = Buffer.alloc(length);
+  left.copy(paddedLeft);
+  right.copy(paddedRight);
+  const equal = crypto.timingSafeEqual(paddedLeft, paddedRight);
+  return equal && left.length === right.length;
+}
+
+export function getApiKeyAuthenticationSecrets(
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const current = getRequiredEnvSecret("API_KEY_SECRET", {
+    env,
+    ...API_KEY_SECRET_REQUIREMENTS,
+  });
+  const previous = [
+    env.API_KEY_SECRET_PREVIOUS,
+    env.MIKI_API_KEY_SECRET_PREVIOUS,
+  ]
+    .find((value): value is string => Boolean(value?.trim()))
+    ?.trim();
+  if (!previous) return [current];
+  if (
+    API_KEY_SECRET_REQUIREMENTS.weakValues.some(
+      (weakValue) => weakValue === previous,
+    )
+  ) {
+    throw new Error("Secret API_KEY_SECRET_PREVIOUS uses unsafe default");
+  }
+  if (previous.length < API_KEY_SECRET_REQUIREMENTS.minLength) {
+    throw new Error(
+      `Secret API_KEY_SECRET_PREVIOUS must be at least ${API_KEY_SECRET_REQUIREMENTS.minLength} characters`,
+    );
+  }
+  return timingSafeStringEqual(previous, current)
+    ? [current]
+    : [current, previous];
+}
+
+export function assertPublicBindPolicy(
+  host: string,
+  options: {
+    env?: NodeJS.ProcessEnv;
+    allowedCidrs?: string[];
+    allowedOrigins?: string[];
+    label?: string;
+    allowEnvVar?: string;
+  } = {},
+): void {
+  const normalizedHost = host.trim().toLowerCase();
+  if (isLoopbackAddress(normalizedHost)) return;
+
+  const env = options.env || process.env;
+  const label = options.label || "service";
+  const allowEnvVar = options.allowEnvVar || "MIKI_ALLOW_PUBLIC_BIND";
+  const legacyAllowEnvVar = allowEnvVar.replace(/^MIKI_/, "Miki_");
+  const allowPublic =
+    env[allowEnvVar] === "true" || env[legacyAllowEnvVar] === "true";
+  if (!allowPublic) {
+    throw new Error(
+      `Refusing non-loopback ${label} without ${allowEnvVar}=true`,
+    );
+  }
+
+  const cidrs = normalizeAllowedCidrs(
+    options.allowedCidrs || resolveAllowedCidrsFromEnv(),
+  );
+  if (
+    cidrs.length === 0 ||
+    cidrs.some(
+      (cidr) => cidr === "*" || !isValidCidr(cidr) || isBroadCidr(cidr),
+    )
+  ) {
+    throw new Error(
+      `Refusing public ${label} bind without valid, restricted MIKI_ALLOWED_CIDRS`,
+    );
+  }
+
+  const origins = (options.allowedOrigins || []).filter(Boolean);
+  if (
+    origins.length === 0 ||
+    origins.some((origin) => origin === "*" || !isBrowserOrigin(origin))
+  ) {
+    throw new Error(
+      `Refusing public ${label} bind without explicit, valid MIKI_ALLOWED_ORIGINS`,
+    );
+  }
+}
+
+function isBroadCidr(value: string): boolean {
+  const parsed = parseCidr(value);
+  return !parsed || parsed.prefix === 0;
 }
 
 export function normalizeCorsOrigin(origin: string): string {

@@ -774,3 +774,11 @@ A clean installation is ready when all of the following are true:
 [8]: packages/core/src/channels/telegram.ts "Telegram configuration, allow-lists, and deterministic admin commands"
 [9]: packages/core/src/mcp/server.ts "Authenticated MCP session and tool execution"
 [10]: packages/core/src/tools/registry/admin-control-handlers.ts "Restricted remote administration patch policy"
+
+## Network security, HTTPS, LAN exposure, and API-key rotation
+
+For remote dashboard access, keep Agent Miki’s Node gateway and core on loopback and place an HTTPS reverse proxy in front of the gateway. The repository includes a review-first NGINX example at `deploy/reverse-proxy/nginx-agent-miki.conf.example`, firewall examples at `deploy/firewall/agent-miki-firewall-examples.md`, and the complete operator runbook at `docs/network-security.md`.
+
+Remote/LAN mode requires `MIKI_ALLOW_PUBLIC_BIND=true`, a restricted `MIKI_ALLOWED_CIDRS` value, and exact `MIKI_ALLOWED_ORIGINS`. The core API has a separate `MIKI_ALLOW_PUBLIC_CORE=true` gate and should normally remain loopback-only. Do not expose ports `8000`, `18700`, `18800`, or `39200` directly to the Internet.
+
+Before remote exposure, enable API-key authentication with a unique 16+ character `API_KEY_SECRET`. For rotation, put the new key in `API_KEY_SECRET`, retain the old key temporarily in `API_KEY_SECRET_PREVIOUS`, restart the protected service, migrate clients, then remove the previous key and restart again. The application accepts both keys only during this explicit overlap window.

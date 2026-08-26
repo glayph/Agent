@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from "express";
-import * as crypto from "crypto";
 import type { IncomingHttpHeaders } from "http";
-import { getRequiredEnvSecret } from "@miki/config/security";
+import {
+  getApiKeyAuthenticationSecrets,
+  getRequiredEnvSecret,
+  timingSafeStringEqual,
+} from "@miki/config/security";
 export {
   getSessionPermissionState,
   getSessionPermissions,
@@ -26,16 +29,6 @@ export type ApiKeyAuthResult =
       error: string;
       detail: string;
     };
-
-function timingSafeStringEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  if (left.length !== right.length) {
-    crypto.timingSafeEqual(left, left);
-    return false;
-  }
-  return crypto.timingSafeEqual(left, right);
-}
 
 export function isApiKeyAuthEnabled(): boolean {
   return process.env.ENABLE_API_KEY_AUTH === "true";
@@ -71,9 +64,9 @@ export function apiKeyFromHeaders(headers: IncomingHttpHeaders): string {
 export function authenticateApiKeyHeaders(
   headers: IncomingHttpHeaders,
 ): ApiKeyAuthResult {
-  let expected: string;
+  let expected: string[];
   try {
-    expected = getRequiredApiKeySecret();
+    expected = getApiKeyAuthenticationSecrets();
   } catch (err) {
     return {
       ok: false,
@@ -84,7 +77,10 @@ export function authenticateApiKeyHeaders(
   }
 
   const apiKey = apiKeyFromHeaders(headers);
-  if (!apiKey || !timingSafeStringEqual(apiKey, expected)) {
+  if (
+    !apiKey ||
+    !expected.some((candidate) => timingSafeStringEqual(apiKey, candidate))
+  ) {
     return {
       ok: false,
       status: 401,

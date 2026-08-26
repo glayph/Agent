@@ -8,6 +8,7 @@ import {
 describe("API key auth configuration", () => {
   const previousEnabled = process.env["ENABLE_API_KEY_AUTH"];
   const previousSecret = process.env["API_KEY_SECRET"];
+  const previousPreviousSecret = process.env["API_KEY_SECRET_PREVIOUS"];
 
   afterEach(() => {
     if (previousEnabled === undefined)
@@ -15,6 +16,9 @@ describe("API key auth configuration", () => {
     else process.env["ENABLE_API_KEY_AUTH"] = previousEnabled;
     if (previousSecret === undefined) delete process.env["API_KEY_SECRET"];
     else process.env["API_KEY_SECRET"] = previousSecret;
+    if (previousPreviousSecret === undefined)
+      delete process.env["API_KEY_SECRET_PREVIOUS"];
+    else process.env["API_KEY_SECRET_PREVIOUS"] = previousPreviousSecret;
   });
 
   it("does not require API_KEY_SECRET when API auth is disabled", () => {
@@ -47,6 +51,34 @@ describe("API key auth configuration", () => {
     expect(
       authenticateApiKeyHeaders({ "x-api-key": "strong-secret-value" }),
     ).toEqual({ ok: true });
+  });
+
+  it("accepts the previous API key during a controlled rotation window", () => {
+    process.env["API_KEY_SECRET"] = "current-secret-value-1234";
+    process.env["API_KEY_SECRET_PREVIOUS"] = "previous-secret-value-1234";
+
+    expect(
+      authenticateApiKeyHeaders({ "x-api-key": "previous-secret-value-1234" }),
+    ).toEqual({ ok: true });
+    expect(
+      authenticateApiKeyHeaders({ "x-api-key": "current-secret-value-1234" }),
+    ).toEqual({ ok: true });
+
+    delete process.env["API_KEY_SECRET_PREVIOUS"];
+    expect(
+      authenticateApiKeyHeaders({ "x-api-key": "previous-secret-value-1234" }),
+    ).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it("rejects a short API key even when rotation is enabled", () => {
+    process.env["API_KEY_SECRET"] = "current-secret-value-1234";
+    process.env["API_KEY_SECRET_PREVIOUS"] = "short";
+
+    expect(authenticateApiKeyHeaders({})).toMatchObject({
+      ok: false,
+      status: 500,
+      error: "API key authentication is misconfigured",
+    });
   });
 
   it("rejects missing API keys when mandatory authentication is used", () => {

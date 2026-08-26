@@ -15,7 +15,9 @@ import {
   normalizeCorsOrigin,
   resolveAllowedCidrsFromEnv,
   isIpAllowedByCidrs,
-  getRequiredEnvSecret,
+  getApiKeyAuthenticationSecrets,
+  timingSafeStringEqual,
+  assertPublicBindPolicy,
 } from "@miki/config/security";
 import { rewriteMcpProxyPath } from "./runtime-utils.js";
 import {
@@ -94,16 +96,13 @@ function isLoopbackBind(host: string): boolean {
 
 const isPublicBind = !isLoopbackBind(config.gatewayHost);
 if (isPublicBind) {
-  if (env("MIKI_ALLOW_PUBLIC_BIND", "false").toLowerCase() !== "true") {
-    throw new Error(
-      "Refusing non-loopback GATEWAY_HOST without MIKI_ALLOW_PUBLIC_BIND=true.",
-    );
-  }
-  if (resolveAllowedCidrsFromEnv().length === 0) {
-    throw new Error(
-      "Refusing public gateway bind without MIKI_ALLOWED_CIDRS allowlist.",
-    );
-  }
+  assertPublicBindPolicy(config.gatewayHost, {
+    allowedCidrs: resolveAllowedCidrsFromEnv(),
+    allowedOrigins: allowedCorsOriginsFromEnv({
+      workspaceDir: config.workspaceDir,
+    }),
+    label: "gateway",
+  });
 }
 
 const currentAllowedCorsOrigins = () =>
@@ -507,16 +506,16 @@ async function gatewayAuthMiddleware(
     req.headers.authorization?.replace(/^Bearer\s+/i, "") ||
     "";
   if (apiKey) {
-    let expected: string;
+    let expected: string[];
     try {
-      expected = getRequiredEnvSecret("API_KEY_SECRET", {
-        weakValues: ["Miki-dev-key", "sk-anything"],
-      });
+      expected = getApiKeyAuthenticationSecrets();
     } catch {
       res.status(500).json({ error: "Gateway auth is misconfigured" });
       return;
     }
-    if (apiKey !== expected) {
+    if (
+      !expected.some((candidate) => timingSafeStringEqual(apiKey, candidate))
+    ) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }

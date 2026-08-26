@@ -1,7 +1,9 @@
 import {
   allowedCorsOriginsFromEnv,
+  getApiKeyAuthenticationSecrets,
   getRequiredEnvSecret,
   isAllowedCorsOrigin,
+  assertPublicBindPolicy,
   isIpAllowedByCidrs,
   isValidCidr,
   isLoopbackAddress,
@@ -136,6 +138,73 @@ describe("security helpers", () => {
         weakValues: ["sk-anything"],
       }),
     ).toThrow(/unsafe default/);
+  });
+
+  it("accepts current and previous API keys during a bounded rotation window", () => {
+    const secrets = getApiKeyAuthenticationSecrets({
+      API_KEY_SECRET: "current-api-key-1234",
+      API_KEY_SECRET_PREVIOUS: "previous-api-key-1234",
+    });
+    expect(secrets).toEqual(["current-api-key-1234", "previous-api-key-1234"]);
+  });
+
+  it("rejects weak or short API keys", () => {
+    expect(() =>
+      getApiKeyAuthenticationSecrets({ API_KEY_SECRET: "too-short" }),
+    ).toThrow(/at least 16/);
+    expect(() =>
+      getApiKeyAuthenticationSecrets({
+        API_KEY_SECRET: "current-api-key-1234",
+        API_KEY_SECRET_PREVIOUS: "short",
+      }),
+    ).toThrow(/API_KEY_SECRET_PREVIOUS must be at least 16/);
+  });
+
+  it("requires explicit opt-in, restricted CIDR and CORS for public binds", () => {
+    expect(() =>
+      assertPublicBindPolicy("0.0.0.0", {
+        env: {},
+        allowedCidrs: ["192.168.1.0/24"],
+        allowedOrigins: ["https://miki.example"],
+        label: "gateway",
+      }),
+    ).toThrow(/MIKI_ALLOW_PUBLIC_BIND/);
+
+    expect(() =>
+      assertPublicBindPolicy("0.0.0.0", {
+        env: { MIKI_ALLOW_PUBLIC_BIND: "true" },
+        allowedCidrs: ["0.0.0.0/0"],
+        allowedOrigins: ["https://miki.example"],
+        label: "gateway",
+      }),
+    ).toThrow(/restricted MIKI_ALLOWED_CIDRS/);
+
+    expect(() =>
+      assertPublicBindPolicy("0.0.0.0", {
+        env: { MIKI_ALLOW_PUBLIC_BIND: "true" },
+        allowedCidrs: ["192.168.1.0/24"],
+        allowedOrigins: [],
+        label: "gateway",
+      }),
+    ).toThrow(/MIKI_ALLOWED_ORIGINS/);
+
+    expect(() =>
+      assertPublicBindPolicy("0.0.0.0", {
+        env: { MIKI_ALLOW_PUBLIC_BIND: "true" },
+        allowedCidrs: ["192.168.1.0/24"],
+        allowedOrigins: ["https://miki.example"],
+        label: "gateway",
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      assertPublicBindPolicy("0.0.0.0", {
+        env: { MIKI_ALLOW_PUBLIC_BIND: "true" },
+        allowedCidrs: ["192.168.1.0/24"],
+        allowedOrigins: ["*"],
+        label: "gateway",
+      }),
+    ).toThrow(/valid MIKI_ALLOWED_ORIGINS/);
   });
 
   it("matches configured IPv4 and IPv6 CIDRs without a loopback bypass", () => {

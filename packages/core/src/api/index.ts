@@ -26,6 +26,9 @@ import {
   isAllowedCorsOrigin,
   normalizeCorsOrigin,
   isLoopbackAddress,
+  isIpAllowedByCidrs,
+  resolveAllowedCidrsFromEnv,
+  assertPublicBindPolicy,
 } from "@miki/config/security";
 import {
   runWithCallContext,
@@ -713,6 +716,31 @@ const app = express();
 // real client instead of collapsing every client behind the gateway into
 // one shared bucket.
 app.set("trust proxy", "loopback");
+
+const coreIsPublicBind = !isLoopbackAddress(settings.coreHost);
+if (coreIsPublicBind) {
+  const coreAllowedCidrs = resolveAllowedCidrsFromEnv();
+  assertPublicBindPolicy(settings.coreHost, {
+    allowedCidrs: coreAllowedCidrs,
+    allowedOrigins: allowedCorsOriginsFromEnv({ workspaceDir }),
+    label: "core",
+    allowEnvVar: "MIKI_ALLOW_PUBLIC_CORE",
+  });
+  app.use((req, res, next) => {
+    const clientIp = (req.ip || req.socket.remoteAddress || "").replace(
+      /^::ffff:/,
+      "",
+    );
+    if (isLoopbackAddress(clientIp)) return next();
+    if (!isIpAllowedByCidrs(clientIp, coreAllowedCidrs)) {
+      return res
+        .status(403)
+        .json({ error: "Client IP not allowed by CIDR policy" });
+    }
+    return next();
+  });
+}
+
 const currentAllowedCorsOrigins = () =>
   allowedCorsOriginsFromEnv({ workspaceDir });
 const rejectDisallowedOrigin = (
