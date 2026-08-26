@@ -11,6 +11,7 @@ import {
 import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { MessageCodeBlock } from "@/features/chat/components/message-code-block"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
@@ -42,9 +43,6 @@ interface AssistantMessageProps {
 
 const EMPTY_ATTACHMENTS: ChatAttachment[] = []
 const EMPTY_TOOL_CALLS: ChatToolCall[] = []
-const VISIBLE_REPLY_CHAR_LIMIT = 180
-const VISIBLE_REPLY_LINE_LIMIT = 2
-
 function isRateLimitConnectionError(content: string): boolean {
   const normalized = content.toLowerCase()
   return (
@@ -67,16 +65,6 @@ function isCredentialConnectionError(content: string): boolean {
           normalized.includes("check credentials") ||
           normalized.includes("credential"))))
   )
-}
-
-function shortVisibleReply(content: string): string {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const compact = lines.slice(0, VISIBLE_REPLY_LINE_LIMIT).join(" ")
-  if (compact.length <= VISIBLE_REPLY_CHAR_LIMIT) return compact
-  return `${compact.slice(0, VISIBLE_REPLY_CHAR_LIMIT - 1).trimEnd()}…`
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
@@ -129,7 +117,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       isCredentialConnectionError(trimmedContent),
     [hasText, isCollapsedBlock, trimmedContent],
   )
-  const visibleContent = shortVisibleReply(trimmedContent)
+  const visibleContent = visibleAssistantContent(trimmedContent)
   return (
     <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-2 px-1">
       {(hasText || isCollapsedBlock || hasToolCalls) && (

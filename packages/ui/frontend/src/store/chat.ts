@@ -127,6 +127,7 @@ export interface ChatStoreState {
   hasHydratedActiveSession: boolean
   contextUsage?: ContextUsage
   activeRunId?: string
+  recentRunIds?: string[]
   activeRunModel?: string
   activeRunProvider?: string
   runStatus?: RunStatus

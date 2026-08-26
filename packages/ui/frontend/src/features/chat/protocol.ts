@@ -12,6 +12,7 @@ import {
   type DeliveryOutcome,
   type DeliveryOutcomeStatus,
   type RunStatus,
+  getChatState,
   updateChatStore,
 } from "@/store/chat"
 
@@ -85,8 +86,20 @@ function isStaleRun(
     eventRunId &&
     activeRunId &&
     activeRunId !== eventRunId &&
-    runStatus === "running",
+    (runStatus === "running" ||
+      runStatus === "completed" ||
+      runStatus === "completed_with_warning" ||
+      runStatus === "failed" ||
+      runStatus === "cancelled"),
   )
+}
+
+function isUnscopedWhileRunning(
+  activeRunId: string | undefined,
+  runStatus: string | undefined,
+  eventRunId: string | undefined,
+): boolean {
+  return !eventRunId && Boolean(activeRunId && runStatus === "running")
 }
 
 function parseContextUsage(
@@ -170,6 +183,12 @@ export function handlemikiMessage(
           : Date.now()
 
       updateChatStore((prev) => {
+        if (
+          isStaleRun(prev.activeRunId, prev.runStatus, runId) ||
+          isUnscopedWhileRunning(prev.activeRunId, prev.runStatus, runId)
+        ) {
+          return prev
+        }
         const nextMessage = {
           id: messageId,
           role: "assistant" as const,
@@ -228,59 +247,67 @@ export function handlemikiMessage(
         break
       }
 
-      updateChatStore((prev) => ({
-        messages: (() => {
-          let found = false
-          const messages = prev.messages.map((msg) => {
-            if (msg.id !== messageId) {
-              return msg
+      updateChatStore((prev) => {
+        if (
+          isStaleRun(prev.activeRunId, prev.runStatus, runId) ||
+          isUnscopedWhileRunning(prev.activeRunId, prev.runStatus, runId)
+        ) {
+          return prev
+        }
+        return {
+          messages: (() => {
+            let found = false
+            const messages = prev.messages.map((msg) => {
+              if (msg.id !== messageId) {
+                return msg
+              }
+              found = true
+              const { content, kind, toolCalls } =
+                parseAssistantMessageUpdateState(payload, msg)
+              return {
+                ...msg,
+                id: messageId,
+                content,
+                kind,
+                toolCalls,
+                ...(modelName ? { modelName } : {}),
+                ...(runId ? { runId } : {}),
+                ...(thoughtCategory ? { thoughtCategory } : {}),
+                ...(inspectorOnly ? { inspectorOnly } : {}),
+                ...(attachments !== undefined ? { attachments } : {}),
+              }
+            })
+            if (found) {
+              return messages
             }
-            found = true
+
             const { content, kind, toolCalls } =
-              parseAssistantMessageUpdateState(payload, msg)
-            return {
-              ...msg,
-              id: messageId,
-              content,
-              kind,
-              toolCalls,
-              ...(modelName ? { modelName } : {}),
-              ...(runId ? { runId } : {}),
-              ...(thoughtCategory ? { thoughtCategory } : {}),
-              ...(inspectorOnly ? { inspectorOnly } : {}),
-              ...(attachments !== undefined ? { attachments } : {}),
-            }
-          })
-          if (found) {
-            return messages
-          }
+              parseAssistantMessageUpdateState(payload)
 
-          const { content, kind, toolCalls } =
-            parseAssistantMessageUpdateState(payload)
-
-          return [
-            ...messages,
-            {
-              id: messageId,
-              role: "assistant" as const,
-              content,
-              kind,
-              toolCalls,
-              ...(modelName ? { modelName } : {}),
-              ...(runId ? { runId } : {}),
-              ...(thoughtCategory ? { thoughtCategory } : {}),
-              ...(inspectorOnly ? { inspectorOnly } : {}),
-              ...(attachments !== undefined ? { attachments } : {}),
-              timestamp,
-            },
-          ]
-        })(),
-        ...(contextUsage ? { contextUsage } : {}),
-        ...(modelName ? { activeRunModel: modelName } : {}),
-        ...(modelName
-          ? { activeRunProvider: providerForModel(modelName) }
-          : {}),
-      }))
+            return [
+              ...messages,
+              {
+                id: messageId,
+                role: "assistant" as const,
+                content,
+                kind,
+                toolCalls,
+                ...(modelName ? { modelName } : {}),
+                ...(runId ? { runId } : {}),
+                ...(thoughtCategory ? { thoughtCategory } : {}),
+                ...(inspectorOnly ? { inspectorOnly } : {}),
+                ...(attachments !== undefined ? { attachments } : {}),
+                timestamp,
+              },
+            ]
+          })(),
+          ...(contextUsage ? { contextUsage } : {}),
+          ...(modelName ? { activeRunModel: modelName } : {}),
+          ...(modelName
+            ? { activeRunProvider: providerForModel(modelName) }
+            : {}),
+        }
+      })
       break
     }
 
@@ -299,16 +326,33 @@ export function handlemikiMessage(
     case "node.run_start": {
       const runId =
         typeof payload.run_id === "string" ? payload.run_id.trim() : ""
-      updateChatStore({
-        ...(runId ? { activeRunId: runId } : {}),
-        ...(parseModelName(payload)
-          ? { activeRunModel: parseModelName(payload) }
-          : {}),
-        ...(parseModelName(payload)
-          ? { activeRunProvider: providerForModel(parseModelName(payload)) }
-          : {}),
-        runStatus: "running",
-        runError: undefined,
+      updateChatStore((prev) => {
+        const recentRunIds = prev.recentRunIds ?? []
+        if (
+          (prev.activeRunId && prev.runStatus === "running" && !runId) ||
+          (runId && recentRunIds.includes(runId) && prev.activeRunId !== runId)
+        ) {
+          return prev
+        }
+        return {
+          ...(runId ? { activeRunId: runId } : {}),
+          ...(runId
+            ? {
+                recentRunIds: [
+                  ...recentRunIds.filter((candidate) => candidate !== runId),
+                  runId,
+                ].slice(-20),
+              }
+            : {}),
+          ...(parseModelName(payload)
+            ? { activeRunModel: parseModelName(payload) }
+            : {}),
+          ...(parseModelName(payload)
+            ? { activeRunProvider: providerForModel(parseModelName(payload)) }
+            : {}),
+          runStatus: "running",
+          runError: undefined,
+        }
       })
       break
     }
@@ -357,7 +401,12 @@ export function handlemikiMessage(
         typeof payload.error === "string" ? payload.error : undefined
       const modelName = parseModelName(payload)
       updateChatStore((prev) => {
-        if (isStaleRun(prev.activeRunId, prev.runStatus, runId)) {
+        const recentRunIds = prev.recentRunIds ?? []
+        if (
+          runId &&
+          recentRunIds.includes(runId) &&
+          prev.activeRunId !== runId
+        ) {
           return prev
         }
         return {
@@ -374,14 +423,22 @@ export function handlemikiMessage(
       break
     }
 
-    case "typing.start":
-      updateChatStore({ isTyping: true })
+    case "typing.start": {
+      const runId = parseRunId(payload)
+      updateChatStore((prev) =>
+        isStaleRun(prev.activeRunId, prev.runStatus, runId) ||
+        isUnscopedWhileRunning(prev.activeRunId, prev.runStatus, runId)
+          ? prev
+          : { isTyping: true },
+      )
       break
+    }
 
     case "typing.stop": {
       const runId = parseRunId(payload)
       updateChatStore((prev) =>
-        isStaleRun(prev.activeRunId, prev.runStatus, runId)
+        isStaleRun(prev.activeRunId, prev.runStatus, runId) ||
+        isUnscopedWhileRunning(prev.activeRunId, prev.runStatus, runId)
           ? prev
           : { isTyping: false },
       )
@@ -394,16 +451,39 @@ export function handlemikiMessage(
       const errorMessage =
         typeof payload.message === "string" ? payload.message : ""
 
+      const runId = parseRunId(payload)
+      const currentState = getChatState()
+      if (
+        isStaleRun(currentState.activeRunId, currentState.runStatus, runId) ||
+        isUnscopedWhileRunning(
+          currentState.activeRunId,
+          currentState.runStatus,
+          runId,
+        )
+      ) {
+        return
+      }
       console.error("miki error:", payload)
       if (errorMessage) {
         toast.error(errorMessage)
       }
-      updateChatStore((prev) => ({
-        messages: requestId
-          ? prev.messages.filter((msg) => msg.id !== requestId)
-          : prev.messages,
-        isTyping: false,
-      }))
+      updateChatStore((prev) => {
+        if (
+          isStaleRun(prev.activeRunId, prev.runStatus, runId) ||
+          isUnscopedWhileRunning(prev.activeRunId, prev.runStatus, runId)
+        ) {
+          return prev
+        }
+        return {
+          messages: requestId
+            ? prev.messages.filter((msg) => msg.id !== requestId)
+            : prev.messages,
+          isTyping: false,
+          ...(runId
+            ? { activeRunId: runId, runStatus: "failed" as const }
+            : {}),
+        }
+      })
       break
     }
 

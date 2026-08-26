@@ -2052,6 +2052,7 @@ mikiWss.on("connection", (ws, req) => {
         timestamp: Date.now(),
         payload: {
           message_id: feedbackReplyId,
+          run_id: activeRunId,
           content: content?.trim()
             ? "I’ve noted your feedback and queued it for this task. I’ll apply it at the next safe checkpoint."
             : "I’m continuing the current task and will share the next update at a safe checkpoint.",
@@ -2077,7 +2078,8 @@ mikiWss.on("connection", (ws, req) => {
       .catch(() => undefined)
       .then(async () => {
         const assistantMessageId = `assistant-${requestId}`;
-        activeRunIds.set(sessionId, assistantMessageId);
+        const runId = crypto.randomUUID();
+        activeRunIds.set(sessionId, runId);
         let fullResponse = "";
         let resolvedRunModel = requestedModel || orchestrator.modelName;
         let artifactContract: ArtifactContract | null = null;
@@ -2099,7 +2101,7 @@ mikiWss.on("connection", (ws, req) => {
           _sendUserStatus(
             ws,
             sessionId,
-            assistantMessageId,
+            runId,
             `${assistantMessageId}-status-accepted`,
             "ঠিক আছে, কাজটি শুরু করছি।",
             resolvedRunModel,
@@ -2109,7 +2111,7 @@ mikiWss.on("connection", (ws, req) => {
             _sendUserStatus(
               ws,
               sessionId,
-              assistantMessageId,
+              runId,
               `${assistantMessageId}-status-working`,
               "কাজ চলছে; প্রয়োজনীয় ধাপগুলো সম্পন্ন করছি।",
               resolvedRunModel,
@@ -2121,7 +2123,7 @@ mikiWss.on("connection", (ws, req) => {
           _sendmiki(ws, {
             type: "typing.start",
             session_id: sessionId,
-            payload: { run_id: assistantMessageId },
+            payload: { run_id: runId },
           });
           _sendmiki(ws, {
             type: "message.create",
@@ -2130,7 +2132,7 @@ mikiWss.on("connection", (ws, req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
-              run_id: assistantMessageId,
+              run_id: runId,
               content: "",
               placeholder: true,
               model_name: resolvedRunModel,
@@ -2143,7 +2145,7 @@ mikiWss.on("connection", (ws, req) => {
           session_id: sessionId,
           timestamp: Date.now(),
           payload: {
-            run_id: assistantMessageId,
+            run_id: runId,
             objective: content,
             model_name: resolvedRunModel,
           },
@@ -2158,7 +2160,7 @@ mikiWss.on("connection", (ws, req) => {
           _sendInspectorThought(
             ws,
             sessionId,
-            assistantMessageId,
+            runId,
             `Voice transcription received from whisper.cpp (${voiceTransport || "configured runtime"}${voiceLanguage ? `, language ${voiceLanguage}` : ""}${duration}${latency}). The transcript is being sent through the standard model route.`,
             "Progress",
           );
@@ -2244,7 +2246,7 @@ mikiWss.on("connection", (ws, req) => {
                   timestamp: now,
                   payload: {
                     message_id: assistantMessageId,
-                    run_id: assistantMessageId,
+                    run_id: runId,
                     content: fullResponse,
                     kind: "normal",
                     model_name: resolvedRunModel,
@@ -2273,7 +2275,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 `Completion verification found missing artifacts (${missing.join(", ") || "required files"}). Starting repair attempt ${String(event.attempt || "1")} before allowing completion.`,
                 "Verification",
               );
@@ -2286,7 +2288,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 `The ${String(event.provider || "selected")} provider rejected a request (HTTP ${String(event.status || "unknown")}). Correlation ${String(diagnostic.correlationId || "unavailable")}; the visible reply was kept concise.`,
                 "Verification",
               );
@@ -2300,7 +2302,7 @@ mikiWss.on("connection", (ws, req) => {
                 session_id: sessionId,
                 timestamp: Date.now(),
                 payload: {
-                  run_id: assistantMessageId,
+                  run_id: runId,
                   total: event.total,
                   levels: event.levels,
                   parallelizable: event.parallelizable,
@@ -2315,7 +2317,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 `Prepared ${Number(event.total) || 1} execution step${Number(event.total) === 1 ? "" : "s"} before replying.`,
                 "Plan",
               );
@@ -2331,7 +2333,7 @@ mikiWss.on("connection", (ws, req) => {
                 _sendUserStatus(
                   ws,
                   sessionId,
-                  assistantMessageId,
+                  runId,
                   `${assistantMessageId}-status-progress-1`,
                   "প্রথম ধাপ চলছে; কাজের অগ্রগতি যাচাই করছি।",
                   resolvedRunModel,
@@ -2344,7 +2346,7 @@ mikiWss.on("connection", (ws, req) => {
                 session_id: sessionId,
                 timestamp: Date.now(),
                 payload: {
-                  run_id: assistantMessageId,
+                  run_id: runId,
                   node_id: nodeId,
                   node_type: "tool",
                   label: event.tool,
@@ -2359,7 +2361,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 _toolActionDescription(event.tool, toolInput),
                 "Action",
               );
@@ -2404,7 +2406,7 @@ mikiWss.on("connection", (ws, req) => {
                   timestamp: Date.now(),
                   payload: {
                     message_id: toolMessageId,
-                    run_id: assistantMessageId,
+                    run_id: runId,
                     content: "",
                     kind: "tool_calls",
 
@@ -2420,7 +2422,7 @@ mikiWss.on("connection", (ws, req) => {
                   timestamp: Date.now(),
                   payload: {
                     message_id: assistantMessageId,
-                    run_id: assistantMessageId,
+                    run_id: runId,
                     content: fullResponse,
                     kind: "tool_calls",
                     tool_calls: [toolCallPayload],
@@ -2435,7 +2437,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 `Retrying ${String(event.tool || "the action")} (attempt ${Number(event.attempt) || 2}) before continuing.`,
                 "Verification",
               );
@@ -2445,7 +2447,7 @@ mikiWss.on("connection", (ws, req) => {
                 session_id: sessionId,
                 timestamp: Date.now(),
                 payload: {
-                  run_id: assistantMessageId,
+                  run_id: runId,
                   node_id: nodeId,
                   status: "retrying",
                   attempt: event.attempt,
@@ -2473,7 +2475,7 @@ mikiWss.on("connection", (ws, req) => {
                 session_id: sessionId,
                 timestamp: Date.now(),
                 payload: {
-                  run_id: assistantMessageId,
+                  run_id: runId,
                   node_id: nodeId,
                   status: event.ok ? "completed" : "failed",
                   ok: event.ok,
@@ -2489,7 +2491,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 resultDescription,
                 event.ok === true ? "Verification" : "Progress",
               );
@@ -2506,7 +2508,7 @@ mikiWss.on("connection", (ws, req) => {
                     timestamp: Date.now(),
                     payload: {
                       message_id: messageId,
-                      run_id: assistantMessageId,
+                      run_id: runId,
                       content: _toolResultDescription(
                         event.tool,
                         toolInput,
@@ -2553,7 +2555,7 @@ mikiWss.on("connection", (ws, req) => {
                 session_id: sessionId,
                 timestamp: Date.now(),
                 payload: {
-                  run_id: assistantMessageId,
+                  run_id: runId,
                   stats: event.stats,
                   locks: event.locks,
                 },
@@ -2585,7 +2587,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 `Corrected Provider/Model metadata using the authoritative runtime identity in: ${repairedMetadata.join(", ")}.`,
                 "Verification",
               );
@@ -2608,7 +2610,7 @@ mikiWss.on("connection", (ws, req) => {
                 _sendInspectorThought(
                   ws,
                   sessionId,
-                  assistantMessageId,
+                  runId,
                   "Verified artifacts were found, but the final assistant message could not be updated with attachment metadata.",
                   "Verification",
                 );
@@ -2617,7 +2619,7 @@ mikiWss.on("connection", (ws, req) => {
             _sendInspectorThought(
               ws,
               sessionId,
-              assistantMessageId,
+              runId,
               verification.ok
                 ? `Verified required ${artifactContract.label} files: ${artifactContract.required.join(", ")}.`
                 : `Required ${artifactContract.label} files are still missing or empty: ${[...verification.missing, ...verification.invalid].join(", ")}.`,
@@ -2651,7 +2653,7 @@ mikiWss.on("connection", (ws, req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
-              run_id: assistantMessageId,
+              run_id: runId,
               content: fullResponse,
               kind: "normal",
               model_name: resolvedRunModel,
@@ -2665,7 +2667,7 @@ mikiWss.on("connection", (ws, req) => {
             _sendInspectorThought(
               ws,
               sessionId,
-              assistantMessageId,
+              runId,
               "The final user-facing reply was prepared after the execution checks.",
               "Progress",
             );
@@ -2678,7 +2680,7 @@ mikiWss.on("connection", (ws, req) => {
             _sendmiki(ws, {
               type: "typing.stop",
               session_id: sessionId,
-              payload: { run_id: assistantMessageId },
+              payload: { run_id: runId },
             });
           }
           _sendmiki(ws, {
@@ -2687,7 +2689,7 @@ mikiWss.on("connection", (ws, req) => {
             session_id: sessionId,
             timestamp: Date.now(),
             payload: {
-              run_id: assistantMessageId,
+              run_id: runId,
               status: finalRunStatus,
               model_name: resolvedRunModel,
             },
@@ -2697,7 +2699,7 @@ mikiWss.on("connection", (ws, req) => {
           _sendInspectorThought(
             ws,
             sessionId,
-            assistantMessageId,
+            runId,
             `The run stopped before completion: ${safeError}`,
             "Verification",
           );
@@ -2716,7 +2718,7 @@ mikiWss.on("connection", (ws, req) => {
             timestamp: Date.now(),
             payload: {
               message_id: assistantMessageId,
-              run_id: assistantMessageId,
+              run_id: runId,
               content: userFacingError,
               kind: "normal",
               model_name: resolvedRunModel,
@@ -2726,7 +2728,7 @@ mikiWss.on("connection", (ws, req) => {
             _sendmiki(ws, {
               type: "typing.stop",
               session_id: sessionId,
-              payload: { run_id: assistantMessageId },
+              payload: { run_id: runId },
             });
           }
           _sendmiki(ws, {
@@ -2734,6 +2736,7 @@ mikiWss.on("connection", (ws, req) => {
             session_id: sessionId,
             payload: {
               request_id: requestId,
+              run_id: runId,
               message: safeError,
             },
           });
@@ -2743,14 +2746,14 @@ mikiWss.on("connection", (ws, req) => {
             session_id: sessionId,
             timestamp: Date.now(),
             payload: {
-              run_id: assistantMessageId,
+              run_id: runId,
               status: "failed",
               error: getErrorMessage(err),
               model_name: resolvedRunModel,
             },
           });
         } finally {
-          if (activeRunIds.get(sessionId) === assistantMessageId) {
+          if (activeRunIds.get(sessionId) === runId) {
             activeRunIds.delete(sessionId);
           }
           if (!activeRunIds.has(sessionId)) {
@@ -2759,7 +2762,7 @@ mikiWss.on("connection", (ws, req) => {
               _sendInspectorThought(
                 ws,
                 sessionId,
-                assistantMessageId,
+                runId,
                 `${queuedCount} feedback message${queuedCount === 1 ? "" : "s"} preserved for the next safe checkpoint.`,
                 "Progress",
               );

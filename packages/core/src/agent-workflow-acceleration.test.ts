@@ -2,7 +2,11 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ChatMessage } from "@miki/config";
-import { AgentOrchestrator } from "./agent.js";
+import {
+  AgentOrchestrator,
+  detectAgentResponseContract,
+  validateAgentResponseContract,
+} from "./agent.js";
 import { type RuntimePaths } from "./paths.js";
 
 function makeRuntimePaths(workspaceDir: string): RuntimePaths {
@@ -29,6 +33,27 @@ function createRawToolCalls(count: number) {
 }
 
 describe("AgentOrchestrator workflow acceleration", () => {
+  it("detects and validates explicit response contracts", () => {
+    const contract = detectAgentResponseContract(
+      "Return only a Python function named average_line_revenue(rows), with no markdown or explanation. Do not use tools.",
+    );
+    expect(contract).toEqual({
+      kind: "function",
+      name: "average_line_revenue",
+    });
+    expect(
+      validateAgentResponseContract(
+        "def average_line_revenue(rows):\\n    if not rows:",
+        contract!,
+      ),
+    ).toBe(false);
+    expect(
+      validateAgentResponseContract(
+        "def average_line_revenue(rows):\\n    return 0.0",
+        contract!,
+      ),
+    ).toBe(true);
+  });
   let workspaceDir: string | null = null;
   let orchestrator: AgentOrchestrator | null = null;
 
@@ -186,5 +211,220 @@ describe("AgentOrchestrator workflow acceleration", () => {
     expect(messages[1].role).toBe("assistant");
     expect(messages[1].content).toContain("Error calling LLM");
     expect(messages[1].content).toContain("Invalid model name");
+  });
+
+  it("terminates an explicit no-tool turn after the first usable answer", async () => {
+    workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-agent-no-tool-finalization-"),
+    );
+    const configDir = path.join(workspaceDir, "config");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, "agent.yaml"),
+      ["agent:", "  resource:", "    quality_retry_limit: 0", ""].join("\n"),
+      "utf8",
+    );
+    orchestrator = new AgentOrchestrator(makeRuntimePaths(workspaceDir));
+    const internal = orchestrator as unknown as {
+      _callLlmApi: () => Promise<unknown>;
+    };
+    let calls = 0;
+    internal._callLlmApi = async () => {
+      calls += 1;
+      return {
+        choices: [{ message: { content: "The direct answer is ready." } }],
+      };
+    };
+
+    const events: Array<Record<string, unknown>> = [];
+    for await (const rawEvent of orchestrator.runAgentLoop(
+      "no-tool-session",
+      "Do not use tools. Answer directly with one short sentence.",
+    )) {
+      events.push(JSON.parse(rawEvent) as Record<string, unknown>);
+    }
+
+    expect(calls).toBe(1);
+    expect(events.filter((event) => event.type === "stream_done")).toHaveLength(
+      1,
+    );
+    expect(events.find((event) => event.type === "stream_chunk")).toEqual(
+      expect.objectContaining({ content: "The direct answer is ready." }),
+    );
+  });
+
+  it("repairs malformed structured output into the exact requested JSON schema", async () => {
+    workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-agent-response-contract-"),
+    );
+    const configDir = path.join(workspaceDir, "config");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, "agent.yaml"),
+      ["agent:", "  resource:", "    quality_retry_limit: 0", ""].join("\n"),
+      "utf8",
+    );
+    orchestrator = new AgentOrchestrator(makeRuntimePaths(workspaceDir));
+    const internal = orchestrator as unknown as {
+      _callLlmApi: () => Promise<unknown>;
+    };
+    let calls = 0;
+    internal._callLlmApi = async () => {
+      calls += 1;
+      return {
+        choices: [
+          {
+            message: {
+              content:
+                calls === 1
+                  ? '{"project":"Aurora Desk","owner":"Mina","priority":"high","due\\_date":"2026-09-15"}'
+                  : '{"project":"Aurora Desk","owner":"Mina","priority":"high","due_date":"2026-09-15"}',
+            },
+          },
+        ],
+      };
+    };
+
+    const events: Array<Record<string, unknown>> = [];
+    for await (const rawEvent of orchestrator.runAgentLoop(
+      "response-contract-session",
+      "Return valid JSON with exactly these fields: project, owner, priority, due\\_date. Do not use tools.",
+    )) {
+      events.push(JSON.parse(rawEvent) as Record<string, unknown>);
+    }
+
+    expect(calls).toBe(2);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "stream_chunk",
+        content:
+          '{"project":"Aurora Desk","owner":"Mina","priority":"high","due_date":"2026-09-15"}',
+      }),
+    );
+    expect(events.filter((event) => event.type === "stream_done")).toHaveLength(
+      1,
+    );
+  });
+
+  it("repairs an incomplete code-only function response", async () => {
+    workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-agent-code-contract-"),
+    );
+    const configDir = path.join(workspaceDir, "config");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, "agent.yaml"),
+      ["agent:", "  resource:", "    quality_retry_limit: 0", ""].join("\n"),
+      "utf8",
+    );
+    orchestrator = new AgentOrchestrator(makeRuntimePaths(workspaceDir));
+    const internal = orchestrator as unknown as {
+      _callLlmApi: () => Promise<unknown>;
+    };
+    let calls = 0;
+    internal._callLlmApi = async () => {
+      calls += 1;
+      return {
+        choices: [
+          {
+            message: {
+              content:
+                calls === 1
+                  ? "def average_line_revenue(rows):\\n    if not rows:"
+                  : "def average_line_revenue(rows):\\n    if not rows:\\n        return 0.0\\n    return sum(row['units'] * row['unit_price'] for row in rows) / len(rows)",
+            },
+          },
+        ],
+      };
+    };
+
+    const events: Array<Record<string, unknown>> = [];
+    for await (const rawEvent of orchestrator.runAgentLoop(
+      "code-contract-session",
+      "Return only a Python function named average_line_revenue(rows), with no markdown or explanation. Do not use tools.",
+    )) {
+      events.push(JSON.parse(rawEvent) as Record<string, unknown>);
+    }
+
+    expect(calls).toBe(2);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "stream_chunk",
+        content: expect.stringContaining("return 0.0"),
+      }),
+    );
+  });
+
+  it("finalizes a bounded tool-only loop with a safe summary", async () => {
+    workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-agent-tool-only-finalization-"),
+    );
+    const configDir = path.join(workspaceDir, "config");
+    fs.mkdirSync(configDir, { recursive: true });
+    orchestrator = new AgentOrchestrator(makeRuntimePaths(workspaceDir));
+    const internal = orchestrator as unknown as {
+      _callLlmApi: () => Promise<unknown>;
+      _executeToolCallsAndYield: (
+        sessionId: string,
+        userMessage: string,
+        toolCalls: unknown,
+        llmMessages: ChatMessage[],
+        turn: number,
+      ) => AsyncGenerator<string, void, unknown>;
+    };
+    internal._callLlmApi = async () => ({
+      choices: [
+        {
+          message: {
+            tool_calls: [
+              {
+                id: "tool-call-loop",
+                function: {
+                  name: "file_read",
+                  arguments: JSON.stringify({ path: "fixture.md" }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    internal._executeToolCallsAndYield = async function* (
+      _sessionId,
+      _userMessage,
+      _toolCalls,
+      llmMessages,
+    ) {
+      llmMessages.push({
+        role: "tool",
+        name: "file_read",
+        tool_call_id: "tool-call-loop",
+        content: "ok",
+      });
+      yield JSON.stringify({
+        type: "tool_result",
+        tool: "file_read",
+        ok: true,
+        output: "ok",
+      });
+    };
+
+    const events: Array<Record<string, unknown>> = [];
+    for await (const rawEvent of orchestrator.runAgentLoop(
+      "tool-only-session",
+      "Read the fixture and complete the task.",
+    )) {
+      events.push(JSON.parse(rawEvent) as Record<string, unknown>);
+    }
+
+    expect(events.filter((event) => event.type === "stream_done")).toHaveLength(
+      1,
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "stream_chunk",
+        content: expect.stringContaining("Completed tool steps: file_read."),
+      }),
+    );
   });
 });

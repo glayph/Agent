@@ -118,7 +118,7 @@ import type { MikiProviderAudio } from "./llm/provider/sdk/index.js";
 import { providerRegistry } from "./llm/provider/registry.js";
 
 const MAX_AGENT_TURNS = 50;
-const MAX_AGENT_TURNS_NO_OUTPUT = 12;
+const MAX_AGENT_TURNS_NO_OUTPUT = 4;
 const DEFAULT_WEB_SEARCH_CALLS_PER_TURN = 2;
 const DEFAULT_MESSAGE_HISTORY_LIMIT = 15;
 
@@ -148,6 +148,77 @@ function providerLabelForModel(model: string): string {
   if (isLocalModelName(model)) return "llama.cpp";
   if (/^(gemini|google)(?:\/|-)/i.test(model)) return "Gemini";
   return "unknown";
+}
+
+function isExplicitNoToolRequest(message: string): boolean {
+  return /(?:\b(?:do not|don't|never)\s+(?:use|call|invoke)\s+(?:any\s+)?(?:external\s+)?tools?\b|\bwithout\s+(?:using\s+)?tools?\b|\bno\s+tools?\b|\b(?:কোনো|কোনও)\s*টুল\s*ব্যবহার\s*করো\s*না\b)/i.test(
+    message,
+  );
+}
+
+type AgentResponseContract =
+  { kind: "json"; keys: string[] } | { kind: "function"; name: string };
+
+export function detectAgentResponseContract(
+  message: string,
+): AgentResponseContract | undefined {
+  const normalizedMessage = message.replace(/\\([_*`])/g, "$1");
+  if (
+    /\b(?:valid|strict|only)\s+json\b/i.test(normalizedMessage) &&
+    /\b(?:exactly|only)\s+(?:these\s+)?fields?\b/i.test(normalizedMessage)
+  ) {
+    const fieldMatch =
+      normalizedMessage.match(/\bfields?\s*:\s*([^\.\n]+)/i) ||
+      normalizedMessage.match(/\bfields?\s+(?:are|must\s+be)\s+([^\.\n]+)/i);
+    const keys = fieldMatch
+      ? fieldMatch[1]
+          .split(/,|\band\b/i)
+          .map((key) => key.trim().replace(/^`|`$/g, "").replace(/\\_/g, "_"))
+          .filter((key) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+      : [];
+    if (keys.length > 0) {
+      return { kind: "json", keys: [...new Set(keys)] };
+    }
+  }
+
+  const functionMatch = normalizedMessage.match(
+    /\bfunction\s+(?:named\s+)?`?([A-Za-z_][A-Za-z0-9_]*)`?/i,
+  );
+  if (
+    functionMatch &&
+    /\b(?:python|code|function)\b/i.test(normalizedMessage)
+  ) {
+    return { kind: "function", name: functionMatch[1] };
+  }
+  return undefined;
+}
+
+export function validateAgentResponseContract(
+  content: string,
+  contract: AgentResponseContract,
+): boolean {
+  if (contract.kind === "function") {
+    if (content.trim().startsWith("``")) return false;
+    const declaration = new RegExp(
+      `(?:^|\\n)\\s*(?:def|function)\\s+${contract.name}\\s*\\(`,
+    );
+    return declaration.test(content) && /\breturn\b/.test(content);
+  }
+
+  if (content.trim().startsWith("``")) return false;
+  try {
+    const parsed: unknown = JSON.parse(content.trim());
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+    const keys = Object.keys(parsed as Record<string, unknown>);
+    return (
+      keys.length === contract.keys.length &&
+      contract.keys.every((key) => keys.includes(key))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
@@ -1798,7 +1869,11 @@ export class AgentOrchestrator {
     // supplies a small read-only recovery set when heuristics are uncertain;
     // falling back to all registered tools here would add the full catalog to
     // every ordinary prompt and defeat adaptive pruning.
-    const toolsSchema = prunedTools as unknown as ToolDefinition[];
+    const noToolsRequested = isExplicitNoToolRequest(userMessage);
+    const responseContract = detectAgentResponseContract(userMessage);
+    const toolsSchema = noToolsRequested
+      ? []
+      : (prunedTools as unknown as ToolDefinition[]);
 
     const deterministicIntent = detectDeterministicIntent(userMessage);
     if (deterministicIntent?.kind === "math") {
@@ -1973,6 +2048,8 @@ export class AgentOrchestrator {
     let consecutiveToolOnly = 0;
     let turn = 0;
     let completionRepairAttempts = 0;
+    let emptyResponseRepairAttempts = 0;
+    let responseContractRepairAttempts = 0;
     let webSearchCallsUsed = 0;
     let response: LLMResponse | null = null;
     let latestContextUsage: ContextUsageSnapshot | undefined;
@@ -2182,6 +2259,51 @@ export class AgentOrchestrator {
 
       const msg = choice.message;
       const content: string | null = msg?.content || null;
+      if (
+        content &&
+        responseContract &&
+        !validateAgentResponseContract(content, responseContract)
+      ) {
+        if (responseContractRepairAttempts < 1) {
+          responseContractRepairAttempts += 1;
+          llmMessages.push({
+            role: "user",
+            content:
+              responseContract.kind === "json"
+                ? `The previous response did not satisfy the exact JSON contract. Return only a JSON object with exactly these keys: ${responseContract.keys.join(", ")}. Do not escape underscores, add markdown, or include extra keys.`
+                : `The previous response did not include the required function ${responseContract.name}. Return only the requested code with that exact function name and no explanation.`,
+          });
+          yield JSON.stringify({
+            type: "response_contract_retry",
+            content: "Retrying once to satisfy the requested response format.",
+            attempt: responseContractRepairAttempts,
+          });
+          continue;
+        }
+
+        const contractFailureMessage =
+          responseContract.kind === "json"
+            ? "I could not produce JSON matching the exact requested field set. The run was stopped safely; please retry the structured request."
+            : `I could not produce the requested function ${responseContract.name} in the required code-only format. The run was stopped safely; please retry the code request.`;
+        await this._saveAssistantHistoryMessage(
+          sessionId,
+          contractFailureMessage,
+          options.responseMessageId,
+        );
+        this._logMemoryInteraction(
+          sessionId,
+          userMessage,
+          contractFailureMessage,
+        );
+        yield JSON.stringify({
+          type: "stream_chunk",
+          content: contractFailureMessage,
+          model_name: turnModel,
+          ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+        });
+        yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
+        return;
+      }
 
       if (content) {
         yield JSON.stringify({
@@ -2200,6 +2322,11 @@ export class AgentOrchestrator {
           });
           this._messageHistory.set(sessionId, history);
           this._touchSession(sessionId);
+        }
+        if (noToolsRequested) {
+          this._logMemoryInteraction(sessionId, userMessage, content);
+          yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
+          return;
         }
         consecutiveToolOnly = 0;
 
@@ -2246,6 +2373,31 @@ export class AgentOrchestrator {
         | undefined;
 
       if (toolCalls && toolCalls.length > 0) {
+        if (noToolsRequested) {
+          const noToolViolationMessage =
+            "The model attempted to use a tool even though this turn requested a direct answer without tools. I stopped safely without executing it.";
+          await this._saveAssistantHistoryMessage(
+            sessionId,
+            noToolViolationMessage,
+            options.responseMessageId,
+          );
+          this._logMemoryInteraction(
+            sessionId,
+            userMessage,
+            noToolViolationMessage,
+          );
+          yield JSON.stringify({
+            type: "stream_chunk",
+            content: noToolViolationMessage,
+            model_name: turnModel,
+            ...(latestContextUsage
+              ? { context_usage: latestContextUsage }
+              : {}),
+          });
+          yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
+          return;
+        }
+
         const requestedWebSearchCalls = toolCalls.filter(
           (toolCall) => toolCall.function?.name === "web_search",
         ).length;
@@ -2351,7 +2503,37 @@ export class AgentOrchestrator {
         continue;
       }
 
-      break;
+      if (noToolsRequested && emptyResponseRepairAttempts < 1) {
+        emptyResponseRepairAttempts += 1;
+        llmMessages.push({
+          role: "user",
+          content:
+            "Answer the user directly now. Do not call tools, do not emit progress-only text, and return one final response.",
+        });
+        yield JSON.stringify({
+          type: "final_response_retry",
+          content: "Retrying once for a direct final response.",
+          attempt: emptyResponseRepairAttempts,
+        });
+        continue;
+      }
+
+      const fallbackContent =
+        "I could not produce a final answer for this turn. The run was stopped safely; please retry the request.";
+      await this._saveAssistantHistoryMessage(
+        sessionId,
+        fallbackContent,
+        options.responseMessageId,
+      );
+      this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
+      yield JSON.stringify({
+        type: "stream_chunk",
+        content: fallbackContent,
+        model_name: turnModel,
+        ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+      });
+      yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
+      return;
     }
 
     let finalContent = response?.choices?.[0]?.message?.content || "";

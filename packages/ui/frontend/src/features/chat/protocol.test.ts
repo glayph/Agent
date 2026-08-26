@@ -23,6 +23,7 @@ function resetChatState() {
     hasHydratedActiveSession: true,
     contextUsage: undefined,
     activeRunId: undefined,
+    recentRunIds: [],
     runStatus: undefined,
     runError: undefined,
   })
@@ -344,6 +345,113 @@ describe("chat protocol flow", () => {
       runStatus: "completed",
       isTyping: false,
     })
+  })
+
+  it("ignores stale assistant messages, run starts, typing, and errors", () => {
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-old", model_name: "old/model" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-new", model_name: "new/model" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "new-message",
+          run_id: "run-new",
+          content: "Current response",
+        },
+      },
+      "session-1",
+    )
+    updateChatStore({ isTyping: true })
+
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-old", model_name: "old/model" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.update",
+        session_id: "session-1",
+        payload: {
+          message_id: "new-message",
+          run_id: "run-old",
+          content: "Stale response",
+        },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "stale-message",
+          run_id: "run-old",
+          content: "Stale message",
+        },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "typing.start",
+        session_id: "session-1",
+        payload: { run_id: "run-old" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "typing.stop",
+        session_id: "session-1",
+        payload: { run_id: "run-old" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "error",
+        session_id: "session-1",
+        payload: {
+          run_id: "run-old",
+          message: "stale error",
+        },
+      },
+      "session-1",
+    )
+
+    expect(getChatState()).toMatchObject({
+      activeRunId: "run-new",
+      activeRunModel: "new/model",
+      runStatus: "running",
+      isTyping: true,
+    })
+    expect(getChatState().messages).toEqual([
+      expect.objectContaining({
+        id: "new-message",
+        content: "Current response",
+        runId: "run-new",
+      }),
+    ])
+    expect(toastError).not.toHaveBeenCalledWith("stale error")
   })
 
   it("stores normalized delivery outcomes and keeps unknown side effects non-successful", () => {

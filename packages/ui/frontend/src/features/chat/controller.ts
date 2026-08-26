@@ -39,7 +39,9 @@ import { type GatewayState, gatewayAtom } from "@/store/gateway"
 
 const store = getDefaultStore()
 
-function providerForRunModel(modelName: string | undefined): string | undefined {
+function providerForRunModel(
+  modelName: string | undefined,
+): string | undefined {
   if (!modelName) return undefined
   const normalized = modelName.toLowerCase()
   if (normalized.startsWith("gemini/") || normalized.startsWith("google/")) {
@@ -474,7 +476,9 @@ function sendmikiMessage(
       payload: {
         content,
         media: attachments.map((attachment) => attachment.url),
-        ...(requestedModel?.trim() ? { requested_model: requestedModel.trim() } : {}),
+        ...(requestedModel?.trim()
+          ? { requested_model: requestedModel.trim() }
+          : {}),
         ...(voice ? { voice } : {}),
         ...(audio ? { audio } : {}),
       },
@@ -752,6 +756,7 @@ export async function switchChatSession(sessionId: string) {
     updateChatStore({
       messages: historyMessages,
       isTyping: false,
+      recentRunIds: [],
       hasHydratedActiveSession: true,
       contextUsage: undefined,
     })
@@ -778,6 +783,7 @@ export async function newChatSession() {
   updateChatStore({
     messages: [],
     isTyping: false,
+    recentRunIds: [],
     hasHydratedActiveSession: true,
     contextUsage: undefined,
   })
