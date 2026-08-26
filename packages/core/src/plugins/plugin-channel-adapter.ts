@@ -4,7 +4,7 @@ import {
   runChannelAdapterProbe,
   type ChannelAdapter,
   type ChannelAdapterContext,
-} from "../channels/adapter-sdk.js";
+} from "./channels/_shared/adapter-sdk.js";
 import type {
   ChannelProbeMode,
   ChannelRuntimeProbe,

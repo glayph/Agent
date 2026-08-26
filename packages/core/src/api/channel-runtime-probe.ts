@@ -1,42 +1,23 @@
 type JsonRecord = Record<string, unknown>;
 
-const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
-  weixin: ["token", "encoding_aes_key"],
-  telegram: ["token"],
-  discord: ["token"],
-  slack: ["bot_token", "app_token", "signing_secret"],
-  feishu: ["app_secret", "encrypt_key", "verification_token"],
-  dingtalk: ["webhook_url", "client_secret"],
-  line: ["token", "channel_secret"],
-  qq: ["token"],
-  onebot: ["access_token"],
-  whatsapp: ["webhook_token"],
-  wecom: ["secret", "corp_secret", "webhook_url"],
-  miki: ["token"],
-  matrix: ["access_token"],
-  irc: ["password", "nickserv_password", "sasl_password"],
-  mqtt: ["username", "password"],
-};
+import { builtinChannelRegistry } from "../plugins/channels/builtin-channel-registry.js";
+import { channelFieldValue } from "../plugins/channels/_shared/probe.js";
 
-const CHANNEL_REQUIRED_FIELDS: Record<string, string[]> = {
-  telegram: ["token"],
-  discord: ["token"],
-  slack: ["bot_token", "app_token"],
-  feishu: ["app_id", "app_secret"],
-  dingtalk: ["webhook_url"],
-  line: ["token", "channel_secret"],
-  qq: ["bot_id", "token"],
-  onebot: ["server_url"],
-  weixin: ["account_id"],
-  wecom: ["bot_id"],
-  whatsapp: ["bridge_url"],
-  whatsapp_native: ["config"],
-  miki: ["token"],
-  maixcam: ["host"],
-  matrix: ["homeserver_url", "user_id", "access_token"],
-  irc: ["server", "nick"],
-  mqtt: ["broker", "agent_id"],
-};
+const BUILTIN_CHANNEL_MANIFESTS = builtinChannelRegistry.manifests();
+const CHANNEL_SECRET_FIELDS: Record<string, string[]> = Object.fromEntries(
+  BUILTIN_CHANNEL_MANIFESTS.map((channel) => [
+    channel.name,
+    [...channel.secret_fields],
+  ]),
+);
+const CHANNEL_REQUIRED_FIELDS: Record<string, string[]> = Object.fromEntries([
+  ...BUILTIN_CHANNEL_MANIFESTS.map((channel) => [
+    channel.name,
+    [...channel.required_fields] as string[],
+  ]),
+  ["whatsapp_native", ["config"]],
+  ["maixcam", ["host"]],
+]);
 
 export type ChannelRuntimeStatus = "functional" | "partial" | "config_only";
 export type ChannelProbeStatus =
@@ -103,99 +84,26 @@ interface BuildChannelRuntimeProbeOptions {
   extraChecks?: ChannelRuntimeProbeCheck[];
 }
 
-const CHANNEL_ENV_DISABLE_FLAGS: Record<string, string> = {
-  telegram: "ENABLE_TELEGRAM",
-  discord: "ENABLE_DISCORD",
-  slack: "ENABLE_SLACK",
-  feishu: "ENABLE_FEISHU",
-  dingtalk: "ENABLE_DINGTALK",
-  line: "ENABLE_LINE",
-  qq: "ENABLE_QQ",
-  onebot: "ENABLE_ONEBOT",
-  weixin: "ENABLE_WEIXIN",
-  wecom: "ENABLE_WECOM",
-  whatsapp: "ENABLE_WHATSAPP",
-  matrix: "ENABLE_MATRIX",
-  irc: "ENABLE_IRC",
-  mqtt: "ENABLE_MQTT",
-};
+const CHANNEL_ENV_DISABLE_FLAGS: Record<string, string> = Object.fromEntries(
+  BUILTIN_CHANNEL_MANIFESTS.filter((channel) => channel.name !== "miki").map(
+    (channel) => [channel.name, `ENABLE_${channel.name.toUpperCase()}`],
+  ),
+);
 
-const CHANNEL_ENV_FIELDS: Record<string, Record<string, string>> = {
-  telegram: { token: "TELEGRAM_BOT_TOKEN" },
-  discord: { token: "DISCORD_BOT_TOKEN" },
-  slack: {
-    bot_token: "SLACK_BOT_TOKEN",
-    app_token: "SLACK_APP_TOKEN",
-  },
-  feishu: {
-    app_id: "FEISHU_APP_ID",
-    app_secret: "FEISHU_APP_SECRET",
-    encrypt_key: "FEISHU_ENCRYPT_KEY",
-    verification_token: "FEISHU_VERIFICATION_TOKEN",
-  },
-  dingtalk: {
-    webhook_url: "DINGTALK_WEBHOOK_URL",
-    client_secret: "DINGTALK_CLIENT_SECRET",
-  },
-  line: {
-    token: "LINE_CHANNEL_ACCESS_TOKEN",
-    channel_secret: "LINE_CHANNEL_SECRET",
-  },
-  qq: {
-    bot_id: "QQ_BOT_ID",
-    token: "QQ_BOT_TOKEN",
-  },
-  onebot: {
-    server_url: "ONEBOT_SERVER_URL",
-    access_token: "ONEBOT_ACCESS_TOKEN",
-    bot_id: "ONEBOT_BOT_ID",
-  },
-  weixin: {
-    account_id: "WEIXIN_ACCOUNT_ID",
-    token: "WEIXIN_TOKEN",
-    encoding_aes_key: "WEIXIN_ENCODING_AES_KEY",
-  },
-  wecom: {
-    bot_id: "WECOM_BOT_ID",
-    secret: "WECOM_SECRET",
-    corp_secret: "WECOM_CORP_SECRET",
-    webhook_url: "WECOM_WEBHOOK_URL",
-  },
-  whatsapp: {
-    bridge_url: "WHATSAPP_BRIDGE_URL",
-    webhook_token: "WHATSAPP_WEBHOOK_TOKEN",
-  },
-  matrix: {
-    homeserver_url: "MATRIX_HOMESERVER_URL",
-    user_id: "MATRIX_USER_ID",
-    access_token: "MATRIX_ACCESS_TOKEN",
-  },
-  irc: {
-    server: "IRC_SERVER",
-    nick: "IRC_NICK",
-    password: "IRC_PASSWORD",
-    nickserv_password: "IRC_NICKSERV_PASSWORD",
-    sasl_password: "IRC_SASL_PASSWORD",
-  },
-  mqtt: {
-    broker: "MQTT_BROKER",
-    agent_id: "MQTT_AGENT_ID",
-    username: "MQTT_USERNAME",
-    password: "MQTT_PASSWORD",
-  },
-};
+const CHANNEL_ENV_FIELDS: Record<
+  string,
+  Record<string, string>
+> = Object.fromEntries(
+  BUILTIN_CHANNEL_MANIFESTS.map((channel) => [
+    channel.name,
+    { ...(channel.env_fields || {}) },
+  ]),
+);
 
 function recordOrEmpty(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : {};
-}
-
-function channelFieldValue(config: JsonRecord, field: string): unknown {
-  const direct = config[field];
-  if (direct !== undefined) return direct;
-  const settingsBlock = recordOrEmpty(config.settings);
-  return settingsBlock[field];
 }
 
 function isChannelFieldConfigured(
@@ -209,20 +117,6 @@ function isChannelFieldConfigured(
   if (typeof value === "string") return value.trim() !== "";
   if (Array.isArray(value)) return value.length > 0;
   return Boolean(value);
-}
-
-function isValidUrlLike(value: unknown, protocols: readonly string[]): boolean {
-  if (typeof value !== "string" || !value.trim()) return false;
-  try {
-    const parsed = new URL(value.trim());
-    return protocols.includes(parsed.protocol);
-  } catch {
-    return false;
-  }
-}
-
-function isNonEmptyIdentifier(value: unknown): boolean {
-  return typeof value === "string" && /^[A-Za-z0-9._-]+$/.test(value.trim());
 }
 
 function configuredFieldSetForEnv(
@@ -354,119 +248,10 @@ export function buildChannelRuntimeProbe({
     });
   }
 
-  if (channel.name === "dingtalk" && configured) {
-    const webhookUrl = channelFieldValue(config, "webhook_url");
-    const hasValidWebhookUrl = isValidUrlLike(webhookUrl, ["http:", "https:"]);
-    checks.push({
-      id: "webhook_url_shape",
-      status:
-        hasValidWebhookUrl || configuredSecretSet.has("webhook_url")
-          ? "pass"
-          : "fail",
-      message:
-        "DingTalk webhook URL must be an HTTP(S) robot webhook endpoint.",
-    });
-    if (hasValidWebhookUrl) {
-      const parsed = new URL(String(webhookUrl).trim());
-      checks.push({
-        id: "webhook_url_endpoint",
-        status:
-          parsed.hostname === "oapi.dingtalk.com" &&
-          parsed.pathname === "/robot/send" &&
-          parsed.searchParams.has("access_token")
-            ? "pass"
-            : "fail",
-        message:
-          "DingTalk webhook URL must target oapi.dingtalk.com/robot/send with access_token.",
-      });
-    }
-  }
-
-  if (channel.name === "feishu" && configured) {
-    checks.push({
-      id: "app_id_shape",
-      status: isNonEmptyIdentifier(channelFieldValue(config, "app_id"))
-        ? "pass"
-        : "fail",
-      message: "Feishu app_id must be a non-empty application identifier.",
-    });
-  }
-
-  if (channel.name === "qq" && configured) {
-    checks.push({
-      id: "bot_id_shape",
-      status:
-        typeof channelFieldValue(config, "bot_id") === "string" &&
-        /^\d{5,20}$/.test(String(channelFieldValue(config, "bot_id")).trim())
-          ? "pass"
-          : "fail",
-      message: "QQ bot_id must be a 5-20 digit bot account ID.",
-    });
-  }
-
-  if (channel.name === "whatsapp" && configured) {
-    checks.push({
-      id: "bridge_url_shape",
-      status: isValidUrlLike(channelFieldValue(config, "bridge_url"), [
-        "http:",
-        "https:",
-      ])
-        ? "pass"
-        : "fail",
-      message: "WhatsApp bridge URL must use http:// or https://.",
-    });
-  }
-
-  if (channel.name === "matrix" && configured) {
-    checks.push({
-      id: "homeserver_url_shape",
-      status: isValidUrlLike(channelFieldValue(config, "homeserver_url"), [
-        "http:",
-        "https:",
-      ])
-        ? "pass"
-        : "fail",
-      message: "Matrix homeserver URL must use http:// or https://.",
-    });
-    const userId = channelFieldValue(config, "user_id");
-    checks.push({
-      id: "user_id_shape",
-      status:
-        typeof userId === "string" && /^@[^:\s]+:[^:\s]+$/.test(userId.trim())
-          ? "pass"
-          : "fail",
-      message: "Matrix user ID must look like @user:homeserver.",
-    });
-  }
-
-  if (channel.name === "onebot" && configured) {
-    checks.push({
-      id: "server_url_shape",
-      status: isValidUrlLike(channelFieldValue(config, "server_url"), [
-        "http:",
-        "https:",
-        "ws:",
-        "wss:",
-      ])
-        ? "pass"
-        : "fail",
-      message: "OneBot server URL must use http(s):// or ws(s)://.",
-    });
-  }
-
-  if (channel.name === "mqtt" && configured) {
-    checks.push({
-      id: "broker_url_shape",
-      status: isValidUrlLike(channelFieldValue(config, "broker"), [
-        "mqtt:",
-        "mqtts:",
-        "ssl:",
-        "tcp:",
-      ])
-        ? "pass"
-        : "fail",
-      message: "MQTT broker must use mqtt://, mqtts://, ssl://, or tcp://.",
-    });
+  const channelProbe = builtinChannelRegistry.get(channel.name)?.manifest
+    .probe_config;
+  if (configured && channelProbe) {
+    checks.push(...channelProbe(config, configuredSecretSet));
   }
 
   checks.push(...extraChecks);

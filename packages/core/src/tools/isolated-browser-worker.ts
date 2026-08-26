@@ -210,13 +210,30 @@ export class IsolatedBrowserWorker {
       } catch {
         /* process may already be gone */
       }
-      setTimeout(() => {
-        if (!child.killed) child.kill("SIGTERM");
-      }, 500).unref();
+      await new Promise<void>((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(() => {
+          if (!child.killed) child.kill("SIGTERM");
+          resolve();
+        }, 750);
+        timer.unref();
+        child.once("exit", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
     }
     this.rejectPending(new Error("Browser worker closed"));
     if (!this.retainProfile)
-      fs.rmSync(this.profileDir, { recursive: true, force: true });
+      fs.rmSync(this.profileDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
   }
 
   kill(reason = "Browser worker terminated"): void {

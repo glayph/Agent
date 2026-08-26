@@ -29,6 +29,10 @@
     "./control": {
       "import": "./dist/control/index.js",
       "types": "./dist/control/index.d.ts"
+    },
+    "./plugins": {
+      "import": "./dist/plugins/index.js",
+      "types": "./dist/plugins/index.d.ts"
     }
   },
   "scripts": {

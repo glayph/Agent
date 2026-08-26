@@ -35,18 +35,8 @@ import {
   runWithCallOrigin,
   type CallOrigin,
 } from "../tools/executor/call-context.js";
-import { TelegramBot } from "../channels/telegram.js";
-import { DiscordBot } from "../channels/discord.js";
-import { SlackBot } from "../channels/slack.js";
-import { createLineWebhookRouter } from "../channels/line.js";
-import { MatrixBot } from "../channels/matrix.js";
-import { IrcBot } from "../channels/irc.js";
-import { OneBotBot } from "../channels/onebot.js";
-import { MqttBot } from "../channels/mqtt.js";
-import { createWhatsAppBridgeRouter } from "../channels/whatsapp.js";
-import { createFeishuWebhookRouter } from "../channels/feishu.js";
-import { createDingTalkWebhookRouter } from "../channels/dingtalk.js";
-import { createQqWebhookRouter } from "../channels/qq.js";
+import { builtinChannelRegistry } from "../plugins/channels/builtin-channel-registry.js";
+import { ChannelPluginLifecycleManager } from "../plugins/channels/sdk/index.js";
 import { initSkillLoader } from "../skill-loader.js";
 import { createSkillsRouter } from "../skill-api.js";
 import { PluginChannelRuntimeManager } from "../plugins/plugin-channel-runtime.js";
@@ -435,89 +425,12 @@ persistentJobRunner.register("agent.message", async (job) => {
   };
 });
 
-const telegramBot = new TelegramBot(orchestrator);
-const discordBot = new DiscordBot(orchestrator);
-const slackBot = new SlackBot(orchestrator);
-const matrixBot = new MatrixBot(orchestrator);
-const ircBot = new IrcBot(orchestrator);
-const oneBotBot = new OneBotBot(orchestrator);
-const mqttBot = new MqttBot(orchestrator);
-
-interface ManagedChannelRuntime {
-  start(): void;
-  stop(): void;
-}
-
-class ChannelRuntimeManager {
-  private runtimes: Map<string, ManagedChannelRuntime>;
-  private pluginRuntime: PluginChannelRuntimeManager;
-
-  constructor(
-    entries: Array<[string, ManagedChannelRuntime]>,
-    pluginRuntime: PluginChannelRuntimeManager,
-  ) {
-    this.runtimes = new Map(entries);
-    this.pluginRuntime = pluginRuntime;
-  }
-
-  startAll(): void {
-    for (const name of this.runtimes.keys()) {
-      this.start(name);
-    }
-    void this.pluginRuntime.startAll();
-  }
-
-  reload(names: string[]): void {
-    const selected = Array.from(
-      new Set(names.filter((name) => this.runtimes.has(name))),
-    );
-    for (const name of selected) {
-      this.stop(name);
-    }
-    for (const name of selected) {
-      this.start(name);
-    }
-    void this.pluginRuntime.reload(names);
-  }
-
-  stopAll(): void {
-    for (const name of this.runtimes.keys()) {
-      this.stop(name);
-    }
-    this.pluginRuntime.stopAll();
-  }
-
-  private start(name: string): void {
-    try {
-      this.runtimes.get(name)?.start();
-    } catch (e: unknown) {
-      console.warn(`${name} channel startup: ${getErrorMessage(e)}`);
-    }
-  }
-
-  private stop(name: string): void {
-    try {
-      this.runtimes.get(name)?.stop();
-    } catch (e: unknown) {
-      console.warn(`${name} channel shutdown: ${getErrorMessage(e)}`);
-    }
-  }
-}
-
 const pluginChannelRuntimeManager = new PluginChannelRuntimeManager(
   orchestrator,
   runtimePaths,
 );
-const channelRuntimeManager = new ChannelRuntimeManager(
-  [
-    ["telegram", telegramBot],
-    ["discord", discordBot],
-    ["slack", slackBot],
-    ["matrix", matrixBot],
-    ["irc", ircBot],
-    ["onebot", oneBotBot],
-    ["mqtt", mqttBot],
-  ],
+const channelRuntimeManager = new ChannelPluginLifecycleManager(
+  builtinChannelRegistry.createRuntimes(orchestrator),
   pluginChannelRuntimeManager,
 );
 
@@ -525,6 +438,7 @@ const channelRuntimeManager = new ChannelRuntimeManager(
 const skillLoader = initSkillLoader(runtimePaths);
 const skillsRouter = createSkillsRouter(skillLoader, runtimePaths, {
   toolRegistry: orchestrator.tools,
+  capabilityHost: orchestrator.capabilityPlugins,
 });
 let launcherRuntimeAuth: LauncherRuntimeAuthBridge | null = null;
 let agentControlService: AgentControlService | undefined;
@@ -899,11 +813,10 @@ app.use((req, _res, next) => {
 });
 
 // Channel webhook runtimes authenticate with provider signatures, not dashboard API keys.
-app.use("/webhooks/line", createLineWebhookRouter(orchestrator));
-app.use("/webhooks/whatsapp", createWhatsAppBridgeRouter(orchestrator));
-app.use("/webhooks/feishu", createFeishuWebhookRouter(orchestrator));
-app.use("/webhooks/dingtalk", createDingTalkWebhookRouter(orchestrator));
-app.use("/webhooks/qq", createQqWebhookRouter(orchestrator));
+// The registry owns provider-specific routers and paths; the API only mounts them.
+for (const mounted of builtinChannelRegistry.createRouters(orchestrator)) {
+  app.use(mounted.path, mounted.router);
+}
 
 // API Key validation middleware (optional, configurable)
 app.use(validateApiKey);
