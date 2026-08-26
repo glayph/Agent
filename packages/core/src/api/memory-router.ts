@@ -32,6 +32,17 @@ function safeQuery(value: unknown, max = 1000): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+// Dashboard searches are explicit observability queries. They must not inherit
+// the agent-context region inference heuristic, otherwise a generic query can
+// hide a matching chunk that lives in another functional memory region.
+const DASHBOARD_SEARCH_REGIONS = [
+  "long_term",
+  "day_to_day",
+  "static",
+  "skill",
+  "rule_emotion",
+] as const;
+
 function jsonError(res: Response, status: number, error: unknown): void {
   res
     .status(status)
@@ -83,6 +94,7 @@ export function createMemoryRouter(): Router {
       const maxTokens = boundedInt(req.query.maxTokens, 1200, 64, 4000);
       const result = getSelectiveContext(query, {
         scope: runtimeScope(),
+        regions: [...DASHBOARD_SEARCH_REGIONS],
         maxSelected,
         maxDepth,
         maxTokens,

@@ -733,6 +733,31 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
+  it("rejects duplicate provider models instead of creating repeated cards", async () => {
+    await withLauncherCompatServer(async (request) => {
+      const first = await request("/models", {
+        method: "POST",
+        body: JSON.stringify({
+          model_name: "openai/gpt-4o",
+          provider: "openai",
+          api_key: "sk-duplicate-test-secret-1234567890",
+        }),
+      });
+      expect(first.status).toBe(200);
+
+      const duplicate = await request("/models", {
+        method: "POST",
+        body: JSON.stringify({
+          model_name: "openai/gpt-4o",
+          provider: "openai",
+          api_key: "sk-duplicate-test-secret-1234567890",
+        }),
+      });
+      expect(duplicate.status).toBe(409);
+      expect((await duplicate.json()).error).toContain("already configured");
+    });
+  });
+
   it("exposes only supported OAuth providers and never returns raw tokens", async () => {
     await withLauncherCompatServer(async (request) => {
       const fakeToken = "test-only-gemini-token-1234567890";

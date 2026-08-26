@@ -75,7 +75,7 @@ const PATTERNS: Array<{ name: string; regex: RegExp }> = [
   {
     name: "provider-key",
     regex:
-      /\b(?:OPENAI|ANTHROPIC|GEMINI|GOOGLE|OPENROUTER|DEEPSEEK|AZURE_OPENAI)_API_KEY\b\s*[:=]\s*["']?([A-Za-z0-9_./+=:-]{12,})/gi,
+      /\b(?:OPENAI|ANTHROPIC|GEMINI|GOOGLE|OPENROUTER|DEEPSEEK|AZURE_OPENAI)_API_KEY\b[ \t]*[:=][ \t]*["']?([A-Za-z0-9_./+=:-]{12,})/gi,
   },
   {
     name: "oauth-token",
@@ -86,7 +86,7 @@ const PATTERNS: Array<{ name: string; regex: RegExp }> = [
   {
     name: "secret-assignment",
     regex:
-      /\b(?:token|secret|password|api[_-]?key|authorization)\b\s*[:=]\s*["']([A-Za-z0-9_./+=:-]{16,})["']/gi,
+      /\b(?:token|secret|password|api[_-]?key|authorization)\b[ \t]*[:=][ \t]*["']([A-Za-z0-9_./+=:-]{16,})["']/gi,
   },
   { name: "bearer-token", regex: /\bBearer\s+[A-Za-z0-9._~+\-/=]{16,}/gi },
 ];

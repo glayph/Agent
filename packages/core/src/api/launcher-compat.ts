@@ -2678,6 +2678,24 @@ function modelInfoFromStored(
   };
 }
 
+function storedModelIdentity(stored: StoredModel): string {
+  return `${String(stored.provider || "")
+    .trim()
+    .toLowerCase()}\u0000${String(stored.model_name || "")
+    .trim()
+    .toLowerCase()}`;
+}
+
+function dedupeStoredModels(models: StoredModel[]): StoredModel[] {
+  const seen = new Set<string>();
+  return models.filter((model) => {
+    const identity = storedModelIdentity(model);
+    if (!identity || seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
 function normalizeStoredModel(
   stored: StoredModel,
   options: ProviderOption[] = PROVIDER_OPTIONS,
@@ -3533,8 +3551,8 @@ export function createLauncherCompatRouter({
     ensuremikiToken,
   });
 
-  const normalizedModels = state.models.map((model) =>
-    normalizeStoredModel(model),
+  const normalizedModels = dedupeStoredModels(
+    state.models.map((model) => normalizeStoredModel(model)),
   );
   if (JSON.stringify(normalizedModels) !== JSON.stringify(state.models)) {
     state.models = normalizedModels;
@@ -5680,10 +5698,35 @@ export function createLauncherCompatRouter({
           error: `A credential is required before adding a ${model.provider || "provider"} model. Configure the provider key or select a configured provider model.`,
         });
       }
+      const hadExistingProviderKey = Boolean(
+        resolveProviderApiKey(model.provider || "", paths),
+      );
       if (apiKey && !isMaskedSecret(apiKey) && model.provider !== "llama.cpp") {
         updateEnvVar(paths, apiKeyEnvForProvider(model.provider || ""), apiKey);
       }
-      state.models = [...(state.models || []), model];
+      const duplicateIndex = (state.models || []).findIndex(
+        (existing) =>
+          storedModelIdentity(
+            normalizeStoredModel(existing, providerOptions),
+          ) === storedModelIdentity(model),
+      );
+      if (duplicateIndex >= 0 && hadExistingProviderKey) {
+        return res.status(409).json({
+          error:
+            "This provider model is already configured. Edit the existing model instead.",
+          index: duplicateIndex,
+        });
+      }
+      const modelIndex =
+        duplicateIndex >= 0 ? duplicateIndex : state.models?.length || 0;
+      if (duplicateIndex >= 0) {
+        state.models![duplicateIndex] = {
+          ...state.models![duplicateIndex],
+          ...model,
+        };
+      } else {
+        state.models = [...(state.models || []), model];
+      }
       configureLocalModels(state.models);
       const localRuntime =
         runtimeModelName(model) === settings.defaultModel
@@ -5697,7 +5740,7 @@ export function createLauncherCompatRouter({
       });
       res.json({
         status: "ok",
-        index: state.models.length - 1,
+        index: modelIndex,
         gateway_restart_required: apply.gateway_restart_required,
         runtime_apply_status: apply.status,
         runtime_apply_error: apply.error,

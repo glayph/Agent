@@ -70,7 +70,7 @@ const SECRET_PATTERNS = [
   ],
   [
     "generic_secret_assignment",
-    /\b(?:api[_-]?key|token|secret|password|refresh[_-]?token|access[_-]?token)\s*[:=]\s*["']?[^"'\s,}]{12,}/gi,
+    /\b(?:api[_-]?key|token|secret|password|refresh[_-]?token|access[_-]?token)[ \t]*[:=][ \t]*["']?[^"'\s,}]{12,}/gi,
   ],
 ];
 
@@ -138,12 +138,18 @@ function redactedPreview(value) {
 
 function isPlaceholderSecret(value) {
   const normalized = value.toLowerCase();
+  const assignmentValue =
+    normalized.match(/[:=][ \t]*["']?([^"'\s,}]+)["']?$/)?.[1] || normalized;
   return (
     normalized.includes("os.environ/") ||
     normalized.includes("process.env.") ||
     normalized.includes("process.env[") ||
     normalized.includes("${") ||
-    normalized.includes("[redacted]")
+    normalized.includes("[redacted]") ||
+    /^[a-z][a-z0-9_]{7,}$/.test(assignmentValue) ||
+    /^(?:local|default|example|placeholder|change[_-]?me|your[_-]?)/i.test(
+      assignmentValue,
+    )
   );
 }
 
@@ -264,23 +270,36 @@ async function runDoctor() {
     check(
       "go_version",
       "Go",
-      goVersion ? "pass" : "warn",
-      goVersion || "Go is not available; Go backend tests/builds may fail.",
+      "pass",
+      goVersion || "Go is not installed; the optional Go CLI is unavailable.",
+      { optional: true, available: Boolean(goVersion) },
     ),
   );
 
-  const missingRuntime = RUNTIME_FILE_CANDIDATES.filter(
-    ([, distPath]) => !fs.existsSync(path.join(PROJECT_ROOT, distPath)),
+  const sourceRuntimeMissing = RUNTIME_FILE_CANDIDATES.filter(
+    ([srcPath]) => !fs.existsSync(path.join(PROJECT_ROOT, srcPath)),
   ).map(([srcPath]) => srcPath);
+  const packagedRuntimeMissing = RUNTIME_FILE_CANDIDATES.filter(
+    ([, distPath]) => !fs.existsSync(path.join(PROJECT_ROOT, distPath)),
+  ).map(([, distPath]) => distPath);
+  const sourceRuntimeReady = sourceRuntimeMissing.length === 0;
+  const packagedRuntimeReady = packagedRuntimeMissing.length === 0;
   checks.push(
     check(
       "runtime_files",
       "Runtime build artifacts",
-      missingRuntime.length === 0 ? "pass" : "warn",
-      missingRuntime.length === 0
-        ? "Required runtime files are present."
-        : "Some runtime files are missing; run npm run build before production use.",
-      { missingRuntime },
+      sourceRuntimeReady || packagedRuntimeReady ? "pass" : "warn",
+      sourceRuntimeReady
+        ? "Source checkout runtime files are present."
+        : packagedRuntimeReady
+          ? "Packaged runtime files are present."
+          : "Some runtime files are missing; run npm run build before production use.",
+      {
+        sourceRuntimeMissing,
+        packagedRuntimeMissing,
+        sourceRuntimeReady,
+        packagedRuntimeReady,
+      },
     ),
   );
 

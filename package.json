@@ -22,6 +22,7 @@
     "model:status": "node scripts/miki-model.mjs status",
     "model:install": "node scripts/miki-model.mjs install",
     "model:remove": "node scripts/miki-model.mjs remove",
+    "model:smoke": "node scripts/model-smoke.mjs",
     "test:model-manager": "node --test scripts/miki-model.test.mjs",
     "dev": "node scripts/dev.js",
     "start": "node bin/miki.js",
