@@ -58,7 +58,13 @@ function runtimePath(relativePath) {
 
 function cliPath() {
   if (runtimeRoot !== PROJECT_ROOT) {
-    return runtimePath(path.join("bin", CLI_EXE));
+    const packaged = runtimePath(path.join("bin", CLI_EXE));
+    if (exists(packaged)) return packaged;
+    // Go CLI is optional. Relocated Node distributions can use the
+    // repository's Node CLI entrypoint until the native CLI is built.
+    const nodeCli = runtimePath(path.join("packages", "cli", "agent.js"));
+    if (exists(nodeCli)) return nodeCli;
+    return packaged;
   }
   const compiled = path.join(PROJECT_ROOT, "packages", "cli", "dist", "bin", CLI_EXE);
   if (exists(compiled)) return compiled;
@@ -125,6 +131,11 @@ async function start(argv) {
   ensureRuntime();
 
   const executable = cliPath();
+  const nodeCliFallback =
+    path.resolve(executable) ===
+    path.resolve(PROJECT_ROOT, "packages", "cli", "agent.js");
+  const childExecutable = nodeCliFallback ? process.execPath : executable;
+  const childArgs = nodeCliFallback ? [executable, ...argv] : argv;
   const env = {
     ...process.env,
     // New canonical env vars
@@ -182,7 +193,7 @@ async function start(argv) {
     });
   }
 
-  child = spawn(executable, argv, {
+  child = spawn(childExecutable, childArgs, {
     cwd: PROJECT_ROOT,
     env,
     stdio: "inherit",

@@ -37,7 +37,11 @@ run() {
   if (( ! DRY_RUN )); then "$@"; fi
 }
 
-run systemctl disable --now "$SERVICE_NAME.service"
+if (( DRY_RUN )) || [[ -e "$UNIT_FILE" ]]; then
+  run systemctl disable --now "$SERVICE_NAME.service"
+else
+  echo "Unit $SERVICE_NAME.service is not installed; skipping disable."
+fi
 if [[ -e "$UNIT_FILE" ]]; then run rm -f "$UNIT_FILE"; fi
 run systemctl daemon-reload
 

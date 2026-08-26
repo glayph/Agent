@@ -45,7 +45,18 @@ if (( ! DRY_RUN )); then
 fi
 [[ -f "$APP_ROOT/bin/miki.js" ]] || fail "missing launcher: $APP_ROOT/bin/miki.js"
 [[ -f "$APP_ROOT/package.json" ]] || fail "missing package manifest: $APP_ROOT/package.json"
-command -v node >/dev/null || fail "node is required"
+for runtime_file in \
+  packages/gateway/dist/index.js \
+  packages/core/dist/api/index.js \
+  packages/config/dist/index.js \
+  packages/installer/dist/index.js \
+  packages/skills/dist/index.js \
+  packages/ui/frontend/dist/index.html; do
+  [[ -f "$APP_ROOT/$runtime_file" ]] ||
+    fail "missing build artifact: $APP_ROOT/$runtime_file; run npm run build:all first"
+done
+NODE_BIN="${MIKI_NODE_BIN:-$(command -v node || true)}"
+[[ -n "$NODE_BIN" && -x "$NODE_BIN" ]] || fail "node is required; set MIKI_NODE_BIN to an absolute executable path"
 
 UNIT_TEMPLATE="$APP_ROOT/deploy/linux/systemd/agent-miki.service.in"
 [[ -f "$UNIT_TEMPLATE" ]] || fail "missing unit template: $UNIT_TEMPLATE"
@@ -69,7 +80,7 @@ else
     cat > "$ENV_FILE" <<EOF
 MIKI_SOURCE_ROOT=$INSTALL_ROOT/app
 MIKI_WORKSPACE_DIR=$WORKSPACE_DIR
-MIKI_RUNTIME_ROOT=$RUNTIME_ROOT
+MIKI_RUNTIME_ROOT=$INSTALL_ROOT/app
 MIKI_24_7_MAX_RESTARTS=5
 MIKI_24_7_ALLOW_UNLIMITED_RESTARTS=false
 MIKI_24_7_READY_TIMEOUT_MS=45000
@@ -83,12 +94,13 @@ if (( DRY_RUN )); then
   echo "Would render $UNIT_FILE from $UNIT_TEMPLATE"
 else
   sed \
+    -e "s|@MIKI_NODE_BIN@|$NODE_BIN|g" \
     -e "s|@MIKI_USER@|$SERVICE_USER|g" \
     -e "s|@MIKI_GROUP@|$SERVICE_GROUP|g" \
     -e "s|@MIKI_APP_ROOT@|$INSTALL_ROOT/app|g" \
     -e "s|@MIKI_ENV_FILE@|$ENV_FILE|g" \
     -e "s|@MIKI_WORKSPACE_DIR@|$WORKSPACE_DIR|g" \
-    -e "s|@MIKI_RUNTIME_ROOT@|$RUNTIME_ROOT|g" \
+    -e "s|@MIKI_RUNTIME_ROOT@|$INSTALL_ROOT/app|g" \
     -e "s|@MIKI_LOG_DIR@|$LOG_DIR|g" \
     "$UNIT_TEMPLATE" > "$UNIT_FILE"
   chmod 0644 "$UNIT_FILE"

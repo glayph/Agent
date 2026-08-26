@@ -679,6 +679,43 @@ Use a Developer PowerShell for Visual Studio, confirm that CMake can locate the 
 
 The default setup is intended for a local machine. For a persistent service, keep the workspace on durable storage, configure a process supervisor appropriate for the operating system, restrict the bind address and firewall exposure, and store credentials in the supervisor's secret/environment mechanism. Do not expose a password-only local dashboard directly to the public internet without adding an appropriate reverse proxy, TLS, access control, and operational monitoring.
 
+### 15.1 Linux systemd deployment and recovery validation
+
+Run the following on a clean Linux host after completing `npm run build:all`. The installer copies the built distribution into `/opt/agent-miki`, keeps mutable workspace/runtime state under `/var/lib/agent-miki`, and writes logs under `/var/log/agent-miki`. Use a system-wide Node executable for the service; if Node is installed through a version manager, pass its absolute executable path with `MIKI_NODE_BIN` rather than relying on an interactive shell PATH.
+
+```bash
+sudo env \
+  MIKI_APP_ROOT="$PWD" \
+  MIKI_NODE_BIN="$(readlink -f "$(command -v node)")" \
+  deploy/linux/install-systemd.sh
+sudo systemctl is-enabled agent-miki.service
+sudo systemctl is-active agent-miki.service
+sudo systemctl --no-pager --full status agent-miki.service
+sudo journalctl -u agent-miki.service -n 100 --no-pager
+```
+
+Confirm the gateway, core, and memory health endpoints with status-only probes, using the ports configured for the host:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18800/gateway/health
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18700/health
+```
+
+For the crash-recovery drill, record the service main PID, terminate only the service control group, and verify that systemd creates a new PID and all health probes return `200`:
+
+```bash
+old_pid=$(sudo systemctl show -p MainPID --value agent-miki.service)
+sudo systemctl kill --kill-who=main --signal=SIGKILL agent-miki.service
+sudo systemctl reset-failed agent-miki.service
+# Poll is-active and the three health endpoints until the new process is ready.
+sudo systemctl is-active agent-miki.service
+```
+
+For permission and disk-full drills, use an isolated test workspace or a temporary filesystem, never the host root filesystem. Remove write permission from the workspace, verify a failed/degraded start, restore ownership and mode `0750`, and verify recovery. For disk-full testing, mount a small temporary filesystem at the workspace path, fill it to `100%`, record the service/journal response, unmount it, recreate the workspace with the service owner, and verify recovery. Do not place a `ReadWritePaths` directory under `/tmp` while `PrivateTmp=true`; use `/var/lib`, `/var/log`, or another durable path.
+
+A reboot drill is complete only when the machine is actually rebooted and the post-boot evidence shows `is-enabled=enabled`, `is-active=active`, a new main PID, current journal entries, and all health probes returning `200`. A sandbox start/restart test is useful evidence for the unit and supervisor but is not a substitute for a clean-host reboot.
+
 A local GGUF model can require substantial memory and sustained CPU/GPU resources. Begin with a small model, verify a short prompt, and only then increase context length, concurrency, or model size. The project-level `MIKI_LLAMA_BUILD_JOBS` controls compilation parallelism; it does not determine model inference performance.
 
 ## 16. Clean-install verification checklist

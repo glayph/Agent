@@ -16,6 +16,7 @@ This document records the repository-level remediation completed in the current 
 | Session list performance | `/sessions` uses SQL-backed summary pagination instead of loading every transcript before slicing. | Session-store and session-router tests pass. |
 | Observability | JSON metrics now include active sessions and collector data; authenticated Prometheus-style metrics are available at `/metrics/prometheus`. | Core typecheck and canonical verification pass. |
 | Public exposure | Non-loopback gateway binding requires explicit public-bind opt-in and a non-empty CIDR allowlist. | Gateway typecheck pass; public deployment remains target-host work. |
+| Linux systemd packaging | Installer requires built artifacts, supports an absolute `MIKI_NODE_BIN`, uses the distribution root for `MIKI_RUNTIME_ROOT`, keeps mutable state outside the application tree, and the unit uses valid systemd start-limit placement. | Isolated systemd install/start, crash restart, permission recovery, disk-full recovery, and rollback probes completed in the sandbox. A real clean-host reboot is still required. |
 
 ## Validation completed
 
@@ -31,11 +32,17 @@ The following checks passed after the changes:
 - Staged whitespace check
 - Staged high-confidence secret-pattern scan with zero matches
 
+## Linux systemd probe evidence
+
+An isolated service instance was installed with a dedicated service account, application root under `/opt`, state under `/var/lib`, logs under `/var/log`, and non-default loopback ports. The service reached `active` with gateway, core, and memory health status `200`. A SIGKILL of the service main process produced a new main PID and systemd restarted the control group; readiness returned after a bounded poll. Permission removal caused the service to become unavailable, and restoring ownership/mode `0750` returned health. A temporary 1 MiB tmpfs was filled to `100%`; the service became unavailable until the filesystem was unmounted and the workspace restored, after which health returned. The unit was then uninstalled and the unit file/enablement were removed while data preservation behavior was checked with privileged filesystem access.
+
+The probe found and fixed three deployment defects: hardcoded `/usr/bin/node` did not work with version-manager-only Node, `MIKI_RUNTIME_ROOT` was incorrectly pointed at mutable state instead of the packaged distribution, and relocated Node CLI fallback was spawned through a shebang that required a `node` PATH entry. It also found that `StartLimitIntervalSec` and `StartLimitBurst` belonged in `[Unit]`, not `[Service]`, and that `PrivateTmp=true` is incompatible with `ReadWritePaths` under `/tmp`.
+
 ## Target-host validation still required
 
 The following cannot be honestly certified from a Linux sandbox alone:
 
-1. Linux systemd install, boot start, crash recovery, reboot recovery, permission failure and disk-full behavior.
+1. Real clean Linux host-এ systemd install, boot start এবং actual machine reboot recovery; sandbox-এ install, crash restart, permission failure, disk-full এবং rollback probes already completed.
 2. Windows PowerShell parsing, Task Scheduler registration, boot start, reboot recovery, process-tree cleanup and native Windows llama.cpp.
 3. Real channel delivery for Telegram, Discord, Slack, WhatsApp or other integrations, because credentials and provider endpoints are environment-specific.
 4. Facebook/YouTube automation, because adapters, scopes, quotas and credentials are not configured by default.

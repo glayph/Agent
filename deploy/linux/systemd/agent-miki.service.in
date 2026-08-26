@@ -2,6 +2,8 @@
 Description=Agent Miki self-healing gateway and local model runtime
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300s
+StartLimitBurst=5
 
 # The launcher owns the gateway, core, memory and llama.cpp child processes.
 # systemd must manage the complete process group as one service.
@@ -18,11 +20,9 @@ Environment=MIKI_24_7_RUNTIME=1
 Environment=MIKI_24_7_MAX_RESTARTS=5
 Environment=MIKI_24_7_ALLOW_UNLIMITED_RESTARTS=false
 Environment=MIKI_24_7_READY_TIMEOUT_MS=45000
-ExecStart=/usr/bin/node @MIKI_APP_ROOT@/bin/miki.js
+ExecStart=@MIKI_NODE_BIN@ @MIKI_APP_ROOT@/bin/miki.js
 Restart=on-failure
 RestartSec=5s
-StartLimitIntervalSec=300s
-StartLimitBurst=5
 TimeoutStartSec=90s
 TimeoutStopSec=45s
 KillSignal=SIGTERM
