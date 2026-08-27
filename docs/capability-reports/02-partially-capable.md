@@ -37,3 +37,7 @@ Repository-এর frontend/core tests, build pipeline এবং source-level fix
 ## Additional code-development evidence
 
 The live test generated an untracked `pseudo-code-review` scaffold containing TypeScript planner, executor, verification-gate modules, workflow metadata, and a README. Its three verification modes (`plan`, `dry-run`, and `smoke`) all exited successfully. However, the generated artifact did not contain the requested null-safe `items.map` function or two test cases. This confirms useful scaffold/code-workflow generation, but not complete task-specific code development.
+
+## Gemini/Gemma re-test status
+
+The Models page exposes Google Gemini model entries, but they are currently marked **Not configured** and the protected environment did not provide a usable `GEMINI_API_KEY`; therefore a fresh Gemini inference comparison could not be honestly claimed. Official Gemma 4 E2B identity was verified, but no Gemma runtime or weights are installed in this project. A 4-bit Gemma 4 E2B download is substantially larger than the retained 664 MB LFM test model, so it was not downloaded merely for this report and to avoid unnecessary storage use.

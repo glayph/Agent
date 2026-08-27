@@ -27,3 +27,7 @@ Null-safe JavaScript function এবং দুটি test case চাওয়�
 ## Verdict
 
 **বর্তমান tested environment-এ সম্পূর্ণভাবে unsuccessful বা unverified ফলাফল: ৪টি নির্দিষ্ট capability/task class।** এগুলোকে ১০০% সক্ষম বলা যাবে না, যতক্ষণ না শক্তিশালী model বা corrected tool/verification configuration-এ একই test পুনরায় সফল হয়।
+
+## Gemini and Gemma verification boundary
+
+A live Gemini re-test was not executed because the current protected environment has no usable `GEMINI_API_KEY`, and the dashboard shows all Google Gemini entries as **Not configured**. Gemma 4 E2B is an official model family member, but this runtime has no Gemma adapter or downloaded Gemma weights. Because the available Gemma 4 E2B quantized model would consume several gigabytes and the user requested storage reduction, downloading it without a working runtime path was not justified. These two provider/model comparisons remain **currently unverified**, not falsely marked as passed.
