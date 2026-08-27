@@ -5,7 +5,6 @@ import {
   IconDownload,
   IconFileText,
   IconKey,
-  IconSearch,
   IconTool,
 } from "@tabler/icons-react"
 import { Suspense, lazy, memo, useMemo, useState } from "react"
@@ -39,7 +38,6 @@ interface AssistantMessageProps {
   onDelete?: () => void
   onFork?: () => void
   onRetry?: () => void
-  onInspect?: () => void
 }
 
 const EMPTY_ATTACHMENTS: ChatAttachment[] = []
@@ -80,7 +78,6 @@ export const AssistantMessage = memo(function AssistantMessage({
   onDelete,
   onFork,
   onRetry,
-  onInspect,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const isThought = kind === "thought"
@@ -126,9 +123,9 @@ export const AssistantMessage = memo(function AssistantMessage({
         <div
           data-chat-bubble="assistant"
           className={cn(
-            "group group/message-bubble hover:bg-background/25 relative flex w-full max-w-full flex-col rounded-xl border border-transparent bg-transparent px-1.5 py-1.5 shadow-none transition-colors",
+            "group group/message-bubble relative flex w-fit max-w-full flex-col rounded-xl rounded-bl-sm border [border-color:var(--chat-assistant-border)] px-3 py-2 [box-shadow:var(--chat-assistant-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-assistant-bubble)]",
             isCollapsedBlock &&
-              "rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
+              "w-full rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
           )}
           title={formattedTimestamp || undefined}
         >
@@ -395,7 +392,6 @@ export const AssistantMessage = memo(function AssistantMessage({
               onDelete={onDelete}
               onFork={onFork}
               onRetry={onRetry}
-              onInspect={onInspect}
               inspectorLabel={t("chat.actions.inspect", {
                 defaultValue: "Inspect agent",
               })}
@@ -408,22 +404,6 @@ export const AssistantMessage = memo(function AssistantMessage({
                   : undefined
               }
             />
-          )}
-
-          {!isCollapsedBlock && hasText && onInspect && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/25 mt-1 h-7 gap-1.5 rounded-md px-2 text-[11px] font-medium focus-visible:ring-2"
-              onClick={onInspect}
-              aria-label={t("chat.actions.inspect", {
-                defaultValue: "Open Inspector",
-              })}
-            >
-              <IconSearch className="size-3.5" aria-hidden="true" />
-              {t("chat.actions.inspect", { defaultValue: "Inspector" })}
-            </Button>
           )}
         </div>
       )}

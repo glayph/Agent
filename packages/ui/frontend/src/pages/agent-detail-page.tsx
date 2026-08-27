@@ -2,6 +2,8 @@ import { IconArrowLeft, IconMessageCircle2 } from "@tabler/icons-react"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
+import { PageHeader } from "@/app/layout/page-header"
+
 interface AgentMessage {
   id: string
   type?: string
@@ -23,20 +25,20 @@ export function AgentDetailPage({ id }: AgentDetailPageProps) {
 
   return (
     <div className="bg-background text-foreground animate-fade-in flex h-full flex-col">
-      <div className="border-border/40 bg-card flex items-center gap-4 border-b px-6 py-4">
-        <Link
-          to="/agents"
-          className="hover:bg-secondary rounded-lg p-1.5 transition-colors"
-        >
-          <IconArrowLeft size={18} className="text-muted-foreground" />
-        </Link>
-        <div>
-          <h2 className="text-lg font-bold tracking-tight">{id}</h2>
-          <p className="text-muted-foreground mt-0.5 text-xs">
-            Real-time inter-agent message telemetry
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title={id}
+        titleLevel={1}
+        titleExtra={
+          <Link
+            to="/agents"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-8 items-center justify-center rounded-md transition-colors"
+            aria-label="Back to agents"
+            title="Back to agents"
+          >
+            <IconArrowLeft size={18} />
+          </Link>
+        }
+      />
 
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-auto p-6">
         <div className="border-border/60 bg-card rounded-2xl border p-6 shadow-sm">

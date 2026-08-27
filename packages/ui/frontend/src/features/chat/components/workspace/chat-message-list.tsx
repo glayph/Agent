@@ -28,7 +28,6 @@ interface ChatMessageListProps {
   onDeleteMessage: (messageId: string) => void
   onForkMessage: (messageId: string) => void
   onRetryMessage: (messageId: string) => void
-  onInspectMessage?: (messageId: string) => void
   liveActivityNodes?: MonitorNode[]
   selectedActivityNodeId?: string
   onActivitySelect?: (node: MonitorNode) => void
@@ -49,7 +48,6 @@ export function ChatMessageList({
   onDeleteMessage,
   onForkMessage,
   onRetryMessage,
-  onInspectMessage,
   liveActivityNodes = [],
   selectedActivityNodeId,
   onActivitySelect,
@@ -120,7 +118,6 @@ export function ChatMessageList({
             onDelete={onDeleteMessage}
             onFork={onForkMessage}
             onRetry={onRetryMessage}
-            onInspect={onInspectMessage}
           />
         ))}
 

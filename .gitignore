@@ -84,3 +84,5 @@ test-results/
 /webui-chat-screenshots/
 /webui-sequential-chat-screenshots/
 /automation-center-multiview-redesign.png
+
+.trash/

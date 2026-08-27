@@ -503,9 +503,7 @@
    ============================================================================= */
 [data-app-shell="content"] {
   isolation: isolate;
-  /* Promote to its own GPU compositing layer */
-  transform: translateZ(0);
-  will-change: transform;
+  contain: layout style;
 }
 
 [data-app-shell="content"] [data-motion-surface="route"] > .bg-background {
@@ -899,7 +897,6 @@ select:focus-visible {
     border-color var(--motion-duration-fast) var(--motion-ease-standard),
     box-shadow var(--motion-duration-fast) var(--motion-ease-standard),
     transform var(--motion-duration-fast) var(--motion-ease-standard);
-  will-change: transform;
 }
 
 .agent-card:hover {
@@ -1149,205 +1146,7 @@ body,
   background: var(--background);
 }
 
-/* =============================================================================
-   INK & LIME — ULTRAMINIMAL PLUGIN SURFACE
-   Scoped to plugin/admin routes so chat and launcher surfaces remain stable.
-   ============================================================================= */
-[data-plugin-surface="true"] {
-  --background: #f7f7f3;
-  --foreground: #171817;
-  --card: #ffffff;
-  --card-foreground: #171817;
-  --popover: #ffffff;
-  --popover-foreground: #171817;
-  --primary: #a3e635;
-  --primary-foreground: #10120d;
-  --secondary: #eceee8;
-  --secondary-foreground: #444740;
-  --muted: #eceee8;
-  --muted-foreground: #70736c;
-  --accent: #e9f7c9;
-  --accent-foreground: #24310e;
-  --border: #dfe2d8;
-  --input: #d4d8cf;
-  --ring: #7aa816;
-  --sidebar: #f1f2ed;
-  --sidebar-foreground: #171817;
-  --sidebar-primary: #a3e635;
-  --sidebar-primary-foreground: #10120d;
-  --sidebar-accent: #e8ebe3;
-  --sidebar-accent-foreground: #171817;
-  --sidebar-border: #dfe2d8;
-  --sidebar-ring: #7aa816;
-  --success: #238636;
-  --warning: #a16207;
-  --plugin-grid: transparent;
-  --plugin-rail: 4.25rem;
-}
-
-.dark [data-plugin-surface="true"] {
-  --background: #111311;
-  --foreground: #eef0e9;
-  --card: #171a17;
-  --card-foreground: #eef0e9;
-  --popover: #171a17;
-  --popover-foreground: #eef0e9;
-  --primary: #bef264;
-  --primary-foreground: #11160b;
-  --secondary: #232823;
-  --secondary-foreground: #c5cbbd;
-  --muted: #232823;
-  --muted-foreground: #9ba394;
-  --accent: #273215;
-  --accent-foreground: #e5f6bb;
-  --border: #30372e;
-  --input: #3a4338;
-  --ring: #a3d94d;
-  --sidebar: #151815;
-  --sidebar-foreground: #eef0e9;
-  --sidebar-primary: #bef264;
-  --sidebar-primary-foreground: #11160b;
-  --sidebar-accent: #242a23;
-  --sidebar-accent-foreground: #eef0e9;
-  --sidebar-border: #30372e;
-  --sidebar-ring: #a3d94d;
-  --success: #69d17a;
-  --warning: #f0b44d;
-  --plugin-grid: transparent;
-}
-
-[data-plugin-surface="true"] > .app-background {
-  background: var(--background);
-}
-
-[data-plugin-surface="true"] > .app-background::after,
-[data-plugin-surface="true"] .app-background__mesh {
-  display: none;
-}
-
-[data-plugin-surface="true"] [data-slot="card"] {
-  border-color: var(--border);
-  border-radius: 0.7rem;
-  box-shadow: none !important;
-}
-
-[data-plugin-surface="true"] [data-slot="button"],
-[data-plugin-surface="true"] [data-slot="input"],
-[data-plugin-surface="true"] [data-slot="textarea"],
-[data-plugin-surface="true"] [data-slot="select-trigger"] {
-  border-radius: 0.45rem;
-}
-
-[data-plugin-surface="true"] .miki-sidebar {
-  background: var(--sidebar);
-  border-color: var(--sidebar-border);
-  color: var(--sidebar-foreground);
-  box-shadow: none;
-}
-
-[data-plugin-surface="true"] .miki-sidebar__header,
-[data-plugin-surface="true"] .miki-sidebar__footer {
-  border-color: var(--sidebar-border);
-}
-
-[data-plugin-surface="true"] .miki-sidebar__brand {
-  background: var(--foreground);
-  border-color: var(--foreground);
-  box-shadow: none;
-}
-
-[data-plugin-surface="true"] .miki-sidebar__brand img {
-  opacity: 0.9;
-  mix-blend-mode: screen;
-}
-
-[data-plugin-surface="true"] .miki-sidebar__nav-item {
-  color: var(--muted-foreground);
-  border-radius: 0.45rem;
-  transition:
-    background-color 140ms ease-out,
-    color 140ms ease-out,
-    transform 140ms ease-out;
-}
-
-[data-plugin-surface="true"] .miki-sidebar__nav-item:hover {
-  background: var(--sidebar-accent);
-  color: var(--foreground);
-  transform: translateY(-1px);
-}
-
-[data-plugin-surface="true"] .miki-sidebar__nav-item.active {
-  background: var(--foreground);
-  color: var(--background);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__scrim {
-  background: color-mix(in srgb, var(--foreground) 12%, transparent);
-  backdrop-filter: blur(2px);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__position {
-  filter: drop-shadow(16px 0 28px rgb(17 24 11 / 0.08));
-}
-
-[data-plugin-surface="true"] .plugin-sidebar {
-  background: var(--sidebar);
-  border-color: var(--sidebar-border);
-  color: var(--sidebar-foreground);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__header,
-[data-plugin-surface="true"] .plugin-sidebar__footer {
-  border-color: var(--sidebar-border);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__mark {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__eyebrow,
-[data-plugin-surface="true"] .plugin-sidebar__label {
-  color: var(--muted-foreground);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__close {
-  color: var(--muted-foreground);
-  transition:
-    background-color 140ms ease-out,
-    color 140ms ease-out;
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__close:hover {
-  background: var(--sidebar-accent);
-  color: var(--foreground);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__item {
-  color: var(--muted-foreground);
-  transition:
-    background-color 140ms ease-out,
-    color 140ms ease-out;
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__item:hover {
-  background: var(--sidebar-accent);
-  color: var(--foreground);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__item.active {
-  background: var(--foreground);
-  color: var(--background);
-}
-
-[data-plugin-surface="true"] .plugin-sidebar__active-dot {
-  margin-left: auto;
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 999px;
-  background: var(--primary);
-}
-
+/* Plugin catalog-only rules; shared chrome is defined once below. */
 [data-plugin-surface="true"] .plugin-page {
   color: var(--foreground);
 }
@@ -1521,60 +1320,6 @@ body,
   [data-plugin-surface="true"] .plugin-sidebar__item,
   [data-plugin-surface="true"] .plugin-tile {
     transition: none;
-  }
-}
-
-[data-plugin-surface="true"] .page-header-surface {
-  align-items: flex-end;
-  background: transparent !important;
-  border-color: var(--border);
-  height: auto;
-  min-height: 6.75rem;
-  padding: 1.75rem 1.5rem 1.25rem;
-}
-
-[data-plugin-surface="true"] .page-header-title {
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  font-size: clamp(1.35rem, 2vw, 1.8rem);
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1.05;
-}
-
-[data-plugin-surface="true"] .page-header-surface [data-slot="button"] {
-  background: transparent;
-  border-color: var(--border);
-  color: var(--muted-foreground);
-}
-
-[data-plugin-surface="true"] .page-header-surface [data-slot="button"]:hover {
-  background: var(--card);
-  color: var(--foreground);
-}
-
-[data-plugin-surface="true"] .page-header-surface kbd {
-  background: var(--muted);
-  border-color: var(--border);
-  color: var(--muted-foreground);
-}
-
-[data-plugin-surface="true"] [data-slot="card-header"] {
-  border-color: var(--border);
-}
-
-@media (min-width: 640px) {
-  [data-plugin-surface="true"] .page-header-surface {
-    padding-right: 2.25rem;
-    padding-left: 2.25rem;
-  }
-}
-
-@media (max-width: 639px) {
-  [data-plugin-surface="true"] .page-header-surface {
-    align-items: center;
-    min-height: 5.25rem;
-    padding: 1rem;
   }
 }
 
@@ -1885,4 +1630,134 @@ html.dark {
   .plugin-tile {
     transition: none;
   }
+}
+
+/* =============================================================================
+   FINAL GLOBAL SURFACE SYSTEM
+   One quiet chrome language for every authenticated route.
+   ============================================================================= */
+:root {
+  --chat-surface: #f7f7f3;
+  --chat-user-bubble: #171817;
+  --chat-user-text: #f7f7f3;
+  --chat-user-border: #171817;
+  --chat-user-shadow: none;
+  --chat-assistant-bubble: #ffffff;
+  --chat-assistant-text: #171817;
+  --chat-assistant-border: #dfe2d8;
+  --chat-assistant-shadow: none;
+  --chat-alert-text: #9f302a;
+  --chat-alert-icon: #c2413b;
+}
+
+html.dark {
+  --chat-surface: #111311;
+  --chat-user-bubble: #bef264;
+  --chat-user-text: #11160b;
+  --chat-user-border: #bef264;
+  --chat-assistant-bubble: #171a17;
+  --chat-assistant-text: #eef0e9;
+  --chat-assistant-border: #30372e;
+  --chat-alert-text: #f7aaa0;
+  --chat-alert-icon: #f17b70;
+}
+
+.miki-topbar {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground);
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.miki-topbar [data-slot="button"],
+.miki-topbar [data-sidebar="trigger"] {
+  color: var(--muted-foreground);
+  border-color: transparent;
+  background: transparent;
+}
+
+.miki-topbar [data-slot="button"]:hover,
+.miki-topbar [data-sidebar="trigger"]:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.miki-topbar [data-slot="input"] {
+  background: var(--background);
+  border-color: var(--border);
+  color: var(--foreground);
+  box-shadow: none;
+}
+
+[data-chat-bubble="assistant"] {
+  border-color: var(--chat-assistant-border) !important;
+  background: var(--chat-assistant-bubble) !important;
+  color: var(--chat-assistant-text);
+  box-shadow: var(--chat-assistant-shadow) !important;
+}
+
+[data-chat-bubble="assistant"] [data-chat-message-actions] {
+  margin-left: 0.125rem;
+}
+
+/* Message tools remain available on hover/focus; the inspector affordance is intentionally absent. */
+[data-chat-message-actions] [aria-label*="Inspect"],
+[data-chat-message-actions] [title*="Inspect"],
+[data-chat-message-actions] [aria-label*="Inspector"],
+[data-chat-message-actions] [title*="Inspector"] {
+  display: none !important;
+}
+
+[data-chat-message="assistant"]:focus-within [data-chat-message-actions],
+[data-chat-message="assistant"]:hover [data-chat-message-actions] {
+  opacity: 1;
+}
+
+/* Keep bespoke route shells visually aligned with the primary rail. */
+[data-app-shell="content"] > main > header,
+[data-app-shell="content"] > main > div > header {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+@media (max-width: 639px) {
+  .miki-topbar {
+    min-height: 3.5rem;
+    padding-inline: 0.75rem;
+  }
+
+  [data-chat-bubble="assistant"] {
+    max-width: calc(100vw - 3rem);
+  }
+}
+
+/* Brand mark uses its own ink field; never blend it away on the sidebar. */
+.miki-sidebar__brand {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  padding: 0.15rem !important;
+}
+
+.miki-sidebar__brand img {
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+}
+
+/* A single visible rule makes each page top bar line up with the rail. */
+[data-miki-topbar="true"],
+[data-chat-header="true"] {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+[data-chat-header="true"] {
+  border-top: 0;
+}
+
+/* Inspector is still available from dedicated workspace controls, not message hover. */
+[data-chat-message] [data-chat-message-actions] {
+  min-height: 0;
 }

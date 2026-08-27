@@ -434,12 +434,6 @@ export function ChatPage() {
       .slice(0, 3)
       .reverse()
   }, [monitorState.nodes, monitorState.runs])
-  const handleInspectMessage = useCallback(
-    (messageId: string) => {
-      openInspector({ chatId: activeSessionId, messageId, page: "response" })
-    },
-    [activeSessionId, openInspector],
-  )
   const handleWorkingClick = useCallback(() => {
     openInspector({ chatId: activeSessionId, page: "overview" })
   }, [activeSessionId, openInspector])
@@ -1129,7 +1123,6 @@ export function ChatPage() {
             onDeleteMessage={deleteMessage}
             onForkMessage={handleForkMessage}
             onRetryMessage={handleRetryMessage}
-            onInspectMessage={handleInspectMessage}
           />
         }
         composer={

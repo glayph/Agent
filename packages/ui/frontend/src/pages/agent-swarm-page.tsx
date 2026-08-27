@@ -1,6 +1,8 @@
 import { IconActivityHeartbeat } from "@tabler/icons-react"
 import { useEffect, useState } from "react"
 
+import { PageHeader } from "@/app/layout/page-header"
+
 interface SwarmStatus {
   status?: string
   active_agents?: number
@@ -27,44 +29,47 @@ export function AgentSwarmPage() {
   }, [])
 
   return (
-    <div className="animate-fade-in mx-auto max-w-6xl p-6">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Swarm Telemetry</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Real-time status and telemetry from the active specialist swarm.
-          </p>
-        </div>
-        {status?.status === "healthy" && (
-          <div className="flex items-center gap-2 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-semibold tracking-wider text-green-500 uppercase">
-            <IconActivityHeartbeat size={14} />
-            Swarm Online
-          </div>
-        )}
-      </div>
+    <div className="bg-background flex h-full min-h-0 flex-col">
+      <PageHeader
+        title="Swarm Telemetry"
+        titleLevel={1}
+        titleExtra={
+          status?.status === "healthy" ? (
+            <span className="text-success inline-flex items-center gap-2 text-xs font-semibold tracking-[0.14em] uppercase">
+              <IconActivityHeartbeat size={14} />
+              Online
+            </span>
+          ) : undefined
+        }
+      />
+      <div className="animate-fade-in mx-auto w-full max-w-6xl flex-1 overflow-y-auto p-6">
+        <p className="text-muted-foreground mb-8 text-sm">
+          Real-time status and telemetry from the active specialist swarm.
+        </p>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="swarm-metric">
-          <span className="swarm-metric__label">Active Specialists</span>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="swarm-metric__value">
-              {status?.active_agents ?? 0}
-            </span>
-            <span className="text-muted-foreground text-xs font-medium">
-              Nodes online
-            </span>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="swarm-metric">
+            <span className="swarm-metric__label">Active Specialists</span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="swarm-metric__value">
+                {status?.active_agents ?? 0}
+              </span>
+              <span className="text-muted-foreground text-xs font-medium">
+                Nodes online
+              </span>
+            </div>
           </div>
-        </div>
 
-        <div className="swarm-metric">
-          <span className="swarm-metric__label">Pending Tasks</span>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="swarm-metric__value">
-              {status?.pending_tasks ?? 0}
-            </span>
-            <span className="text-muted-foreground text-xs font-medium">
-              In queue
-            </span>
+          <div className="swarm-metric">
+            <span className="swarm-metric__label">Pending Tasks</span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="swarm-metric__value">
+                {status?.pending_tasks ?? 0}
+              </span>
+              <span className="text-muted-foreground text-xs font-medium">
+                In queue
+              </span>
+            </div>
           </div>
         </div>
       </div>

@@ -17,7 +17,6 @@ interface ChatMessageProps {
   onDelete: (messageId: string) => void
   onFork: (messageId: string) => void
   onRetry: (messageId: string) => void
-  onInspect?: (messageId: string) => void
 }
 
 export function ChatMessage({
@@ -27,7 +26,6 @@ export function ChatMessage({
   onDelete,
   onFork,
   onRetry,
-  onInspect,
 }: ChatMessageProps) {
   return (
     <article
@@ -59,7 +57,6 @@ export function ChatMessage({
             onDelete={() => onDelete(message.id)}
             onFork={() => onFork(message.id)}
             onRetry={() => onRetry(message.id)}
-            onInspect={() => onInspect?.(message.id)}
           />
         </Suspense>
       ) : (

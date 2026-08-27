@@ -2383,7 +2383,10 @@ export function DrivePage() {
 
   return (
     <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="border-border bg-card/80 flex h-14 shrink-0 items-center gap-2 border-b px-3">
+      <header
+        data-miki-topbar="true"
+        className="miki-topbar border-border bg-background/96 flex h-14 shrink-0 items-center gap-2 border-b px-3"
+      >
         <SidebarTrigger
           className="size-8 shrink-0 rounded-md md:hidden"
           aria-label={t("navigation.toggle_sidebar")}

@@ -5044,10 +5044,13 @@ export function createLauncherCompatRouter({
       saveState();
     }
     const providerOptions = await launcherProviderOptions(paths);
-    const models = state.models.map((model, index) =>
+    const normalizedStateModels = state.models.map((model) =>
+      normalizeStoredModel(model, providerOptions),
+    );
+    const models = normalizedStateModels.map((model, index) =>
       modelInfoFromStored(model, index, paths.configDir, providerOptions),
     );
-    const activeStoredModel = state.models.find(
+    const activeStoredModel = normalizedStateModels.find(
       (model) => runtimeModelName(model) === settings.defaultModel,
     );
     res.json({
