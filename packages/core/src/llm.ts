@@ -36,11 +36,12 @@ export async function achatCompletion(
   messages: MikiProviderMessage[],
   extra?: Record<string, unknown>,
   modelOverride?: string,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   const model =
     modelOverride?.trim() ||
     (await import("@miki/config")).settings.defaultModel;
-  return providerRegistry.complete(model, messages, extra);
+  return providerRegistry.complete(model, messages, { extra, signal });
 }
 
 export async function supportsAudioModel(

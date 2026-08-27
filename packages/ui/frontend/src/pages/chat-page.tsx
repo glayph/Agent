@@ -23,11 +23,7 @@ import { Composer } from "@/features/chat/components/workspace/composer"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
 import { WorkspaceHeader } from "@/features/chat/components/workspace/workspace-header"
 import { WorkspaceShell } from "@/features/chat/components/workspace/workspace-shell"
-import {
-  type MonitorNode,
-  monitorAtom,
-  selectMonitorNode,
-} from "@/features/monitor/store"
+import { monitorAtom, selectMonitorNode } from "@/features/monitor/store"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useMikiChat } from "@/hooks/use-miki-chat"
@@ -437,18 +433,6 @@ export function ChatPage() {
   const handleWorkingClick = useCallback(() => {
     openInspector({ chatId: activeSessionId, page: "overview" })
   }, [activeSessionId, openInspector])
-  const handleActivitySelect = useCallback(
-    (node: MonitorNode) => {
-      selectMonitorNode(node.id)
-      openInspector({
-        chatId: activeSessionId,
-        runId: node.runId,
-        nodeId: node.id,
-        page: "work",
-      })
-    },
-    [activeSessionId, openInspector],
-  )
   const retryableMessageIds = useMemo(
     () => getRetryableMessageIds(messages),
     [messages],
@@ -521,6 +505,7 @@ export function ChatPage() {
 
   const {
     defaultModelName,
+    defaultModelId,
     hasAvailableModels,
     apiKeyModels,
     oauthModels,
@@ -549,7 +534,7 @@ export function ChatPage() {
           blob,
           filename,
           durationMs,
-          defaultModelName,
+          defaultModelId,
         )
         let sent: boolean
         if (result.mode === "local") {
@@ -559,7 +544,7 @@ export function ChatPage() {
           }
           sent = await sendMessage({
             content: transcript,
-            requestedModel: defaultModelName,
+            requestedModel: defaultModelId,
             voice: {
               source,
               provider: result.provider,
@@ -574,7 +559,7 @@ export function ChatPage() {
           const cloudResult = result as VoiceCloudAudioResult
           sent = await sendMessage({
             content: "",
-            requestedModel: defaultModelName,
+            requestedModel: defaultModelId,
             voice: {
               source,
               provider: "cloud",
@@ -607,7 +592,7 @@ export function ChatPage() {
         setVoiceElapsedMs(0)
       }
     },
-    [defaultModelName, sendMessage, t],
+    [defaultModelId, defaultModelName, sendMessage, t],
   )
 
   const handleStopVoice = useCallback(() => {
@@ -873,7 +858,7 @@ export function ChatPage() {
       await sendMessage({
         content: input,
         attachments,
-        requestedModel: defaultModelName,
+        requestedModel: defaultModelId,
       })
     ) {
       setInput("")
@@ -1114,9 +1099,6 @@ export function ChatPage() {
             defaultModelName={defaultModelName}
             connectionState={connectionState}
             retryableMessageIds={retryableMessageIds}
-            liveActivityNodes={liveActivityNodes}
-            selectedActivityNodeId={monitorState.selectedNodeId}
-            onActivitySelect={handleActivitySelect}
             scrollRef={scrollRef}
             onScroll={handleScroll}
             onEditMessage={handleEditMessage}

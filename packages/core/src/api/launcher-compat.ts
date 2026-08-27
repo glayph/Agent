@@ -351,11 +351,18 @@ interface CompatState {
     port: number;
     public: boolean;
     allowed_cidrs: string[];
+    /** 0 disables the countdown and uses the persistent cookie lifetime. */
+    session_timeout_minutes?: number;
   };
   autostart?: {
     enabled: boolean;
   };
   auth?: StoredAuth;
+  /** Persisted as hashes only; raw HttpOnly session tokens never enter launcher state. */
+  auth_sessions?: Array<{
+    token_hash: string;
+    expires_at: number | null;
+  }>;
   models?: StoredModel[];
   model_catalog?: CatalogEntry[];
   tool_state?: Record<string, boolean>;
@@ -370,9 +377,10 @@ interface CompatState {
 
 const AUTH_COOKIE = "Miki_dashboard_session";
 const AUTH_COOKIE_MAX_AGE_SECONDS = 31 * 24 * 60 * 60;
+const MAX_SESSION_TIMEOUT_MINUTES = 31 * 24 * 60;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAILED_LOGINS = 8;
-const activeSessions = new Map<string, number>();
+const activeSessions = new Map<string, number | null>();
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 
 export const SUPPORTED_CHANNELS: SupportedChannelMetadata[] =
@@ -1608,12 +1616,28 @@ function readCookie(req: Request, name: string): string {
   return readCookieHeader(req.headers.cookie, name);
 }
 
-function setSessionCookie(res: Response, token: string): void {
+function setSessionCookie(
+  res: Response,
+  token: string,
+  maxAgeSeconds = AUTH_COOKIE_MAX_AGE_SECONDS,
+): void {
   const secure = process.env["NODE_ENV"] === "production" ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
-    `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_COOKIE_MAX_AGE_SECONDS}${secure}`,
+    `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.max(1, Math.floor(maxAgeSeconds))}${secure}`,
   );
+}
+
+function configuredSessionTimeoutMinutes(state: CompatState): number {
+  const value = Number(state.launcher_config?.session_timeout_minutes ?? 0);
+  return Number.isInteger(value) && value > 0
+    ? Math.min(value, MAX_SESSION_TIMEOUT_MINUTES)
+    : 0;
+}
+
+function sessionLifetimeSeconds(state: CompatState): number {
+  const minutes = configuredSessionTimeoutMinutes(state);
+  return minutes > 0 ? minutes * 60 : AUTH_COOKIE_MAX_AGE_SECONDS;
 }
 
 function clearSessionCookie(res: Response): void {
@@ -1621,6 +1645,10 @@ function clearSessionCookie(res: Response): void {
     "Set-Cookie",
     `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
   );
+}
+
+function hashSessionToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function hashPassword(password: string, salt: string): string {
@@ -1639,9 +1667,11 @@ function verifyPassword(password: string, auth?: StoredAuth): boolean {
 
 function isSessionTokenAuthenticated(token: string): boolean {
   if (!token) return false;
-  const expiresAt = activeSessions.get(token);
-  if (!expiresAt || expiresAt < Date.now()) {
-    activeSessions.delete(token);
+  const key = hashSessionToken(token);
+  if (!activeSessions.has(key)) return false;
+  const expiresAt = activeSessions.get(key);
+  if (expiresAt !== null && expiresAt !== undefined && expiresAt < Date.now()) {
+    activeSessions.delete(key);
     return false;
   }
   return true;
@@ -2263,6 +2293,10 @@ function modelInfoFromStored(
     model_name: modelName,
     provider,
     model: stored.model || modelBodyName(modelName, provider),
+    // Keep the friendly UI label separate from the provider-facing identity.
+    // Chat requests must use this canonical value so a local alias such as
+    // `lfm2.5-local-1.2b` is never sent to the provider registry directly.
+    runtime_model: runtimeModelName(stored),
     api_base: stored.api_base ?? option.default_api_base,
     api_key: maskSecret(apiKey),
     api_key_set: Boolean(apiKey),
@@ -3010,6 +3044,25 @@ export function createLauncherCompatRouter({
     });
 
   let state = readJsonFile<CompatState>(statePath, {});
+  activeSessions.clear();
+  if (Array.isArray(state.auth_sessions)) {
+    for (const record of state.auth_sessions) {
+      if (
+        typeof record?.token_hash !== "string" ||
+        !/^[a-f0-9]{64}$/.test(record.token_hash)
+      ) {
+        continue;
+      }
+      const expiresAt = record.expires_at;
+      if (
+        expiresAt !== null &&
+        (!Number.isFinite(expiresAt) || expiresAt < Date.now())
+      ) {
+        continue;
+      }
+      activeSessions.set(record.token_hash, expiresAt);
+    }
+  }
   const runtimeConfig = runtimeConfigFromFiles(paths);
   const mergedInitialConfig = stripChannelAliases(
     mergePatch(
@@ -3047,10 +3100,13 @@ export function createLauncherCompatRouter({
     port: positiveIntFromEnv("GATEWAY_PORT", 18800),
     public: process.env["GATEWAY_HOST"] === "0.0.0.0",
     allowed_cidrs: [],
+    session_timeout_minutes: 0,
   };
+  state.launcher_config.session_timeout_minutes = configuredSessionTimeoutMinutes(state);
   if (!state.models || state.models.length === 0) {
     state.models = defaultModelsFromSettings();
   }
+  configureLocalModels(state.models);
   state.model_catalog ??= [];
   state.tool_state ??= {};
   // Import disabled tool state from tools.yaml so manual disables survive restart
@@ -3087,6 +3143,9 @@ export function createLauncherCompatRouter({
     );
     if (isRecord(state.config.web_search))
       state.web_search = state.config.web_search;
+    state.auth_sessions = Array.from(activeSessions.entries()).map(
+      ([token_hash, expires_at]) => ({ token_hash, expires_at }),
+    );
     writeJsonFile(statePath, state);
   };
 
@@ -4136,11 +4195,19 @@ export function createLauncherCompatRouter({
     next();
   });
 
-  const authStatus = (req: Request) => {
+  const authStatus = (req: Request, res: Response) => {
     const initialized = isAuthInitialized(state.auth);
+    const token = readCookie(req, AUTH_COOKIE);
+    const authenticated = isSessionTokenAuthenticated(token);
+    if (token && !authenticated) clearSessionCookie(res);
+    const sessionKey = token ? hashSessionToken(token) : "";
+    const expiresAt = authenticated ? activeSessions.get(sessionKey) : undefined;
+    const timeoutMinutes = configuredSessionTimeoutMinutes(state);
     return {
       initialized,
-      authenticated: isAuthenticated(req),
+      authenticated,
+      session_timeout_minutes: timeoutMinutes,
+      ...(timeoutMinutes > 0 && expiresAt ? { session_expires_at: expiresAt } : {}),
     };
   };
 
@@ -4178,7 +4245,7 @@ export function createLauncherCompatRouter({
   };
 
   const handleStatus = (req: Request, res: Response) =>
-    res.json(authStatus(req));
+    res.json(authStatus(req, res));
 
   const handleSetup = (req: Request, res: Response) => {
     if (!canRunDashboardSetup(state.auth, isAuthenticated(req))) {
@@ -4227,16 +4294,24 @@ export function createLauncherCompatRouter({
       return res.status(401).json({ error: "Invalid password" });
     }
     const token = crypto.randomBytes(32).toString("base64url");
-    activeSessions.set(token, Date.now() + AUTH_COOKIE_MAX_AGE_SECONDS * 1000);
+    const lifetimeSeconds = sessionLifetimeSeconds(state);
+    activeSessions.set(
+      hashSessionToken(token),
+      configuredSessionTimeoutMinutes(state) > 0
+        ? Date.now() + lifetimeSeconds * 1000
+        : null,
+    );
     loginFailures.delete(loginFailureKey(req));
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, lifetimeSeconds);
+    saveState();
     return res.json({ status: "ok" });
   };
 
   const handleLogout = (req: Request, res: Response) => {
     const token = readCookie(req, AUTH_COOKIE);
-    if (token) activeSessions.delete(token);
+    if (token) activeSessions.delete(hashSessionToken(token));
     clearSessionCookie(res);
+    saveState();
     return res.json({ status: "ok" });
   };
 
@@ -4255,8 +4330,15 @@ export function createLauncherCompatRouter({
       return res.status(401).json({ error: "Unauthorized" });
     }
     const token = crypto.randomBytes(32).toString("base64url");
-    activeSessions.set(token, Date.now() + AUTH_COOKIE_MAX_AGE_SECONDS * 1000);
-    setSessionCookie(res, token);
+    const lifetimeSeconds = sessionLifetimeSeconds(state);
+    activeSessions.set(
+      hashSessionToken(token),
+      configuredSessionTimeoutMinutes(state) > 0
+        ? Date.now() + lifetimeSeconds * 1000
+        : null,
+    );
+    setSessionCookie(res, token, lifetimeSeconds);
+    saveState();
     res.json({ status: "ok" });
   });
 
@@ -6807,6 +6889,7 @@ export function createLauncherCompatRouter({
 
   router.put("/system/launcher-config", (req, res) => {
     const port = Number(req.body?.port);
+    const requestedTimeout = Number(req.body?.session_timeout_minutes ?? 0);
     const allowed = normalizeAllowedCidrs(req.body?.allowed_cidrs);
     const invalidCidrs = allowed.filter((cidr) => !isValidCidr(cidr));
     if (invalidCidrs.length > 0) {
@@ -6820,11 +6903,27 @@ export function createLauncherCompatRouter({
         .status(400)
         .json({ error: "port must be between 1 and 65535" });
     }
+    if (
+      !Number.isInteger(requestedTimeout) ||
+      requestedTimeout < 0 ||
+      requestedTimeout > MAX_SESSION_TIMEOUT_MINUTES
+    ) {
+      return res.status(400).json({
+        error: `session_timeout_minutes must be 0 or an integer between 1 and ${MAX_SESSION_TIMEOUT_MINUTES}`,
+      });
+    }
+    const previousTimeout = configuredSessionTimeoutMinutes(state);
     state.launcher_config = {
       port,
       public: req.body?.public === true,
       allowed_cidrs: allowed,
+      session_timeout_minutes: requestedTimeout,
     };
+    // Changing the policy invalidates existing sessions so every new session
+    // receives the newly configured lifetime. Ordinary launcher edits keep
+    // the current authenticated dashboard session alive.
+    if (previousTimeout !== requestedTimeout) activeSessions.clear();
+    saveState();
     updateEnvVar(paths, "GATEWAY_PORT", String(port));
     updateEnvVar(
       paths,

@@ -288,6 +288,81 @@ describe("launcher compatibility auth guards", () => {
   });
 });
 
+describe("dashboard session persistence and timeout policy", () => {
+  it("persists hashed sessions, keeps default sessions without countdown, and enforces finite timeout", async () => {
+    await withLauncherCompatServer(async (request, workspaceDir) => {
+      const initial = await request("/auth/status").then((res) => res.json())
+      expect(initial).toMatchObject({
+        initialized: true,
+        authenticated: true,
+        session_timeout_minutes: 0,
+      })
+      expect(initial.session_expires_at).toBeUndefined()
+
+      const statePath = path.join(
+        workspaceDir,
+        "data",
+        "launcher-state.json",
+      )
+      const persisted = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+        auth_sessions?: Array<{ token_hash?: string; expires_at?: number | null }>
+      }
+      expect(persisted.auth_sessions).toHaveLength(1)
+      expect(persisted.auth_sessions?.[0]?.token_hash).toMatch(/^[a-f0-9]{64}$/)
+      expect(persisted.auth_sessions?.[0]?.expires_at).toBeNull()
+
+      const malformed = await request("/system/launcher-config", {
+        method: "PUT",
+        body: JSON.stringify({
+          port: 18800,
+          public: false,
+          allowed_cidrs: [],
+          session_timeout_minutes: "ten",
+        }),
+      })
+      expect(malformed.status).toBe(400)
+
+      const finite = await request("/system/launcher-config", {
+        method: "PUT",
+        body: JSON.stringify({
+          port: 18800,
+          public: false,
+          allowed_cidrs: [],
+          session_timeout_minutes: 1,
+        }),
+      })
+      expect(finite.status).toBe(200)
+      expect((await request("/auth/status")).status).toBe(200)
+      expect((await request("/auth/status")).json()).resolves.toMatchObject({
+        initialized: true,
+        authenticated: false,
+        session_timeout_minutes: 1,
+      })
+
+      const relogin = await request("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ password: "password123" }),
+      })
+      expect(relogin.status).toBe(200)
+      const finiteStatus = await request("/auth/status").then((res) => res.json())
+      expect(finiteStatus).toMatchObject({
+        initialized: true,
+        authenticated: true,
+        session_timeout_minutes: 1,
+      })
+      expect(finiteStatus.session_expires_at).toBeGreaterThan(Date.now())
+
+      expect(
+        (await request("/auth/logout", { method: "POST" })).status,
+      ).toBe(200)
+      expect((await request("/auth/status")).json()).resolves.toMatchObject({
+        initialized: true,
+        authenticated: false,
+      })
+    })
+  })
+})
+
 describe("dashboard login throttling behind the gateway proxy", () => {
   // Mirrors production: core is only ever reached through the gateway over
   // 127.0.0.1 (packages/config/src/config.ts coreHost default), and the

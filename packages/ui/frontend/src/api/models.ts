@@ -46,6 +46,8 @@ export interface ModelInfo {
   model_name: string
   provider?: string
   model: string
+  /** Provider-facing canonical identity; model_name remains the UI label. */
+  runtime_model?: string
   api_base?: string
   api_key: string
   api_key_set?: boolean

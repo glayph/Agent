@@ -73,6 +73,10 @@ let managedProcess: ChildProcess | undefined;
 let managedKey = "";
 let managedBaseUrl = "";
 let managedError = "";
+// A server started by the model manager is external to this core process. Keep
+// the last successful health probe so synchronous provider readiness checks do
+// not incorrectly report that healthy loopback runtime as unavailable.
+let externalReadyBaseUrl = "";
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
@@ -262,6 +266,34 @@ function packagedExecutable(): string | undefined {
       LOCAL_RUNTIME_PLATFORM,
       LOCAL_RUNTIME_EXECUTABLE,
     ),
+    // Current plugin-owned runtime location. Keep the legacy llm/local paths
+    // above for packaged and older installations.
+    path.join(
+      runtimeRoot,
+      "packages",
+      "core",
+      "src",
+      "plugins",
+      "providers",
+      "llama-cpp",
+      "runtime",
+      "native",
+      LOCAL_RUNTIME_PLATFORM,
+      LOCAL_RUNTIME_EXECUTABLE,
+    ),
+    path.join(
+      workspaceRoot,
+      "packages",
+      "core",
+      "src",
+      "plugins",
+      "providers",
+      "llama-cpp",
+      "runtime",
+      "native",
+      LOCAL_RUNTIME_PLATFORM,
+      LOCAL_RUNTIME_EXECUTABLE,
+    ),
   ];
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
@@ -393,6 +425,7 @@ export async function ensureLocalRuntime(
       : "";
   try {
     await waitForReady(baseUrl, 1000);
+    externalReadyBaseUrl = baseUrl;
     const managedConfigChanged = Boolean(
       managedProcess && managedBaseUrl === baseUrl && managedKey !== desiredKey,
     );
@@ -412,6 +445,9 @@ export async function ensureLocalRuntime(
       };
     }
   } catch {
+    // The previous health result must not survive a failed live probe. Otherwise
+    // the dashboard can report ready while the loopback server is gone.
+    externalReadyBaseUrl = "";
     // A configured external loopback server is allowed, but managed startup is
     // attempted only when a model path and executable are explicitly supplied.
   }
@@ -461,6 +497,7 @@ export async function ensureLocalRuntime(
   }
   try {
     await waitForReady(baseUrl);
+    externalReadyBaseUrl = baseUrl;
   } catch (error) {
     managedError = error instanceof Error ? error.message : String(error);
     stopManagedProcess();
@@ -479,7 +516,8 @@ export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
   const baseUrl = localBaseUrl(entry);
   return {
     provider: "llama.cpp",
-    ready: Boolean(managedProcess) || Boolean(process.env.MIKI_LLAMA_BASE_URL),
+    ready:
+      Boolean(managedProcess) || externalReadyBaseUrl === baseUrl,
     configured: Boolean(
       entry ||
       process.env.MIKI_LLAMA_BASE_URL ||

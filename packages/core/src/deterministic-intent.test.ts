@@ -35,6 +35,27 @@ describe("deterministic intent safeguards", () => {
     });
   });
 
+  it("extracts backtick-quoted file paths and JSON content from a UI prompt", () => {
+    expect(
+      detectDeterministicIntent(
+        'Create a new folder named `agentic-eval-smoke-final` and create exactly these two files inside it: `agentic-eval-smoke-final/README.md` containing exactly `Agent Miki tool execution verified.` and `agentic-eval-smoke-final/result.json` containing exactly `{"status":"verified","tests":2}`. Then read both files back and verify their exact contents.',
+      ),
+    ).toEqual({
+      kind: "file_workflow",
+      files: [
+        {
+          path: "agentic-eval-smoke-final/README.md",
+          content: "Agent Miki tool execution verified.",
+        },
+        {
+          path: "agentic-eval-smoke-final/result.json",
+          content: '{"status":"verified","tests":2}',
+        },
+      ],
+      verificationRequested: true,
+    });
+  });
+
   it("answers standalone English and Bengali arithmetic deterministically", () => {
     expect(detectDeterministicIntent("What is 2 + 2?")).toEqual({
       kind: "math",

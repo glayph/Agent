@@ -233,6 +233,12 @@ export function shouldShowAssistantMessage(
   visibility: AssistantDetailVisibility,
   kind: AssistantDetailMessageKind,
 ): boolean {
+  // Action updates are runtime progress text, not model-generated answers.
+  // Keep normal assistant content—including genuine error messages—visible.
+  if (kind === "action_update") {
+    return false
+  }
+
   if (kind !== "thought" && kind !== "tool_calls") {
     return true
   }

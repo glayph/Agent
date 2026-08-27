@@ -14,9 +14,9 @@
 
 Agent Miki-এর বর্তমান runtime সফলভাবে চালু হয়েছে এবং gateway, core backend, memory service ও dashboard end-to-end smoke test পাস করেছে। Authenticated dashboard-এর login, workspace, Drive, Hub, Agent Control, Runs, plugin navigation, plugin catalog, Models, Credentials, Channels, Skills, Tools, Memory, Configuration, Automation, Health, Logs এবং chat error state visualভাবে পরীক্ষা করা হয়েছে। মোট ২২টি screenshot `docs/screenshots/`-এ সংরক্ষিত আছে; screenshot index `docs/screenshot-index.md`-এ দেওয়া হয়েছে।
 
-বর্তমান run-এ model-independent অংশ কার্যকর প্রমাণিত হয়েছে। Repository test suite-এ core-এর ৫৮৬টি এবং installer-এর ৫১টি test পাস করেছে। তবে full native local-model build সম্পূর্ণ হয়নি, কারণ clone-এ platform-native llama.cpp source bundle নেই। Gemini smoke test-এ ব্যবহৃত credential provider-এর পক্ষ থেকে `HTTP 400: Invalid Auth key` ফেরত দিয়েছে। ফলে Gemini বা local LFM inference সফল বলে দাবি করা যাবে না।
+প্রথম Web UI run-এ `/api/goals` route অনুপস্থিত এবং local model readiness false—এই দুই blocking সমস্যা ধরা পড়েছিল। Remediation-এ bundled llama-server discovery, canonical model routing, launcher model hydration, external local-runtime health synchronization, explicit-model routing এবং exact quoted multi-file parser ঠিক করা হয়েছে। Final Web UI run-এ local `lfm2.5-local-1.2b` model selected অবস্থায় `file_write` একবার এবং `file_read` দুইবার **Completed** হয়েছে; exact দুইটি artifact তৈরি ও যাচাই হয়েছে। Core suite-এ ৫৮৭টি test এবং frontend build পাস করেছে। Gemini credential এখনো configured নয়।
 
-> **সঠিক সিদ্ধান্ত:** Agent Miki-এর runtime foundation, dashboard, guarded tools, memory UI, automation UI, health/observability এবং CLI management কার্যকর। Actual AI answer generation, local LFM inference, external channel delivery এবং ২৪/৭ target-host service recovery এখনো সম্পূর্ণভাবে certify করা যায়নি।
+> **সংশোধিত সিদ্ধান্ত:** Agent Miki-এর runtime foundation, dashboard, guarded tools, memory UI, automation UI, health/observability, local model routing এবং Web UI-ভিত্তিক deterministic agentic file execution এখন প্রমাণিত। Local model-এর সাধারণ free-form reasoning quality সীমিত থাকতে পারে; Gemini/cloud answer generation, external channel delivery এবং ২৪/৭ target-host service recovery এই pass-এ certify করা হয়নি।
 
 ## বর্তমান run-এর verified ফলাফল
 
@@ -28,15 +28,16 @@ Agent Miki-এর বর্তমান runtime সফলভাবে চাল�
 | Dashboard login | সফল | `01-setup.webp`, `02-login.webp`, `03-workspace.webp` |
 | Core health | HTTP 200 | Runtime probe |
 | CLI version/help/doctor/install preparation | সফল | `docs/evidence/cli-capability.log` |
-| Workspace test suite | ৫৮৬/৫৮৬ core এবং ৫১/৫১ installer test পাস | `docs/evidence/cli-model-tests.log` |
+| Workspace test suite | ৫৮৭/৫৮৭ core test পাস; deterministic intent test ৮/৮ | Regression output ও Jest report |
 | Short soak | ৩টি health check পাস; metrics endpoint auth ছাড়া 401 | `docs/evidence/soak-report.json` |
 | Skills UI | ৩৯টি discovered skill দৃশ্যমান | `13-skills.webp` |
 | Plugin catalog | Provider, channel ও capability inventory দৃশ্যমান | `09-plugin-catalog.webp` |
 | Memory UI | Search, reindex, region filters ও zero-state সঠিকভাবে দৃশ্যমান | `15-memory.webp` |
 | Health/doctor UI | Healthy state, doctor pass, zero secret findings দৃশ্যমান | `18-health.webp` |
-| Chat execution | Request accepted; missing/rejected provider honestভাবে দেখানো | `21-chat-provider-error.webp` |
+| Chat execution | Local model request accepted; deterministic tool workflow executed | Web UI live run: `File Write — Completed`, `File Read — Completed` ×2 |
 | Gemini model smoke | ব্যর্থ; provider বলেছে `Invalid Auth key` | `docs/evidence/verification-summary.txt` |
-| Local LFM model | চালানো যায়নি; GGUF/model runtime configured নয় | Model status ও full-build error |
+| Local LFM model | configured, reachable এবং `local_runtime.ready:true` | Web UI `/api/models` response ও final run |
+| Exact file workflow | সফল; README.md ও result.json exact content সহ ২টি file, no extra file | `agentic-eval-smoke-patched/` ও Web UI evidence |
 
 ## Agent Miki কী ধরনের কাজ করতে পারে
 
@@ -70,7 +71,7 @@ Skills page-এ ৩৯টি discovered skill, search/filter/sort ও view contr
 
 ### ৮. Models ও provider management
 
-Models ও Credentials page-এ local llama.cpp এবং Gemini provider management, API-key edit, default selection, local model configuration এবং voice configuration UI দৃশ্যমান। Runtime চারটি model entry দেখিয়েছে, কিন্তু সবগুলো unconfigured। Gemini smoke test invalid key-তে থেমেছে; local LFM-এর জন্য GGUF model path এবং native llama-server প্রয়োজন। Provider readiness না থাকলে chat UI কাজ না করার কারণ স্পষ্টভাবে দেখিয়েছে।
+Models ও Credentials page-এ local llama.cpp এবং Gemini provider management, API-key edit, default selection, local model configuration এবং voice configuration UI দৃশ্যমান। Remediation-এর পরে local LFM model path, bundled executable এবং llama-server reachable হিসেবে registered; `/api/models` response-এ `available:true`, `configured:true`, `executable_available:true` এবং `local_runtime.ready:true` দেখা গেছে। Gemini smoke test এখনো invalid/missing key-এ থেমেছে।
 
 ### ৯. Linux/Windows deployment foundation
 
@@ -86,7 +87,7 @@ Health page doctor, backup, secret scan, watchdog, queue, delivery recovery, pen
 |---|---|---|---|
 | উচ্চ | Native llama.cpp source bundle অনুপস্থিত | `npm run build:all` এবং full `npm run verify` ব্যর্থ | Linux/Windows compatible source বা prebuilt checksum-pinned executable দিন |
 | উচ্চ | Gemini credential invalid | Cloud model answer ও agentic task execution certify করা যায়নি | Valid Gemini key dashboard-এর protected flow-তে configure করুন |
-| উচ্চ | Local LFM GGUF configured নয় | Local inference quality/latency যাচাই করা যায়নি | Approved LFM GGUF install/register/start করে health test চালান |
+| মাঝারি | Local LFM free-form quality/latency সীমিতভাবে পরীক্ষা হয়েছে | Deterministic tool workflow certified; broad autonomous coding quality এখনও uncertified | দীর্ঘতর multi-turn benchmark ও latency profile চালান |
 | উচ্চ | Skill discovered বনাম callable contract gap | Metadata skill থাকলেও executable invocation অনিশ্চিত | `loaded/callable` আলাদা status ও typed adapter যোগ করুন |
 | মাঝারি | Prometheus endpoint auth-protected | Unauthenticated soak metrics সংগ্রহ করতে পারেনি | Session/API-key authenticated soak run চালান |
 | মাঝারি | Windows target-host evidence নেই | PowerShell, Task Scheduler ও reboot recovery uncertified | বাস্তব Windows host-এ acceptance matrix চালান |
@@ -97,11 +98,19 @@ Health page doctor, backup, secret scan, watchdog, queue, delivery recovery, pen
 
 সব visual screenshot repository-এর `docs/screenshots/` directory-তে আছে। Login, dashboard, প্রতিটি প্রধান page, plugin navigation, provider state, health/logs এবং provider-error chat state আলাদা file হিসেবে রাখা হয়েছে। সূচিপত্র `docs/screenshot-index.md`।
 
+## Remediation এবং final Web UI evidence
+
+প্রথমে local model-এর friendly display label chat request-এ চলে যাচ্ছিল, ফলে canonical `llama.cpp/...` model resolve হচ্ছিল না। এরপর bundled executable path, launcher model hydration এবং externally started llama-server readiness—এই পৃথক root cause-গুলো ঠিক করা হয়েছে।
+
+Final Web UI task-এ নতুন `agentic-eval-smoke-patched` folder-এ exact `README.md` ও `result.json` লেখা, দুই file read-back করা এবং no-extra-file যাচাই করা হয়। UI-তে `File Write — Completed`, `File Read — Completed` দুইবার এবং উভয় artifact link দেখা গেছে। Filesystem verification-এ file list কেবল `README.md`, `result.json`; count `2`; exact bytes/content match করেছে।
+
+Parser regression fix-এর পরে deterministic-intent suite-এর ৮/৮ test পাস করেছে। Final full core suite-এ ১০০টি suite-এর ৫৮৭টি test পাস করেছে এবং frontend production build সফল হয়েছে।
+
 ## Final review
 
 এই verification pass-এ কোনো credential, token, password বা private response report/doc/screenshot-এর মধ্যে লেখা হয়নি। Model credential transient environment variable হিসেবে ব্যবহৃত হলেও output-এ key প্রকাশিত হয়নি। কোনো external side effect ঘটেনি। Full build failure এবং Gemini invalid-key failure ইচ্ছাকৃতভাবে failure হিসেবে রিপোর্ট করা হয়েছে; এগুলোকে সফলতা হিসেবে গণ্য করা হয়নি।
 
-বর্তমান evidence অনুযায়ী Agent Miki একটি কার্যকর local-first agent workspace foundation, কিন্তু এটি এখনো valid model configuration এবং target-host ২৪/৭ acceptance evidence ছাড়া সম্পূর্ণ autonomous production agent হিসেবে certify করা যাবে না।
+বর্তমান evidence অনুযায়ী Agent Miki-এর goal interpretation, deterministic planning/tool execution, artifact verification এবং local LFM routing এই scoped Web UI benchmark-এ সফলভাবে পুনঃযাচাই হয়েছে। এটি unrestricted production autonomy, cloud-provider reasoning quality, external side effects বা target-host ২৪/৭ reliability-এর পূর্ণ certification নয়।
 
 ## References
 

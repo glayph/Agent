@@ -277,7 +277,9 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
           provider,
           apiKey,
           request.timeoutMs,
-        ).chat.completions.create(requestBody as never);
+        ).chat.completions.create(requestBody as never, {
+          signal: request.signal,
+        });
       } catch (error) {
         lastError = error;
         const message = errorMessage(error).toLowerCase();

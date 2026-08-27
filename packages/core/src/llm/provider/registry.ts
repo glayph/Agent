@@ -123,7 +123,11 @@ export class ProviderRegistry {
   async complete(
     model: string,
     messages: MikiProviderMessage[],
-    extra?: Record<string, unknown>,
+    options: {
+      extra?: Record<string, unknown>;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<LLMResponse> {
     const plugin = this.pluginRegistry.resolve(model);
     if (!plugin) {
@@ -146,7 +150,11 @@ export class ProviderRegistry {
       plugin.manifest.capabilities.local && !model.includes("/")
         ? `${plugin.manifest.id}/${model}`
         : model;
-    return this.pluginRegistry.complete(pluginModel, messages, { extra });
+    return this.pluginRegistry.complete(pluginModel, messages, {
+      extra: options.extra,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
   }
 
   async listModels(

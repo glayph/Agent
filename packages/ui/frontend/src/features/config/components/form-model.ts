@@ -75,6 +75,7 @@ export interface LauncherForm {
   port: string
   publicAccess: boolean
   allowedCIDRsText: string
+  sessionTimeoutMinutes: string
   dashboardPassword: string
   dashboardPasswordConfirm: string
 }
@@ -165,6 +166,7 @@ export const EMPTY_LAUNCHER_FORM: LauncherForm = {
   port: "18800",
   publicAccess: false,
   allowedCIDRsText: "",
+  sessionTimeoutMinutes: "0",
   dashboardPassword: "",
   dashboardPasswordConfirm: "",
 }

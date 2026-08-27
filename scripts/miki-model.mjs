@@ -57,6 +57,19 @@ const MODEL_CATALOG = [
     source: "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF",
     context_size: 32768,
   },
+  {
+    id: "gemma-4-E2B-it-Q4_0",
+    alias: "gemma-4-e2b",
+    provider: "llama.cpp",
+    display_name: "Gemma 4 E2B Instruct Q4_0",
+    filename: "google_gemma-4-E2B-it-Q4_0.gguf",
+    url: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_0.gguf?download=true",
+    sha256: "2d9a803a627ee94230dc23681008ae340d9785a2374e2a6a0c8d69c7ee7ea47e",
+    bytes: 3378740704,
+    license: "apache-2.0",
+    source: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF",
+    context_size: 32768,
+  },
 ];
 
 function log(message) {
@@ -200,6 +213,19 @@ function llamaExecutable() {
     path.join(dataRoot, "runtime", "native", executableName),
     path.join(projectRoot, "packages", "core", "dist", "llm", "local", "native", platformKey, executableName),
     path.join(projectRoot, "packages", "core", "src", "llm", "local", "native", platformKey, executableName),
+    path.join(
+      projectRoot,
+      "packages",
+      "core",
+      "src",
+      "plugins",
+      "providers",
+      "llama-cpp",
+      "runtime",
+      "native",
+      platformKey,
+      executableName,
+    ),
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
@@ -227,10 +253,14 @@ function updateState(model, modelPath) {
       allowed_model_dirs: [modelRoot],
     },
   };
-  state.models = state.models.filter((entry) => {
-    const text = JSON.stringify(entry).toLowerCase();
-    return !text.includes(model.alias.toLowerCase()) && !text.includes(model.id.toLowerCase());
-  });
+  const gemmaOnly = model.id === "gemma-4-E2B-it-Q4_0";
+  state.models = gemmaOnly
+    ? []
+    : state.models.filter((entry) => {
+        const text = JSON.stringify(entry).toLowerCase();
+        return !text.includes(model.alias.toLowerCase()) &&
+          !text.includes(model.id.toLowerCase());
+      });
   state.models.unshift(record);
   writeJsonAtomic(statePath, state);
   writeEnvValues({
@@ -302,7 +332,7 @@ async function start(model, record) {
     "--host", "127.0.0.1",
     "--port", String(port),
     "--ctx-size", String(model.context_size || defaultContext),
-    "--n-predict", process.env.MIKI_LOCAL_MAX_TOKENS || "512",
+    "--n-predict", process.env.MIKI_LOCAL_MAX_TOKENS || "2048",
     "--alias", model.id,
     "--chat-template-kwargs", '{"enable_thinking":false}',
   ], { detached: true, stdio: "ignore", windowsHide: true });

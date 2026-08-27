@@ -167,6 +167,7 @@ export function ConfigPage() {
       port: String(launcherConfig.port),
       publicAccess: launcherConfig.public,
       allowedCIDRsText: (launcherConfig.allowed_cidrs ?? []).join("\n"),
+      sessionTimeoutMinutes: String(launcherConfig.session_timeout_minutes ?? 0),
       dashboardPassword: "",
       dashboardPasswordConfirm: "",
     }
@@ -184,7 +185,8 @@ export function ConfigPage() {
   const launcherSettingsDirty =
     launcherForm.port !== launcherBaseline.port ||
     launcherForm.publicAccess !== launcherBaseline.publicAccess ||
-    launcherForm.allowedCIDRsText !== launcherBaseline.allowedCIDRsText
+    launcherForm.allowedCIDRsText !== launcherBaseline.allowedCIDRsText ||
+    launcherForm.sessionTimeoutMinutes !== launcherBaseline.sessionTimeoutMinutes
   const launcherPasswordDirty =
     launcherForm.dashboardPassword.trim() !== "" ||
     launcherForm.dashboardPasswordConfirm.trim() !== ""
@@ -647,16 +649,25 @@ export function ConfigPage() {
           max: 65535,
         })
         const allowedCIDRs = parseCIDRText(launcherForm.allowedCIDRsText)
+        const sessionTimeoutMinutes = parseIntField(
+          launcherForm.sessionTimeoutMinutes,
+          "Dashboard session timeout",
+          { min: 0, max: 31 * 24 * 60 },
+        )
         const savedLauncherConfig = await updateLauncherConfig({
           port,
           public: launcherForm.publicAccess,
           allowed_cidrs: allowedCIDRs,
+          session_timeout_minutes: sessionTimeoutMinutes,
         })
         const parsedLauncher: LauncherForm = {
           port: String(savedLauncherConfig.port),
           publicAccess: savedLauncherConfig.public,
           allowedCIDRsText: (savedLauncherConfig.allowed_cidrs ?? []).join(
             "\n",
+          ),
+          sessionTimeoutMinutes: String(
+            savedLauncherConfig.session_timeout_minutes ?? 0,
           ),
           dashboardPassword: "",
           dashboardPasswordConfirm: "",

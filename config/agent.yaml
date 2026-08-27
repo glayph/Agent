@@ -20,19 +20,15 @@ agent:
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
-  model_routing:
-    enabled: true
-    local_model: llama.cpp/gemma-4-e2b
-    complex_model: llama.cpp/gemma-4-e2b
   browser:
     max_retries: 2
     clear_state_every_n_navigations: 5
     chrome_path: null
   resource:
     mode: balanced
-    message_history_limit: 8
+    message_history_limit: 4
     web_search_max_calls_per_turn: 2
-    max_context_chars: 40000
+    max_context_chars: 12000
     system_index_limit: 6
     system_index_cache_ttl_ms: 15000
     tool_warmup_enabled: true
@@ -65,6 +61,10 @@ agent:
       Workspace-scoped access is enabled by default. The agent must verify
       boundaries and obtain explicit approval before destructive or external
       side effects.
+  model_routing:
+    enabled: true
+    local_model: llama.cpp/gemma-4-E2B-it-Q4_0
+    complex_model: gemini/gemini-3.5-flash-lite
   visual:
     screen_cooldown_seconds: 10
   tools:
@@ -118,7 +118,7 @@ agents:
     split_on_marker: true
     max_tokens: 16384
     context_window: 0
-    max_tool_iterations: 40
+    max_tool_iterations: 12
     summarize_message_threshold: 20
     summarize_token_percent: 75
     tool_feedback:
@@ -135,7 +135,11 @@ agents:
         mode: custom
         allow: []
       tools:
-        mode: default
+        mode: custom
+        allow:
+          - file_write
+          - file_read
+          - shell_execute
   router:
     enabled: true
     default_agent: Miki

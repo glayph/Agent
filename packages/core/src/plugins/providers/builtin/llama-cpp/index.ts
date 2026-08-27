@@ -94,6 +94,7 @@ export const llamaCppProviderPlugin: MikiProviderPlugin = {
       messages: request.messages as never,
       extra: request.extra,
       timeoutMs: request.timeoutMs,
+      signal: request.signal,
     });
   },
   async listModels(context) {
@@ -107,17 +108,30 @@ export const llamaCppProviderPlugin: MikiProviderPlugin = {
       : [];
   },
   async testConnection(context): Promise<ProviderConnectionResult> {
-    const health = getLocalRuntimeHealth();
-    context.log("provider.local.health", {
-      ready: health.ready,
-      configured: health.configured,
-    });
-    return {
-      ok: health.ready,
-      latencyMs: 0,
-      error: health.ready
-        ? undefined
-        : health.last_error || "llama.cpp runtime is not ready",
-    };
+    const startedAt = Date.now();
+    try {
+      // A cached health flag is not sufficient: an external llama-server can
+      // exit after the last successful probe while the dashboard stays open.
+      await ensureLocalRuntime("local-model");
+      const health = getLocalRuntimeHealth();
+      context.log("provider.local.health", {
+        ready: health.ready,
+        configured: health.configured,
+      });
+      return { ok: true, latencyMs: Date.now() - startedAt };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const health = getLocalRuntimeHealth();
+      context.log("provider.local.health", {
+        ready: false,
+        configured: health.configured,
+        error: message,
+      });
+      return {
+        ok: false,
+        latencyMs: Date.now() - startedAt,
+        error: `llama.cpp health check failed: ${message}`,
+      };
+    }
   },
 };

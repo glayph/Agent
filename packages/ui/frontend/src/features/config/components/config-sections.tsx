@@ -1282,6 +1282,29 @@ export function LauncherSection({
         />
       </Field>
 
+      <Field
+        label={t("pages.config.dashboard_session_timeout", {
+          defaultValue: "Dashboard session timeout (minutes)",
+        })}
+        hint={t("pages.config.dashboard_session_timeout_hint", {
+          defaultValue:
+            "0 keeps the session active without a countdown. Set a positive number to require re-login after that many minutes.",
+        })}
+        layout="setting-row"
+      >
+        <Input
+          type="number"
+          min={0}
+          max={31 * 24 * 60}
+          step={1}
+          value={launcherForm.sessionTimeoutMinutes}
+          disabled={disabled}
+          onChange={(e) =>
+            onFieldChange("sessionTimeoutMinutes", e.target.value)
+          }
+        />
+      </Field>
+
       {launcherForm.dashboardPassword.trim() !== "" && (
         <Field
           label={t("pages.config.dashboard_password_confirm")}

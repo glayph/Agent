@@ -15,6 +15,13 @@ export interface DeterministicIntent {
 const FILE_OPERATION_PATTERN =
   /(?:create|write|make)\s+(?:a\s+)?(?:file\s+)?(?:named\s+)?([^\s,;:()]+)\s+(?:containing|with(?:\s+the)?\s+(?:text|content))\s+(?:exactly\s*:?\s*)?/gi;
 
+// Also accept the common UI-friendly form used for multiple files:
+// `folder/file.md` containing exactly `...` and `folder/data.json` containing
+// exactly `...`. The content delimiter is captured so JSON quotes remain part
+// of the file body instead of terminating the match.
+const QUOTED_FILE_OPERATION_PATTERN =
+  /([`'\"])([a-zA-Z0-9][a-zA-Z0-9._/-]*)\1\s+(?:containing|with(?:\s+the)?\s+(?:text|content))\s+(?:exactly\s*:?\s*)([`'\"])([\s\S]*?)\3/gi;
+
 function cleanFilePath(value: string): string | null {
   const candidate = value.trim().replace(/^['"`]|['"`]$/g, "");
   if (
@@ -51,8 +58,17 @@ function cleanContent(value: string): string {
 }
 
 function parseFileRequests(message: string): DeterministicFileRequest[] {
-  const matches = [...message.matchAll(FILE_OPERATION_PATTERN)];
   const requests: DeterministicFileRequest[] = [];
+  const seen = new Set<string>();
+  const addRequest = (filePath: string | null, content: string): void => {
+    if (!filePath || !content) return;
+    const key = `${filePath}\u0000${content}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    requests.push({ path: filePath, content });
+  };
+
+  const matches = [...message.matchAll(FILE_OPERATION_PATTERN)];
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index];
     const rawPath = match[1] || "";
@@ -60,9 +76,12 @@ function parseFileRequests(message: string): DeterministicFileRequest[] {
     if (!filePath || match.index === undefined) continue;
     const contentStart = (match.index ?? 0) + match[0].length;
     const nextStart = matches[index + 1]?.index ?? message.length;
-    const content = cleanContent(message.slice(contentStart, nextStart));
-    if (!content) continue;
-    requests.push({ path: filePath, content });
+    addRequest(filePath, cleanContent(message.slice(contentStart, nextStart)));
+  }
+
+  for (const match of message.matchAll(QUOTED_FILE_OPERATION_PATTERN)) {
+    // Quoted content is explicitly exact: preserve punctuation and JSON syntax.
+    addRequest(cleanFilePath(match[2] || ""), (match[4] || "").trim());
   }
   return requests;
 }

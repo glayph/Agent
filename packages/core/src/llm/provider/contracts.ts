@@ -13,6 +13,8 @@ export interface ProviderCompletionRequest {
   extra?: Record<string, unknown>;
   /** Bounded request timeout in milliseconds; local models may need a longer CPU window. */
   timeoutMs?: number;
+  /** Abort an in-flight provider request when the agent turn is cancelled or times out. */
+  signal?: AbortSignal;
 }
 
 export interface ProviderModel {

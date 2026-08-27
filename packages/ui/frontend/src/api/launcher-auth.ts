@@ -25,8 +25,12 @@ export async function postLauncherDashboardLogin(
 
 export type LauncherAuthStatus = {
   authenticated: boolean
-  /** true when a bcrypt password has been stored in the DB */
+  /** true when a password has been stored in the launcher state */
   initialized: boolean
+  /** 0 means no countdown/automatic expiry. */
+  session_timeout_minutes?: number
+  /** Unix epoch milliseconds; present only for an authenticated finite session. */
+  session_expires_at?: number
 }
 
 export async function getLauncherAuthStatus(): Promise<LauncherAuthStatus> {

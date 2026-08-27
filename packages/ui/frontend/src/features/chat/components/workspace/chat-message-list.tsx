@@ -3,9 +3,6 @@ import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
-import { LiveActivityStrip } from "@/features/chat/components/live-activity-strip"
-import { TypingIndicator } from "@/features/chat/components/typing-indicator"
-import type { MonitorNode } from "@/features/monitor/store"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { Button } from "@/shared/ui/button"
 import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
@@ -28,9 +25,6 @@ interface ChatMessageListProps {
   onDeleteMessage: (messageId: string) => void
   onForkMessage: (messageId: string) => void
   onRetryMessage: (messageId: string) => void
-  liveActivityNodes?: MonitorNode[]
-  selectedActivityNodeId?: string
-  onActivitySelect?: (node: MonitorNode) => void
 }
 
 export function ChatMessageList({
@@ -48,9 +42,6 @@ export function ChatMessageList({
   onDeleteMessage,
   onForkMessage,
   onRetryMessage,
-  liveActivityNodes = [],
-  selectedActivityNodeId,
-  onActivitySelect,
 }: ChatMessageListProps) {
   const { t } = useTranslation()
   const renderableMessages = useMemo(
@@ -71,6 +62,7 @@ export function ChatMessageList({
     fromEnd: true,
     resetKey: messages[0]?.id ?? "empty",
   })
+
   return (
     <div
       ref={scrollRef}
@@ -87,14 +79,6 @@ export function ChatMessageList({
               isConnected={isGatewayRunning}
             />
           </div>
-        )}
-
-        {onActivitySelect && liveActivityNodes.length > 0 && (
-          <LiveActivityStrip
-            nodes={liveActivityNodes}
-            selectedNodeId={selectedActivityNodeId}
-            onSelect={onActivitySelect}
-          />
         )}
 
         {hiddenCount > 0 && (
@@ -120,12 +104,6 @@ export function ChatMessageList({
             onRetry={onRetryMessage}
           />
         ))}
-
-        {isTyping && (
-          <div className="border-0 bg-transparent px-0 py-1">
-            <TypingIndicator />
-          </div>
-        )}
       </div>
     </div>
   )

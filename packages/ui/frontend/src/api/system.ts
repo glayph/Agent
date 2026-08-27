@@ -11,6 +11,8 @@ export interface LauncherConfig {
   port: number
   public: boolean
   allowed_cidrs: string[]
+  /** 0 disables the countdown; positive values are minutes. */
+  session_timeout_minutes?: number
 }
 
 export interface SystemVersionInfo {

@@ -25,15 +25,26 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
   const { t } = useTranslation()
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
+  const [defaultModelId, setDefaultModelId] = useState("")
   const setDefaultRequestIdRef = useRef(0)
 
   const syncDefaultModelName = useCallback(
     (models: ModelInfo[], defaultModel: string) => {
-      if (models.some((m) => m.model_name === defaultModel)) {
-        setDefaultModelName(defaultModel)
+      const selected = models.find(
+        (model) =>
+          model.model_name === defaultModel ||
+          model.runtime_model === defaultModel ||
+          model.model === defaultModel,
+      )
+      if (selected) {
+        setDefaultModelName(selected.model_name)
+        setDefaultModelId(
+          selected.runtime_model || selected.model || selected.model_name,
+        )
         return
       }
       setDefaultModelName("")
+      setDefaultModelId("")
     },
     [],
   )
@@ -121,6 +132,7 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
 
   return {
     defaultModelName,
+    defaultModelId,
     hasAvailableModels,
     apiKeyModels,
     oauthModels,

@@ -125,6 +125,10 @@ import { globalAgentPlanner } from "./agent-planner.js";
 import type { AgentControlService } from "./control/index.js";
 import type { MikiProviderAudio } from "./llm/provider/sdk/index.js";
 import { providerRegistry } from "./llm/provider/registry.js";
+import {
+  isLocalModel,
+  synchronizeLocalRuntimeForModel,
+} from "./plugins/providers/llama-cpp/runtime/local-runtime.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 4;
@@ -392,13 +396,14 @@ function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   label: string,
+  abortController?: AbortController,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   return new Promise<T>((resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
-      timeoutMs,
-    );
+    timer = setTimeout(() => {
+      abortController?.abort(new Error(`${label} timed out after ${timeoutMs}ms`));
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
     promise.then(resolve, reject).finally(() => timer && clearTimeout(timer));
   });
 }
@@ -1302,6 +1307,12 @@ export class AgentOrchestrator {
         : "") ||
       this.modelName;
 
+    // If the user explicitly requested a model (e.g. via Web UI selector),
+    // do not allow complexity-based routing to override it.
+    if (requested) {
+      preferred = requested;
+    }
+
     // Learned routing is observe/draft by default. Only an explicit apply mode
     // may select a persisted model action, and never overrides a user request.
     if (!requested && this.selfImprovement) {
@@ -1322,8 +1333,20 @@ export class AgentOrchestrator {
       }
     }
 
+    if (isLocalModel(preferred)) {
+      await synchronizeLocalRuntimeForModel(preferred);
+    }
     const readiness = await providerRegistry.isModelReady(preferred);
     if (readiness.available) return preferred;
+
+    // If the user explicitly requested this model, do not fall back to
+    // another model even if it is unavailable. This ensures that a local
+    // run stays local and provides a clear error if the runtime is down.
+    if (requested) {
+      throw new LLMMissingCredentialError(
+        `The requested model "${preferred}" is unavailable. ${readiness.reason || "Configure a compatible provider plugin."}`,
+      );
+    }
 
     // An explicit remote model error should remain targeted. An unavailable
     // local model, however, is a normal first-run state: use the configured
@@ -1360,13 +1383,47 @@ export class AgentOrchestrator {
     );
   }
 
+  private static _compactToolParameters(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { type: "object", properties: {} };
+    }
+    const source = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    if (typeof source.type === "string") result.type = source.type;
+    if (Array.isArray(source.required)) {
+      result.required = source.required.filter((item): item is string => typeof item === "string");
+    }
+    if (source.properties && typeof source.properties === "object" && !Array.isArray(source.properties)) {
+      const properties: Record<string, unknown> = {};
+      for (const [key, raw] of Object.entries(source.properties as Record<string, unknown>)) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+        const item = raw as Record<string, unknown>;
+        const compact: Record<string, unknown> = {};
+        if (typeof item.type === "string") compact.type = item.type;
+        if (Array.isArray(item.enum)) compact.enum = item.enum;
+        if (item.items && typeof item.items === "object" && !Array.isArray(item.items)) {
+          compact.items = AgentOrchestrator._compactToolParameters(item.items);
+        }
+        properties[key] = compact;
+      }
+      result.properties = properties;
+    }
+    return result.type ? result : { type: "object", properties: {} };
+  }
+
   private async _callLlmApi(
     messages: ChatMessage[],
     toolsSchema?: ToolDefinition[],
-    runtimeOptions: { maxTokens?: number; model?: string } = {},
+    runtimeOptions: {
+      maxTokens?: number;
+      model?: string;
+      signal?: AbortSignal;
+      forceToolCall?: boolean;
+    } = {},
   ): Promise<LLMResponse> {
     const startedAt = Date.now();
     const model = runtimeOptions.model?.trim() || this.modelName;
+    const localModel = isLocalModelName(model);
     const metricTags = {
       model,
       tools: String(Boolean(toolsSchema?.length)),
@@ -1391,16 +1448,34 @@ export class AgentOrchestrator {
           };
         };
         const fn = candidate.function ?? candidate;
+        const name = String(fn.name ?? "");
+        const compactDescriptions: Record<string, string> = {
+          file_write: "Create or replace a file inside the workspace.",
+          file_read: "Read a file inside the workspace.",
+          shell_execute: "Run a safe shell command inside the workspace.",
+        };
+        const parameters = fn.parameters ?? { type: "object", properties: {} };
+        const compactParameters = localModel
+          ? AgentOrchestrator._compactToolParameters(parameters)
+          : parameters;
         return {
           type: "function",
           function: {
-            name: fn.name ?? "",
-            description: fn.description,
-            parameters: fn.parameters ?? { type: "object", properties: {} },
+            name,
+            description: localModel
+              ? compactDescriptions[name] || String(fn.description || "Use this tool.")
+              : fn.description,
+            parameters: compactParameters,
           },
         };
       });
-      options.tool_choice = "auto";
+      options.tool_choice = runtimeOptions.forceToolCall ? "required" : "auto";
+      if (localModel) options.parallel_tool_calls = false;
+      if (localModel) {
+        console.info(
+          `[agent.llm] local tool request model=${model} tools=${toolsSchema.length} choice=${String(options.tool_choice)} names=${(options.tools as Array<{ function?: { name?: string } }>).map((item) => item.function?.name || "").join(",")}`,
+        );
+      }
     }
     if (
       typeof runtimeOptions.maxTokens === "number" &&
@@ -1416,7 +1491,13 @@ export class AgentOrchestrator {
     try {
       const response = await globalExecutionTracer.spanAsync(
         "agent.llm_call",
-        () => achatCompletion(processedMessages as never, options, model),
+        () =>
+          achatCompletion(
+            processedMessages as never,
+            options,
+            model,
+            runtimeOptions.signal,
+          ),
         metricTags,
       );
       globalMetricsCollector.recordLatency(
@@ -1976,17 +2057,26 @@ export class AgentOrchestrator {
     );
 
     // Warm up only the selected tools for faster and more accurate selection.
+    // Local compact models need the explicitly configured execution tools even
+    // when the adaptive heuristic is uncertain; otherwise they receive no
+    // function schema and can only narrate the requested work.
     const adaptiveTools = adaptiveSelection.selectedTools;
+    const profileTools =
+      localModel && turnProfile.toolsMode === "custom"
+        ? allTools.filter((tool) =>
+            turnProfile.toolsAllow.has(String(tool.function?.name || "").trim()),
+          )
+        : adaptiveTools;
     const prunedTools =
       turnProfile.toolsMode === "off"
         ? []
         : turnProfile.toolsMode === "custom"
-          ? adaptiveTools.filter((tool) =>
+          ? profileTools.filter((tool) =>
               turnProfile.toolsAllow.has(
                 String(tool.function?.name || "").trim(),
               ),
             )
-          : adaptiveTools;
+          : profileTools;
 
     // Keep the per-turn tool surface bounded. The adaptive selector always
     // supplies a small read-only recovery set when heuristics are uncertain;
@@ -2259,8 +2349,19 @@ export class AgentOrchestrator {
         // A small local model should answer ordinary turns briefly; a tight
         // per-call cap prevents accidental runaway generation while Gemini
         // retains the full configured budget for complex work.
+        const localMaxTokens = Math.max(
+          128,
+          Math.min(
+            4096,
+            Number.parseInt(process.env.MIKI_LOCAL_MAX_TOKENS || "2048", 10) ||
+              2048,
+          ),
+        );
+        const localToolTurnCap = taskProfile.signals.includes("artifact_workflow")
+          ? 192
+          : localMaxTokens;
         const requestMaxTokens = localModel
-          ? Math.min(requestBudget.maxTokens, 512)
+          ? Math.min(requestBudget.maxTokens, localMaxTokens, localToolTurnCap)
           : requestBudget.maxTokens;
 
         if (!requestBudget.shouldCall) {
@@ -2282,23 +2383,44 @@ export class AgentOrchestrator {
           return;
         }
 
-        // Deduplicate LLM calls for efficiency
+        // Deduplicate LLM calls for efficiency. Each provider request gets its
+        // own controller so a local timeout cannot leave llama.cpp generating
+        // in the background and blocking the next turn.
         const requestKey = {
           model: turnModel,
           messages: llmMessages,
           tools: toolsSchema,
           maxTokens: requestMaxTokens,
         };
-        response = await withTimeout(
-          globalRequestDeduplicator.execute(requestKey, () =>
-            this._callLlmApi(llmMessages, toolsSchema, {
-              maxTokens: requestMaxTokens,
-              model: turnModel,
-            }),
-          ),
-          localModel ? LOCAL_LLM_CALL_TIMEOUT_MS : REMOTE_LLM_CALL_TIMEOUT_MS,
-          localModel ? "Local llama.cpp request" : "Remote provider request",
-        );
+        const requestAbortController = new AbortController();
+        const forwardAbort = () => requestAbortController.abort(options.signal?.reason);
+        if (options.signal?.aborted) {
+          requestAbortController.abort(options.signal.reason);
+        } else {
+          options.signal?.addEventListener("abort", forwardAbort, { once: true });
+        }
+        try {
+          response = await withTimeout(
+            globalRequestDeduplicator.execute(requestKey, () =>
+              this._callLlmApi(llmMessages, toolsSchema, {
+                maxTokens: requestMaxTokens,
+                model: turnModel,
+                signal: requestAbortController.signal,
+                forceToolCall:
+                  localModel &&
+                  (taskProfile.signals.includes("artifact_workflow") ||
+                    /\b(?:use|run|execute|call)\b.{0,50}\btools?\b/i.test(
+                      userMessage,
+                    )),
+              }),
+            ),
+            localModel ? LOCAL_LLM_CALL_TIMEOUT_MS : REMOTE_LLM_CALL_TIMEOUT_MS,
+            localModel ? "Local llama.cpp request" : "Remote provider request",
+            requestAbortController,
+          );
+        } finally {
+          options.signal?.removeEventListener("abort", forwardAbort);
+        }
 
         // BUG FIX: Track budget after each call
         spentBudgetTokens += this._checkBudget(response);
@@ -2345,11 +2467,17 @@ export class AgentOrchestrator {
                 ? `\n\nThe ${providerLabel} credential was missing or rejected. Add a valid API key in Models/Credentials, then retry.`
                 : providerError instanceof LLMTimeoutError ||
                     providerError.message.toLowerCase().includes("timed out")
-                  ? `\n\nThe ${providerLabel} request timed out. Check the provider connection and try again.`
+                  ? `\n\n[Local AI timeout] ${providerLabel} did not finish within ${localModel ? LOCAL_LLM_CALL_TIMEOUT_MS : REMOTE_LLM_CALL_TIMEOUT_MS}ms. The request was cancelled; the usual cause is a CPU-bound local model or an oversized prompt/tool context. Model: ${turnModel}. Reduce the task size or increase the local timeout, then retry.`
                   : providerError.status && providerError.status >= 500
                     ? `\n\nThe ${providerLabel} service is temporarily unavailable. Please try again shortly.`
                     : `\n\n${providerError.message || "The selected AI service returned an error."} The run was stopped safely.`
-          : `\n\n${isCredentialOrRateLimitError ? rawMessage : `Error calling LLM: ${rawMessage}`}`;
+          : `\n\n${
+              isCredentialOrRateLimitError
+                ? rawMessage
+                : rawMessage.toLowerCase().includes("timed out")
+                  ? `[Local AI timeout] ${turnModel} did not finish within ${LOCAL_LLM_CALL_TIMEOUT_MS}ms. The request was cancelled; the usual cause is a CPU-bound local model or an oversized prompt/tool context. Reduce the task size or increase the local timeout, then retry.`
+                  : `Error calling LLM: ${rawMessage}`
+            }`;
         this._logMemoryFailure(sessionId, userMessage, err, {
           modelId: turnModel,
           taskClass: taskProfile.complexity,
@@ -3174,6 +3302,7 @@ export class AgentOrchestrator {
     turnProfile = this._turnProfilePolicy(),
     turnModel?: string,
   ): Promise<string> {
+    const localModel = turnModel ? isLocalModelName(turnModel) : false;
     const taskProfile = classifyAgentTask(userMessage);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
     const accelerationPlan = buildWorkflowAccelerationPlan(
@@ -3322,6 +3451,22 @@ export class AgentOrchestrator {
       ? "\n[ARTIFACT WORKFLOW — REQUIRED]\n" +
         "This is a multi-step artifact task. Do not claim completion from prose alone. First create the requested files inside the workspace, then verify them with file_read. If a screenshot is requested, navigate to the rendered page and call browser_screenshot with path `hello-world-landing/hello-world-landing.png` so the PNG is inside the workspace. Before your final reply, ensure every required artifact exists and is non-empty; the runtime will attach verified artifacts automatically.\n"
       : "";
+
+    if (localModel) {
+      return (
+        `${memoryContextBlock}` +
+        `${screenshotBlock}${turnProfile.systemPromptMode === "off" ? "" : systemPersona}` +
+        `${artifactWorkflowBlock}` +
+        `LOCAL TOOL-CALL CONTRACT:\n` +
+        `For any request that asks to use file, shell, browser, or other tools, emit a native structured function call using the provided tool schema. Never write \\"tool_code\\", markdown pseudo-calls, or a prose substitute. Use canonical tool names only: file_write creates or replaces files, file_read reads files, and shell_execute runs commands. There is no file_edit tool; edit an existing file by calling file_write with the complete replacement content. Use one call at a time and wait for the tool result before continuing.\n\n` +
+        `ACTION UPDATES:\n` +
+        `When you need to use a tool, first write one short, natural sentence (maximum 12 words) telling the user what you will do immediately. Then call the tool. If no tool is needed, answer directly.\n\n` +
+        `CONVERSATION STYLE:\n` +
+        `Write like one person sending a normal message to another: natural, direct, and concise. Give the answer first in one or two short sentences. Do not narrate plans, routing, tools, or completion evidence in the visible reply. Never claim a task is complete without checking the result.\n\n` +
+        `You operate as a computer-based agent with full system access. Use absolute paths for any file operation outside the project workspace. Keep tool use purposeful and verification-driven.\n\n` +
+        `${screenshotNote}`
+      );
+    }
 
     return (
       `${memoryContextBlock}` +
