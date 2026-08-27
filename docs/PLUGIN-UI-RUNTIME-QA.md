@@ -32,3 +32,7 @@ The Plugin sidebar was reopened while `/models` was active, confirming the trigg
 ## Automated verification
 
 Frontend lint passed with zero warnings. Frontend build passed and generated the `/plugins` route chunk. The frontend test suite passed with **15 test files and 67 tests**. The repository’s canonical `npm run verify` workflow also passed all verification stages, including build, typecheck, package tests, frontend tests, and doctor checks. The doctor output reported only the pre-existing optional Gemini credential warning; local llama.cpp remains available without a cloud key.
+
+## Publication verification
+
+Commit `5c96c2edb96e9217e331ed3f52e5316fbf728694` is present on the canonical `glayph/Agent` repository and is associated with `main`.
