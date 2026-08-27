@@ -24,7 +24,8 @@
     "control": "Controle do agente",
     "agents": "Agentes",
     "toggle_sidebar": "Alternar barra lateral",
-    "channels": "Canais"
+    "channels": "Canais",
+    "plugins": "Plugins"
   },
   "launcherLogin": {
     "title": "Entrar",

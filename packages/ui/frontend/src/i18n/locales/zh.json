@@ -24,7 +24,8 @@
     "control": "Agent 控制",
     "agents": "代理人",
     "toggle_sidebar": "切换侧边栏",
-    "channels": "频道"
+    "channels": "频道",
+    "plugins": "插件"
   },
   "launcherLogin": {
     "title": "登录",

@@ -7,6 +7,7 @@ import {
   IconKey,
   IconListDetails,
   IconMessageCircle,
+  IconPuzzle,
   IconSearch,
   IconSettings,
   IconSparkles,
@@ -57,6 +58,13 @@ const staticRoutes = [
     url: "/drive",
     description: "Browse files, assets, and generated outputs.",
     icon: IconFolder,
+  },
+  {
+    id: "plugins",
+    labelKey: "navigation.plugins",
+    url: "/plugins",
+    description: "Review the canonical Plugin catalog and runtime status.",
+    icon: IconPuzzle,
   },
   {
     id: "models",

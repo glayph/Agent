@@ -1,18 +1,10 @@
 import {
-  IconActivityHeartbeat,
-  IconAtom,
-  IconBrain,
-  IconBroadcast,
-  IconClockPlay,
   IconFolder,
-  IconKey,
-  IconListDetails,
   IconMessageCircle,
+  IconPuzzle,
   IconSearch,
   IconSettings,
-  IconSparkles,
   IconTimeline,
-  IconTools,
 } from "@tabler/icons-react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
@@ -29,6 +21,8 @@ import {
   useSidebar,
 } from "@/shared/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
+
+import { PluginSidebar } from "./plugin-sidebar"
 
 // Dev-tool sidebar styles — dark surfaces, orange accent for active state
 const materialSidebarStyles = `
@@ -68,28 +62,10 @@ interface NavItem {
 
 const primaryNav: NavItem[] = [
   { titleKey: "navigation.chat", url: "/", icon: IconMessageCircle },
-  { titleKey: "navigation.channels", url: "/channels", icon: IconBroadcast },
   { titleKey: "navigation.drive", url: "/drive", icon: IconFolder },
-  { titleKey: "navigation.models", url: "/models", icon: IconAtom },
-  { titleKey: "navigation.memory", url: "/memory", icon: IconBrain },
-  { titleKey: "navigation.credentials", url: "/credentials", icon: IconKey },
   { titleKey: "navigation.hub", url: "/agent/hub", icon: IconSearch },
-  { titleKey: "navigation.skills", url: "/agent/skills", icon: IconSparkles },
-  { titleKey: "navigation.tools", url: "/agent/tools", icon: IconTools },
   { titleKey: "navigation.control", url: "/control", icon: IconSettings },
   { titleKey: "navigation.runs", url: "/agent/runs", icon: IconTimeline },
-  {
-    titleKey: "navigation.automations",
-    url: "/agent/automations",
-    icon: IconClockPlay,
-  },
-  { titleKey: "navigation.config", url: "/config", icon: IconSettings },
-  { titleKey: "navigation.logs", url: "/logs", icon: IconListDetails },
-  {
-    titleKey: "navigation.health",
-    url: "/health",
-    icon: IconActivityHeartbeat,
-  },
 ]
 
 function isActivePath(pathname: string, url: string): boolean {
@@ -107,8 +83,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const routerState = useRouterState()
   const { t } = useTranslation()
   const { isMobile, setOpenMobile } = useSidebar()
+  const [pluginSidebarOpen, setPluginSidebarOpen] = React.useState(false)
   const currentPath = routerState.location.pathname
   const commandShortcut = commandShortcutLabel()
+  const isPluginPath = [
+    "/plugins",
+    "/models",
+    "/credentials",
+    "/channels",
+    "/agent/skills",
+    "/agent/tools",
+    "/memory",
+    "/config",
+    "/agent/automations",
+    "/health",
+    "/logs",
+  ].some((path) => isActivePath(currentPath, path))
 
   const closeMobileSidebar = () => {
     if (isMobile) setOpenMobile(false)
@@ -135,6 +125,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <>
       <style>{materialSidebarStyles}</style>
+      <PluginSidebar
+        open={pluginSidebarOpen}
+        onOpenChange={setPluginSidebarOpen}
+      />
       <Sidebar
         {...props}
         collapsible={isMobile ? "offcanvas" : "none"}
@@ -163,6 +157,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
         <SidebarContent className="px-0 py-3">
           <SidebarMenu className="gap-1">
+            <SidebarMenuItem>
+              <Tooltip delayDuration={250}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setPluginSidebarOpen((open) => !open)}
+                    aria-label={t("navigation.plugins")}
+                    aria-expanded={pluginSidebarOpen}
+                    title={t("navigation.plugins")}
+                    data-active={pluginSidebarOpen || isPluginPath}
+                    className={cn(
+                      "material-sidebar-nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
+                      (pluginSidebarOpen || isPluginPath) && "active",
+                    )}
+                  >
+                    <IconPuzzle className="size-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {t("navigation.plugins")}
+                </TooltipContent>
+              </Tooltip>
+            </SidebarMenuItem>
             {primaryNav.map((item) => {
               const Icon = item.icon
               const isActive = isActivePath(currentPath, item.url)

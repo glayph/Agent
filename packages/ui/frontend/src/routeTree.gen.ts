@@ -24,6 +24,7 @@ import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as ModelsRouteImport } from './routes/models'
+import { Route as PluginsRouteImport } from './routes/plugins'
 import { Route as AgentAutomationsRouteImport } from './routes/agent/automations'
 import { Route as AgentHubRouteImport } from './routes/agent/hub'
 import { Route as AgentMonitorRouteImport } from './routes/agent/monitor'
@@ -115,6 +116,11 @@ const MemoryRoute = MemoryRouteImport.update({
 const ModelsRoute = ModelsRouteImport.update({
   id: '/models',
   path: '/models',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PluginsRoute = PluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentAutomationsRoute = AgentAutomationsRouteImport.update({
@@ -220,6 +226,7 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
+  '/plugins': typeof PluginsRoute
   '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
@@ -253,6 +260,7 @@ export interface FileRoutesByTo {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
+  '/plugins': typeof PluginsRoute
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/run': typeof AgentRunRoute
@@ -287,6 +295,7 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
+  '/plugins': typeof PluginsRoute
   '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/models'
+    | '/plugins'
     | '/agent/automations'
     | '/agent/hub'
     | '/agent/monitor'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/models'
+    | '/plugins'
     | '/agent/hub'
     | '/agent/monitor'
     | '/agent/run'
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/models'
+    | '/plugins'
     | '/agent/automations'
     | '/agent/hub'
     | '/agent/monitor'
@@ -424,6 +436,7 @@ export interface RootRouteChildren {
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
   ModelsRoute: typeof ModelsRoute
+  PluginsRoute: typeof PluginsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -531,6 +544,13 @@ declare module '@tanstack/react-router' {
       path: '/models'
       fullPath: '/models'
       preLoaderRoute: typeof ModelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plugins': {
+      id: '/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof PluginsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agent/automations': {
@@ -750,6 +770,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
   ModelsRoute: ModelsRoute,
+  PluginsRoute: PluginsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
