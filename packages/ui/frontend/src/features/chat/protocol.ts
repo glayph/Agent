@@ -352,6 +352,7 @@ export function handlemikiMessage(
             : {}),
           runStatus: "running",
           runError: undefined,
+          isTyping: true,
         }
       })
       break

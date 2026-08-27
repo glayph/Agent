@@ -2306,8 +2306,23 @@ export class AgentOrchestrator {
 
       const msg = choice.message;
       const content: string | null = msg?.content || null;
+      const toolCalls = msg?.tool_calls as
+        | Array<{
+            id?: string;
+            function?: { name?: string; arguments?: string };
+            extra_content?: Record<string, unknown>;
+          }>
+        | undefined;
+      if (toolCalls && toolCalls.length > 0 && content?.trim()) {
+        yield JSON.stringify({
+          type: "action_update",
+          content: content.trim(),
+          model_name: turnModel,
+        });
+      }
       if (
         content &&
+        !toolCalls?.length &&
         responseContract &&
         !validateAgentResponseContract(content, responseContract)
       ) {
@@ -2352,7 +2367,7 @@ export class AgentOrchestrator {
         return;
       }
 
-      if (content) {
+      if (content && !toolCalls?.length) {
         yield JSON.stringify({
           type: "stream_chunk",
           content,
@@ -2410,14 +2425,6 @@ export class AgentOrchestrator {
           return;
         }
       }
-
-      const toolCalls = msg?.tool_calls as
-        | Array<{
-            id?: string;
-            function?: { name?: string; arguments?: string };
-            extra_content?: Record<string, unknown>;
-          }>
-        | undefined;
 
       if (toolCalls && toolCalls.length > 0) {
         if (noToolsRequested) {
@@ -3241,6 +3248,8 @@ export class AgentOrchestrator {
       `${adaptiveBlock}` +
       `${capabilityBlock}` +
       `${artifactWorkflowBlock}` +
+      `ACTION UPDATES:\n` +
+      `When you need to use a tool, first write one short, natural sentence (maximum 12 words) telling the user what you will do immediately. Do not mention internal tool names, routing, tokens, or hidden reasoning. Then call the tool. If no tool is needed, answer directly without a progress announcement.\n\n` +
       `${systemIndexBlock}` +
       `${dynamicStateBlock}` +
       `CONVERSATION STYLE:\n` +

@@ -85,6 +85,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const { t } = useTranslation()
   const isThought = kind === "thought"
   const isToolCalls = kind === "tool_calls"
+  const isActionUpdate = kind === "action_update"
   const isCollapsedBlock = isThought || isToolCalls
   const trimmedContent = content.trim()
   const hasText = trimmedContent.length > 0
@@ -137,6 +138,18 @@ export const AssistantMessage = memo(function AssistantMessage({
               isCollapsedBlock && "text-muted-foreground",
             )}
           >
+            {isActionUpdate && hasText && (
+              <div
+                data-chat-action-update="true"
+                className="text-muted-foreground/80 bg-primary/5 inline-flex max-w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] leading-5"
+              >
+                <IconTool
+                  className="text-primary size-3.5 shrink-0 animate-pulse"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">{visibleContent}</span>
+              </div>
+            )}
             {isCollapsedBlock && (
               <button
                 type="button"
@@ -315,7 +328,8 @@ export const AssistantMessage = memo(function AssistantMessage({
               </div>
             )}
 
-            {!isCredentialError &&
+            {!isActionUpdate &&
+              !isCredentialError &&
               (!isCollapsedBlock || isExpanded) &&
               !isToolCalls &&
               hasText && (
@@ -341,7 +355,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               )}
           </div>
 
-          {!isCollapsedBlock && hasText && (
+          {!isCollapsedBlock && !isActionUpdate && hasText && (
             <MessageActionBar
               content={content}
               align="start"

@@ -37,6 +37,9 @@ function parseAssistantMessageKind(
   if (kind === "thought") {
     return "thought"
   }
+  if (kind === "action_update") {
+    return "action_update"
+  }
   if (kind === "tool_calls" || toolCalls) {
     return "tool_calls"
   }

@@ -95,6 +95,40 @@ describe("chat protocol flow", () => {
     })
   })
 
+  it("renders AI-generated action updates without treating them as final replies", () => {
+    handlemikiMessage(
+      {
+        type: "node.run_start",
+        session_id: "session-1",
+        payload: { run_id: "run-action" },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "action-1",
+          run_id: "run-action",
+          content: "I’ll check the page now.",
+          kind: "action_update",
+          action_update: true,
+          placeholder: true,
+        },
+      },
+      "session-1",
+    )
+
+    expect(getChatState().isTyping).toBe(true)
+    expect(getChatState().messages[0]).toMatchObject({
+      id: "action-1",
+      content: "I’ll check the page now.",
+      kind: "action_update",
+      runId: "run-action",
+    })
+  })
+
   it("clears stale attachments when the server sends an explicit empty list", () => {
     handlemikiMessage(
       {

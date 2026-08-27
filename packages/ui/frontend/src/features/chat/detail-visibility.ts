@@ -2,7 +2,7 @@ export type AssistantDetailVisibility =
   "none" | "thought" | "tool_calls" | "all"
 
 export type AssistantDetailMessageKind =
-  "normal" | "thought" | "tool_calls" | undefined
+  "normal" | "thought" | "tool_calls" | "action_update" | undefined
 
 interface StorageLike {
   getItem(key: string): string | null

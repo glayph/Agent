@@ -26,6 +26,7 @@ interface WorkspaceHeaderProps {
   subtitle?: string
   statuses: WorkspaceStatusPill[]
   controls?: ReactNode
+  isWorking?: boolean
 }
 
 export function WorkspaceHeader({
@@ -33,6 +34,7 @@ export function WorkspaceHeader({
   subtitle,
   statuses,
   controls,
+  isWorking = false,
 }: WorkspaceHeaderProps) {
   const statusSummary = statuses.map((status) => status.label).join(", ")
 
@@ -122,7 +124,26 @@ export function WorkspaceHeader({
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">{controls}</div>
+      <div className="flex shrink-0 items-center gap-1">
+        {isWorking && (
+          <button
+            type="button"
+            data-testid="working-indicator"
+            className="text-primary/90 hover:bg-primary/10 inline-flex size-7 items-center justify-center rounded-md transition-colors motion-reduce:transition-none"
+            onClick={statuses[0]?.onClick}
+            aria-label="Agent is working"
+            title="Agent is working"
+          >
+            <span
+              aria-hidden="true"
+              className="inline-block text-[15px] leading-none motion-safe:animate-bounce motion-reduce:animate-none"
+            >
+              🛠️
+            </span>
+          </button>
+        )}
+        {controls}
+      </div>
     </header>
   )
 }

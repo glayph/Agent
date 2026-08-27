@@ -11,7 +11,6 @@ import * as path from "path";
 import * as fs from "fs";
 
 import { AgentOrchestrator } from "../agent.js";
-import { suppressVisibleStatusForIntent } from "../deterministic-intent.js";
 import type { AgentTask } from "../task-queue.js";
 import {
   createWorkspaceSecretVault,
@@ -1686,11 +1685,10 @@ function _toolResultDescription(
 }
 
 /**
- * Sends a compact, non-sensitive execution summary to the Inspector only.
- * These messages use kind="thought", which the main transcript intentionally
- * hides while the Inspector renders them as expandable categorized cards.
+ * Sends the model's own short action announcement to the visible chat.
+ * The runtime only trims and labels the model text; it never invents a status sentence.
  */
-function _sendUserStatus(
+function _sendAiActionUpdate(
   ws: WebSocket,
   sessionId: string,
   runId: string,
@@ -1700,6 +1698,17 @@ function _sendUserStatus(
 ): void {
   const trimmed = content.trim();
   if (!trimmed) return;
+  const compact = trimmed.split(/(?<=[.!?。！？])\s+/u)[0]?.trim() || trimmed;
+  const bounded =
+    compact.length > 180 ? `${compact.slice(0, 177).trimEnd()}…` : compact;
+  const words = bounded.split(/\s+/u).filter(Boolean);
+  const concise =
+    words.length > 12
+      ? `${words
+          .slice(0, 12)
+          .join(" ")
+          .replace(/[.!?。！？]+$/u, "")}…`
+      : bounded;
   _sendmiki(ws, {
     type: "message.create",
     id: crypto.randomUUID(),
@@ -1708,10 +1717,10 @@ function _sendUserStatus(
     payload: {
       message_id: statusId,
       run_id: runId,
-      content: trimmed,
-      kind: "normal",
+      content: concise,
+      kind: "action_update",
       placeholder: true,
-      status_message: true,
+      action_update: true,
       model_name: modelName,
     },
   });
@@ -2003,36 +2012,11 @@ mikiWss.on("connection", (ws, req) => {
         let finalAttachments: ChatAttachment[] = [];
         const toolFeedback = _getToolFeedbackConfig();
         const streaming = _getmikiStreamingConfig();
-        const suppressVisibleStatus = suppressVisibleStatusForIntent(content);
         let lastStreamSentAt = 0;
         let lastStreamSentLength = 0;
         let toolFeedbackCounter = 0;
-        let userProgressSent = false;
-        let progressTimer: ReturnType<typeof setTimeout> | null = null;
         const toolInputs = new Map<number, unknown>();
         const toolFeedbackMessageIds = new Map<number, string>();
-
-        if (!suppressVisibleStatus) {
-          _sendUserStatus(
-            ws,
-            sessionId,
-            runId,
-            `${assistantMessageId}-status-accepted`,
-            "ঠিক আছে, কাজটি শুরু করছি।",
-            resolvedRunModel,
-          );
-          progressTimer = setTimeout(() => {
-            progressTimer = null;
-            _sendUserStatus(
-              ws,
-              sessionId,
-              runId,
-              `${assistantMessageId}-status-working`,
-              "কাজ চলছে; প্রয়োজনীয় ধাপগুলো সম্পন্ন করছি।",
-              resolvedRunModel,
-            );
-          }, 10000);
-        }
 
         if (streaming.enabled) {
           _sendmiki(ws, {
@@ -2210,6 +2194,20 @@ mikiWss.on("connection", (ws, req) => {
               continue;
             }
 
+            if (event.type === "action_update") {
+              if (typeof event.content === "string" && event.content.trim()) {
+                _sendAiActionUpdate(
+                  ws,
+                  sessionId,
+                  runId,
+                  `${assistantMessageId}-action-${crypto.randomUUID()}`,
+                  event.content,
+                  resolvedRunModel,
+                );
+              }
+              continue;
+            }
+
             if (event.type === "tool_execution_plan") {
               _sendmiki(ws, {
                 type: "node.plan",
@@ -2243,17 +2241,6 @@ mikiWss.on("connection", (ws, req) => {
               const invocationIndex = Number(event.invocation_index ?? 0);
               const toolInput = event.input;
               toolInputs.set(invocationIndex, toolInput);
-              if (!userProgressSent) {
-                userProgressSent = true;
-                _sendUserStatus(
-                  ws,
-                  sessionId,
-                  runId,
-                  `${assistantMessageId}-status-progress-1`,
-                  "প্রথম ধাপ চলছে; কাজের অগ্রগতি যাচাই করছি।",
-                  resolvedRunModel,
-                );
-              }
               const nodeId = `${assistantMessageId}-node-${invocationIndex}`;
               _sendmiki(ws, {
                 type: "node.spawn",
@@ -2587,10 +2574,6 @@ mikiWss.on("connection", (ws, req) => {
               "Progress",
             );
           }
-          if (progressTimer) {
-            clearTimeout(progressTimer);
-            progressTimer = null;
-          }
           if (streaming.enabled) {
             _sendmiki(ws, {
               type: "typing.stop",
@@ -2618,10 +2601,6 @@ mikiWss.on("connection", (ws, req) => {
             `The run stopped before completion: ${safeError}`,
             "Verification",
           );
-          if (progressTimer) {
-            clearTimeout(progressTimer);
-            progressTimer = null;
-          }
           const userFacingError = /timed out|timeout/i.test(safeError)
             ? "কাজটি নির্ধারিত সময়ের মধ্যে শেষ হয়নি। আমি নিরাপদভাবে থামিয়েছি; চাইলে কাজটি ছোট ধাপে আবার দিতে পারেন।"
             : fullResponse.trim() ||

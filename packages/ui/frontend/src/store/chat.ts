@@ -48,7 +48,8 @@ export interface ChatToolCall {
   extraContent?: ChatToolCallExtraContent
 }
 
-export type AssistantMessageKind = "normal" | "thought" | "tool_calls"
+export type AssistantMessageKind =
+  "normal" | "thought" | "tool_calls" | "action_update"
 
 export type AssistantThoughtCategory =
   "Plan" | "Action" | "Verification" | "Progress" | "Decision" | "Thought"

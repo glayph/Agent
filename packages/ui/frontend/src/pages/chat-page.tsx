@@ -1106,6 +1106,7 @@ export function ChatPage() {
             subtitle={subtitle}
             statuses={statusPills}
             controls={headerControls}
+            isWorking={isTyping}
           />
         }
 
