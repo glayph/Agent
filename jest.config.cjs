@@ -51,8 +51,8 @@ module.exports = {
       "<rootDir>/packages/gateway/src/index.ts",
     "^openai$": "<rootDir>/packages/core/src/__mocks__/openai.ts",
     "^@anthropic-ai/sdk$": "<rootDir>/packages/core/src/__mocks__/@anthropic-ai/sdk.ts",
-    "^(\\.{1,2}/.*)memory/memory-bridge\\.js$":
-      "<rootDir>/packages/core/src/__mocks__/memory-bridge.ts",
+    "^(\\.{1,2}/.*)plugins/memory/runtime\\.js$":
+      "<rootDir>/packages/core/src/__mocks__/memory-runtime.ts",
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
 };

@@ -11,15 +11,15 @@
 
 Agent Miki is a monorepo. The main `npm start` command launches the Node launcher, which starts the gateway and its managed core runtime. The dashboard is served by the gateway. When a local model is selected and configured for automatic startup, Agent Miki starts the included platform-specific `llama-server` executable against the separately configured GGUF path; no answer-model GGUF is included in the release. When a cloud/API model is selected, the local llama-server process is not needed for that request path.
 
-The repository keeps the complete llama.cpp source under `packages/core/src/llm/local/vendor/llama.cpp/`. The project build compiles only the headless server component and disables the upstream web UI before copying the resulting executable into the local runtime area. Agent Miki's own dashboard is the user interface for model management and chat.
+The repository keeps the complete llama.cpp source under `packages/core/src/plugins/providers/llama-cpp/runtime/vendor/llama.cpp/`. The project build compiles only the headless server component and disables the upstream web UI before copying the resulting executable into the local runtime area. Agent Miki's own dashboard is the user interface for model management and chat.
 
 | Component             | Location                                        | Purpose                                                                                          |
 | --------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Node launcher         | `bin/miki.js`                                   | Starts Miki, delegates setup/doctor commands, and manages child processes.                       |
 | Gateway               | `packages/gateway/`                             | Serves the dashboard, API, authentication, WebSocket connection, and runtime controls.           |
 | Core agent            | `packages/core/`                                | Agent orchestration, providers, tools, channels, safety, memory bridge, and local LLM lifecycle. |
-| Local LLM integration | `packages/core/src/llm/local/`                  | Local provider code, executable locations, metadata, and vendored llama.cpp source.              |
-| llama.cpp source      | `packages/core/src/llm/local/vendor/llama.cpp/` | Vendored upstream source used to build `llama-server`.                                           |
+| Local LLM integration | `packages/core/src/plugins/providers/llama-cpp/runtime/`                  | Local provider code, executable locations, metadata, and vendored llama.cpp source.              |
+| llama.cpp source      | `packages/core/src/plugins/providers/llama-cpp/runtime/vendor/llama.cpp/` | Vendored upstream source used to build `llama-server`.                                           |
 | Frontend              | `packages/ui/frontend/`                         | React dashboard and chat interface.                                                              |
 | Memory package        | `packages/memory/`                              | Memory service and persistence support.                                                          |
 | Go CLI                | `packages/cli/`                                 | Optional native terminal interface and managed runtime controls.                                 |
@@ -124,7 +124,7 @@ The llama.cpp build script uses the vendored source and applies these important 
 | `LLAMA_OPENSSL`         | `OFF` | Keep this embedded server build independent of OpenSSL.                        |
 | `GGML_NATIVE`           | `OFF` | Produce a more portable CPU artifact rather than a host-specific native build. |
 
-The compiled executable is copied into `packages/core/src/llm/local/native/<platform>-<architecture>/` and into the core distribution during the build. Do not move the vendored llama.cpp source outside `packages/core/src/llm/local/`.
+The compiled executable is copied into `packages/core/src/plugins/providers/llama-cpp/runtime/native/<platform>-<architecture>/` and into the core distribution during the build. Do not move the vendored llama.cpp source outside `packages/core/src/plugins/providers/llama-cpp/runtime/`.
 
 ### 3.5 Start Agent Miki
 
@@ -316,7 +316,7 @@ $env:MIKI_LLAMA_BUILD_JOBS="1"
 npm run build:llama
 ```
 
-Do not delete the vendored source to fix a build problem. Confirm that `packages/core/src/llm/local/vendor/llama.cpp/` exists, confirm that CMake and the compiler are available, and read the first compiler error rather than only the final CMake summary.
+Do not delete the vendored source to fix a build problem. Confirm that `packages/core/src/plugins/providers/llama-cpp/runtime/vendor/llama.cpp/` exists, confirm that CMake and the compiler are available, and read the first compiler error rather than only the final CMake summary.
 
 ## 6. Dual-mode web-search setup
 
@@ -611,7 +611,7 @@ Important runtime locations include:
 | `data/core_backend.log`               | Core/gateway runtime log stream exposed by the Logs page.                 |
 | `data/backups/`                       | Runtime backups created by the safety/backup subsystem.                   |
 | `config/agent.yaml`                   | Checked-in project configuration template/defaults.                       |
-| `packages/core/src/llm/local/native/` | Platform-specific local llama-server artifacts generated during builds.   |
+| `packages/core/src/plugins/providers/llama-cpp/runtime/native/` | Platform-specific local llama-server artifacts generated during builds.   |
 | `.miki-build/`                        | Temporary llama.cpp build directory; generated and not source-controlled. |
 
 Do not commit `.env` files, API keys, local databases, runtime logs, GGUF model files, compiled executables, or private keys. Keep model files and credentials outside the Git repository.
@@ -623,7 +623,7 @@ Do not commit `.env` files, API keys, local databases, runtime logs, GGUF model 
 Confirm that the vendored directory exists and that CMake and a working C/C++ compiler are available:
 
 ```bash
-test -d packages/core/src/llm/local/vendor/llama.cpp
+test -d packages/core/src/plugins/providers/llama-cpp/runtime/vendor/llama.cpp
 cmake --version
 cc --version || gcc --version
 c++ --version || g++ --version

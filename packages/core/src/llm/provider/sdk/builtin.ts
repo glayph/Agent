@@ -1,9 +1,9 @@
 /**
  * Backward-compatible export for existing imports. Provider ownership and
- * registration live under packages/core/src/llm/provider/Plug-in.
+ * registration live under packages/core/src/plugins/providers/builtin.
  */
 export {
   builtinProviderPlugins,
   geminiProviderPlugin,
   llamaCppProviderPlugin,
-} from "../Plug-in/index.js";
+} from "../../../plugins/providers/builtin/index.js";

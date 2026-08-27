@@ -109,7 +109,7 @@ import {
   type SessionMetadata,
   type SessionSummary,
 } from "./session-history-store.js";
-import { initMemory, getMemory } from "./memory/memory-bridge.js";
+import { initMemory, getMemory } from "./plugins/memory/runtime.js";
 import {
   AgentRegistry,
   globalAgentRegistry,

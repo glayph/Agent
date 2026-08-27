@@ -6,7 +6,7 @@ import {
   inspectSelectiveMemory,
   listSelectiveMemory,
   reindexSelectiveMemory,
-} from "../memory/memory-bridge.js";
+} from "../plugins/memory/runtime.js";
 
 function runtimeScope(): Record<string, string> {
   return {

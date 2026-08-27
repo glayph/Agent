@@ -8,7 +8,7 @@ compact, ready-to-inject context string for the LLM.
 
 This package has no HTTP server, no standalone dashboard, and no separate
 process. It is consumed directly as a Node module by `packages/core`
-(`packages/core/src/memory/memory-bridge.ts`), which is the only integration
+(`packages/core/src/plugins/memory/runtime.ts`), which is the only integration
 point — there is nothing to start or configure separately.
 
 ---
@@ -167,7 +167,7 @@ const {
 - **Storage**: `better-sqlite3` (single file, WAL mode) — no other
   dependencies
 - **Integration**: consumed directly by `packages/core` via
-  `packages/core/src/memory/memory-bridge.ts`; no separate process, no
+  `packages/core/src/plugins/memory/runtime.ts`; no separate process, no
   network calls anywhere in the write or read path
 
 ---

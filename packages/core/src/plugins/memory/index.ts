@@ -1,9 +1,5 @@
-import {
-  closeMemory,
-  getMemory,
-  initMemory,
-} from "../../memory/memory-bridge.js";
-import type { AgentMemoryIntegration } from "../../memory/types.js";
+import { closeMemory, getMemory, initMemory } from "./runtime.js";
+import type { AgentMemoryIntegration } from "./types.js";
 import {
   pluginManifest,
   type ManagedPlugin,

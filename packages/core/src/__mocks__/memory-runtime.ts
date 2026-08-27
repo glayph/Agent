@@ -1,4 +1,4 @@
-// Jest manual mock for ../memory/memory-bridge.ts.
+// Jest manual mock for ../plugins/memory/runtime.ts.
 //
 // The real module calls `createRequire(import.meta.url)` to load the
 // CommonJS `@miki/memory` package from an ESM file. Jest's ts-jest ESM
@@ -9,7 +9,7 @@
 //
 // Every real code path here (agent-memory-integration, TKG writes, etc.) is
 // exercised by tests that already mock or avoid this import elsewhere; this
-// mock only exists so files that transitively import memory-bridge (like
+// mock only exists so files that transitively import the Plugin memory runtime (like
 // tools/executor/shell.ts) can be loaded under Jest at all. Tests that
 // specifically want to assert memory-logging *behavior* should mock this
 // module explicitly with jest.mock() and provide their own getMemory().

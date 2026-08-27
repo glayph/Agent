@@ -1,13 +1,13 @@
 import { fetchGeminiModels, testGeminiConnection } from "./catalog.js";
-import type { ProviderTransportConfig } from "../../transport.js";
-import { openAICompatibleAdapter } from "../../openai-compatible-adapter.js";
+import type { ProviderTransportConfig } from "../../../../llm/provider/transport.js";
+import { openAICompatibleAdapter } from "../../../../llm/provider/openai-compatible-adapter.js";
 import { normalizeGeminiExtra, normalizeGeminiMessages } from "./compat.js";
 import type {
   MikiProviderContext,
   MikiProviderModel,
   MikiProviderPlugin,
   ProviderConnectionResult,
-} from "../../sdk/index.js";
+} from "../../../../llm/provider/sdk/index.js";
 
 const DEFAULT_BASE_URL =
   "https://generativelanguage.googleapis.com/v1beta/openai/";

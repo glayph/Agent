@@ -1,4 +1,4 @@
-import { builtinProviderPlugins } from "../llm/provider/Plug-in/index.js";
+import { builtinProviderPlugins } from "./providers/builtin/index.js";
 import type { MikiProviderPlugin } from "../llm/provider/sdk/index.js";
 import { builtinChannelRegistry } from "./channels/builtin-channel-registry.js";
 import {

@@ -1,4 +1,4 @@
-import * as memoryBridge from "../../memory/memory-bridge.js";
+import * as memoryBridge from "../memory/runtime.js";
 import {
   pluginManifest,
   type ManagedPlugin,

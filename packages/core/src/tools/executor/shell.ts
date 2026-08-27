@@ -4,7 +4,7 @@ import { exec } from "child_process";
 import * as util from "util";
 import * as yaml from "js-yaml";
 import { getErrorMessage } from "../../errors.js";
-import { getMemory } from "../../memory/memory-bridge.js";
+import { getMemory } from "../../plugins/memory/runtime.js";
 import { getCallOrigin } from "./call-context.js";
 
 const execAsync = util.promisify(exec);

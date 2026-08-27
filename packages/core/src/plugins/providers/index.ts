@@ -2,7 +2,7 @@ export {
   builtinProviderPlugins,
   geminiProviderPlugin,
   llamaCppProviderPlugin,
-} from "../../llm/provider/Plug-in/index.js";
+} from "./builtin/index.js";
 export {
   providerRegistry,
   ProviderRegistry,

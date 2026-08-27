@@ -1,6 +1,6 @@
 import { geminiProviderPlugin } from "./gemini/index.js";
 import { llamaCppProviderPlugin } from "./llama-cpp/index.js";
-import type { MikiProviderPlugin } from "../sdk/index.js";
+import type { MikiProviderPlugin } from "../../../llm/provider/sdk/index.js";
 
 /**
  * Provider ownership lives below this directory. This index is the only

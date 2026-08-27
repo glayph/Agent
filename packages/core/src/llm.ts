@@ -6,7 +6,8 @@ import type { MikiProviderMessage } from "./llm/provider/sdk/index.js";
 
 /**
  * Backward-compatible provider name used by existing agent configuration.
- * New provider implementations belong under `./llm/provider/`.
+ * New provider implementations belong under `./plugins/providers/`; shared
+ * contracts and registry remain under `./llm/provider/`.
  */
 export type Provider = "gemini" | "llama.cpp";
 

@@ -5,8 +5,8 @@
 // source: 'tool' as the "skill" category, so without this wiring the
 // skill category was effectively unreachable from real agent usage.
 //
-// jest.config.cjs force-redirects every "*/memory-bridge.js" import to
-// __mocks__/memory-bridge.ts, which always returns null from getMemory()
+// jest.config.cjs force-redirects every "*/plugins/memory/runtime.js" import to
+// __mocks__/memory-runtime.ts, which always returns null from getMemory()
 // (see that file's comment for why). To actually observe what agent.ts
 // passes to memory.logToolCall(), we override that mock's exports for
 // this file only via jest.mock() with an explicit factory, per the
@@ -19,7 +19,7 @@ import { type RuntimePaths } from "./paths.js";
 
 const logToolCall = jest.fn();
 
-jest.unstable_mockModule("./memory/memory-bridge.js", () => ({
+jest.unstable_mockModule("./plugins/memory/runtime.js", () => ({
   initMemory: () => null,
   closeMemory: () => {},
   getMemory: () => ({

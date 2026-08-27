@@ -18,7 +18,7 @@ import type {
   TemporalKnowledgeGraph,
   MikiMemoryModule,
   MemoryConsolidationDaemon as MemoryConsolidationDaemonType,
-} from "../../memory/types.js";
+} from "./types.js";
 
 const require = createRequire(import.meta.url);
 

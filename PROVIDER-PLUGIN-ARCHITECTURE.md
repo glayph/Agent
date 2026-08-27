@@ -6,7 +6,7 @@ Every AI provider is an independently managed plugin. The core runtime owns only
 
 ## Current audit
 
-The repository provides a provider-plugin contract and registry under `packages/core/src/llm/provider/sdk`. Built-in ownership is now explicit under the mandated `packages/core/src/llm/provider/Plug-in/` path: Gemini is under `Plug-in/gemini/`, local LFM/llama.cpp is under `Plug-in/llama-cpp/`, and `Plug-in/index.ts` is the sole built-in registration list. The launcher’s provider options and OAuth list are derived from registered manifests; the legacy catalog is only a compatibility facade derived from those manifests.
+The repository provides a provider-plugin contract and registry under `packages/core/src/llm/provider/sdk`. Built-in ownership is now explicit under the mandated `packages/core/src/plugins/providers/builtin/` path: Gemini is under `Plug-in/gemini/`, local LFM/llama.cpp is under `Plug-in/llama-cpp/`, and `Plug-in/index.ts` is the sole built-in registration list. The launcher’s provider options and OAuth list are derived from registered manifests; the legacy catalog is only a compatibility facade derived from those manifests.
 
 The shared OpenAI-compatible adapter is retained as a transport utility, not as a provider definition. It may be used by a plugin when the provider exposes a compatible endpoint, while provider-specific request normalization remains inside that plugin.
 

@@ -3,7 +3,7 @@ import {
   isLocalModel,
   synchronizeLocalRuntimeForModel,
   type LocalRuntimeHealth,
-} from "../llm/local/local-runtime.js";
+} from "../plugins/providers/llama-cpp/runtime/local-runtime.js";
 import { VoiceRuntimeManager } from "../voice-runtime.js";
 import type { RuntimePaths } from "../paths.js";
 

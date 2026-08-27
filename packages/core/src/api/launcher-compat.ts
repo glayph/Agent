@@ -138,7 +138,7 @@ import {
   getLocalRuntimeHealth,
   normalizeLocalModelConfig,
   synchronizeLocalRuntimeForModel,
-} from "../llm/local/local-runtime.js";
+} from "../plugins/providers/llama-cpp/runtime/local-runtime.js";
 import { globalLogger, type LogLevel } from "../structured-logger.js";
 import type { AgentControlService } from "../control/service.js";
 import type { ControlOperationRequest, ControlPlan } from "../control/types.js";
@@ -294,7 +294,7 @@ interface StoredModel {
   streaming?: { enabled?: boolean };
   extra_body?: JsonRecord;
   custom_headers?: Record<string, string>;
-  local?: import("../llm/local/local-runtime.js").LocalLlamaModelConfig;
+  local?: import("../plugins/providers/llama-cpp/runtime/local-runtime.js").LocalLlamaModelConfig;
 }
 
 interface ProviderPluginOptionInfo {

@@ -1,13 +1,13 @@
 import {
   ensureLocalRuntime,
   getLocalRuntimeHealth,
-} from "../../../local/local-runtime.js";
-import { openAICompatibleAdapter } from "../../openai-compatible-adapter.js";
+} from "../../llama-cpp/runtime/local-runtime.js";
+import { openAICompatibleAdapter } from "../../../../llm/provider/openai-compatible-adapter.js";
 import type {
   MikiProviderModel,
   MikiProviderPlugin,
   ProviderConnectionResult,
-} from "../../sdk/index.js";
+} from "../../../../llm/provider/sdk/index.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:39200/v1";
 

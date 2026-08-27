@@ -1,4 +1,4 @@
-import type { ProviderTransportConfig } from "../../transport.js";
+import type { ProviderTransportConfig } from "../../../../llm/provider/transport.js";
 
 export interface GeminiDiscoveredModel {
   id: string;

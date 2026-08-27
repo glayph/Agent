@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "../../../../mcp/contracts/tools.js";
-import type { MikiProviderMessage } from "../../sdk/index.js";
+import type { MikiProviderMessage } from "../../../../llm/provider/sdk/index.js";
 
 type JsonObject = Record<string, unknown>;
 

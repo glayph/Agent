@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { type RuntimePaths } from "../paths.js";
-import { getMemory } from "../memory/memory-bridge.js";
+import { getMemory } from "../plugins/memory/runtime.js";
 import { findFolderForPath } from "./store.js";
 import type { FolderRulesPayload, WorkspaceFolder } from "./types.js";
 
