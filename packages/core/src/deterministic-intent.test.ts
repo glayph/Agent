@@ -1,5 +1,6 @@
 import {
   detectDeterministicIntent,
+  isExplicitProcessControlRequest,
   isExplicitToolIntent,
   suppressVisibleStatusForIntent,
 } from "./deterministic-intent.js";
@@ -105,6 +106,22 @@ describe("deterministic intent safeguards", () => {
     expect(isExplicitToolIntent(message, "shell_execute")).toBe(false);
   });
 
+  it("routes a safe disposable process-control request deterministically", () => {
+    const message =
+      "Use the workspace shell tool now. Run this safe disposable-process test: sleep 30 & p=$!; kill -TERM $p; wait $p.";
+    expect(detectDeterministicIntent(message)).toEqual({
+      kind: "process_control",
+      verificationRequested: true,
+    });
+    expect(isExplicitProcessControlRequest(message)).toBe(true);
+    expect(isExplicitToolIntent(message, "shell_execute")).toBe(true);
+    expect(isExplicitToolIntent(message, "file_write")).toBe(false);
+  });
+  it("does not deterministically target an existing process without a disposable test", () => {
+    const message = "Stop PID 12345 after checking whether it is running.";
+    expect(isExplicitProcessControlRequest(message)).toBe(true);
+    expect(detectDeterministicIntent(message)).toBeNull();
+  });
   it("keeps web search and file tools in a simple-turn selection", () => {
     const messages = [
       "Search the web for the latest Agent commit.",

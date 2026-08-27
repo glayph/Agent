@@ -4,7 +4,7 @@ export interface DeterministicFileRequest {
 }
 
 export interface DeterministicIntent {
-  kind: "web_search" | "file_workflow" | "math";
+  kind: "web_search" | "file_workflow" | "process_control" | "math";
   query?: string;
   files?: DeterministicFileRequest[];
   expression?: string;
@@ -148,6 +148,24 @@ function parseMathIntent(message: string): DeterministicIntent | null {
   };
 }
 
+const PROCESS_CONTROL_PATTERN =
+  /(?:process|প্রসেস|pid|background\s+job).{0,100}(?:stop|kill|terminate|বন্ধ|sigterm|sigkill)|(?:stop|kill|terminate|বন্ধ).{0,100}(?:process|প্রসেস|pid|background\s+job)/i;
+const SAFE_DISPOSABLE_PROCESS_PATTERN =
+  /\b(?:safe|disposable|temporary|test)\b[\s\S]{0,140}\bsleep\b[\s\S]{0,180}\b(?:kill|terminate|stop)\b/i;
+
+function parseProcessControlIntent(message: string): DeterministicIntent | null {
+  if (!PROCESS_CONTROL_PATTERN.test(message)) return null;
+  // Only auto-execute the tightly bounded disposable-process test. General
+  // process-control requests still go through the normal model/tool path and
+  // its safety policy; this deterministic path cannot target an existing PID.
+  if (!SAFE_DISPOSABLE_PROCESS_PATTERN.test(message)) return null;
+  return { kind: "process_control", verificationRequested: true };
+}
+
+export function isExplicitProcessControlRequest(message: string): boolean {
+  return PROCESS_CONTROL_PATTERN.test(message);
+}
+
 function searchQueryFromMessage(message: string): string {
   const url = message.match(/https?:\/\/[^\s<>()]+/i)?.[0];
   if (url) return url.replace(/[.,;:]+$/, "");
@@ -169,6 +187,9 @@ export function detectDeterministicIntent(
         /\b(verify|check|confirm|exists|read\s+back)\b/i.test(message),
     };
   }
+
+  const processControl = parseProcessControlIntent(message);
+  if (processControl) return processControl;
 
   const math = parseMathIntent(message);
   if (math) return math;
@@ -203,6 +224,9 @@ export function isExplicitToolIntent(
   if (intent.kind === "web_search") return toolName === "web_search";
   if (intent.kind === "file_workflow") {
     return toolName === "file_write" || toolName === "file_read";
+  }
+  if (intent.kind === "process_control") {
+    return toolName === "shell_execute";
   }
   return false;
 }

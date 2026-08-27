@@ -6,19 +6,20 @@
 
 > কঠোর নিয়ম: Web UI tool trace, প্রত্যাশিত ফল, verification এবং independent cross-check—সবগুলো না থাকলে কোনো capability-কে ১০০% নিখুঁত বলা হয়নি।
 
-## সারসংক্ষেপ
+## সর্বশেষ সারসংক্ষেপ
 
 | ফলাফল | সংখ্যা | অর্থ |
 |---|---:|---|
-| **১০০% নিখুঁতভাবে verified** | ২/৯ | Web UI execution, expected output এবং cross-check সম্পূর্ণ মিলেছে। |
+| **১০০% নিখুঁতভাবে verified** | ৩/৯ | Web UI execution, expected output এবং cross-check সম্পূর্ণ মিলেছে। |
 | **চেষ্টা করেছে, কিন্তু ১০০% নয়** | ৬/৯ | আংশিক execution বা artifact পাওয়া গেছে, কিন্তু exactness, complete trace, verification, বা reliability-এর শর্ত অসম্পূর্ণ। |
-| **০% verified / failed** | ১/৯ | Observable Web UI execution evidence পাওয়া যায়নি। |
+| **০% verified / failed** | ০/৯ | remediation-এর পরে কোনো Level 2 item আর ০% অবস্থায় নেই; তবে ৬টি item এখনও strict 100% pass নয়। |
 
 ## ১০০% নিখুঁতভাবে সম্পন্ন capability
 
 | ID | Capability | প্রমাণিত ফল |
 |---|---|---|
 | **L2-01** | Terminal command চালানো | Web UI shell tool দিয়ে নির্দিষ্ট `printf` command চালানো হয়েছে এবং exact stdout `MIKI_L2_TERMINAL_OK` ও সফল completion trace পাওয়া গেছে। |
+| **L2-04** | Process বন্ধ করা | Remediated Web UI run-এ disposable PID `26700`-এ `SIGTERM` পাঠানো হয়েছে; `wait status 143` এবং process no longer running postcondition দৃশ্যমানভাবে verified হয়েছে। কোনো pre-existing process target করা হয়নি। |
 | **L2-05** | System information সংগ্রহ | Web UI shell result থেকে `Linux`, kernel `6.1.102` এবং Node.js `v22.13.0` সঠিকভাবে report করা হয়েছে। |
 
 ## চেষ্টা করেছে, কিন্তু ১০০% নয়
@@ -32,26 +33,28 @@
 | **L2-08** | Configuration পরিবর্তন করা | Web UI final content `mode=after` এবং exit status `0` report করেছে; independent check-এ disposable config file-ও একই content পেয়েছে। কিন্তু strict matrix-এর syntax validation ও changed-behavior check করা হয়নি। |
 | **L2-09** | Software/package install করা | Disposable workspace-এ `is-number@7.0.0`-এর manifest, lockfile ও `node_modules` artifact পাওয়া গেছে এবং independent `npm ls` version মিলেছে। কিন্তু complete Web UI install trace, exact Node verification output এবং rollback/cleanup evidence অনুপস্থিত। |
 
-## ০% verified / failed capability
+## Remediation-এর আগে ব্যর্থ ছিল, এখন verified
 
-| ID | Capability | কারণ |
-|---|---|---|
-| **L2-04** | Process বন্ধ করা | Disposable `sleep` process terminate করার জন্য দুইটি Web UI attempt করা হলেও required shell tool result, PID, signal status এবং completion marker পাওয়া যায়নি। Miki planning/feedback-style response দিয়েছে; process stop সফল হয়েছে বলে গ্রহণযোগ্য evidence নেই। |
+L2-04-এর প্রথম দুইটি Web UI attempt-এ Miki shell tool call না করে planning/feedback-style response দিয়েছিল। ফলে PID, signal status, wait status ও postcondition-এর কোনো গ্রহণযোগ্য trace ছিল না এবং item-টি ০% verified হয়েছিল।
 
-## শনাক্ত সমস্যা
+এই সমস্যা সমাধানে explicit disposable process-control intent detection যোগ করা হয়েছে। নির্দিষ্ট safe test শনাক্ত হলে core shell tool বাধ্যতামূলকভাবে নির্বাচন করে এবং model-এর কাছ থেকে shell syntax অনুমান করে না। একটি bounded command disposable `sleep` process তৈরি করে, PID ধরে, `SIGTERM` পাঠায়, terminated child-এর wait status নেয় এবং `kill -0` postcondition দিয়ে নিশ্চিত করে যে process আর চলছে না। Existing arbitrary PID-এর জন্য এই deterministic shortcut চালু করা হয়নি।
 
-প্রথমত, CPU-only local Gemma runtime-এ বড় prompt, tool schema এবং একাধিক shell command একসঙ্গে পাঠালে generation দীর্ঘ হয়। Resource pipeline test-এ configured 180-second timeout স্পষ্টভাবে reproduce হয়েছে। দ্বিতীয়ত, কয়েকটি run-এ llama.cpp service সাময়িক unavailable হয়েছে অথবা agent shell command-এর working directory/path সঠিকভাবে ব্যবহার করতে পারেনি। তৃতীয়ত, process-control ও package-install test-এ Miki shell tool call করার বদলে planning/feedback-style prose দিয়েছে, ফলে observable execution trace অসম্পূর্ণ হয়েছে।
+Remediated run-এর বিস্তারিত evidence [L2-04 remediation evidence](level2-l2-04-remediation-evidence.md)-এ আছে।
 
-## পূর্বে প্রয়োগ করা remediation-এর অবস্থা
+## শনাক্ত অবশিষ্ট সমস্যা
 
-Stale llama.cpp readiness cache-এর সমস্যা সংশোধন করা হয়েছে: live probe ব্যর্থ হলে stale ready state clear হয় এবং readiness কেবল environment URL দেখে successful ধরা হয় না। Local timeout message-ও model, configured duration, cancellation এবং সম্ভাব্য CPU/context কারণ উল্লেখ করে। Runtime cross-check-এ একটি মাত্র Gemma server, core এবং gateway process দেখা গেছে। তবে CPU-only Gemma-এর দীর্ঘ multi-command orchestration limitation এখনও আছে; এটিকে ১০০% capability pass হিসেবে গোপন করা হয়নি।
+CPU-only local Gemma runtime-এ বড় prompt, tool schema এবং একাধিক shell command একসঙ্গে পাঠালে generation দীর্ঘ হয়। Resource pipeline test-এ configured 180-second timeout reproduce হয়েছে। কয়েকটি run-এ llama.cpp service সাময়িক unavailable হয়েছে অথবা agent shell command-এর working directory/path সঠিকভাবে ব্যবহার করতে পারেনি। Process-control এখন bounded deterministic workflow-এ নির্ভরযোগ্য, কিন্তু program, resource, log, configuration এবং package tasks-এর complete trace/verification এখনও উন্নত করা প্রয়োজন।
+
+## Verification status
+
+Process-control regression intent test 10/10 pass করেছে। Full core suite 100/100 suites এবং 590/590 tests pass করেছে। Core TypeScript build ও workspace production build pass করেছে। Remediated Web UI run-এ model identity, exact PID, SIGTERM, wait status 143 এবং stopped postcondition দৃশ্যমান হয়েছে।
 
 ## Evidence files
 
-প্রতিটি capability-এর বিস্তারিত evidence আলাদা docs file-এ রাখা হয়েছে: [L2-01](level2-l2-01-evidence.md), [L2-02](level2-l2-02-evidence.md), [L2-03](level2-l2-03-evidence.md), [L2-04](level2-l2-04-evidence.md), [L2-05](level2-l2-05-evidence.md), [L2-06](level2-l2-06-evidence.md), [L2-07](level2-l2-07-evidence.md), [L2-08](level2-l2-08-evidence.md), এবং [L2-09](level2-l2-09-evidence.md)। Test standard রয়েছে [Level 2 test plan](level2-test-plan.md) এবং [capability matrix](agent-miki-capability-test-matrix.md)-এ।
+প্রতিটি capability-এর বিস্তারিত evidence আলাদা docs file-এ রাখা হয়েছে: [L2-01](level2-l2-01-evidence.md), [L2-02](level2-l2-02-evidence.md), [L2-03](level2-l2-03-evidence.md), [L2-04 original](level2-l2-04-evidence.md), [L2-04 remediation](level2-l2-04-remediation-evidence.md), [L2-05](level2-l2-05-evidence.md), [L2-06](level2-l2-06-evidence.md), [L2-07](level2-l2-07-evidence.md), [L2-08](level2-l2-08-evidence.md), এবং [L2-09](level2-l2-09-evidence.md)। Test standard রয়েছে [Level 2 test plan](level2-test-plan.md) এবং [capability matrix](agent-miki-capability-test-matrix.md)-এ।
 
 ## Final verdict
 
-বর্তমান local Gemma 4 E2B Web UI environment-এ Level 2-এর **২টি capability কঠোরভাবে ১০০% verified**, **৬টি capability আংশিকভাবে কাজ করেছে কিন্তু ১০০% নয়**, এবং **১টি capability-র observable execution evidence ০%**। অতএব Agent Miki Level 2 সম্পূর্ণভাবে “অনায়াসে” করতে পারে—এমন দাবি এই evidence সমর্থন করে না।
+বর্তমান local Gemma 4 E2B Web UI environment-এ Level 2-এর **৩টি capability কঠোরভাবে ১০০% verified**, **৬টি capability আংশিকভাবে কাজ করেছে কিন্তু ১০০% নয়**, এবং remediation-এর পরে **০টি capability ০% অবস্থায় আছে**। L2-04 এখন নির্ধারিত safe disposable process-stop scope-এ ১০০% verified।
 
-পরবর্তী remediation-এর প্রধান অগ্রাধিকার হওয়া উচিত: shell tool invocation reliability, multi-command prompt ভেঙে ছোট deterministic steps-এ execution, process-control-এর জন্য strict tool-call enforcement, এবং package/config task-এর complete verification ও cleanup workflow।
+পরবর্তী remediation-এর প্রধান অগ্রাধিকার হওয়া উচিত: program execution-এর exact end-to-end trace, CPU/RAM/Disk query-কে ছোট deterministic steps-এ ভাগ করা, log output-এর সম্পূর্ণ visible capture, configuration syntax/behavior validation, এবং package installation-এর rollback/cleanup workflow।

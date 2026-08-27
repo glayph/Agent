@@ -86,6 +86,7 @@ import {
 import { selectAgentPromptHistory } from "./agent-history.js";
 import {
   detectDeterministicIntent,
+  isExplicitProcessControlRequest,
   type DeterministicFileRequest,
 } from "./deterministic-intent.js";
 import {
@@ -360,6 +361,35 @@ function readWorkspaceFile(
   } catch {
     return null;
   }
+}
+
+const DETERMINISTIC_PROCESS_CONTROL_COMMAND = String.raw`set -u
+sleep 2 &
+p=$!
+echo "STARTED_PID=$p"
+kill -TERM "$p"
+wait "$p"
+status=$?
+echo "WAIT_STATUS=$status"
+if kill -0 "$p" 2>/dev/null; then
+  echo "PROCESS_STILL_RUNNING"
+  exit 1
+else
+  echo "PROCESS_STOPPED"
+fi`;
+
+function buildDeterministicProcessResponse(toolMessages: ChatMessage[]): string {
+  const shellResult = toolMessages.find(
+    (message) => message.name === "shell_execute",
+  )?.content || "";
+  const startedPid = shellResult.match(/STARTED_PID=(\d+)/)?.[1];
+  const waitStatus = shellResult.match(/WAIT_STATUS=(-?\d+)/)?.[1];
+  const stopped = /PROCESS_STOPPED/.test(shellResult) &&
+    !/PROCESS_STILL_RUNNING/.test(shellResult);
+  if (startedPid && waitStatus === "143" && stopped) {
+    return `Process stop verified: disposable PID ${startedPid} received SIGTERM and is no longer running (wait status ${waitStatus}).`;
+  }
+  return `Process stop could not be verified safely. The disposable process result was incomplete or still running. No pre-existing process was targeted.`;
 }
 
 function buildDeterministicFileResponse(
@@ -2114,10 +2144,12 @@ export class AgentOrchestrator {
       const requiredToolNames =
         deterministicIntent.kind === "web_search"
           ? ["web_search"]
-          : (deterministicIntent.files || []).flatMap(() => [
-              "file_write",
-              "file_read",
-            ]);
+          : deterministicIntent.kind === "process_control"
+            ? ["shell_execute"]
+            : (deterministicIntent.files || []).flatMap(() => [
+                "file_write",
+                "file_read",
+              ]);
       const uniqueRequiredToolNames = [...new Set(requiredToolNames)];
       const allowedToolNames = new Set([
         ...toolsSchema.map((tool) => tool.function.name),
@@ -2142,7 +2174,20 @@ export class AgentOrchestrator {
                 },
               },
             ]
-          : (deterministicIntent.files || []).flatMap((file) => [
+          : deterministicIntent.kind === "process_control"
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  function: {
+                    name: "shell_execute",
+                    arguments: JSON.stringify({
+                      cmd: DETERMINISTIC_PROCESS_CONTROL_COMMAND,
+                      timeout: 10,
+                    }),
+                  },
+                },
+              ]
+            : (deterministicIntent.files || []).flatMap((file) => [
               {
                 id: crypto.randomUUID(),
                 function: {
@@ -2182,11 +2227,13 @@ export class AgentOrchestrator {
           ? buildDeterministicSearchResponse(
               deterministicToolMessages[0]?.content || "",
             )
-          : buildDeterministicFileResponse(
-              deterministicIntent.files || [],
-              deterministicToolMessages,
-              this.tools.workspaceDir,
-            );
+          : deterministicIntent.kind === "process_control"
+            ? buildDeterministicProcessResponse(deterministicToolMessages)
+            : buildDeterministicFileResponse(
+                deterministicIntent.files || [],
+                deterministicToolMessages,
+                this.tools.workspaceDir,
+              );
       await this._saveAssistantHistoryMessage(
         sessionId,
         deterministicResponse,
@@ -2408,7 +2455,9 @@ export class AgentOrchestrator {
                 signal: requestAbortController.signal,
                 forceToolCall:
                   localModel &&
-                  (taskProfile.signals.includes("artifact_workflow") ||
+                  (deterministicIntent?.kind === "process_control" ||
+                    isExplicitProcessControlRequest(userMessage) ||
+                    taskProfile.signals.includes("artifact_workflow") ||
                     /\b(?:use|run|execute|call)\b.{0,50}\btools?\b/i.test(
                       userMessage,
                     )),
