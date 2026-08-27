@@ -30,12 +30,12 @@ The redesign is scoped to routes identified as plugin/admin surfaces. Chat, laun
 | Channels visual test | Passed |
 | Skills visual test | Passed |
 | Health visual test | Passed |
-| Desktop screenshot evidence | 7 screenshots captured |
+| Desktop screenshot evidence | 8 screenshots captured |
 | Mobile screenshot automation | Not captured because the installed Playwright browser binary was unavailable; responsive CSS was reviewed and the existing browser viewport was used for functional visual verification |
 
 ## Screenshots
 
-The redesigned visual evidence is in `docs/plugin-redesign-screenshots/`. Start with [00-contact-sheet.webp](./plugin-redesign-screenshots/00-contact-sheet.webp), then use [screenshot-index.md](./plugin-redesign-screenshots/screenshot-index.md) for individual captures.
+The redesigned visual evidence is in `docs/plugin-redesign-screenshots/`. Start with [00-contact-sheet.webp](./plugin-redesign-screenshots/00-contact-sheet.webp), then use [screenshot-index.md](./plugin-redesign-screenshots/screenshot-index.md) for individual captures. The final Drive capture confirms that the same style is applied outside the plugin routes.
 
 ## Known limitation
 
