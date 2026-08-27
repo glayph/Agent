@@ -40,12 +40,25 @@ const sourceRoot =
 const platformKey = `${process.platform}-${process.arch}`;
 const executableName =
   process.platform === "win32" ? "llama-server.exe" : "llama-server";
-const bundledExecutable = path.join(
-  localRoot,
-  "native",
-  platformKey,
-  executableName,
-);
+const bundledExecutableCandidates = [
+  path.join(localRoot, "native", platformKey, executableName),
+  path.join(
+    projectRoot,
+    "packages",
+    "core",
+    "src",
+    "plugins",
+    "providers",
+    "llama-cpp",
+    "runtime",
+    "native",
+    platformKey,
+    executableName,
+  ),
+];
+const bundledExecutable =
+  bundledExecutableCandidates.find((candidate) => existsSync(candidate)) ||
+  bundledExecutableCandidates[0];
 const distRoot = path.join(
   projectRoot,
   "packages",

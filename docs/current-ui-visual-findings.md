@@ -66,3 +66,7 @@ On the authenticated Agents route, the document reported no horizontal overflow 
 A geometry audit found the actual remaining mismatch: the primary sidebar header and logo container were 56px high, while the chat workspace header was 64px high. The workspace header was changed from `h-16 min-h-16` to `h-14 min-h-14`. A cache-busted live bundle probe now measures chat top bar 56px, sidebar header 56px, 36px logo at x=13.5/y=9.5, shared content edge x=64px, and no horizontal overflow.
 
 The same probe on the Plugin and Drive routes measures their top bars at 56px with x=64px shared edge and no horizontal overflow. The corrected live chat screenshot is `docs/current-ui-screenshots/chat-aligned-56px.webp`; the final CSS also fixes the previously oversized Plugin PageHeader by setting `.page-header-surface` to 56px with centered alignment.
+
+## Code review visual inspection
+
+The generated primary mark is a square navy/white/lime eye-orbit icon with transparent edge treatment and is correctly available as a 512px RGBA asset. The final chat screenshot visibly shows the primary rail and top bar sharing the same top band, a centered logo block, right-aligned dark user bubbles, left-aligned light assistant bubbles, and no highlighted message Inspector control.
