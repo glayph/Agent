@@ -33,3 +33,7 @@ Repository-এর frontend/core tests, build pipeline এবং source-level fix
 ## Verdict
 
 **আংশিক বা শর্তসাপেক্ষ সক্ষম capability: ৪টি।** Agent Miki-এর architecture ও UI execution path আছে, কিন্তু বর্তমান 1.2B local model-এর reasoning, planning, tool selection এবং code-generation reliability সীমিত।
+
+## Additional code-development evidence
+
+The live test generated an untracked `pseudo-code-review` scaffold containing TypeScript planner, executor, verification-gate modules, workflow metadata, and a README. Its three verification modes (`plan`, `dry-run`, and `smoke`) all exited successfully. However, the generated artifact did not contain the requested null-safe `items.map` function or two test cases. This confirms useful scaffold/code-workflow generation, but not complete task-specific code development.
