@@ -2,32 +2,36 @@
 
 ## Classification rule
 
-এই ফাইলে সেই capability রাখা হয়েছে যেগুলো বর্তমান test environment-এ নির্দিষ্ট কাজ হিসেবে সম্পূর্ণ হয়নি। “অক্ষম” শব্দটি বর্তমান local LFM2.5 configuration ও tested prompt-এর জন্য প্রযোজ্য; অন্য model, connector বা deployment configuration-এ ফলাফল ভিন্ন হতে পারে।
+এই ফাইলে সেই নির্দিষ্ট task class রাখা হয়েছে যা বর্তমান tested runtime-এ সম্পূর্ণ হয়নি বা পর্যাপ্ত evidence-এ যাচাই করা যায়নি। “অক্ষম” শব্দটি এই prompt, configuration ও run-এর জন্য প্রযোজ্য; অন্য model বা corrected runtime-এ ফল পরিবর্তিত হতে পারে।
 
-## 1. Verified complete goal decomposition — বর্তমানে করতে পারেনি
+## 1. Verified complete goal decomposition — বর্তমানে unverified/failed
 
-Goal understanding test-এ Miki-কে স্পষ্ট goal, তিনটি subtask, success criteria এবং safety constraints আলাদা heading-এ দিতে বলা হয়েছিল। সে প্রত্যাশিত structure দেয়নি; `write_files` parameter নিয়ে অপ্রাসঙ্গিক refusal দিয়েছে। এই নির্দিষ্ট structured goal-decomposition task সম্পূর্ণ হয়নি।
+Goal, তিনটি subtask, success criteria এবং safety constraints আলাদা heading-এ চাওয়া হলে আগের live run-এ Miki প্রত্যাশিত structure দেয়নি; অপ্রাসঙ্গিক `write_files` refusal দিয়েছে। Gemma-routed retest final answer render না করে দীর্ঘ `Thinking…` অবস্থায় ছিল। তাই এই structured goal task সম্পূর্ণ হয়নি।
 
-## 2. Verified read-only tool execution — বর্তমানে করতে পারেনি
+## 2. Verified read-only tool execution — বর্তমানে failed
 
-Top-level directory count/list করার harmless read-only task দেওয়া হয়েছিল। Miki কোনো directory list বা count দেয়নি এবং “No matching verification gates were found” error response দিয়েছে। Tool-use path এই test-এ সফলভাবে verified নয়।
+Top-level directory count/list করার harmless read-only task-এ Miki directory list বা count দেয়নি এবং “No matching verification gates” error দিয়েছে। Tool registry উপস্থিত থাকলেও এই test-এ end-to-end tool use সফলভাবে verified নয়।
 
-## 3. Verified code generation with tests — বর্তমানে করতে পারেনি
+## 3. Verified code generation with tests — বর্তমানে failed
 
-Null-safe JavaScript function এবং দুটি test case চাওয়া হয়েছিল। Miki code বা test case না দিয়ে বলেছে যে প্রয়োজনীয় context নেই। তাই বর্তমান local model run-এ requested code-development output সম্পূর্ণ হয়নি।
+Null-safe JavaScript function এবং দুটি test case চাওয়া হলে live model code বা tests না দিয়ে context না থাকার কথা বলেছে। আগের pseudo-code review-তেও null handling সম্পর্কে ভুল claim ছিল। এই নির্দিষ্ট code-development output সম্পূর্ণ হয়নি।
 
-## 4. Strict format adherence — বর্তমানে করতে পারেনি
+## 4. Strict format adherence — বর্তমানে failed
 
-আগের local tests-এ JSON-only output চাওয়া হলে model `Apples: 3` ধরনের natural-language output দিয়েছে, valid JSON দেয়নি। একইভাবে exact planning constraint-এ অপ্রাসঙ্গিক refusal এসেছে। Strict output-format compliance এখনো নির্ভরযোগ্যভাবে verified নয়।
+JSON-only output test-এ valid JSON-এর বদলে `Apples: 3` ধরনের natural-language response এসেছিল। Exact sentence ও structured plan constraints-এও inconsistent output দেখা গেছে।
+
+## 5. Gemini live comparison — unverified
+
+Gemini model entries dashboard-এ থাকলেও usable Gemini credential পাওয়া যায়নি; তাই Gemini inference comparison চালানো হয়নি। Gemini-কে passed বা failed—কোনোটিই দাবি করা হচ্ছে না।
 
 ## What this does not mean
 
-এই ফলাফল থেকে বলা যায় না যে Agent Miki architecture-গতভাবে কোনো tool, code workflow বা plan চালাতেই পারে না। Platform-level build, test, model transport, workflow activity এবং chat lifecycle কাজ করেছে। ব্যর্থতা মূলত বর্তমান ছোট local LFM2.5 model-এর instruction-following, context handling এবং tool-selection behavior-এ দেখা গেছে।
+এটি প্রমাণ করে না যে Agent Miki-এর architecture-এ tool, code workflow বা planning path নেই। Dashboard, model selector, local provider registry, audit boundary এবং project workflow infrastructure কাজ করেছে। ব্যর্থতা মূলত model-mediated instruction following, context handling, tool selection এবং agentic end-to-end completion-এ।
+
+## Gemma boundary
+
+Gemma 4 E2B GGUF download, model identity, `/health` এবং direct exact-text completion সফলভাবে verified হয়েছে। Direct transport success-কে Goal, Planning, Tool use বা Code development success হিসেবে গণ্য করা হয়নি, কারণ UI agentic retest final answer দেয়নি।
 
 ## Verdict
 
-**বর্তমান tested environment-এ সম্পূর্ণভাবে unsuccessful বা unverified ফলাফল: ৪টি নির্দিষ্ট capability/task class।** এগুলোকে ১০০% সক্ষম বলা যাবে না, যতক্ষণ না শক্তিশালী model বা corrected tool/verification configuration-এ একই test পুনরায় সফল হয়।
-
-## Gemini and Gemma verification boundary
-
-A live Gemini re-test was not executed because the current protected environment has no usable `GEMINI_API_KEY`, and the dashboard shows all Google Gemini entries as **Not configured**. Gemma 4 E2B is an official model family member, but this runtime has no Gemma adapter or downloaded Gemma weights. Because the available Gemma 4 E2B quantized model would consume several gigabytes and the user requested storage reduction, downloading it without a working runtime path was not justified. These two provider/model comparisons remain **currently unverified**, not falsely marked as passed.
+**বর্তমান tested environment-এ সম্পূর্ণভাবে unsuccessful বা unverified: ৪টি নির্দিষ্ট agentic task class এবং Gemini comparison।**

@@ -99,7 +99,7 @@ async function testLocal() {
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 32,
+      max_tokens: Number(process.env.MIKI_MODEL_SMOKE_MAX_TOKENS || 128),
       temperature: 0,
       stream: false,
     }),
@@ -138,7 +138,7 @@ async function testOpenAI() {
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: prompt }],
-      max_completion_tokens: 32,
+      max_completion_tokens: Number(process.env.MIKI_MODEL_SMOKE_MAX_TOKENS || 128),
       temperature: 0,
       stream: false,
     }),
@@ -169,7 +169,7 @@ async function testGemini() {
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 32,
+      max_tokens: Number(process.env.MIKI_MODEL_SMOKE_MAX_TOKENS || 128),
       temperature: 0,
       stream: false,
     }),

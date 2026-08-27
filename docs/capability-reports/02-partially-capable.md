@@ -2,42 +2,40 @@
 
 ## Classification rule
 
-এই ফাইলে সেই capability রাখা হয়েছে যেগুলোর কিছু অংশ বাস্তবে কাজ করেছে, কিন্তু বর্তমান local LFM2.5 model-এর response quality, context length, tool configuration বা provider setup-এর কারণে প্রতিটি নির্দিষ্ট task-এ নির্ভরযোগ্যভাবে সম্পূর্ণ হয়নি।
+এই ফাইলে সেই capability রাখা হয়েছে যেগুলোর infrastructure বা কিছু execution path বাস্তবে কাজ করেছে, কিন্তু নির্দিষ্ট task-এ নির্ভরযোগ্যভাবে সম্পূর্ণ হয়নি।
 
 ## 1. Goal understanding — আংশিক সক্ষম
 
-Agent Miki goal-oriented prompt গ্রহণ করেছে এবং task run শুরু করেছে। কিন্তু test-এ নির্দিষ্ট চারটি heading-সহ goal, subtask, success criteria এবং safety constraints দিতে পারেনি; বরং `write_files` parameter সংক্রান্ত অপ্রাসঙ্গিক refusal দিয়েছে। ফলে intent গ্রহণের basic layer কাজ করলেও goal decomposition ও constraint interpretation ১০০% নির্ভরযোগ্য নয়।
+আগের live run-এ goal-oriented prompt গ্রহণ ও task run শুরু হয়েছিল, কিন্তু চারটি নির্দিষ্ট heading-সহ goal decomposition দেওয়া হয়নি; `write_files` নিয়ে অপ্রাসঙ্গিক refusal এসেছিল। Gemma routing retest-এ নতুন inference `Thinking…` অবস্থায় আটকে ছিল। Basic intent গ্রহণের path আছে, কিন্তু structured goal understanding ১০০% নির্ভরযোগ্য নয়।
 
-## 2. Planning — আংশিক সক্ষম
+## 2. Planning — আংশিক/শর্তসাপেক্ষ সক্ষম
 
-আগের live task-এ Miki planning-oriented workflow শুরু করেছে এবং dashboard activity-তে workflow completion দেখা গেছে। তবে read-only তিন ধাপের plan test-এ destructive action চাওয়া হয়েছে বলে ভুলভাবে refusal দিয়েছে। অর্থাৎ planning path আছে, কিন্তু harmless planning এবং “plan only” বনাম “execute” পার্থক্য সবসময় সঠিকভাবে বুঝতে পারেনি।
+Planner specialist, workflow metadata এবং project workflow infrastructure repository-তে উপস্থিত; আগের scaffold workflow-এর plan, dry-run ও smoke modes সফলভাবে exit করেছিল। তবে live read-only planning prompt-এ harmless plan দেওয়ার বদলে ভুল refusal এসেছিল। ফলে planning architecture কাজ করে, model-mediated planning reliability সীমিত।
 
 ## 3. Tool use — আংশিক/শর্তসাপেক্ষ সক্ষম
 
-Dashboard-এ tool-related workflow activity (`project_workflow_create`) সম্পন্ন হওয়ার প্রমাণ পাওয়া গেছে এবং runtime tools/build infrastructure কাজ করেছে। কিন্তু সরাসরি read-only top-level directory inspection test-এ Miki কোনো directory result দিতে পারেনি; “No matching verification gates” error দিয়েছে। Tool registry, prompt format এবং model instruction-following একসঙ্গে সঠিক হলে capability কাজ করতে পারে, কিন্তু বর্তমান local model দিয়ে নির্ভরযোগ্য নয়।
+Tool registry, workspace boundary, audit path এবং workflow execution infrastructure চালু আছে। কিন্তু read-only top-level directory inspection test-এ কোনো directory result না দিয়ে “No matching verification gates” error এসেছিল। Tool path available হলেও prompt-to-tool selection end-to-end নির্ভরযোগ্যভাবে verified নয়।
 
 ## 4. Code development — আংশিক/শর্তসাপেক্ষ সক্ষম
 
-Repository-এর frontend/core tests, build pipeline এবং source-level fixes বাস্তবে সম্পন্ন হয়েছে; এগুলো platform execution-এর সক্ষমতা দেখায়। কিন্তু live LFM prompt-এ null-safe JavaScript function ও দুইটি test case চাওয়া হলে model বলেছে প্রয়োজনীয় context নেই এবং code দেয়নি। আগের pseudo-code review-তেও null handling সম্পর্কে ভুল claim করেছে। তাই code development infrastructure আছে, কিন্তু local model output correctness ও instruction adherence ১০০% নয়।
+Frontend 68 tests এবং core 586 tests আগের validation-এ passed; source-level code workflow ও generated scaffold বাস্তবে কাজ করেছে। কিন্তু live null-safe JavaScript function + দুই test case prompt-এ model code দেয়নি। তাই platform code execution সক্ষম, কিন্তু task-specific code generation ও correctness model-dependent।
 
 ## Supporting verified infrastructure
 
 | Area | Observed result |
 |---|---|
-| Dashboard availability | Authenticated chat workspace reached successfully |
-| Local model transport | llama.cpp local endpoint loaded and served requests |
-| Chat lifecycle | User prompt, running state, activity, and assistant response rendered |
-| Runtime source quality | Frontend 68 tests and core 586 tests passed in prior validation |
-| Provider state | Local model appeared in the Models UI and was selected as default |
+| Dashboard | Authentication ও chat workspace visualভাবে reached |
+| Local Gemma runtime | `gemma-4-e2b` model server `/health`-এ `ok` |
+| Direct Gemma completion | Exact smoke prompt-এর exact response; exit code `0` |
+| Model identity | `/v1/models`-এ `gemma-4-e2b` verified |
+| UI model label | `llama.cpp/local-model` run label rendered |
+| Source validation | Frontend 68 এবং core 586 tests পূর্বে passed |
+| Gemini comparison | Usable credential না থাকায় live comparison unverified |
 
 ## Verdict
 
-**আংশিক বা শর্তসাপেক্ষ সক্ষম capability: ৪টি।** Agent Miki-এর architecture ও UI execution path আছে, কিন্তু বর্তমান 1.2B local model-এর reasoning, planning, tool selection এবং code-generation reliability সীমিত।
+**আংশিক বা শর্তসাপেক্ষ সক্ষম capability: ৪টি।** Gemma transport সফল হলেও agentic quality, tool selection, planning এবং code output-এর ১০০% end-to-end প্রমাণ পাওয়া যায়নি।
 
-## Additional code-development evidence
+## Gemma retest boundary
 
-The live test generated an untracked `pseudo-code-review` scaffold containing TypeScript planner, executor, verification-gate modules, workflow metadata, and a README. Its three verification modes (`plan`, `dry-run`, and `smoke`) all exited successfully. However, the generated artifact did not contain the requested null-safe `items.map` function or two test cases. This confirms useful scaffold/code-workflow generation, but not complete task-specific code development.
-
-## Gemini/Gemma re-test status
-
-The Models page exposes Google Gemini model entries, but they are currently marked **Not configured** and the protected environment did not provide a usable `GEMINI_API_KEY`; therefore a fresh Gemini inference comparison could not be honestly claimed. Official Gemma 4 E2B identity was verified, but no Gemma runtime or weights are installed in this project. A 4-bit Gemma 4 E2B download is substantially larger than the retained 664 MB LFM test model, so it was not downloaded merely for this report and to avoid unnecessary storage use.
+Gemma server direct transport সফল হয়েছে। Agent Miki UI-তে Gemma-routed retest একটি দীর্ঘ `Thinking…` state-এ ছিল; final assistant answer আসেনি। তাই direct model transport-কে agentic capability success হিসেবে গণ্য করা হয়নি।

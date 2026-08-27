@@ -2,18 +2,22 @@
 
 ## Classification rule
 
-এই ফাইলে শুধুমাত্র সেই capability রাখা হবে যেটি বর্তমান Agent Miki runtime-এ নির্দিষ্ট test prompt, প্রত্যাশিত ফলাফল এবং live verification—তিনটিতেই সম্পূর্ণভাবে সফল হয়েছে। “কখনো কাজ করেছে” বা “সম্ভবত কাজ করতে পারে” ১০০% সক্ষমতার প্রমাণ হিসেবে গণ্য করা হয়নি।
+এই ফাইলে শুধুমাত্র সেই capability রাখা হয়েছে যেটি নির্দিষ্ট test prompt, প্রত্যাশিত ফলাফল এবং live verification—তিনটিতেই সম্পূর্ণভাবে সফল হয়েছে।
 
 ## Result
 
-বর্তমান local LFM2.5 runtime-এ user-এর নির্দিষ্ট চারটি capability-এর কোনোটি এই কঠোর ১০০% মানদণ্ড পূরণ করেনি। তাই এই ফাইলটি ইচ্ছাকৃতভাবে **No capability verified at 100%** ফলাফল ধারণ করছে।
+বর্তমান Gemma 4 E2B + Agent Miki live chat run-এ Goal understanding, Planning, Tool use এবং Code development-এর কোনো capability-ই কঠোর ১০০% মানদণ্ড পূরণ করেছে—এমন প্রমাণ নেই। UI agentic retest একটি দীর্ঘ `Thinking…` অবস্থায় ছিল এবং requested answer render করেনি।
 
-এটি Agent Miki অক্ষম—এমন দাবি নয়। বরং এটি দেখায় যে 1.2B local model-এর বর্তমান live run-এ goal understanding, planning, tool execution এবং code generation-এর প্রত্যেকটির অন্তত একটি গুরুত্বপূর্ণ শর্ত পূরণ হয়নি। Gemini বা শক্তিশালী production model দিয়ে আলাদা পরিবেশে পুনরায় test করলে ফলাফল পরিবর্তিত হতে পারে।
+## 100% verified transport capability
 
-## Infrastructure observations
-
-Agent Miki dashboard চালু ছিল, local llama.cpp endpoint reachable ছিল, model selection UI কাজ করছিল, এবং chat request/response lifecycle সম্পূর্ণ হয়েছিল। এগুলো infrastructure/transport সফলতার প্রমাণ; কিন্তু এগুলো একা চারটি agentic capability-কে ১০০% সক্ষম প্রমাণ করে না।
+সীমিত transport smoke test সম্পূর্ণ সফল হয়েছে। `http://127.0.0.1:39200/v1` endpoint-এর `gemma-4-e2b` model exact prompt-এর exact text ফেরত দিয়েছে এবং process exit code `0` ছিল। এটি **Gemma local inference transport**-এর ১০০% verified success; এটি goal planning, tool execution বা code correctness-এর ১০০% প্রমাণ নয়।
 
 ## Strict verdict
 
-**১০০% সক্ষম হিসেবে যাচাইকৃত capability: ০টি।**
+**চারটি agentic capability-এর মধ্যে ১০০% সক্ষম হিসেবে যাচাইকৃত: ০টি।**
+
+**আলাদা infrastructure check হিসেবে ১০০% সফল: Gemma local transport smoke test।**
+
+## Evidence boundary
+
+Gemma server health `ok`, model identity `gemma-4-e2b`, এবং direct completion response verified হয়েছে। Gemini live comparison সম্পন্ন হয়নি; dashboard-এ Gemini credential usable ছিল না।

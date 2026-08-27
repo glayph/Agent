@@ -140,7 +140,7 @@ export async function probeProviderCompletion(
   const payload = {
     model: modelId,
     messages: [{ role: "user", content: prompt }],
-    max_tokens: 8,
+    max_tokens: Number(process.env.MIKI_PROVIDER_HEALTH_MAX_TOKENS || 128),
     temperature: 0,
     stream: false,
   };
