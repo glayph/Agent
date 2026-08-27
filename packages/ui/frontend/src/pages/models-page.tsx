@@ -195,10 +195,14 @@ export function ModelsPage() {
                   onSetDefault={handleSetDefault}
                   onDelete={setDeletingModel}
                   settingDefaultIndex={settingDefaultIndex}
+                  afterModels={
+                    providerGroup.provider.isLocal ? (
+                      <SpeechToTextModels />
+                    ) : null
+                  }
                 />
               ),
             )}
-            <SpeechToTextModels />
           </div>
         )}
       </div>

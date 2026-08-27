@@ -32,6 +32,17 @@ const providers: ModelProviderOption[] = [
     aliases: ["oai"],
   },
   {
+    id: "llama.cpp",
+    display_name: "llama.cpp Local",
+    default_api_base: "http://127.0.0.1:39200/v1",
+    empty_api_key_allowed: true,
+    create_allowed: true,
+    default_model_allowed: true,
+    priority: 9,
+    local: true,
+    aliases: ["local"],
+  },
+  {
     id: "google",
     display_name: "Google Gemini",
     default_api_base:
@@ -77,5 +88,21 @@ describe("models page grouping", () => {
       "openai/gpt-4.1",
       "openai/gpt-4.1-mini",
     ])
+  })
+
+  it("uses a recognized model-name prefix for local provider placement", () => {
+    const groups = buildProviderGroups(
+      [
+        model({
+          provider: "google",
+          model_name: "llama.cpp/local-model",
+          model: "local-model",
+        }),
+      ],
+      providers,
+    )
+
+    expect(groups[0]?.key).toBe("llama.cpp")
+    expect(groups[0]?.provider.isLocal).toBe(true)
   })
 })

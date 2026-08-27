@@ -10,7 +10,7 @@ export interface ProviderGroup {
   key: string
   provider: Pick<
     ProviderCatalogEntry,
-    "key" | "label" | "iconSlug" | "domain" | "plugin"
+    "key" | "label" | "iconSlug" | "domain" | "plugin" | "isLocal"
   >
   models: ModelInfo[]
   hasDefault: boolean
@@ -27,14 +27,24 @@ export function buildProviderGroups(
     {
       provider: Pick<
         ProviderCatalogEntry,
-        "key" | "label" | "iconSlug" | "domain" | "plugin"
+        "key" | "label" | "iconSlug" | "domain" | "plugin" | "isLocal"
       >
       models: ModelInfo[]
     }
   > = {}
 
   for (const model of models) {
-    const providerKey = getCanonicalProviderKey(model.provider, providerOptions)
+    const configuredProviderKey = getCanonicalProviderKey(
+      model.provider,
+      providerOptions,
+    )
+    const modelNamePrefix = model.model_name.includes("/")
+      ? model.model_name.split("/", 1)[0]
+      : ""
+    const namedProviderKey = modelNamePrefix
+      ? getCanonicalProviderKey(modelNamePrefix, providerOptions)
+      : ""
+    const providerKey = namedProviderKey || configuredProviderKey
     const providerDef = providerKey ? providerMap.get(providerKey) : undefined
     if (!grouped[providerKey]) {
       grouped[providerKey] = {
@@ -44,6 +54,7 @@ export function buildProviderGroups(
           iconSlug: providerDef?.iconSlug,
           domain: providerDef?.domain,
           plugin: providerDef?.plugin,
+          isLocal: providerDef?.isLocal === true,
         },
         models: [],
       }

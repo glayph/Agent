@@ -1,5 +1,5 @@
 import { IconChevronDown } from "@tabler/icons-react"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 
 import type { ModelInfo } from "@/api/models"
 
@@ -10,13 +10,14 @@ import type { ProviderCatalogEntry } from "./provider-registry"
 interface ProviderSectionProps {
   provider: Pick<
     ProviderCatalogEntry,
-    "key" | "label" | "iconSlug" | "domain" | "plugin"
+    "key" | "label" | "iconSlug" | "domain" | "plugin" | "isLocal"
   >
   models: ModelInfo[]
   onEdit: (model: ModelInfo) => void
   onSetDefault: (model: ModelInfo) => void
   onDelete: (model: ModelInfo) => void
   settingDefaultIndex: number | null
+  afterModels?: ReactNode
 }
 
 export function ProviderSection({
@@ -26,6 +27,7 @@ export function ProviderSection({
   onSetDefault,
   onDelete,
   settingDefaultIndex,
+  afterModels,
 }: ProviderSectionProps) {
   const [open, setOpen] = useState(true)
 
@@ -70,18 +72,21 @@ export function ProviderSection({
       </button>
 
       {open && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {models.map((model) => (
-            <ModelCard
-              key={model.model_name}
-              model={model}
-              onEdit={onEdit}
-              onSetDefault={onSetDefault}
-              onDelete={onDelete}
-              settingDefault={settingDefaultIndex === model.index}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {models.map((model) => (
+              <ModelCard
+                key={model.model_name}
+                model={model}
+                onEdit={onEdit}
+                onSetDefault={onSetDefault}
+                onDelete={onDelete}
+                settingDefault={settingDefaultIndex === model.index}
+              />
+            ))}
+          </div>
+          {afterModels}
+        </>
       )}
     </section>
   )

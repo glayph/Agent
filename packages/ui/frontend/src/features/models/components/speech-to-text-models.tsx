@@ -1,5 +1,6 @@
 import {
   IconCheck,
+  IconChevronRight,
   IconEdit,
   IconLoader2,
   IconMicrophone,
@@ -27,6 +28,13 @@ import {
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import { Label } from "@/shared/ui/label"
 import {
@@ -75,7 +83,7 @@ function formFromModel(model: SpeechToTextModel): SpeechModelForm {
   }
 }
 
-export function SpeechToTextModels() {
+function SpeechToTextModelsPanel() {
   const { t } = useTranslation()
   const [data, setData] = useState<SpeechModelsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -730,5 +738,58 @@ export function SpeechToTextModels() {
         }}
       />
     </section>
+  )
+}
+
+export function SpeechToTextModels() {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="border-border/60 bg-card/70 hover:bg-muted/35 mt-3 flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors"
+        aria-label={t("models.speech.openVoice", "Open Voice configuration")}
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="bg-primary/10 text-primary flex size-8 shrink-0 items-center justify-center rounded-md">
+            <IconMicrophone className="size-4" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">
+              {t("models.speech.voice", "Voice")}
+            </span>
+            <span className="text-muted-foreground block truncate text-xs">
+              {t(
+                "models.speech.voiceHint",
+                "Local voice model or API audio-to-text",
+              )}
+            </span>
+          </span>
+        </span>
+        <span className="text-muted-foreground flex shrink-0 items-center gap-2 text-xs">
+          <span className="hidden sm:inline">
+            {t("models.speech.configure", "Configure")}
+          </span>
+          <IconChevronRight className="size-4" aria-hidden="true" />
+        </span>
+      </button>
+      <DialogContent className="max-h-[90vh] w-[min(48rem,calc(100vw-2rem))] !max-w-none overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {t("models.speech.voiceConfigTitle", "Voice configuration")}
+          </DialogTitle>
+          <DialogDescription>
+            {t(
+              "models.speech.voiceConfigDescription",
+              "Configure a local voice model or an API-based audio-to-text endpoint.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <SpeechToTextModelsPanel />
+      </DialogContent>
+    </Dialog>
   )
 }
