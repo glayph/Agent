@@ -1469,12 +1469,12 @@ html.dark {
 }
 
 .page-header-surface {
-  align-items: flex-end;
+  align-items: center;
   background: transparent !important;
   border-color: var(--border) !important;
-  height: auto;
-  min-height: 6.75rem;
-  padding: 1.75rem 1.5rem 1.25rem;
+  height: 3.5rem;
+  min-height: 3.5rem;
+  padding: 0 1.5rem;
 }
 
 .page-header-title {
@@ -1619,8 +1619,9 @@ html.dark {
 @media (max-width: 639px) {
   .page-header-surface {
     align-items: center;
-    min-height: 5.25rem;
-    padding: 1rem;
+    height: 3.5rem;
+    min-height: 3.5rem;
+    padding: 0 0.75rem;
   }
 }
 

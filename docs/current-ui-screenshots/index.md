@@ -12,6 +12,9 @@ Fresh authenticated browser evidence captured after the final frontend/backend r
 | `models_local_default.webp` | `/models` | `llama.cpp/local-model` shown as Available and Default; Gemini cards clearly show Not configured in local-only mode. |
 | `hub_header.webp` | `/agent/hub` | Shared PageHeader, quiet canvas, centered discovery surface, and no overflow. |
 | `agents_registry.webp` | `/agents` | Refactored shared PageHeader, Agents/Swarm tabs, readable empty state, and no clipping. |
+| `chat-aligned-56px.webp` | `/` chat workspace | Final corrected geometry: 56px sidebar header and 56px chat top bar with the logo centered at the same vertical level. |
+| `plugin-aligned-56px.webp` | `/plugins` | Final Plugin PageHeader corrected to 56px and aligned to the logo/header level. |
+| `drive-aligned-56px.webp` | `/drive` | Final Drive custom top bar measured at 56px and aligned to the shared rail edge. |
 | `01-plugin-catalog.webp` | Earlier plugin evidence | Prior redesign reference retained for comparison. |
 | `02-workspace-bubbles.webp` | Earlier chat evidence | Prior bubble/Inspector verification retained for comparison. |
 | `03-login-new-brand.webp` | Earlier login evidence | Prior generated-brand login reference retained for comparison. |
@@ -21,4 +24,4 @@ Fresh authenticated browser evidence captured after the final frontend/backend r
 | `07-manifest-192.png` | Generated asset | 192px installed-app icon evidence. |
 | `08-manifest-512.png` | Generated asset | 512px installed-app icon evidence. |
 
-The browser DOM check reported no horizontal overflow at the tested viewport and zero message-level Inspector selectors. Dedicated workspace-level Inspector/activity controls remain intentionally available.
+The browser DOM check reported no horizontal overflow at the tested viewport and zero message-level Inspector selectors. The final geometry probe measured a 56px sidebar header, a 56px chat top bar, a 36px centered logo, and a shared x=64px content edge. Dedicated workspace-level Inspector/activity controls remain intentionally available.

@@ -41,7 +41,7 @@ export function WorkspaceHeader({
   return (
     <header
       data-chat-header="true"
-      className="miki-topbar bg-background/96 border-border relative z-10 flex h-16 min-h-16 shrink-0 items-center gap-2 border-b px-3 backdrop-blur-xl sm:px-6"
+      className="miki-topbar bg-background/96 border-border relative z-10 flex h-14 min-h-14 shrink-0 items-center gap-2 border-b px-3 backdrop-blur-xl sm:px-6"
     >
       <SidebarTrigger
         className="text-muted-foreground hover:bg-primary/10 hover:text-primary md:hidden"

@@ -51,6 +51,10 @@ No provider key, GitHub token, dashboard password, or secret-bearing runtime log
 
 The supplied GitHub personal access token and provider key were exposed in the working session history before this continuation. They should be revoked and rotated immediately. Future runs should use protected environment injection or the dashboard’s credential flow rather than shell history.
 
+## Alignment correction follow-up
+
+A fresh geometry audit found the remaining mismatch: the primary sidebar header was 56px high while the chat workspace top bar was 64px high. The workspace header was corrected from `h-16/min-h-16` to `h-14/min-h-14`, matching the sidebar header and the centered 36px Miki logo. The live browser probe then measured sidebar header 56px, chat top bar 56px, logo 36px, shared content edge x=64px, and no horizontal overflow. The corrected screenshot is `docs/current-ui-screenshots/chat-aligned-56px.webp`.
+
 ## Final status
 
-The UI redesign, brand integration, chat presentation, Inspector suppression, model registry normalization, local LFM smoke path, automated checks, browser checks, screenshot evidence, safe cleanup, and local commit are complete. The commit was created as `f672125`; GitHub push could not be completed because the available GitHub authentication was rejected and the session GitHub connector was not permitted. The release remains transparent about the small local model’s instruction-following limitations and does not claim unsupported external channel or 24/7 host-service behavior.
+The UI redesign, brand integration, chat presentation, Inspector suppression, model registry normalization, local LFM smoke path, automated checks, browser checks, screenshot evidence, safe cleanup, alignment correction, and local commit are complete. A local alignment commit was created; GitHub push could not be completed because the available GitHub authentication was rejected and the session GitHub connector was not permitted. The release remains transparent about the small local model’s instruction-following limitations and does not claim unsupported external channel or 24/7 host-service behavior.
