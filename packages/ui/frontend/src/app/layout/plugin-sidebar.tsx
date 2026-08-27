@@ -97,10 +97,10 @@ export function PluginSidebar({
       <button
         type="button"
         aria-label="Close Plugin navigation"
-        className="fixed inset-0 z-40 cursor-default bg-black/10 md:bg-transparent"
+        className="plugin-sidebar__scrim fixed inset-0 z-40 cursor-default"
         onClick={() => onOpenChange(false)}
       />
-      <div className="fixed inset-y-3 left-3 z-50 w-[min(18rem,calc(100vw-1.5rem))] md:left-[4.5rem]">
+      <div className="plugin-sidebar__position fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] md:left-16 md:w-80">
         <SidebarProvider
           defaultOpen
           open={true}
@@ -111,30 +111,40 @@ export function PluginSidebar({
             side="left"
             variant="floating"
             collapsible="none"
-            style={{ "--sidebar-width": "288px" } as CSSProperties}
-            className="material-sidebar h-full w-full border shadow-xl"
+            style={{ "--sidebar-width": "320px" } as CSSProperties}
+            className="plugin-sidebar h-full w-full border-r shadow-none"
           >
-            <SidebarHeader className="material-sidebar-header flex h-14 flex-row items-center gap-3 border-b px-4">
-              <div className="bg-primary/10 text-primary flex size-8 items-center justify-center rounded-lg">
-                <IconPuzzle className="size-4" />
+            <SidebarHeader className="plugin-sidebar__header flex h-16 flex-row items-center justify-between border-b px-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="plugin-sidebar__mark flex size-7 shrink-0 items-center justify-center rounded-sm">
+                  <IconPuzzle className="size-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-semibold tracking-tight">
+                    {t("navigation.plugins")}
+                  </p>
+                  <p className="plugin-sidebar__eyebrow truncate text-[10px] tracking-[0.18em] uppercase">
+                    Runtime surfaces
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">
-                  {t("navigation.plugins")}
-                </p>
-                <p className="text-muted-foreground truncate text-[11px]">
-                  Modular capabilities
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="plugin-sidebar__close flex size-7 items-center justify-center rounded-sm"
+                aria-label="Close Plugin navigation"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
             </SidebarHeader>
-            <SidebarContent className="gap-0 px-2 py-3">
+            <SidebarContent className="gap-0 px-3 py-4">
               {pluginNavGroups.map((group) => (
-                <SidebarGroup key={group.label} className="py-2">
-                  <SidebarGroupLabel className="text-muted-foreground px-2 text-[10px] font-semibold tracking-[0.16em] uppercase">
+                <SidebarGroup key={group.label} className="px-0 py-3">
+                  <SidebarGroupLabel className="plugin-sidebar__label h-6 px-2 text-[10px] font-semibold tracking-[0.18em] uppercase">
                     {group.label}
                   </SidebarGroupLabel>
                   <SidebarGroupContent>
-                    <SidebarMenu className="gap-1">
+                    <SidebarMenu className="gap-0.5">
                       {group.items.map((item) => {
                         const Icon = item.icon
                         const active = isActivePath(pathname, item.to)
@@ -145,8 +155,8 @@ export function PluginSidebar({
                               isActive={active}
                               tooltip={item.label}
                               className={cn(
-                                "h-9 font-mono text-xs",
-                                active && "bg-primary/10 text-primary",
+                                "plugin-sidebar__item h-9 rounded-sm px-2 text-[13px]",
+                                active && "active",
                               )}
                             >
                               <Link
@@ -154,8 +164,14 @@ export function PluginSidebar({
                                 onClick={() => onOpenChange(false)}
                                 aria-current={active ? "page" : undefined}
                               >
-                                <Icon className="size-4" />
+                                <Icon className="size-3.5" />
                                 <span>{item.label}</span>
+                                {active && (
+                                  <span
+                                    className="plugin-sidebar__active-dot"
+                                    aria-hidden="true"
+                                  />
+                                )}
                               </Link>
                             </SidebarMenuButton>
                           </SidebarMenuItem>
@@ -166,6 +182,10 @@ export function PluginSidebar({
                 </SidebarGroup>
               ))}
             </SidebarContent>
+            <div className="plugin-sidebar__footer px-5 py-4 text-[11px]">
+              <span className="plugin-sidebar__eyebrow">ESC</span>
+              <span className="ml-2">Close navigation</span>
+            </div>
           </Sidebar>
         </SidebarProvider>
       </div>

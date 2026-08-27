@@ -24,36 +24,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 
 import { PluginSidebar } from "./plugin-sidebar"
 
-// Dev-tool sidebar styles — dark surfaces, orange accent for active state
-const materialSidebarStyles = `
-  .material-sidebar {
-    background-color: var(--md-sys-color-surface);
-    border-color: var(--md-sys-color-outline);
-  }
-  .material-sidebar-nav-item {
-    border-radius: var(--md-sys-radius-sm);
-    color: var(--md-sys-color-on-surface-variant);
-    transition: all 0.2s ease;
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-  .material-sidebar-nav-item:hover {
-    background-color: var(--md-sys-color-surface-variant);
-    color: var(--md-sys-color-on-surface);
-  }
-  .material-sidebar-nav-item.active {
-    background-color: color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
-    color: var(--md-sys-color-primary);
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 35%, transparent);
-  }
-  .material-sidebar-header {
-    border-color: var(--md-sys-color-outline);
-  }
-  .material-sidebar-footer {
-    border-color: var(--md-sys-color-outline);
-  }
-`
-
 interface NavItem {
   titleKey: string
   url: string
@@ -124,7 +94,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <>
-      <style>{materialSidebarStyles}</style>
       <PluginSidebar
         open={pluginSidebarOpen}
         onOpenChange={setPluginSidebarOpen}
@@ -133,13 +102,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         {...props}
         collapsible={isMobile ? "offcanvas" : "none"}
         style={{ "--sidebar-width": "64px" } as React.CSSProperties}
-        className="material-sidebar border-r"
+        className="miki-sidebar border-r"
       >
-        <SidebarHeader className="material-sidebar-header flex h-14 items-center justify-center border-b px-0">
+        <SidebarHeader className="miki-sidebar__header flex h-14 items-center justify-center border-b px-0">
           <Link
             to="/"
             onClick={closeMobileSidebar}
-            className="bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/20 mx-auto flex size-9 items-center justify-center overflow-hidden rounded-lg border p-0 shadow-sm transition-colors"
+            className="miki-sidebar__brand mx-auto flex size-9 items-center justify-center overflow-hidden rounded-md border p-0 transition-colors"
             aria-label="Miki"
             title="Miki"
           >
@@ -168,7 +137,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     title={t("navigation.plugins")}
                     data-active={pluginSidebarOpen || isPluginPath}
                     className={cn(
-                      "material-sidebar-nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
+                      "miki-sidebar__nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
                       (pluginSidebarOpen || isPluginPath) && "active",
                     )}
                   >
@@ -195,7 +164,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         title={label}
                         data-active={isActive}
                         className={cn(
-                          "material-sidebar-nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
+                          "miki-sidebar__nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
                           isActive && "active",
                         )}
                       >
@@ -210,13 +179,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenu>
         </SidebarContent>
 
-        <SidebarFooter className="material-sidebar-footer border-t px-0 py-3">
+        <SidebarFooter className="miki-sidebar__footer border-t px-0 py-3">
           <Tooltip delayDuration={250}>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={openCommand}
-                className="material-sidebar-nav-item mx-auto flex h-9 w-9 items-center justify-center border border-transparent"
+                className="miki-sidebar__nav-item mx-auto flex h-9 w-9 items-center justify-center border border-transparent"
                 aria-label={t("command.open")}
                 title={t("command.open")}
               >

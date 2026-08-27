@@ -170,30 +170,21 @@ function PluginTile({
       onClick={onSelect}
       aria-pressed={selected}
       title={`${manifest.displayName}: ${statusLabel(status)}`}
-      className={[
-        "group flex min-h-24 min-w-24 flex-col items-center justify-center gap-2 rounded-xl border p-3 text-center transition-all",
-        "hover:border-primary/50 hover:-translate-y-0.5 hover:shadow-sm",
-        selected
-          ? "border-primary bg-primary/8 text-primary shadow-sm"
-          : "border-border/70 bg-card/70 text-foreground",
-      ].join(" ")}
+      data-selected={selected}
+      className="plugin-tile group w-full"
     >
-      <span
-        className={[
-          "flex size-9 items-center justify-center rounded-lg transition-colors",
-          selected
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted/70 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
-        ].join(" ")}
-      >
+      <span className="plugin-tile__icon flex size-8 items-center justify-center rounded-md transition-colors">
         {renderPluginIcon(manifest, "size-4")}
       </span>
-      <span className="line-clamp-2 max-w-24 text-[11px] leading-tight font-medium">
+      <span className="plugin-tile__name mt-1 line-clamp-2">
         {manifest.displayName}
+      </span>
+      <span className="plugin-tile__id mt-auto line-clamp-1 w-full">
+        {manifest.id}
       </span>
       <span
         className={[
-          "size-1.5 rounded-full",
+          "plugin-status-dot mt-2 shrink-0 rounded-full",
           status === "functional"
             ? "bg-emerald-500"
             : status === "partial" || status === "config_only"
@@ -220,7 +211,7 @@ function PluginInspector({
   const requirements = manifest.requiredConfig?.filter(Boolean) ?? []
 
   return (
-    <Card className="border-border/70 bg-card/80 h-fit shadow-none lg:sticky lg:top-2">
+    <Card className="plugin-inspector h-fit lg:sticky lg:top-5">
       <CardContent className="space-y-5 p-5">
         <div className="flex items-start gap-3">
           <span className="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-xl">
@@ -385,23 +376,45 @@ export function PluginsPage() {
   }, [health, manifests])
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title={t("navigation.plugins")}>
-        <span className="text-muted-foreground hidden text-xs sm:inline">
-          {counts.functional} ready · {counts.partial} partial · {counts.core}{" "}
-          core
-        </span>
+    <div className="plugin-page flex h-full min-h-0 flex-col">
+      <PageHeader
+        title={t("navigation.plugins")}
+        titleLevel={1}
+        className="plugin-page__header"
+        titleClassName="plugin-page__title"
+        titleExtra={
+          <span className="plugin-page__kicker hidden sm:inline">
+            Modular runtime surface
+          </span>
+        }
+      >
+        <div className="flex items-center gap-4">
+          <span className="plugin-stat">
+            <strong className="plugin-stat__value">{counts.functional}</strong>
+            <span className="plugin-stat__label">Ready</span>
+          </span>
+          <span className="plugin-stat">
+            <strong className="plugin-stat__value">{counts.partial}</strong>
+            <span className="plugin-stat__label">Partial</span>
+          </span>
+          <span className="plugin-stat hidden sm:block">
+            <strong className="plugin-stat__value">{counts.core}</strong>
+            <span className="plugin-stat__label">Core</span>
+          </span>
+        </div>
       </PageHeader>
 
       <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
         <div className="mx-auto w-full max-w-7xl space-y-5">
-          <section className="border-border/70 bg-muted/15 flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
+          <section className="plugin-catalog__toolbar flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <IconPuzzle className="text-primary size-4" />
+              <IconPuzzle className="text-muted-foreground size-4" />
               <div>
-                <h2 className="text-sm font-semibold">Plugin catalog</h2>
-                <p className="text-muted-foreground text-xs">
-                  Click an icon to inspect its implemented capabilities.
+                <h2 className="text-sm font-semibold tracking-tight">
+                  Plugin catalog
+                </h2>
+                <p className="plugin-page__lede">
+                  Select a surface to inspect its runtime contract.
                 </p>
               </div>
             </div>
@@ -411,8 +424,8 @@ export function PluginsPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search plugins…"
-                className="h-9 pl-9 text-xs"
+                placeholder="Filter plugins…"
+                className="plugin-search h-9 pl-9 text-xs"
               />
             </label>
           </section>
@@ -445,19 +458,17 @@ export function PluginsPage() {
                     if (familyManifests.length === 0) return null
                     const FamilyIcon = FAMILY_ICONS[family]
                     return (
-                      <section key={family} className="space-y-3">
-                        <div className="flex items-center gap-2">
+                      <section key={family} className="plugin-family space-y-3">
+                        <div className="plugin-family__heading">
                           <FamilyIcon className="text-muted-foreground size-4" />
-                          <div>
-                            <h2 className="text-sm font-semibold">
-                              {FAMILY_LABELS[family]}
-                            </h2>
-                            <p className="text-muted-foreground text-xs">
-                              {FAMILY_DESCRIPTIONS[family]}
-                            </p>
-                          </div>
+                          <h2 className="plugin-family__title">
+                            {FAMILY_LABELS[family]}
+                          </h2>
+                          <p className="plugin-family__description">
+                            {FAMILY_DESCRIPTIONS[family]}
+                          </p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                           {familyManifests.map((manifest) => (
                             <PluginTile
                               key={manifest.id}
@@ -473,7 +484,7 @@ export function PluginsPage() {
                   },
                 )}
 
-                <section className="space-y-3 border-t pt-5">
+                <section className="plugin-family space-y-3 border-t pt-5">
                   <div className="flex items-center gap-2">
                     <IconSettings className="text-muted-foreground size-4" />
                     <div>
@@ -483,12 +494,12 @@ export function PluginsPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {CORE_SERVICES.map(([label, description, Icon]) => (
                       <div
                         key={label}
                         title={`${label}: ${description}`}
-                        className="border-border/60 bg-muted/10 text-muted-foreground flex min-h-20 min-w-20 flex-col items-center justify-center gap-2 rounded-xl border p-2 text-center"
+                        className="plugin-tile flex min-h-20 flex-col items-start justify-center gap-2 p-3"
                       >
                         <Icon className="size-4" />
                         <span className="max-w-20 text-[10px] leading-tight">

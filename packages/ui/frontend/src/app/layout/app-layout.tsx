@@ -55,6 +55,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
     select: (state) => state.location.pathname,
   })
 
+  const isPluginSurface = [
+    "/plugins",
+    "/models",
+    "/credentials",
+    "/channels",
+    "/agent/skills",
+    "/agent/tools",
+    "/memory",
+    "/config",
+    "/agent/automations",
+    "/health",
+    "/logs",
+  ].some((path) => pathname === path || pathname.startsWith(`${path}/`))
+
   return (
     <TooltipProvider>
       <OfflineBanner />
@@ -72,6 +86,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
         <div
           data-app-shell="content"
+          data-plugin-surface={isPluginSurface ? "true" : undefined}
           className="bg-background relative flex min-w-0 flex-1 flex-col overflow-hidden"
         >
           <AppBackground />
