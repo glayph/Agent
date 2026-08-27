@@ -13,6 +13,7 @@ Fresh authenticated browser evidence captured after the final frontend/backend r
 | `hub_header.webp` | `/agent/hub` | Shared PageHeader, quiet canvas, centered discovery surface, and no overflow. |
 | `agents_registry.webp` | `/agents` | Refactored shared PageHeader, Agents/Swarm tabs, readable empty state, and no clipping. |
 | `chat-aligned-56px.webp` | `/` chat workspace | Final corrected geometry: 56px sidebar header and 56px chat top bar with the logo centered at the same vertical level. |
+| `chat-lite-grey-white.webp` | `/` chat workspace | Latest palette: User bubble soft lite grey; Miki assistant bubble clean lite white. |
 | `plugin-aligned-56px.webp` | `/plugins` | Final Plugin PageHeader corrected to 56px and aligned to the logo/header level. |
 | `drive-aligned-56px.webp` | `/drive` | Final Drive custom top bar measured at 56px and aligned to the shared rail edge. |
 | `01-plugin-catalog.webp` | Earlier plugin evidence | Prior redesign reference retained for comparison. |

@@ -1639,9 +1639,9 @@ html.dark {
    ============================================================================= */
 :root {
   --chat-surface: #f7f7f3;
-  --chat-user-bubble: #171817;
-  --chat-user-text: #f7f7f3;
-  --chat-user-border: #171817;
+  --chat-user-bubble: #eceeea;
+  --chat-user-text: #171817;
+  --chat-user-border: #d7dbd3;
   --chat-user-shadow: none;
   --chat-assistant-bubble: #ffffff;
   --chat-assistant-text: #171817;

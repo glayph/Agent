@@ -70,3 +70,7 @@ The same probe on the Plugin and Drive routes measures their top bars at 56px wi
 ## Code review visual inspection
 
 The generated primary mark is a square navy/white/lime eye-orbit icon with transparent edge treatment and is correctly available as a 512px RGBA asset. The final chat screenshot visibly shows the primary rail and top bar sharing the same top band, a centered logo block, right-aligned dark user bubbles, left-aligned light assistant bubbles, and no highlighted message Inspector control.
+
+## Chat bubble palette update
+
+The light theme now uses `#eceeea` for the user bubble with `#d7dbd3` border and graphite text, while Miki assistant bubbles use `#ffffff` with `#dfe2d8` border and graphite text. A live computed-style probe confirmed the user inner bubble as `rgb(236, 238, 234)` and the assistant bubble as `rgb(255, 255, 255)`; message-level Inspector count remained zero. Fresh evidence: `docs/current-ui-screenshots/chat-lite-grey-white.webp`.
