@@ -14,3 +14,7 @@ The live runtime served the rebuilt bundle after restart. No route crash, text c
 ## Console and artifact review
 
 The browser console showed no output or runtime error during the final visual pass. A contact sheet was generated from the seven redesigned route captures and visually inspected; the captions and page compositions are legible at overview scale.
+
+## Global Web UI visual check
+
+After the global token override, the login screen remained functional and its primary action adopted the lime accent. The authenticated workspace loaded normally after sign-in, retaining existing chat content, navigation rail, composer, and inspector controls. This confirms that the reference style is no longer limited to the plugin route surface; the global authenticated UI tokens now drive the broader Web UI as requested.

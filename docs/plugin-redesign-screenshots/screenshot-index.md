@@ -12,3 +12,5 @@
 | 5 | [05-channels.webp](./05-channels.webp) | Channel configuration page |
 | 6 | [06-skills.webp](./06-skills.webp) | Skills page with clean content grid |
 | 7 | [07-health.webp](./07-health.webp) | Health and runtime status page |
+
+| 8 | [08-drive-global.webp](./08-drive-global.webp) | Global style applied to Drive page |

@@ -1577,3 +1577,312 @@ body,
     padding: 1rem;
   }
 }
+
+/* =============================================================================
+   GLOBAL INK & LIME APPLICATION
+   The reference style is intentionally shared by every authenticated Web UI page.
+   ============================================================================= */
+:root {
+  --md-sys-color-primary: #a3e635;
+  --md-sys-color-on-primary: #11160b;
+  --md-sys-color-primary-container: #e8f7c4;
+  --md-sys-color-on-primary-container: #1d290d;
+  --md-sys-color-secondary: #6a7164;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #eceee8;
+  --md-sys-color-on-secondary-container: #252a22;
+  --md-sys-color-tertiary: #70736c;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #e6e9e1;
+  --md-sys-color-on-tertiary-container: #252a22;
+  --md-sys-color-error: #c2413b;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #fce8e5;
+  --md-sys-color-on-error-container: #5f1713;
+  --md-sys-color-background: #f7f7f3;
+  --md-sys-color-on-background: #171817;
+  --md-sys-color-surface: #ffffff;
+  --md-sys-color-on-surface: #171817;
+  --md-sys-color-surface-variant: #eceee8;
+  --md-sys-color-on-surface-variant: #70736c;
+  --md-sys-color-outline: #dfe2d8;
+  --md-sys-color-outline-variant: #e9ebe5;
+  --md-sys-color-inverse-surface: #171817;
+  --md-sys-color-inverse-on-surface: #f7f7f3;
+  --md-sys-color-inverse-primary: #bef264;
+  --background: #f7f7f3;
+  --foreground: #171817;
+  --card: #ffffff;
+  --card-foreground: #171817;
+  --popover: #ffffff;
+  --popover-foreground: #171817;
+  --primary: #a3e635;
+  --primary-foreground: #11160b;
+  --secondary: #eceee8;
+  --secondary-foreground: #444740;
+  --muted: #eceee8;
+  --muted-foreground: #70736c;
+  --accent: #e8f7c4;
+  --accent-foreground: #24310e;
+  --destructive: #c2413b;
+  --destructive-foreground: #ffffff;
+  --border: #dfe2d8;
+  --input: #d4d8cf;
+  --ring: #7aa816;
+  --sidebar: #f1f2ed;
+  --sidebar-foreground: #171817;
+  --sidebar-primary: #a3e635;
+  --sidebar-primary-foreground: #11160b;
+  --sidebar-accent: #e8ebe3;
+  --sidebar-accent-foreground: #171817;
+  --sidebar-border: #dfe2d8;
+  --sidebar-ring: #7aa816;
+  --success: #238636;
+  --warning: #a16207;
+}
+
+html.dark {
+  --md-sys-color-primary: #bef264;
+  --md-sys-color-on-primary: #11160b;
+  --md-sys-color-primary-container: #273215;
+  --md-sys-color-on-primary-container: #e5f6bb;
+  --md-sys-color-secondary: #9ba394;
+  --md-sys-color-on-secondary: #151815;
+  --md-sys-color-secondary-container: #232823;
+  --md-sys-color-on-secondary-container: #dce2d5;
+  --md-sys-color-tertiary: #9ba394;
+  --md-sys-color-on-tertiary: #151815;
+  --md-sys-color-tertiary-container: #242a23;
+  --md-sys-color-on-tertiary-container: #dce2d5;
+  --md-sys-color-error: #f17b70;
+  --md-sys-color-on-error: #321310;
+  --md-sys-color-error-container: #471c19;
+  --md-sys-color-on-error-container: #ffd8d2;
+  --md-sys-color-background: #111311;
+  --md-sys-color-on-background: #eef0e9;
+  --md-sys-color-surface: #171a17;
+  --md-sys-color-on-surface: #eef0e9;
+  --md-sys-color-surface-variant: #232823;
+  --md-sys-color-on-surface-variant: #9ba394;
+  --md-sys-color-outline: #30372e;
+  --md-sys-color-outline-variant: #252b24;
+  --md-sys-color-inverse-surface: #eef0e9;
+  --md-sys-color-inverse-on-surface: #171817;
+  --md-sys-color-inverse-primary: #7ba52e;
+  --background: #111311;
+  --foreground: #eef0e9;
+  --card: #171a17;
+  --card-foreground: #eef0e9;
+  --popover: #171a17;
+  --popover-foreground: #eef0e9;
+  --primary: #bef264;
+  --primary-foreground: #11160b;
+  --secondary: #232823;
+  --secondary-foreground: #c5cbbd;
+  --muted: #232823;
+  --muted-foreground: #9ba394;
+  --accent: #273215;
+  --accent-foreground: #e5f6bb;
+  --destructive: #f17b70;
+  --destructive-foreground: #321310;
+  --border: #30372e;
+  --input: #3a4338;
+  --ring: #a3d94d;
+  --sidebar: #151815;
+  --sidebar-foreground: #eef0e9;
+  --sidebar-primary: #bef264;
+  --sidebar-primary-foreground: #11160b;
+  --sidebar-accent: #242a23;
+  --sidebar-accent-foreground: #eef0e9;
+  --sidebar-border: #30372e;
+  --sidebar-ring: #a3d94d;
+  --success: #69d17a;
+  --warning: #f0b44d;
+}
+
+/* Global page rhythm: quiet canvas, hairline rules, no decorative grid. */
+.app-background::after,
+.app-background__mesh {
+  display: none !important;
+}
+
+[data-app-shell="content"] {
+  background: var(--background);
+}
+
+[data-slot="card"] {
+  border-color: var(--border);
+  border-radius: 0.7rem;
+  box-shadow: none !important;
+}
+
+[data-slot="button"],
+[data-slot="input"],
+[data-slot="textarea"],
+[data-slot="select-trigger"] {
+  border-radius: 0.45rem;
+}
+
+.page-header-surface {
+  align-items: flex-end;
+  background: transparent !important;
+  border-color: var(--border) !important;
+  height: auto;
+  min-height: 6.75rem;
+  padding: 1.75rem 1.5rem 1.25rem;
+}
+
+.page-header-title {
+  color: var(--foreground) !important;
+  font-family: var(--font-sans);
+  font-size: clamp(1.35rem, 2vw, 1.8rem) !important;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.page-header-surface [data-slot="button"] {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted-foreground);
+}
+
+.page-header-surface [data-slot="button"]:hover {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.page-header-surface kbd {
+  background: var(--muted);
+  border-color: var(--border);
+  color: var(--muted-foreground);
+}
+
+.miki-sidebar {
+  background: var(--sidebar);
+  border-color: var(--sidebar-border);
+  color: var(--sidebar-foreground);
+  box-shadow: none;
+}
+
+.miki-sidebar__header,
+.miki-sidebar__footer {
+  border-color: var(--sidebar-border);
+}
+
+.miki-sidebar__brand {
+  background: var(--foreground);
+  border-color: var(--foreground);
+  box-shadow: none;
+}
+
+.miki-sidebar__brand img {
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
+
+.miki-sidebar__nav-item {
+  color: var(--muted-foreground);
+  border-radius: 0.45rem;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out,
+    transform 140ms ease-out;
+}
+
+.miki-sidebar__nav-item:hover {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+  transform: translateY(-1px);
+}
+
+.miki-sidebar__nav-item.active {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.plugin-sidebar__scrim {
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.plugin-sidebar__position {
+  filter: drop-shadow(16px 0 28px rgb(17 24 11 / 0.08));
+}
+
+.plugin-sidebar {
+  background: var(--sidebar);
+  border-color: var(--sidebar-border);
+  color: var(--sidebar-foreground);
+}
+
+.plugin-sidebar__header,
+.plugin-sidebar__footer {
+  border-color: var(--sidebar-border);
+}
+
+.plugin-sidebar__mark {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.plugin-sidebar__eyebrow,
+.plugin-sidebar__label {
+  color: var(--muted-foreground);
+}
+
+.plugin-sidebar__close {
+  color: var(--muted-foreground);
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.plugin-sidebar__close:hover {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+}
+
+.plugin-sidebar__item {
+  color: var(--muted-foreground);
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.plugin-sidebar__item:hover,
+.plugin-sidebar__item.active {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.plugin-sidebar__active-dot {
+  margin-left: auto;
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+@media (min-width: 640px) {
+  .page-header-surface {
+    padding-right: 2.25rem;
+    padding-left: 2.25rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .page-header-surface {
+    align-items: center;
+    min-height: 5.25rem;
+    padding: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .miki-sidebar__nav-item,
+  .plugin-sidebar__item,
+  .plugin-tile {
+    transition: none;
+  }
+}
