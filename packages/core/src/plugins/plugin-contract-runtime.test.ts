@@ -82,6 +82,7 @@ describe("loadRuntimePluginContracts", () => {
         "    allow_execution: true",
         "    allow_network: true",
         "    allow_secrets: true",
+        "    allow_unsafe_host_execution: true",
       ].join("\n"),
     );
     await registerPlugin(workspaceDir, {
@@ -111,6 +112,39 @@ describe("loadRuntimePluginContracts", () => {
     expect(contracts[0].readiness.risk.level).toBe("high");
   });
 
+  it("fails closed for high-risk host execution without an enforced sandbox", async () => {
+    workspaceDir = createWorkspace();
+    fs.writeFileSync(
+      path.join(workspaceDir, "config", "tools.yaml"),
+      [
+        "runtime:",
+        "  plugin_contracts:",
+        "    allow_execution: true",
+        "    allow_network: true",
+      ].join("\n"),
+    );
+    await registerPlugin(workspaceDir, {
+      permissions: ["network.http"],
+      createToolEntrypoint: true,
+      contracts: {
+        tools: [{ name: "unsafe_remote", entrypoint: "tools/run.js" }],
+      },
+    });
+
+    const [contract] = await loadRuntimePluginContracts(workspaceDir, {
+      kind: "tools",
+    });
+
+    expect(contract.readiness.status).toBe("requires_policy");
+    expect(contract.readiness.executable).toBe(false);
+    expect(contract.readiness.risk.requiresPolicy).toContain(
+      "enforced.host_sandbox",
+    );
+    expect(contract.readiness.reasons).toContain(
+      "High-risk plugin execution requires an enforced host sandbox; set allow_unsafe_host_execution=true only for trusted local plugins.",
+    );
+  });
+
   it("blocks executable tools when execution is disabled by default", async () => {
     workspaceDir = createWorkspace();
     await registerPlugin(workspaceDir, {
@@ -132,7 +166,9 @@ describe("loadRuntimePluginContracts", () => {
 
     expect(contract.readiness.status).toBe("policy_blocked");
     expect(contract.readiness.executable).toBe(false);
-    expect(contract.readiness.risk.requiresPolicy).toEqual(["network.http"]);
+    expect(contract.readiness.risk.requiresPolicy).toEqual(
+      expect.arrayContaining(["network.http", "enforced.host_sandbox"]),
+    );
     expect(contract.readiness.reasons).toContain(
       "Plugin contract execution is disabled by policy.",
     );

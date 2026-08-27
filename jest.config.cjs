@@ -2,6 +2,7 @@
 module.exports = {
   preset: "ts-jest",
   testEnvironment: "node",
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.mjs"],
   extensionsToTreatAsEsm: [".ts", ".tsx"],
   testMatch: [
     "<rootDir>/__tests__/**/*.test.ts",

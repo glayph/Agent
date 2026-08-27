@@ -29,9 +29,31 @@ export interface SkillRegistrySearchResult {
   installed_name?: string
 }
 
-interface SkillsResponse {
+export interface SkillsResponse {
   skills: SkillSupportItem[]
+  total?: number
 }
+
+type SkillApiEnvelope<T> = {
+  success: boolean
+  data: T
+  error?: string
+  detail?: string
+}
+
+function unwrapSkillApiResponse<T>(response: T | SkillApiEnvelope<T>): T {
+  if (
+    typeof response === "object" &&
+    response !== null &&
+    "success" in response &&
+    "data" in response &&
+    typeof response.success === "boolean"
+  ) {
+    return response.data
+  }
+  return response as T
+}
+
 
 export interface SkillSearchResponse {
   results: SkillRegistrySearchResult[]
@@ -160,11 +182,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getSkills(): Promise<SkillsResponse> {
-  return request<SkillsResponse>("/api/skills")
+  const response = await request<
+    SkillsResponse | SkillApiEnvelope<SkillsResponse>
+  >("/api/skills")
+  return unwrapSkillApiResponse(response)
 }
 
 export async function getSkill(name: string): Promise<SkillDetailResponse> {
-  return request<SkillDetailResponse>(`/api/skills/${encodeURIComponent(name)}`)
+  const response = await request<
+    SkillDetailResponse | SkillApiEnvelope<SkillDetailResponse>
+  >(`/api/skills/${encodeURIComponent(name)}`)
+  return unwrapSkillApiResponse(response)
 }
 
 export async function searchSkills(
@@ -177,17 +205,23 @@ export async function searchSkills(
     limit: String(limit),
     offset: String(offset),
   })
-  return request<SkillSearchResponse>(`/api/skills/search?${params.toString()}`)
+  const response = await request<
+    SkillSearchResponse | SkillApiEnvelope<SkillSearchResponse>
+  >(`/api/skills/search?${params.toString()}`)
+  return unwrapSkillApiResponse(response)
 }
 
 export async function installSkill(
   input: InstallSkillRequest,
 ): Promise<InstallSkillResponse> {
-  return request<InstallSkillResponse>("/api/skills/install", {
+  const response = await request<
+    InstallSkillResponse | SkillApiEnvelope<InstallSkillResponse>
+  >("/api/skills/install", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   })
+  return unwrapSkillApiResponse(response)
 }
 
 export async function getPluginMarketplaceReadiness(): Promise<PluginMarketplaceReadinessResponse> {
@@ -207,17 +241,20 @@ export async function importSkill(file: File): Promise<SkillActionResponse> {
   if (!res.ok) {
     throw new Error(await extractErrorMessage(res))
   }
-  return res.json() as Promise<SkillActionResponse>
+  const response = (await res.json()) as
+    | SkillActionResponse
+    | SkillApiEnvelope<SkillActionResponse>
+  return unwrapSkillApiResponse(response)
 }
 
 export async function deleteSkill(name: string): Promise<SkillActionResponse> {
-  return request<SkillActionResponse>(
-    `/api/skills/${encodeURIComponent(name)}`,
-    {
-      method: "DELETE",
-      headers: { "X-Miki-Confirm": "delete-skill" },
-    },
-  )
+  const response = await request<
+    SkillActionResponse | SkillApiEnvelope<SkillActionResponse>
+  >(`/api/skills/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: { "X-Miki-Confirm": "delete-skill" },
+  })
+  return unwrapSkillApiResponse(response)
 }
 
 async function extractErrorMessage(res: Response): Promise<string> {

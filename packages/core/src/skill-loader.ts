@@ -19,9 +19,35 @@ export interface SkillDefinition {
   }>;
 }
 
+/**
+ * Resolve a discovered skill entrypoint to the compiled runtime module when
+ * metadata points at a TypeScript source tree. Downloaded JavaScript skills
+ * continue to use their original entrypoint.
+ */
+export function resolveSkillRuntimeEntry(indexPath: string): string {
+  if (!indexPath) return "";
+  const javascriptPath = indexPath.replace(/\.(tsx?|mts|cts)$/i, ".js");
+  if (fs.existsSync(javascriptPath)) return javascriptPath;
+
+  const normalized = path.normalize(indexPath);
+  const sourceMarker = `${path.sep}src${path.sep}`;
+  const sourceIndex = normalized.lastIndexOf(sourceMarker);
+  if (sourceIndex >= 0) {
+    const packageRoot = normalized.slice(0, sourceIndex);
+    const sourceRelative = normalized
+      .slice(sourceIndex + sourceMarker.length)
+      .replace(/\.(tsx?|mts|cts)$/i, ".js");
+    const compiledPath = path.join(packageRoot, "dist", sourceRelative);
+    if (fs.existsSync(compiledPath)) return compiledPath;
+  }
+
+  return javascriptPath;
+}
+
 export class SkillLoader {
   private searchEngine: SkillSearchEngine;
   private loadedSkills: Map<string, SkillDefinition> = new Map();
+  private callableSkills: Set<string> = new Set();
   public runtimePaths: RuntimePaths;
   constructor(paths: RuntimePaths | string) {
     this.runtimePaths = normalizeRuntimePaths(paths);
@@ -147,11 +173,15 @@ export class SkillLoader {
     return this.searchEngine.listAll(true);
   }
 
-  /**
-   * Unload a skill
-   */
+  /** Mark a loaded skill after its module has registered callable tools. */
+  markSkillCallable(skillId: string): void {
+    if (this.loadedSkills.has(skillId)) this.callableSkills.add(skillId);
+  }
+
+  /** Unload a skill and remove its callable state. */
   unloadSkill(skillId: string): void {
     this.loadedSkills.delete(skillId);
+    this.callableSkills.delete(skillId);
   }
 
   /**
@@ -159,17 +189,26 @@ export class SkillLoader {
    */
   clearLoaded(): void {
     this.loadedSkills.clear();
+    this.callableSkills.clear();
   }
 
   /**
    * Get list of loaded skills
    */
-  getLoadedSkills(): Array<{ id: string; name: string; path: string }> {
-    return Array.from(this.loadedSkills.values()).map((skill) => ({
-      id: skill.metadata.id,
-      name: skill.metadata.name,
-      path: skill.index,
-    }));
+  getLoadedSkills(): Array<{
+    id: string;
+    name: string;
+    path: string;
+    callable: true;
+  }> {
+    return Array.from(this.loadedSkills.values())
+      .filter((skill) => this.callableSkills.has(skill.metadata.id))
+      .map((skill) => ({
+        id: skill.metadata.id,
+        name: skill.metadata.name,
+        path: skill.index,
+        callable: true as const,
+      }));
   }
 
   /**
@@ -235,7 +274,7 @@ export class SkillLoader {
     return {
       totalSkills: allSkills.length,
       categories,
-      loadedSkills: this.loadedSkills.size,
+      loadedSkills: this.callableSkills.size,
       availableTags: tags,
     };
   }

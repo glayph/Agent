@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
 import {
   settings,
@@ -45,7 +46,11 @@ import {
 } from "./automation.js";
 import { SqlitePlatformConnectionStore } from "./platform-connections.js";
 import { buildAgentTokenBudget } from "./agent-token-budget.js";
-import { initSkillLoader, SkillLoader } from "./skill-loader.js";
+import {
+  initSkillLoader,
+  resolveSkillRuntimeEntry,
+  SkillLoader,
+} from "./skill-loader.js";
 import { globalToolWarmer } from "./tools/tool-warmer.js";
 import {
   formatAdaptiveCapabilitySelection,
@@ -1051,6 +1056,11 @@ export class AgentOrchestrator {
     this.skillLoader = initSkillLoader(paths);
   }
 
+  /** Return the shared skill loader used by orchestration and the API. */
+  getSkillLoader(): SkillLoader {
+    return this.skillLoader;
+  }
+
   private _bgStarted = false;
   private _messageHistory = new Map<string, ChatMessage[]>();
   private _sessionHistoryStore: SqliteSessionHistoryStore;
@@ -1098,11 +1108,13 @@ export class AgentOrchestrator {
         }
         // Dynamically import the skill module and register its tools
         try {
-          const module = await import(skill.index.replace(/\.ts$/, ".js"));
+          const runtimeEntry = resolveSkillRuntimeEntry(skill.index);
+          const module = await import(pathToFileURL(runtimeEntry).href);
           if (module && typeof module.registerSkills === "function") {
             module.registerSkills(
               this.tools.registerSkillTool.bind(this.tools),
             );
+            this.skillLoader.markSkillCallable(skill.metadata.id);
           }
         } catch (err) {
           console.warn(
@@ -1734,6 +1746,70 @@ export class AgentOrchestrator {
   }
 
   /**
+   * Persist an LLM/provider failure as a durable learning experience.
+   *
+   * Provider exceptions return before a normal assistant response exists, so
+   * they cannot use _logMemoryInteraction(). Keep this path defensive and
+   * idempotent: observability must never change the user-facing error flow.
+   */
+  private _logMemoryFailure(
+    sessionId: string,
+    userMessage: string,
+    error: unknown,
+    options: {
+      modelId?: string;
+      taskClass?: string;
+      runId?: string;
+      messageId?: string;
+      providerId?: string;
+      providerStatus?: number;
+      retryable?: boolean;
+      retryCount?: number;
+    } = {},
+  ): void {
+    const memory = getMemory();
+    if (!memory || !this.selfImprovement) return;
+    try {
+      const modelId = options.modelId || this.modelName || "unknown";
+      const errorMessage = (
+        error instanceof Error ? error.message : String(error)
+      ).slice(0, 500);
+      const identity =
+        options.messageId || options.runId || crypto.randomUUID();
+      this.selfImprovement.recordExperience({
+        sessionId,
+        runId: options.runId,
+        taskClass: options.taskClass,
+        context: userMessage,
+        actionKey: `model:${modelId}`,
+        outcome: "failure",
+        rewardInput: {
+          completionQuality: 0,
+          taskSuccess: 0,
+          verificationSuccess: 0,
+          latencyScore: 0,
+          retryCount: options.retryCount || 0,
+          outcome: "failure",
+        },
+        modelId,
+        idempotencyKey: `${sessionId}:${identity}:provider-failure:${modelId}`,
+        metadata: {
+          failureType: "llm_provider_error",
+          error: errorMessage,
+          providerId: options.providerId,
+          providerStatus: options.providerStatus,
+          retryable: options.retryable,
+        },
+      });
+    } catch (learningError) {
+      console.error(
+        "[Agent] Learning failure record failed:",
+        (learningError as Error).message,
+      );
+    }
+  }
+
+  /**
    * Write a resolved tool call into long-term memory (the `skill` category
    * — see _classifyMemoryCategory in the memory package, which files any
    * event with source: 'tool' there regardless of content). Called once
@@ -2274,6 +2350,16 @@ export class AgentOrchestrator {
                     ? `\n\nThe ${providerLabel} service is temporarily unavailable. Please try again shortly.`
                     : `\n\n${providerError.message || "The selected AI service returned an error."} The run was stopped safely.`
           : `\n\n${isCredentialOrRateLimitError ? rawMessage : `Error calling LLM: ${rawMessage}`}`;
+        this._logMemoryFailure(sessionId, userMessage, err, {
+          modelId: turnModel,
+          taskClass: taskProfile.complexity,
+          runId: String(loopId),
+          messageId: options.messageId,
+          providerId: providerError?.providerId,
+          providerStatus: providerError?.status,
+          retryable: providerError?.retryable,
+          retryCount: turn,
+        });
         await this._saveAssistantHistoryMessage(
           sessionId,
           errorMessage,

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { ApprovalInbox } from "../security/approval-inbox.js";
 import { IsolatedBrowserWorker } from "./isolated-browser-worker.js";
 
@@ -32,7 +32,7 @@ describe("IsolatedBrowserWorker", () => {
     await expect(worker.execute({ command: "getUrl" })).resolves.toBe(
       "https://worker.local/",
     );
-    expect(worker.pid).toBeTypeOf("number");
+    expect(typeof worker.pid).toBe("number");
     expect(worker.profilePath).toContain(
       path.join("browser-runs", "run-isolated"),
     );

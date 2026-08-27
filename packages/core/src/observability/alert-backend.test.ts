@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, jest } from "@jest/globals";
 import { AlertBackend } from "./alert-backend.js";
 import type { ResourceAlert } from "./resource-monitor.js";
 
@@ -35,13 +35,13 @@ describe("AlertBackend", () => {
   });
 
   test("does not call a webhook when it is not configured", async () => {
-    const fetchImpl = vi.fn();
+    const fetchImpl = jest.fn();
     await new AlertBackend({ fetchImpl }).notify(alert);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   test("delivers a bounded, authenticated JSON alert", async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchImpl = jest.fn(async () => new Response(null, { status: 204 }));
     const backend = new AlertBackend({
       webhookUrl: "https://alerts.example.test/hook",
       webhookToken: "test-only-token",
@@ -62,7 +62,7 @@ describe("AlertBackend", () => {
 
   test("retries transient webhook failures at most maxAttempts times", async () => {
     let calls = 0;
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = jest.fn(async () => {
       calls += 1;
       if (calls < 3) return new Response(null, { status: 503 });
       return new Response(null, { status: 204 });
@@ -79,7 +79,7 @@ describe("AlertBackend", () => {
   });
 
   test("suppresses duplicate alert delivery within the configured interval", async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchImpl = jest.fn(async () => new Response(null, { status: 204 }));
     const backend = new AlertBackend({
       webhookUrl: "https://alerts.example.test/hook",
       fetchImpl,

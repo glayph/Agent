@@ -6,8 +6,8 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -160,10 +160,6 @@ function persistArtifact(sourceExecutable, mode) {
       null,
       2,
     ) + "\n",
-  );
-  writeFileSync(
-    path.join(localRoot, "native", platformKey, "build-metadata.json"),
-    readFileSync(metadataPath),
   );
 }
 

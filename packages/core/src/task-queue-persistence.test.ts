@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@jest/globals";
 import { TaskQueue } from "./task-queue.js";
 
 const tempDirs: string[] = [];

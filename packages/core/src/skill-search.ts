@@ -258,7 +258,15 @@ export class SkillSearchEngine {
       for (const skillName of skillIds) {
         const skillId = `${categoryName}/${skillName}`;
         if (uninstalledSkills.includes(skillId)) continue;
-        const skillPath = path.join(categoryPath, skillName);
+        // Most categories contain one subdirectory per skill. A bundled
+        // single-skill category may also use the category directory itself as
+        // the skill root (for example goal-completion/). Support both layouts
+        // so an executable bundled skill is not silently undiscoverable.
+        const nestedSkillPath = path.join(categoryPath, skillName);
+        const skillPath =
+          fs.existsSync(nestedSkillPath) || categoryName !== skillName
+            ? nestedSkillPath
+            : categoryPath;
         if (!fs.existsSync(skillPath)) continue;
 
         const skillMetadataPath = this.findMetadataFile(skillPath);

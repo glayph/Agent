@@ -2,7 +2,7 @@
 /**
  * run-verify.mjs
  *
- * Standard verification: lint + typecheck + build + test + doctor.
+ * Standard verification: lint + dependency build + typecheck + build + test + doctor.
  * Used by `npm run verify`.
  */
 
@@ -26,7 +26,7 @@ const eslintEntry = path.join(
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: node scripts/run-verify.mjs [options]
 
-Standard verification: lint + typecheck + build + test + doctor.
+Standard verification: lint + dependency build + typecheck + build + test + doctor.
 
 Options:
   -h, --help    Show this help message
@@ -98,8 +98,15 @@ function main() {
     { cwd: root },
   );
 
-  // Step 2: Strict typechecking
-  log("Step 2/5: Running strict typechecks...");
+  // Step 2: Build workspace dependencies so package exports and declarations
+  // exist before strict typechecking on a clean checkout.
+  log("Step 2/6: Building workspace dependencies...");
+  for (const workspace of ["@miki/config", "@miki/installer", "@miki/skills", "@miki/memory"]) {
+    runNpm(["run", "build", "--workspace=" + workspace], { cwd: root });
+  }
+
+  // Step 3: Strict typechecking
+  log("Step 3/6: Running strict typechecks...");
   runNpm(["run", "typecheck", "--workspaces", "--if-present"], { cwd: root });
   runNpm(
     ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "build"],
@@ -108,12 +115,12 @@ function main() {
     },
   );
 
-  // Step 3: Production builds
-  log("Step 3/5: Running production builds...");
+  // Step 4: Production builds
+  log("Step 4/6: Running production builds...");
   runNpm(["run", "build:all"], { cwd: root });
 
-  // Step 4: Tests
-  log("Step 4/5: Running tests...");
+  // Step 5: Tests
+  log("Step 5/6: Running tests...");
   runNpm(["test", "--workspaces", "--if-present"], { cwd: root });
   runNpm(
     ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "test"],
@@ -122,8 +129,8 @@ function main() {
     },
   );
 
-  // Step 5: Doctor
-  log("Step 5/5: Running doctor checks...");
+  // Step 6: Doctor checks
+  log("Step 6/6: Running doctor checks...");
   run("node", [path.join(root, "bin", "miki.js"), "doctor"], { cwd: root });
 
   log("");

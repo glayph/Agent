@@ -1,5 +1,7 @@
 import { calculateReward, SelfImprovementEngine } from "./engine.js";
 
+import { jest } from "@jest/globals";
+
 type StoredExperience = {
   id: string;
   actionKey: string;
@@ -181,11 +183,16 @@ describe("SelfImprovementEngine durable learning", () => {
         "model:gemini": { count: 3, averageReward: 0.2 },
       },
     });
-    const decision = engine.chooseAction({
-      context: "complex",
-      candidates: ["model:local-lfm", "model:gemini"],
-      baselineAction: "model:gemini",
-    });
-    expect(decision.actionKey).toBe("model:local-lfm");
+    const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.99);
+    try {
+      const decision = engine.chooseAction({
+        context: "complex",
+        candidates: ["model:local-lfm", "model:gemini"],
+        baselineAction: "model:gemini",
+      });
+      expect(decision.actionKey).toBe("model:local-lfm");
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 });

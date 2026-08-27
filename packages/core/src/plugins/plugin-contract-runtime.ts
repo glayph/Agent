@@ -74,6 +74,8 @@ export interface RuntimePluginContractsConfig {
   allow_secrets?: boolean;
   allow_filesystem_write?: boolean;
   allow_shell?: boolean;
+  /** Explicit opt-in for high-risk host execution when no OS sandbox exists. */
+  allow_unsafe_host_execution?: boolean;
   require_entrypoint_for?: PluginContractKind[];
 }
 
@@ -504,6 +506,19 @@ function evaluateContract(
         requiresPolicy.push(permission);
       }
     }
+  }
+
+  const requiresHostSandbox =
+    Boolean(entry.contract.entrypoint) &&
+    (sandbox.network ||
+      sandbox.secrets ||
+      sandbox.shell ||
+      sandbox.filesystem === "write");
+  if (requiresHostSandbox && policy.allow_unsafe_host_execution !== true) {
+    requiresPolicy.push("enforced.host_sandbox");
+    reasons.push(
+      "High-risk plugin execution requires an enforced host sandbox; set allow_unsafe_host_execution=true only for trusted local plugins.",
+    );
   }
 
   const requireEntrypointKinds = new Set(

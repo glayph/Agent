@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, jest } from "@jest/globals";
 import { ResourceMonitor } from "./resource-monitor.js";
 import type { ResourceSnapshot } from "./resource-monitor.js";
 
@@ -19,7 +19,7 @@ function snapshot(overrides: Partial<ResourceSnapshot> = {}): ResourceSnapshot {
 
 describe("ResourceMonitor", () => {
   test("emits one alert per state and a recovery event", () => {
-    const onAlert = vi.fn();
+    const onAlert = jest.fn();
     const monitor = new ResourceMonitor({
       rssWarningBytes: 200,
       rssCriticalBytes: 400,
@@ -46,7 +46,7 @@ describe("ResourceMonitor", () => {
   });
 
   test("reports critical file descriptor pressure", () => {
-    const onAlert = vi.fn();
+    const onAlert = jest.fn();
     const monitor = new ResourceMonitor({
       rssWarningBytes: 10_000,
       rssCriticalBytes: 20_000,
@@ -66,7 +66,7 @@ describe("ResourceMonitor", () => {
   });
 
   test("can reset the RSS baseline before a new soak window", () => {
-    const onAlert = vi.fn();
+    const onAlert = jest.fn();
     const monitor = new ResourceMonitor({
       rssWarningBytes: 10_000,
       rssCriticalBytes: 20_000,

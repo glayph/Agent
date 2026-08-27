@@ -44,6 +44,48 @@ function writeSkill(
 }
 
 describe("SkillSearchEngine", () => {
+  it("discovers a single-skill category whose directory is the skill root", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-root-skill-"),
+    );
+    const skillsRoot = path.join(workspaceDir, "custom-skills");
+    const categoryDir = path.join(skillsRoot, "goal-completion");
+    fs.mkdirSync(categoryDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillsRoot, "categories.json"),
+      JSON.stringify({ categories: ["goal-completion"] }),
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(categoryDir, "skills.json"),
+      JSON.stringify({ skills: ["goal-completion"] }),
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(categoryDir, "SKILL.md"),
+      [
+        "---",
+        "name: goal-completion",
+        "description: Track and complete a goal",
+        "---",
+      ].join("\\n"),
+      "utf-8",
+    );
+
+    const engine = new SkillSearchEngine(makeRuntimePaths(workspaceDir), [
+      skillsRoot,
+    ]);
+    const skills = await engine.listAll();
+    expect(skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "goal-completion",
+          path: categoryDir,
+        }),
+      ]),
+    );
+  });
+
   it("deduplicates query terms and ranks relevant skills first", async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-skill-"));
     const skillsRoot = path.join(workspaceDir, "custom-skills");

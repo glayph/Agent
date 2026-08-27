@@ -279,4 +279,48 @@ describe("Agent tool calls are logged to memory", () => {
 
     expect(result.ok).toBe(true);
   });
+
+  it("records thrown LLM failures as durable learning experiences", async () => {
+    const agent = setUp();
+    const recordExperience = jest.spyOn(
+      (
+        agent as unknown as {
+          selfImprovement: {
+            recordExperience: (...args: unknown[]) => unknown;
+          };
+        }
+      ).selfImprovement,
+      "recordExperience",
+    );
+    const internal = agent as unknown as {
+      _callLlmApi: () => Promise<never>;
+    };
+    internal._callLlmApi = async () => {
+      throw new Error("provider unavailable");
+    };
+
+    for await (const rawEvent of agent.runAgentLoop(
+      "mem-log-provider-failure",
+      "Test provider failure learning",
+      undefined,
+      { messageId: "message-provider-failure-1" },
+    )) {
+      expect(rawEvent).toEqual(expect.any(String));
+    }
+
+    expect(recordExperience).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "mem-log-provider-failure",
+        actionKey: expect.stringMatching(/^model:/),
+        outcome: "failure",
+        idempotencyKey: expect.stringContaining(
+          "message-provider-failure-1:provider-failure",
+        ),
+        metadata: expect.objectContaining({
+          failureType: "llm_provider_error",
+          error: "provider unavailable",
+        }),
+      }),
+    );
+  });
 });

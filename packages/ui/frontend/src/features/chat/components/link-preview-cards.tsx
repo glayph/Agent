@@ -27,7 +27,7 @@ function isSocialUrl(value: string): boolean {
 }
 
 function extractSocialUrls(content: string): string[] {
-  const candidates = content.match(/https?:\/\/[^\s<>()\[\]"']+/gi) ?? []
+  const candidates = content.match(/https?:\/\/[^\s<>()\x5B\x5D"']+/gi) ?? []
   const normalized = candidates
     .map((value) => value.replace(/[.,!?;:)]+$/g, ""))
     .filter(isSocialUrl)

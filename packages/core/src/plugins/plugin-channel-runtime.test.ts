@@ -148,6 +148,7 @@ describe("PluginChannelRuntimeManager", () => {
         "    allow_channel_runtime: true",
         "    allow_secrets: true",
         "    allow_filesystem_write: true",
+        "    allow_unsafe_host_execution: true",
         "    max_output_bytes: 8192",
       ].join("\n"),
     );

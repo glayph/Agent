@@ -85,6 +85,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
         "  plugin_contracts:",
         "    allow_execution: true",
         "    allow_network: true",
+        "    allow_unsafe_host_execution: true",
       ].join("\n"),
     );
     await registerPlugin(workspaceDir, {
@@ -170,6 +171,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
         "  plugin_contracts:",
         "    allow_execution: true",
         "    allow_network: true",
+        "    allow_unsafe_host_execution: true",
       ].join("\n"),
     );
     await registerPlugin(workspaceDir, {

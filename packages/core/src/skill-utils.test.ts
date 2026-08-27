@@ -2,6 +2,7 @@
  * Tests for skill utility functions
  */
 
+import { jest } from "@jest/globals";
 import {
   createSuccessResponse,
   createErrorResponse,

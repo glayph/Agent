@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as child_process from "child_process";
+import { fileURLToPath } from "node:url";
 import { SqliteAuditLog } from "../audit-log.js";
 import { BackupManager } from "./backup.js";
 import { goDoctorCheck, runDoctor } from "./doctor.js";
@@ -10,6 +11,11 @@ import { SafeModeManager } from "./safe-mode.js";
 import { scanSecrets } from "./secret-scan.js";
 import { Watchdog } from "./watchdog.js";
 import { type RuntimePaths } from "../paths.js";
+
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../..",
+);
 
 function makePaths(workspace: string): RuntimePaths {
   return {
@@ -445,9 +451,13 @@ describe("safety and recovery modules", () => {
   it("exposes Miki doctor as JSON from the launcher", () => {
     const result = child_process.spawnSync(
       process.execPath,
-      ["bin/miki-doctor.mjs", "--json", "--skip-external"],
+      [
+        path.join(repoRoot, "bin", "miki-doctor.mjs"),
+        "--json",
+        "--skip-external",
+      ],
       {
-        cwd: process.cwd(),
+        cwd: repoRoot,
         encoding: "utf-8",
         shell: false,
         timeout: 60_000,

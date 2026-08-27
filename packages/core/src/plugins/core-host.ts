@@ -10,6 +10,9 @@ import {
 import type { RuntimePaths } from "../paths.js";
 
 const CORE_OWNED_STATEFUL_PLUGINS = new Set([
+  // HTTP/dashboard authentication is owned by the API and gateway middleware;
+  // there is no standalone authentication service to inject into this host.
+  "authentication.core",
   "mcp.server",
   "memory.temporal-knowledge-graph",
   // api/index.ts owns the request-scoped search router; activating a second

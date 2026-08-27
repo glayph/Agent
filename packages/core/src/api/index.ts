@@ -36,7 +36,6 @@ import {
 } from "../tools/executor/call-context.js";
 import { builtinChannelRegistry } from "../plugins/channels/builtin-channel-registry.js";
 import { ChannelPluginLifecycleManager } from "../plugins/channels/sdk/index.js";
-import { initSkillLoader } from "../skill-loader.js";
 import { createSkillsRouter } from "../skill-api.js";
 import { PluginChannelRuntimeManager } from "../plugins/plugin-channel-runtime.js";
 import { summarizeAgentRoute } from "../agent-router.js";
@@ -433,8 +432,9 @@ const channelRuntimeManager = new ChannelPluginLifecycleManager(
   pluginChannelRuntimeManager,
 );
 
-// Initialize skill system
-const skillLoader = initSkillLoader(runtimePaths);
+// Initialize skill system with the same loader the orchestrator loads and
+// registers at startup; a second loader would always report loadedSkills: 0.
+const skillLoader = orchestrator.getSkillLoader();
 const skillsRouter = createSkillsRouter(skillLoader, runtimePaths, {
   toolRegistry: orchestrator.tools,
   capabilityHost: orchestrator.capabilityPlugins,

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import {
   clearWebSearchCache,
   searchWeb,
@@ -37,12 +37,14 @@ afterEach(() => {
   else process.env.TAVILY_API_KEY = originalTavilyKey;
   if (originalBraveKey === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
   else process.env.BRAVE_SEARCH_API_KEY = originalBraveKey;
-  vi.restoreAllMocks();
+  jest.restoreAllMocks();
 });
 
 describe("dual-mode web search", () => {
   it("runs local native retrieval and returns numbered citations", async () => {
-    globalThis.fetch = vi.fn(async () => response(localHtml())) as typeof fetch;
+    globalThis.fetch = jest.fn(async () =>
+      response(localHtml()),
+    ) as typeof fetch;
     const config: WebSearchConfig = {
       execution_mode: "local",
       provider: "native",
@@ -63,7 +65,7 @@ describe("dual-mode web search", () => {
 
   it("bounds snippets, removes tracking duplicates, and caches normalized queries", async () => {
     const longSnippet = "x".repeat(500);
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = jest.fn(async () =>
       response(`
         <a class="result__a" href="https://example.com/one?utm_source=test">First result</a>
         <a class="result__snippet">${longSnippet}</a>
@@ -101,7 +103,7 @@ describe("dual-mode web search", () => {
 
   it("uses an enabled API provider only in explicit cloud mode", async () => {
     process.env.TAVILY_API_KEY = "test-tavily-secret";
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = jest.fn().mockResolvedValue(
       response({
         results: [
           {
@@ -134,7 +136,7 @@ describe("dual-mode web search", () => {
 
   it("uses API fallback in auto mode only after local retrieval returns no results", async () => {
     process.env.BRAVE_SEARCH_API_KEY = "test-brave-secret";
-    const fetchMock = vi
+    const fetchMock = jest
       .fn()
       .mockImplementation(async (input: RequestInfo | URL) => {
         if (String(input).includes("duckduckgo"))
@@ -168,7 +170,7 @@ describe("dual-mode web search", () => {
 
   it("blocks cloud fallback for sensitive queries when local retrieval fails", async () => {
     process.env.BRAVE_SEARCH_API_KEY = "test-brave-secret";
-    globalThis.fetch = vi
+    globalThis.fetch = jest
       .fn()
       .mockRejectedValue(new Error("network unavailable")) as typeof fetch;
     const config: WebSearchConfig = {
@@ -196,7 +198,7 @@ describe("dual-mode web search", () => {
   });
 
   it("decodes Bing tracking URLs when DuckDuckGo is unavailable", async () => {
-    const fetchMock = vi
+    const fetchMock = jest
       .fn()
       .mockRejectedValueOnce(new Error("DuckDuckGo unavailable"))
       .mockResolvedValueOnce(

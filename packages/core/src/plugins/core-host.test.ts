@@ -29,6 +29,7 @@ describe("core capability plugin host", () => {
     await host.start();
     expect(host.isActive("tools.core-registry")).toBe(true);
     expect(host.isActive("browser.playwright")).toBe(true);
+    expect(host.isActive("authentication.core")).toBe(false);
     expect(host.isActive("mcp.server")).toBe(false);
     expect(host.isActive("memory.temporal-knowledge-graph")).toBe(false);
     const health = await host.health();
