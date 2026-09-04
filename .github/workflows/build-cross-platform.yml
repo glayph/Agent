@@ -1,0 +1,103 @@
+name: Build and verify Agent Miki
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22.23.2"
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: windows-x64
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup MSVC
+        if: matrix.platform == 'windows-x64'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Linux native prerequisites
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config
+
+      - name: Install Windows native prerequisites
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' --no-progress -y
+
+      - name: Build and verify
+        env:
+          MIKI_LLAMA_BUILD_JOBS: "2"
+        run: node scripts/build-local.mjs --ci
+
+      - name: Configure release path (Linux)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: echo "MIKI_RELEASE_DIR=$RUNNER_TEMP/agent-miki-linux-x64-offline" >> "$GITHUB_ENV"
+
+      - name: Configure release path (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'agent-miki-windows-x64-offline'
+          "MIKI_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build offline release package
+        env:
+          MIKI_LLAMA_BUILD_JOBS: "2"
+        run: node scripts/build-local.mjs --ci --skip-install --skip-verify --release
+
+      - name: Upload Linux offline artifacts
+        if: matrix.platform == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-miki-linux-x64-offline
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tar.gz
+            ${{ runner.temp }}/agent-miki-linux-x64-offline/SHA256SUMS
+
+      - name: Upload Windows offline artifacts
+        if: matrix.platform == 'windows-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-miki-windows-x64-offline
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.zip
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/SHA256SUMS

@@ -1,0 +1,5 @@
+npm run build:all: FAILED — native llama runtime source unavailable
+manual workspace/core/gateway/frontend build excluding native: completed
+npm test: 100 suites / 586 tests passed; 10 suites / 51 tests passed
+npm run verify: FAILED at native llama build step
+Gemini smoke: provider returned HTTP 400 Invalid Auth key

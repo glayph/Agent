@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>লগইন ডেমো — OpenCode</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="container">
+    <!-- Login Card -->
+    <section id="login-section" class="card active">
+      <h1>🔒 লগইন</h1>
+      <p class="subtitle">এটি একটি <strong>মক ডেমো</strong> — কোনো বাস্তব API ব্যবহার হয়নি।</p>
+      <div class="demo-creds">
+        <span>ডেমো অ্যাকাউন্ট:</span>
+        <code>demo@opencode.dev</code> / <code>demo123</code>
+      </div>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="email">ইমেইল</label>
+          <input type="email" id="email" placeholder="demo@opencode.dev" autocomplete="off" required>
+          <span class="error" id="email-error"></span>
+        </div>
+        <div class="field">
+          <label for="password">পাসওয়ার্ড</label>
+          <input type="password" id="password" placeholder="••••••" autocomplete="off" required>
+          <span class="error" id="password-error"></span>
+        </div>
+        <button type="submit" class="btn primary" id="login-btn">লগইন করুন</button>
+      </form>
+      <div id="error-banner" class="banner error-banner" role="alert"></div>
+      <div id="loading-spinner" class="spinner" aria-hidden="true">⏳ যাচাই হচ্ছে...</div>
+    </section>
+
+    <!-- Success Card -->
+    <section id="success-section" class="card">
+      <h1>✅ সফল লগইন!</h1>
+      <p class="subtitle">আপনি সিস্টেমে প্রবেশ করেছেন।</p>
+      <div class="profile-box">
+        <span class="avatar">👤</span>
+        <div>
+          <strong id="welcome-name">ডেমো ব্যবহারকারী</strong>
+          <span id="welcome-email" class="muted"></span>
+        </div>
+      </div>
+      <button class="btn danger" id="logout-btn">লগআউট</button>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

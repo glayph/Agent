@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "scale": {
+    "min": 1,
+    "max": 5,
+    "meaning": {
+      "1": "missing or critical gap",
+      "2": "partial and materially incomplete",
+      "3": "usable baseline with hardening or breadth gaps",
+      "4": "strong documented and verified capability",
+      "5": "mature production-oriented capability within evidence scope"
+    }
+  },
+  "dimensions": [
+    { "id": "execution_environment", "label": "Execution environment & isolation", "weight": 0.15 },
+    { "id": "durable_execution", "label": "Durable task execution & reliability", "weight": 0.15 },
+    { "id": "web_search", "label": "Web search: local + cloud", "weight": 0.10 },
+    { "id": "memory", "label": "Memory & personalization", "weight": 0.10 },
+    { "id": "skills", "label": "Skills & extensibility", "weight": 0.08 },
+    { "id": "connectors", "label": "Multi-channel connectors", "weight": 0.08 },
+    { "id": "security_policy", "label": "Security & policy boundary", "weight": 0.15 },
+    { "id": "observability", "label": "Observability & operator controls", "weight": 0.07 },
+    { "id": "deployment", "label": "Deployment flexibility", "weight": 0.08 },
+    { "id": "developer_experience", "label": "Developer/operator experience", "weight": 0.04 }
+  ],
+  "products": {
+    "Manus": [5, 5, 4, 4, 4, 4, 4, 4, 1, 4],
+    "OpenClaw": [3, 3, 3, 4, 4, 5, 4, 4, 5, 4],
+    "Agent Miki": [2, 4, 4, 3, 3, 2, 4, 3, 5, 3]
+  },
+  "targets": {
+    "minimum_80_plus": {
+      "label": "Minimum 80%+ target",
+      "scores": [4, 4, 4, 4, 4, 4, 4, 4, 5, 3],
+      "expected_weighted_score_5": 4.04,
+      "expected_percent": 80.8
+    },
+    "recommended_buffer": {
+      "label": "Recommended buffer target",
+      "scores": [4, 5, 4, 4, 4, 4, 4, 4, 5, 3],
+      "expected_weighted_score_5": 4.19,
+      "expected_percent": 83.8
+    }
+  }
+}

@@ -1,0 +1,248 @@
+/* =============================================================================
+   MIKI DESIGN TOKEN SYSTEM — Dark Dev-Tool Aesthetic
+   Near-black surfaces · light text · vivid orange (#FF6B35) accent
+   Card-based layout with distinct borders · monospace dev accents
+   ============================================================================= */
+
+@theme inline {
+  /* Primary — Vivid Orange (high-contrast accent) */
+  --md-sys-color-primary: #FF6B35;
+  --md-sys-color-on-primary: #FFFFFF;
+  --md-sys-color-primary-container: #FFE1D1;
+  --md-sys-color-on-primary-container: #2B0D00;
+
+  /* Secondary — Graphite */
+  --md-sys-color-secondary: #55555C;
+  --md-sys-color-on-secondary: #FFFFFF;
+  --md-sys-color-secondary-container: #F0F0F1;
+  --md-sys-color-on-secondary-container: #18181B;
+
+  /* Tertiary — Warm gray */
+  --md-sys-color-tertiary: #6B6B70;
+  --md-sys-color-on-tertiary: #FFFFFF;
+  --md-sys-color-tertiary-container: #E4E4E7;
+  --md-sys-color-on-tertiary-container: #1C1C1F;
+
+  /* Error — stays red for clear failure states */
+  --md-sys-color-error: #DC2626;
+  --md-sys-color-on-error: #FFFFFF;
+  --md-sys-color-error-container: #FEE2E2;
+  --md-sys-color-on-error-container: #450A0A;
+
+  /* Neutral Palette - Backgrounds & Surfaces */
+  --md-sys-color-background: #FAFAFA;
+  --md-sys-color-on-background: #18181B;
+  --md-sys-color-surface: #FFFFFF;
+  --md-sys-color-on-surface: #18181B;
+  --md-sys-color-surface-variant: #F0F0F1;
+  --md-sys-color-on-surface-variant: #52525B;
+  --md-sys-color-outline: #E4E4E7;
+  --md-sys-color-outline-variant: #F0F0F1;
+
+  /* Inverse Colors */
+  --md-sys-color-inverse-surface: #18181B;
+  --md-sys-color-inverse-on-surface: #F4F4F5;
+  --md-sys-color-inverse-primary: #FF8A5C;
+
+  /* Elevation Shadows */
+  --md-sys-elevation-0: none;
+  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.06), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.06), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.07), 0px 1px 3px 0px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.08), 0px 2px 3px 0px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-5: 0px 8px 12px 6px rgba(0, 0, 0, 0.10), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
+
+  /* State Layer Opacities */
+  --md-sys-state-hover-opacity: 0.08;
+  --md-sys-state-focus-opacity: 0.12;
+  --md-sys-state-pressed-opacity: 0.12;
+
+  /* Typography Scale */
+  --md-sys-typescale-display-large: 400 57px/64px 'Inter Variable', system-ui;
+  --md-sys-typescale-display-medium: 400 45px/52px 'Inter Variable', system-ui;
+  --md-sys-typescale-display-small: 400 36px/44px 'Inter Variable', system-ui;
+
+  --md-sys-typescale-headline-large: 400 32px/40px 'Inter Variable', system-ui;
+  --md-sys-typescale-headline-medium: 400 28px/36px 'Inter Variable', system-ui;
+  --md-sys-typescale-headline-small: 400 24px/32px 'Inter Variable', system-ui;
+
+  --md-sys-typescale-title-large: 400 22px/28px 'Inter Variable', system-ui;
+  --md-sys-typescale-title-medium: 500 16px/24px 'Inter Variable', system-ui;
+  --md-sys-typescale-title-small: 500 14px/20px 'Inter Variable', system-ui;
+
+  --md-sys-typescale-body-large: 400 16px/24px 'Inter Variable', system-ui;
+  --md-sys-typescale-body-medium: 400 14px/20px 'Inter Variable', system-ui;
+  --md-sys-typescale-body-small: 400 12px/16px 'Inter Variable', system-ui;
+
+  --md-sys-typescale-label-large: 500 14px/20px 'Inter Variable', system-ui;
+  --md-sys-typescale-label-medium: 500 12px/16px 'Inter Variable', system-ui;
+  --md-sys-typescale-label-small: 500 11px/16px 'Inter Variable', system-ui;
+
+  /* Spacing Scale (4px base) */
+  --md-sys-spacing-1: 4px;
+  --md-sys-spacing-2: 8px;
+  --md-sys-spacing-3: 12px;
+  --md-sys-spacing-4: 16px;
+  --md-sys-spacing-5: 20px;
+  --md-sys-spacing-6: 24px;
+  --md-sys-spacing-7: 28px;
+  --md-sys-spacing-8: 32px;
+  --md-sys-spacing-9: 36px;
+  --md-sys-spacing-10: 40px;
+  --md-sys-spacing-12: 48px;
+  --md-sys-spacing-16: 64px;
+  --md-sys-spacing-20: 80px;
+  --md-sys-spacing-24: 96px;
+
+  /* Radius Scale — sharper for a technical feel */
+  --md-sys-radius-none: 0px;
+  --md-sys-radius-xs: 4px;
+  --md-sys-radius-sm: 6px;
+  --md-sys-radius-md: 8px;
+  --md-sys-radius-lg: 10px;
+  --md-sys-radius-xl: 12px;
+  --md-sys-radius-2xl: 16px;
+  --md-sys-radius-full: 9999px;
+
+  /* Motion */
+  --md-sys-motion-duration-short: 150ms;
+  --md-sys-motion-duration-medium: 250ms;
+  --md-sys-motion-duration-long: 350ms;
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0.0, 0, 1.0);
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0.0, 0, 1.0);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0.0, 0.8, 0.15);
+}
+
+/* =============================================================================
+   DARK MODE (PRIMARY) — Near-black surfaces, vivid orange accent
+   ============================================================================= */
+.dark {
+  /* Primary — Vivid Orange */
+  --md-sys-color-primary: #FF6B35;
+  --md-sys-color-on-primary: #1A0600;
+  --md-sys-color-primary-container: #3A1A0E;
+  --md-sys-color-on-primary-container: #FFD9C7;
+
+  /* Secondary — Graphite */
+  --md-sys-color-secondary: #9B9BA1;
+  --md-sys-color-on-secondary: #1A1A1D;
+  --md-sys-color-secondary-container: #242427;
+  --md-sys-color-on-secondary-container: #D4D4D8;
+
+  /* Tertiary — Warm gray */
+  --md-sys-color-tertiary: #8E8E94;
+  --md-sys-color-on-tertiary: #1A1A1D;
+  --md-sys-color-tertiary-container: #2A2A2E;
+  --md-sys-color-on-tertiary-container: #C8C8CC;
+
+  /* Error */
+  --md-sys-color-error: #F87171;
+  --md-sys-color-on-error: #2B0D0D;
+  --md-sys-color-error-container: #3F1414;
+  --md-sys-color-on-error-container: #FECACA;
+
+  /* Neutral Palette - Dark Backgrounds */
+  --md-sys-color-background: #050505;
+  --md-sys-color-on-background: #EDEDEF;
+  --md-sys-color-surface: #0A0A0A;
+  --md-sys-color-on-surface: #EDEDEF;
+  --md-sys-color-surface-variant: #141416;
+  --md-sys-color-on-surface-variant: #9B9BA1;
+  --md-sys-color-outline: #2A2A2E;
+  --md-sys-color-outline-variant: #1B1B1E;
+
+  /* Inverse Colors */
+  --md-sys-color-inverse-surface: #EDEDEF;
+  --md-sys-color-inverse-on-surface: #18181B;
+  --md-sys-color-inverse-primary: #E8541C;
+
+  /* Dark Mode Elevation (stronger shadows) */
+  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.3), 0px 1px 3px 0px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.3), 0px 2px 3px 0px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-5: 0px 8px 12px 6px rgba(0, 0, 0, 0.3), 0px 2px 4px 0px rgba(0, 0, 0, 0.5);
+}
+
+/* =============================================================================
+   UTILITY CLASSES FOR TOKENS
+   ============================================================================= */
+
+/* Surface elevations */
+.surface-elevation-0 { box-shadow: var(--md-sys-elevation-0); }
+.surface-elevation-1 { box-shadow: var(--md-sys-elevation-1); }
+.surface-elevation-2 { box-shadow: var(--md-sys-elevation-2); }
+.surface-elevation-3 { box-shadow: var(--md-sys-elevation-3); }
+.surface-elevation-4 { box-shadow: var(--md-sys-elevation-4); }
+.surface-elevation-5 { box-shadow: var(--md-sys-elevation-5); }
+
+/* State layers */
+.state-layer-hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: currentColor;
+  opacity: var(--md-sys-state-hover-opacity);
+  pointer-events: none;
+}
+
+.state-layer-focus::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: currentColor;
+  opacity: var(--md-sys-state-focus-opacity);
+  pointer-events: none;
+}
+
+.state-layer-pressed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: currentColor;
+  opacity: var(--md-sys-state-pressed-opacity);
+  pointer-events: none;
+}
+
+/* Typography utilities */
+.type-display-large { font: var(--md-sys-typescale-display-large); }
+.type-display-medium { font: var(--md-sys-typescale-display-medium); }
+.type-display-small { font: var(--md-sys-typescale-display-small); }
+
+.type-headline-large { font: var(--md-sys-typescale-headline-large); }
+.type-headline-medium { font: var(--md-sys-typescale-headline-medium); }
+.type-headline-small { font: var(--md-sys-typescale-headline-small); }
+
+.type-title-large { font: var(--md-sys-typescale-title-large); }
+.type-title-medium { font: var(--md-sys-typescale-title-medium); }
+.type-title-small { font: var(--md-sys-typescale-title-small); }
+
+.type-body-large { font: var(--md-sys-typescale-body-large); }
+.type-body-medium { font: var(--md-sys-typescale-body-medium); }
+.type-body-small { font: var(--md-sys-typescale-body-small); }
+
+.type-label-large { font: var(--md-sys-typescale-label-large); }
+.type-label-medium { font: var(--md-sys-typescale-label-medium); }
+.type-label-small { font: var(--md-sys-typescale-label-small); }
+
+/* Spacing utilities */
+.spacing-1 { padding: var(--md-sys-spacing-1); }
+.spacing-2 { padding: var(--md-sys-spacing-2); }
+.spacing-3 { padding: var(--md-sys-spacing-3); }
+.spacing-4 { padding: var(--md-sys-spacing-4); }
+.spacing-5 { padding: var(--md-sys-spacing-5); }
+.spacing-6 { padding: var(--md-sys-spacing-6); }
+.spacing-8 { padding: var(--md-sys-spacing-8); }
+.spacing-12 { padding: var(--md-sys-spacing-12); }
+.spacing-16 { padding: var(--md-sys-spacing-16); }
+
+/* Radius utilities */
+.radius-none { border-radius: var(--md-sys-radius-none); }
+.radius-xs { border-radius: var(--md-sys-radius-xs); }
+.radius-sm { border-radius: var(--md-sys-radius-sm); }
+.radius-md { border-radius: var(--md-sys-radius-md); }
+.radius-lg { border-radius: var(--md-sys-radius-lg); }
+.radius-xl { border-radius: var(--md-sys-radius-xl); }
+.radius-2xl { border-radius: var(--md-sys-radius-2xl); }
+.radius-full { border-radius: var(--md-sys-radius-full); }

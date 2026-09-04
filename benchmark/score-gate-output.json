@@ -1,0 +1,120 @@
+{
+  "generatedAt": "2026-08-20T15:01:49.227Z",
+  "rubricVersion": 1,
+  "dimensions": [
+    {
+      "id": "execution_environment",
+      "label": "Execution environment & isolation",
+      "weight": 0.15
+    },
+    {
+      "id": "durable_execution",
+      "label": "Durable task execution & reliability",
+      "weight": 0.15
+    },
+    {
+      "id": "web_search",
+      "label": "Web search: local + cloud",
+      "weight": 0.1
+    },
+    {
+      "id": "memory",
+      "label": "Memory & personalization",
+      "weight": 0.1
+    },
+    {
+      "id": "skills",
+      "label": "Skills & extensibility",
+      "weight": 0.08
+    },
+    {
+      "id": "connectors",
+      "label": "Multi-channel connectors",
+      "weight": 0.08
+    },
+    {
+      "id": "security_policy",
+      "label": "Security & policy boundary",
+      "weight": 0.15
+    },
+    {
+      "id": "observability",
+      "label": "Observability & operator controls",
+      "weight": 0.07
+    },
+    {
+      "id": "deployment",
+      "label": "Deployment flexibility",
+      "weight": 0.08
+    },
+    {
+      "id": "developer_experience",
+      "label": "Developer/operator experience",
+      "weight": 0.04
+    }
+  ],
+  "results": {
+    "Manus": {
+      "weightedScore5": 4.06,
+      "percent": 81.2
+    },
+    "OpenClaw": {
+      "weightedScore5": 3.76,
+      "percent": 75.2
+    },
+    "Agent Miki": {
+      "weightedScore5": 3.33,
+      "percent": 66.6
+    }
+  },
+  "targets": {
+    "minimum_80_plus": {
+      "label": "Minimum 80%+ target",
+      "scores": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        5,
+        3
+      ],
+      "expected_weighted_score_5": 4.04,
+      "expected_percent": 80.8,
+      "calculated": {
+        "weightedScore5": 4.04,
+        "percent": 80.8
+      }
+    },
+    "recommended_buffer": {
+      "label": "Recommended buffer target",
+      "scores": [
+        4,
+        5,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        5,
+        3
+      ],
+      "expected_weighted_score_5": 4.19,
+      "expected_percent": 83.8,
+      "calculated": {
+        "weightedScore5": 4.19,
+        "percent": 83.8
+      }
+    }
+  },
+  "gateStatus": {
+    "baselineReproducible": true,
+    "minimumTargetDefined": true,
+    "recommendedTargetDefined": true,
+    "implementationEvidenceRequired": true
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "miki",
+  "version": "1.3.6",
+  "private": true,
+  "type": "module",
+  "description": "Miki — local-first autonomous AI agent",
+  "workspaces": [
+    "packages/*",
+    "packages/ui/frontend"
+  ],
+  "scripts": {
+    "build": "npm run build:all",
+    "build:llama": "node scripts/build-llama.mjs",
+    "build:all": "npm run clean --workspaces --if-present && npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend",
+    "build:frontend": "npm --prefix packages/ui/frontend run build",
+    "build:release:offline": "node scripts/build-offline-release.mjs",
+    "build:release:linux": "node scripts/build-offline-release.mjs",
+    "build:release:windows": "node scripts/build-offline-release.mjs",
+    "build:local": "node scripts/build-local.mjs",
+    "build:local:release": "node scripts/build-local.mjs --release",
+    "model:list": "node scripts/miki-model.mjs list",
+    "model:status": "node scripts/miki-model.mjs status",
+    "model:install": "node scripts/miki-model.mjs install",
+    "model:remove": "node scripts/miki-model.mjs remove",
+    "model:smoke": "node scripts/model-smoke.mjs",
+    "test:model-manager": "node --test scripts/miki-model.test.mjs",
+    "dev": "node scripts/dev.js",
+    "start": "node bin/miki.js",
+    "runtime:24-7": "node scripts/miki-24-7.mjs",
+    "runtime:24-7:check": "node scripts/miki-24-7.mjs --check",
+    "soak": "node scripts/soak-agent.mjs",
+    "test": "npm run test --workspaces --if-present",
+    "verify": "node scripts/run-verify.mjs",
+    "verify:release": "node scripts/run-release-verify.mjs",
+    "benchmark:score": "node scripts/benchmark-score-gate.mjs --write",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "globals": "^17.11.0",
+    "typescript": "^5.9.3"
+  }
+}
