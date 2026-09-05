@@ -56,7 +56,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.26.x"
 
       - name: Enable MSVC developer environment
         if: matrix.platform == 'windows-x64'
@@ -80,14 +80,6 @@ jobs:
 
       - name: Rebuild native JavaScript addons
         run: npm rebuild better-sqlite3
-
-      - name: Build workspace type declarations
-        shell: bash
-        run: |
-          npm run build --workspace=@miki/config
-          npm run build --workspace=@miki/installer
-          npm run build --workspace=@miki/skills
-          npm run build --workspace=@miki/gateway
 
       - name: Configure release inputs (Linux)
         if: matrix.platform == 'linux-x64'

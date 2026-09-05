@@ -22,6 +22,10 @@ const packageNames = [
   "gateway",
 ];
 
+// Packages that ship as plain JS source (no build/dist step) and must be
+// copied from src/ directly, plus their package.json.
+const sourceOnlyPackageNames = ["memory"];
+
 function shouldCopyRuntimeFile(source) {
   return path.extname(source).toLowerCase() !== ".map";
 }
@@ -34,6 +38,7 @@ function copyRecursive(source, destination, options = {}) {
     return;
   }
   if (!fs.existsSync(source)) {
+    if (options.optional) return;
     throw new Error(
       `Required build artifact is missing: ${path.relative(root, source)}`,
     );
@@ -207,6 +212,20 @@ function publishRuntimeRoot() {
   removeStagingRoot();
 }
 
+// Clean up leftover staging directories from any previous run that crashed
+// or was interrupted before cleanup (these are PID-named, so a new process
+// would otherwise never find and remove an old one, leaking disk space).
+const distDir = path.join(root, "dist");
+if (fs.existsSync(distDir)) {
+  for (const entry of fs.readdirSync(distDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith(".runtime-staging-")) {
+      const stalePath = path.join(distDir, entry.name);
+      assertSafeWorkspacePath(stalePath);
+      fs.rmSync(stalePath, removeOptions);
+    }
+  }
+}
+
 removeStagingRoot();
 fs.mkdirSync(stagingRoot, { recursive: true });
 
@@ -235,6 +254,41 @@ for (const name of packageNames) {
   copyRecursive(path.join(runtimePackageDir, "dist"), path.join(pkgNmDir, "dist"));
   copyRecursive(path.join(runtimePackageDir, "package.json"), path.join(pkgNmDir, "package.json"));
 }
+
+// Source-only packages (no dist/build step, e.g. @miki/memory): copy src/
+// directly instead of requiring a dist/ folder to exist.
+for (const name of sourceOnlyPackageNames) {
+  const packageDir = path.join(root, "packages", name);
+  const runtimePackageDir = path.join(stagingRoot, "packages", name);
+  copyRecursive(
+    path.join(packageDir, "src"),
+    path.join(runtimePackageDir, "src"),
+  );
+  copyRecursive(
+    path.join(packageDir, "package.json"),
+    path.join(runtimePackageDir, "package.json"),
+  );
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf-8"));
+  const pkgNmDir = path.join(stagingRoot, "node_modules", pkg.name);
+  fs.mkdirSync(path.dirname(pkgNmDir), { recursive: true });
+  copyRecursive(path.join(runtimePackageDir, "src"), path.join(pkgNmDir, "src"));
+  copyRecursive(path.join(runtimePackageDir, "package.json"), path.join(pkgNmDir, "package.json"));
+}
+
+// @miki/cli: bundle agent.js (the Node-CLI fallback used when the compiled
+// Go dashboard binary is unavailable, and the only place install/uninstall
+// workspace-lifecycle logic lives) at the path the launcher scripts expect:
+// <runtimeRoot>/packages/cli/agent.js. The compiled Go binary itself is
+// copied separately below to <runtimeRoot>/bin/.
+copyRecursive(
+  path.join(root, "packages", "cli", "agent.js"),
+  path.join(stagingRoot, "packages", "cli", "agent.js"),
+);
+copyRecursive(
+  path.join(root, "packages", "cli", "package.json"),
+  path.join(stagingRoot, "packages", "cli", "package.json"),
+);
 
 // Copy production npm dependencies from root node_modules (excluding dev-only packages)
 const rootNm = path.join(root, "node_modules");
@@ -289,20 +343,38 @@ copyRecursive(
   path.join(root, "packages", "ui", "frontend", "dist"),
   path.join(stagingRoot, "packages", "ui", "backend", "dist"),
 );
+// Legacy compatibility stub (Windows systray backend). Not required for the
+// core CLI + web UI experience, so its absence (e.g. no Go toolchain, or a
+// platform build that skipped it) must not block packaging.
 copyRecursive(
   path.join(root, "packages", "ui", "backend", "dist", "bin"),
   path.join(stagingRoot, "packages", "ui", "backend", "dist", "bin"),
+  { optional: true },
 );
+// Compiled Go TUI dashboard binary. Optional at packaging time: if the
+// packaging machine has no Go toolchain, bin/miki.js already falls back to
+// the bundled packages/cli/agent.js (Node CLI) at runtime instead of failing
+// to install altogether. A packaging machine with Go produces the full
+// dashboard experience; without it, the core CLI + web UI flow still works.
 copyRecursive(
   path.join(root, "packages", "cli", "dist", "bin"),
   path.join(stagingRoot, "bin"),
+  { optional: true },
 );
 
 fs.writeFileSync(
   path.join(stagingRoot, "runtime-loader.mjs"),
-  `import path from "node:path";\nimport { fileURLToPath, pathToFileURL } from "node:url";\n\nconst loaderDir = path.dirname(fileURLToPath(import.meta.url));\nconst runtimeRoot = path.resolve(process.env.Miki_RUNTIME_ROOT || loaderDir);\nconst packageMap = new Map([\n  ["@miki/config", "packages/config/dist/index.js"],\n  ["@miki/config/security", "packages/config/dist/security.js"],\n  ["@miki/installer", "packages/installer/dist/index.js"],\n  ["@miki/skills", "packages/skills/dist/index.js"],\n  ["@miki/core", "packages/core/dist/api/index.js"],\n  ["@miki/gateway", "packages/gateway/dist/index.js"],\n]);\n\nexport async function resolve(specifier, context, nextResolve) {\n  const mapped = packageMap.get(specifier);\n  if (mapped) {\n    return { url: pathToFileURL(path.join(runtimeRoot, mapped)).href, shortCircuit: true };\n  }\n  return nextResolve(specifier, context);\n}\n`,
+  `import path from "node:path";\nimport { fileURLToPath, pathToFileURL } from "node:url";\n\nconst loaderDir = path.dirname(fileURLToPath(import.meta.url));\nconst runtimeRoot = path.resolve(process.env.MIKI_RUNTIME_ROOT || process.env.Miki_RUNTIME_ROOT || loaderDir);\nconst packageMap = new Map([\n  ["@miki/config", "packages/config/dist/index.js"],\n  ["@miki/config/security", "packages/config/dist/security.js"],\n  ["@miki/installer", "packages/installer/dist/index.js"],\n  ["@miki/skills", "packages/skills/dist/index.js"],\n  ["@miki/core", "packages/core/dist/api/index.js"],\n  ["@miki/gateway", "packages/gateway/dist/index.js"],\n]);\n\nexport async function resolve(specifier, context, nextResolve) {\n  const mapped = packageMap.get(specifier);\n  if (mapped) {\n    return { url: pathToFileURL(path.join(runtimeRoot, mapped)).href, shortCircuit: true };\n  }\n  return nextResolve(specifier, context);\n}\n`,
   "utf-8",
 );
+
+// Bundle the launcher scripts so a packaged/installed runtime is a fully
+// self-contained entry point: `<runtimeRoot>/bin/miki.js` resolves its own
+// PROJECT_ROOT as its own parent directory (this same stagingRoot), so it
+// works correctly regardless of where the package ends up installed.
+copyRecursive(path.join(root, "bin", "miki.js"), path.join(stagingRoot, "bin", "miki.js"));
+copyRecursive(path.join(root, "bin", "miki-doctor.mjs"), path.join(stagingRoot, "bin", "miki-doctor.mjs"));
+copyRecursive(path.join(root, "bin", "miki-config.js"), path.join(stagingRoot, "bin", "miki-config.js"));
 
 copyRecursive(
   path.join(root, "config"),

@@ -299,6 +299,25 @@ function stageRuntimeTree() {
     path.join(stageDir, "LICENSE"),
     "Agent Miki license",
   );
+
+  // Compiled Go TUI dashboard binary. Optional: only present if the release
+  // build ran on a machine/CI runner with Go available. When absent,
+  // miki-offline.js falls back to launching the gateway directly (headless),
+  // matching its long-standing behavior.
+  const cliExe = isWindows ? "Miki-cli.exe" : "Miki-cli";
+  const dashboardCopied = copyRecursive(
+    path.join(root, "packages", "cli", "dist", "bin", cliExe),
+    path.join(stageDir, "bin", cliExe),
+  );
+  if (dashboardCopied) {
+    chmodExecutable(path.join(stageDir, "bin", cliExe));
+    log("Included the Go terminal dashboard binary in the offline package.");
+  } else {
+    log(
+      "Go terminal dashboard binary not found (Go toolchain unavailable during build); " +
+        "the offline package will start the gateway directly instead of opening the dashboard.",
+    );
+  }
 }
 
 function writeRuntimeLoader() {

@@ -19,6 +19,23 @@ The project is designed to be useful with low-cost or local models first. Cloud 
 
 ## Quick start
 
+### Option A: npm package (single command, no monorepo checkout needed)
+
+```bash
+npm install -g @miki/cli
+miki
+```
+
+`miki` starts everything (memory service, core, gateway, and the web UI) and
+opens the terminal dashboard. Open the printed web UI address to log in and
+configure a cloud model or use the bundled local llama.cpp model — no
+separate command is needed to start llama.cpp; it starts on demand only if
+you actually select/configure a local model. See
+[`packages/cli/README.md`](packages/cli/README.md) for how this package is
+built and what "self-contained" means.
+
+### Option B: from this repository (development)
+
 The recommended local workflow is:
 
 ```bash
@@ -100,6 +117,7 @@ The project deliberately treats external MCP servers, downloaded skills, native 
 | `packages/gateway` | Gateway process and runtime-facing services |
 | `packages/memory` | SQLite-backed memory and retrieval components |
 | `packages/skills` | Skill metadata, discovery, import, and installation boundaries |
+| `packages/cli` | The `@miki/cli` npm package: single `miki` command, Go terminal dashboard, self-contained packaging |
 | `packages/ui/frontend` | React dashboard, routes, API clients, and visual workspace |
 | `scripts` | Development, build, release, verification, and 24/7 readiness commands |
 | `docs` | Architecture audits, control API guidance, and capability reports |
@@ -116,6 +134,8 @@ The project deliberately treats external MCP servers, downloaded skills, native 
 | --- | --- |
 | `npm run dev` | Start the development workflow |
 | `npm run build:all` | Build native/runtime packages and the production dashboard |
+| `npm run build:cli` | Build the Go terminal dashboard binary (requires Go; skips gracefully if absent) |
+| `npm run build:go-backend` | Build the legacy Windows systray backend (requires Go; optional, skips gracefully if absent) |
 | `npm run build:local` | Check prerequisites, build locally, and run verification |
 | `npm run build:local:release` | Build locally and create the platform offline package |
 | `npm start` | Start the launcher |

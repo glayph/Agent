@@ -433,6 +433,11 @@ function startGateway(auth, argv) {
   const nodeExecutable = fs.existsSync(embeddedNode)
     ? embeddedNode
     : process.execPath;
+  const dashboardBinary = path.join(
+    packageRoot,
+    "bin",
+    `Miki-cli${executableSuffix}`,
+  );
   const nativeLibraryDir = path.join(sourceRuntime, "native", "lib");
   const oldPath = process.env.PATH || "";
   const oldLibraryPath = process.env.LD_LIBRARY_PATH || "";
@@ -443,6 +448,8 @@ function startGateway(auth, argv) {
     MIKI_SOURCE_ROOT: sourceRuntime,
     MIKI_RUNTIME_ROOT: runtimeRoot,
     MIKI_WORKSPACE_DIR: workspaceRoot,
+    MIKI_GATEWAY_ENTRY: gatewayEntry,
+    MIKI_NODE: nodeExecutable,
     ...(process.env.MIKI_MODEL ? { MIKI_MODEL: process.env.MIKI_MODEL } : {}),
     ...(process.env.DEFAULT_MODEL
       ? { DEFAULT_MODEL: process.env.DEFAULT_MODEL }
@@ -474,7 +481,18 @@ function startGateway(auth, argv) {
   if (portIndex >= 0 && argv[portIndex + 1]) {
     env.GATEWAY_PORT = argv[portIndex + 1];
   }
-  console.log("[miki-offline] Starting local Agent Miki gateway...");
+  // Use the compiled Go terminal dashboard when it was bundled and we're
+  // attached to a real terminal; otherwise fall back to spawning the
+  // gateway directly (headless), exactly as this launcher has always done.
+  const useDashboard =
+    !argv.includes("--plain") &&
+    fs.existsSync(dashboardBinary) &&
+    process.stdout.isTTY;
+  console.log(
+    useDashboard
+      ? "[miki-offline] Starting local Agent Miki dashboard..."
+      : "[miki-offline] Starting local Agent Miki gateway...",
+  );
   console.log(
     `[miki-offline] Dashboard: http://${env.GATEWAY_HOST || "127.0.0.1"}:${env.GATEWAY_PORT || "18800"}`,
   );
@@ -485,12 +503,19 @@ function startGateway(auth, argv) {
     `[miki-offline] Voice: optional local runtime/model or audio-capable cloud fallback`,
   );
   printCredentials(auth);
-  const child = spawn(nodeExecutable, [gatewayEntry], {
-    cwd: workspaceRoot,
-    env,
-    stdio: "inherit",
-    shell: false,
-  });
+  const child = useDashboard
+    ? spawn(dashboardBinary, argv.filter((arg) => arg !== "--plain"), {
+        cwd: workspaceRoot,
+        env,
+        stdio: "inherit",
+        shell: false,
+      })
+    : spawn(nodeExecutable, [gatewayEntry], {
+        cwd: workspaceRoot,
+        env,
+        stdio: "inherit",
+        shell: false,
+      });
   const shutdown = (signal) => {
     try {
       child.kill(signal);

@@ -161,11 +161,11 @@ async function runDoctor() {
   console.log("\n=== Diagnostic Complete ===");
   console.log("\nNext steps:");
   if (gatewayPath) {
-    console.log("1. Run `agent start` to launch the dashboard.");
+    console.log("1. Run `miki start` to launch the dashboard.");
   } else {
-    console.log("1. Build the gateway or set MIKI_GATEWAY_PATH, then run `agent start`.");
+    console.log("1. Build the gateway or set MIKI_GATEWAY_PATH, then run `miki start`.");
   }
-  console.log("2. Run `agent help` for command details.");
+  console.log("2. Run `miki help` for command details.");
 }
 
 async function installPackage() {
@@ -187,7 +187,7 @@ async function installPackage() {
 
   if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";
   console.log("\nInstallation preparation complete.");
-  console.log("Run `agent start` to launch the dashboard.");
+  console.log("Run `miki start` to launch the dashboard.");
 }
 
 async function uninstallPackage() {
@@ -199,7 +199,7 @@ async function uninstallPackage() {
   if (!purge) {
     console.log("CLI uninstall completed; workspace data was retained.");
     console.log(`Retained workspace: ${workspaceDir}`);
-    console.log("Use `agent uninstall --purge` only when data deletion is intended.");
+    console.log("Use `miki uninstall --purge` only when data deletion is intended.");
     return;
   }
 
@@ -235,13 +235,13 @@ async function showVersion() {
 function showHelp() {
   console.log("=== miki CLI Command Reference ===\n");
   console.log("Commands:");
-  console.log("  agent start                    Start the miki dashboard and agent runtime");
-  console.log("  agent doctor                   Run system diagnostics and health checks");
-  console.log("  agent install                  Prepare data, logs, and config directories");
-  console.log("  agent uninstall                Remove the CLI workspace registration but retain data");
-  console.log("  agent uninstall --purge        Delete the workspace data, logs, and config directories");
-  console.log("  agent version                  Show version information");
-  console.log("  agent help                     Show this help information");
+  console.log("  miki start                     Start the miki dashboard and agent runtime");
+  console.log("  miki doctor                    Run system diagnostics and health checks");
+  console.log("  miki install                   Prepare data, logs, and config directories");
+  console.log("  miki uninstall                Remove the CLI workspace registration but retain data");
+  console.log("  miki uninstall --purge        Delete the workspace data, logs, and config directories");
+  console.log("  miki version                   Show version information");
+  console.log("  miki help                      Show this help information");
   console.log("\nFlags:");
   console.log("  --tray                         Request tray mode (gateway fallback on headless systems)");
   console.log("  --help, -h                     Show help");

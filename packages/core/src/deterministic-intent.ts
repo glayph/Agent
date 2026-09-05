@@ -4,7 +4,8 @@ export interface DeterministicFileRequest {
 }
 
 export interface DeterministicIntent {
-  kind: "web_search" | "file_workflow" | "process_control" | "math" | "file_delete";
+  kind:
+    "web_search" | "file_workflow" | "process_control" | "math" | "file_delete";
   query?: string;
   files?: DeterministicFileRequest[];
   deletePaths?: string[];
@@ -154,7 +155,9 @@ const PROCESS_CONTROL_PATTERN =
 const SAFE_DISPOSABLE_PROCESS_PATTERN =
   /\b(?:safe|disposable|temporary|test)\b[\s\S]{0,140}\bsleep\b[\s\S]{0,180}\b(?:kill|terminate|stop)\b/i;
 
-function parseProcessControlIntent(message: string): DeterministicIntent | null {
+function parseProcessControlIntent(
+  message: string,
+): DeterministicIntent | null {
   if (!PROCESS_CONTROL_PATTERN.test(message)) return null;
   // Only auto-execute the tightly bounded disposable-process test. General
   // process-control requests still go through the normal model/tool path and
@@ -191,8 +194,8 @@ function parseFileDeleteIntent(message: string): DeterministicIntent | null {
   const bare = message.match(
     /\b([a-zA-Z0-9][a-zA-Z0-9._-]*\.[a-zA-Z0-9]{1,8})\b/,
   );
-  const deletePaths = [quoted?.[1] || bare?.[1]].filter(
-    (v): v is string => Boolean(v),
+  const deletePaths = [quoted?.[1] || bare?.[1]].filter((v): v is string =>
+    Boolean(v),
   );
   return {
     kind: "file_delete",

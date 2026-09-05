@@ -90,9 +90,7 @@ export function parseCronToNextRun(
   if (secondMatch) {
     const seconds = parseInt(secondMatch[1], 10);
     const MIN_SECONDS_INTERVAL = 30;
-    return seconds >= MIN_SECONDS_INTERVAL
-      ? time + seconds * 1000
-      : null;
+    return seconds >= MIN_SECONDS_INTERVAL ? time + seconds * 1000 : null;
   }
 
   return null;

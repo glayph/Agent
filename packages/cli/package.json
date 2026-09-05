@@ -1,28 +1,20 @@
 {
   "name": "@miki/cli",
   "version": "1.0.0",
-  "description": "Miki CLI entry point for npm package distribution",
-  "main": "agent.js",
+  "description": "Agent Miki — self-contained npm package. A single `miki` command starts the full runtime (gateway, core, memory, web UI) and opens the terminal dashboard.",
   "type": "module",
   "bin": {
-    "agent": "agent.js",
-    "Miki": "agent.js"
+    "miki": "dist/pack/bin/miki.js"
   },
+  "files": [
+    "dist/pack/**",
+    "README.md"
+  ],
   "scripts": {
-    "start": "node agent.js start",
-    "doctor": "node agent.js doctor",
-    "version": "node agent.js version",
-    "help": "node agent.js help"
+    "prepack": "node scripts/pack-self-contained.mjs"
   },
   "license": "MIT",
   "engines": {
     "node": "^20.19.0 || ^22.13.0 || >=24"
-  },
-  "dependencies": {
-    "dotenv": "^16.4.0",
-    "express": "^4.19.0",
-    "http-proxy-middleware": "^3.0.7",
-    "ws": "^8.17.0",
-    "zod": "^3.25.76"
   }
 }

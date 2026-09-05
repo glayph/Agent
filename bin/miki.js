@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CLI_EXE = process.platform === "win32" ? "miki-cli.exe" : "miki-cli";
+const CLI_EXE = process.platform === "win32" ? "Miki-cli.exe" : "Miki-cli";
 
 const requiredRuntimeFiles = [
   ["gateway", "packages/gateway/dist/index.js"],
@@ -354,6 +354,25 @@ if (argv[0] === "doctor") {
     path.join(PROJECT_ROOT, "bin", "miki-doctor.mjs"),
     ...argv.slice(1),
   ], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      MIKI_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+      Miki_WORKSPACE_DIR: process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT,
+    },
+    stdio: "inherit",
+    shell: false,
+  });
+  process.exit(result.status ?? 1);
+}
+
+// Delegate install/uninstall (and version/help fallback when the compiled
+// Go binary is unavailable) workspace-lifecycle commands to agent.js. These
+// have no Go-side equivalent, unlike start/help/version which the Go binary
+// (or the Node CLI fallback inside agent.js) already handles via start().
+if (argv[0] === "install" || argv[0] === "uninstall") {
+  const agentScript = runtimePath(path.join("packages", "cli", "agent.js"));
+  const result = spawnSync(process.execPath, [agentScript, ...argv], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
