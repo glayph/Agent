@@ -568,8 +568,7 @@ export class ToolRegistry {
     const def = all.find((d) => d.function.name === name);
     if (!def) return null; // unknown tool — handled separately
     const params = def.function.parameters as
-      | { required?: string[]; properties?: Record<string, unknown> }
-      | undefined;
+      { required?: string[]; properties?: Record<string, unknown> } | undefined;
     if (!params) return null;
     const required: string[] = Array.isArray(params.required)
       ? (params.required as string[])
@@ -581,12 +580,20 @@ export class ToolRegistry {
     const presentKeys = Object.keys(args);
     const presentHint =
       presentKeys.length > 0
-        ? " (received keys: " + presentKeys.map((k) => "'" + k + "'").join(", ") + ")"
+        ? " (received keys: " +
+          presentKeys.map((k) => "'" + k + "'").join(", ") +
+          ")"
         : " (no arguments provided)";
     return (
-      "Tool '" + name + "' called with missing required parameter(s): " +
-      missing.map((k) => "'" + k + "'").join(", ") + presentHint + ". " +
-      "Required parameters are: " + required.map((k) => "'" + k + "'").join(", ") + "."
+      "Tool '" +
+      name +
+      "' called with missing required parameter(s): " +
+      missing.map((k) => "'" + k + "'").join(", ") +
+      presentHint +
+      ". " +
+      "Required parameters are: " +
+      required.map((k) => "'" + k + "'").join(", ") +
+      "."
     );
   }
 
@@ -598,9 +605,15 @@ export class ToolRegistry {
     if (!handler) {
       // BUG-02 FIX: fuzzy suggestion so the model can self-correct on next turn.
       const suggestion = this._suggestToolName(name);
-      const knownSample = Array.from(this.handlers.keys()).slice(0, 8).join(", ");
+      const knownSample = Array.from(this.handlers.keys())
+        .slice(0, 8)
+        .join(", ");
       const hint = suggestion
-        ? " Did you mean '" + suggestion + "'? Known tools include: " + knownSample + ", ..."
+        ? " Did you mean '" +
+          suggestion +
+          "'? Known tools include: " +
+          knownSample +
+          ", ..."
         : " Known tools include: " + knownSample + ", ...";
       throw new Error("Tool '" + name + "' not found in registry." + hint);
     }

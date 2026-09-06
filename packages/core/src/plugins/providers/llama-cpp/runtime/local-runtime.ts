@@ -516,8 +516,7 @@ export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
   const baseUrl = localBaseUrl(entry);
   return {
     provider: "llama.cpp",
-    ready:
-      Boolean(managedProcess) || externalReadyBaseUrl === baseUrl,
+    ready: Boolean(managedProcess) || externalReadyBaseUrl === baseUrl,
     configured: Boolean(
       entry ||
       process.env.MIKI_LLAMA_BASE_URL ||

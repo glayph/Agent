@@ -1737,11 +1737,13 @@ function updateEnvVar(
   // BUG-05 FIX: warn when saving a key for a provider that has no plugin.
   if (value && UNWIRED_PROVIDER_KEYS.has(key.toUpperCase())) {
     console.warn(
-      "[Config] BUG-05: Key \"" + key + "\" was saved to the vault, but no " +
-      "provider plugin currently consumes it. The key will be stored but will " +
-      "have no effect at runtime. Only Gemini and llama.cpp providers are " +
-      "active. If you intended to use a different provider, check that its " +
-      "plugin is installed.",
+      '[Config] BUG-05: Key "' +
+        key +
+        '" was saved to the vault, but no ' +
+        "provider plugin currently consumes it. The key will be stored but will " +
+        "have no effect at runtime. Only Gemini and llama.cpp providers are " +
+        "active. If you intended to use a different provider, check that its " +
+        "plugin is installed.",
     );
   }
   const envPath = path.join(paths.configDir, ".env");
@@ -3121,7 +3123,8 @@ export function createLauncherCompatRouter({
     allowed_cidrs: [],
     session_timeout_minutes: 0,
   };
-  state.launcher_config.session_timeout_minutes = configuredSessionTimeoutMinutes(state);
+  state.launcher_config.session_timeout_minutes =
+    configuredSessionTimeoutMinutes(state);
   if (!state.models || state.models.length === 0) {
     state.models = defaultModelsFromSettings();
   }
@@ -4220,13 +4223,17 @@ export function createLauncherCompatRouter({
     const authenticated = isSessionTokenAuthenticated(token);
     if (token && !authenticated) clearSessionCookie(res);
     const sessionKey = token ? hashSessionToken(token) : "";
-    const expiresAt = authenticated ? activeSessions.get(sessionKey) : undefined;
+    const expiresAt = authenticated
+      ? activeSessions.get(sessionKey)
+      : undefined;
     const timeoutMinutes = configuredSessionTimeoutMinutes(state);
     return {
       initialized,
       authenticated,
       session_timeout_minutes: timeoutMinutes,
-      ...(timeoutMinutes > 0 && expiresAt ? { session_expires_at: expiresAt } : {}),
+      ...(timeoutMinutes > 0 && expiresAt
+        ? { session_expires_at: expiresAt }
+        : {}),
     };
   };
 
@@ -4348,7 +4355,10 @@ export function createLauncherCompatRouter({
       // showing the onboarding prompt rather than breaking login.
     }
 
-    return res.json({ status: "ok", default_model_configured: defaultModelConfigured });
+    return res.json({
+      status: "ok",
+      default_model_configured: defaultModelConfigured,
+    });
   };
 
   const handleLogout = (req: Request, res: Response) => {
