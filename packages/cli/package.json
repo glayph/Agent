@@ -1,0 +1,20 @@
+{
+  "name": "@miki/cli",
+  "version": "1.0.0",
+  "description": "Agent Miki — self-contained npm package. A single `miki` command starts the full runtime (gateway, core, memory, web UI) and opens the terminal dashboard.",
+  "type": "module",
+  "bin": {
+    "miki": "dist/pack/bin/miki.js"
+  },
+  "files": [
+    "dist/pack/**",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node scripts/pack-self-contained.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  }
+}

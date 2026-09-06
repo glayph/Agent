@@ -1,0 +1,23 @@
+import type { ModelProviderOption } from "@/api/models"
+
+import { getProviderDefaultAPIBase } from "./provider-registry"
+
+export function normalizeApiBase(value: string): string {
+  return value.trim().replace(/\/+$/, "")
+}
+
+export function getEffectiveAPIBase(
+  provider: string,
+  apiBase: string,
+  providerOptions?: ModelProviderOption[],
+): string {
+  return normalizeApiBase(
+    apiBase || getProviderDefaultAPIBase(provider, providerOptions),
+  )
+}
+
+/** Returns trimmed api_base, or null when the user explicitly cleared the field. */
+export function getSubmittedAPIBase(apiBase: string): string | null {
+  const normalized = normalizeApiBase(apiBase)
+  return normalized || null
+}
