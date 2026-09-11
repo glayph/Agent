@@ -18,17 +18,37 @@ import type { ApprovalInbox } from "../../security/approval-inbox.js";
 
 export type DestructiveApprovalGate = {
   requestId: string;
-  context: {
-    runId: string;
-    stepId: string;
-    deliveryId: string;
-    previewHash: string;
-  };
+  context: { runId: string; stepId: string; deliveryId: string; previewHash: string };
 };
+
+export type GatedToolName =
+  | "shell_execute"
+  | "file_write"
+  | "file_delete"
+  | "computer_click_at"
+  | "computer_invoke"
+  | "computer_drag"
+  | "computer_set_text"
+  | "computer_hotkey"
+  | "computer_launch"
+  | "computer_terminate_app"
+  | "computer_clipboard";
+
+const COMPUTER_USE_TOOLS = new Set<GatedToolName>([
+  "computer_click_at",
+  "computer_invoke",
+  "computer_drag",
+  "computer_set_text",
+  "computer_hotkey",
+  "computer_launch",
+  "computer_terminate_app",
+  "computer_clipboard",
+]);
 
 interface AgentToolsConfig {
   require_confirm_destructive?: boolean;
   auto_approve_safe?: boolean;
+  require_confirm_computer_use?: boolean;
 }
 
 let cachedConfigDir: string | undefined;
@@ -47,15 +67,31 @@ function loadAgentToolsConfig(configDir: string): AgentToolsConfig {
       return cachedConfig;
     }
     const doc = yaml.load(fs.readFileSync(agentYamlPath, "utf-8")) as
-      { tools?: AgentToolsConfig } | undefined;
-    cachedConfig = doc?.tools || {};
+      | { tools?: AgentToolsConfig; agent?: { tools?: AgentToolsConfig } }
+      | undefined;
+    // AUDIT FIX: the shipped config/agent.yaml nests `tools:` under the
+    // top-level `agent:` key (agent.ts reads it the same way, via
+    // `asAgentConfig(this.config).agent?.model_routing` for the sibling
+    // `model_routing` key) — but this loader was reading `doc.tools` at the
+    // document root, which is always undefined against the real file. That
+    // silently fell back to `{}`, which happened to still default
+    // require_confirm_destructive to true (undefined !== false), so the gate
+    // stayed on — but it meant `require_confirm_destructive: false` (or the
+    // new require_confirm_computer_use) written into the real agent.yaml
+    // could never actually take effect. Prefer the real nested location;
+    // fall back to a flat `tools:` root for any other agent.yaml shape.
+    cachedConfig = doc?.agent?.tools || doc?.tools || {};
     cachedConfigDir = configDir;
     cachedMtimeMs = stat.mtimeMs;
     return cachedConfig;
   } catch {
     // Fail safe: if agent.yaml cannot be read, default to requiring
     // confirmation rather than silently allowing destructive actions.
-    return { require_confirm_destructive: true, auto_approve_safe: true };
+    return {
+      require_confirm_destructive: true,
+      auto_approve_safe: true,
+      require_confirm_computer_use: true,
+    };
   }
 }
 
@@ -63,6 +99,22 @@ function loadAgentToolsConfig(configDir: string): AgentToolsConfig {
 export function requireConfirmDestructive(configDir: string): boolean {
   const cfg = loadAgentToolsConfig(configDir);
   return cfg.require_confirm_destructive !== false; // default true (matches shipped agent.yaml)
+}
+
+// COMPUTER-USE GATE (audit follow-up): computer_use ships with
+// `level: TRUSTED_FULL_ACCESS` and mouse_input/allow_keyboard/allow_app_launch
+// all true in config/tools.yaml, and none of the handleComputer* handlers in
+// handlers.ts ever consulted ApprovalInbox — a model could move the mouse,
+// type, press hotkeys, or launch/kill processes with zero human confirmation,
+// unlike shell_execute/file_write/file_delete which are gated by
+// requireConfirmDestructive() above. This mirrors that same pattern for the
+// state-changing computer-use actions (click/invoke/drag/type/hotkey/launch/
+// terminate/clipboard write). Read-only actions (observe, focus, screenshot,
+// scroll, list_*, get_system_info, verify, clipboard read) are intentionally
+// left ungated, matching how file_read is never gated.
+export function requireConfirmComputerUse(configDir: string): boolean {
+  const cfg = loadAgentToolsConfig(configDir);
+  return cfg.require_confirm_computer_use !== false; // default true (fail safe)
 }
 
 // Heuristic classification of "destructive" shell commands: anything that can
@@ -102,8 +154,8 @@ function hashPreview(preview: string): string {
 }
 
 /**
- * Gate a destructive shell/file tool call behind ApprovalInbox, mirroring the
- * pattern already used in admin-control-handlers.ts. Returns:
+ * Gate a destructive shell/file/computer-use tool call behind ApprovalInbox,
+ * mirroring the pattern already used in admin-control-handlers.ts. Returns:
  *  - null: not destructive (or confirmation disabled) — caller proceeds normally.
  *  - a JSON string: an approval_required response to hand back to the model/user.
  *  - throws: if approval_request_id was supplied but is invalid/expired/unapproved.
@@ -113,11 +165,19 @@ function hashPreview(preview: string): string {
 export function destructiveApprovalGate(opts: {
   approvalInbox: ApprovalInbox | undefined;
   configDir: string;
-  toolName: "shell_execute" | "file_write" | "file_delete";
+  toolName: GatedToolName;
   resource: string;
   args: Record<string, unknown>;
 }): { gate: DestructiveApprovalGate | null; response: string | null } {
-  if (!requireConfirmDestructive(opts.configDir)) {
+  const isComputerUse = COMPUTER_USE_TOOLS.has(opts.toolName);
+  const configFlag = isComputerUse
+    ? "tools.require_confirm_computer_use"
+    : "tools.require_confirm_destructive";
+  const gateEnabled = isComputerUse
+    ? requireConfirmComputerUse(opts.configDir)
+    : requireConfirmDestructive(opts.configDir);
+
+  if (!gateEnabled) {
     return { gate: null, response: null };
   }
   if (!opts.approvalInbox) {
@@ -125,7 +185,7 @@ export function destructiveApprovalGate(opts: {
     // (e.g. a minimal embedding of ToolRegistry). Fail closed with a clear
     // error rather than silently skipping the check.
     throw new Error(
-      `${opts.toolName} requires owner approval (tools.require_confirm_destructive is enabled) ` +
+      `${opts.toolName} requires owner approval (${configFlag} is enabled) ` +
         `but no approval service is configured. Refusing to run.`,
     );
   }
@@ -140,10 +200,7 @@ export function destructiveApprovalGate(opts: {
   const argsForPreview = { ...opts.args };
   delete argsForPreview.approval_request_id;
   delete argsForPreview.approval_token;
-  const previewPayload = JSON.stringify({
-    tool: opts.toolName,
-    args: argsForPreview,
-  });
+  const previewPayload = JSON.stringify({ tool: opts.toolName, args: argsForPreview });
   const previewHash = hashPreview(previewPayload);
   const approvalContext = {
     runId: `destructive:${previewHash.slice(0, 16)}`,
@@ -157,21 +214,22 @@ export function destructiveApprovalGate(opts: {
       ? opts.args.approval_request_id.trim()
       : "";
   if (requestId) {
-    opts.approvalInbox.assertApprovedByContext(
-      requestId,
-      approvalContext,
-      actor,
-    );
+    opts.approvalInbox.assertApprovedByContext(requestId, approvalContext, actor);
     return { gate: { requestId, context: approvalContext }, response: null };
   }
 
+  // "delete" for the original shell/file trio keeps their existing approval
+  // wording/behavior unchanged; computer-use actions use "external_write"
+  // (mouse/keyboard/process control reaching outside the sandboxed
+  // workspace) — both are in ApprovalInbox's SIDE_EFFECT_ACTIONS set, so both
+  // always require human approval.
   const challenge = opts.approvalInbox.request({
     runId: approvalContext.runId,
     actor,
-    action: "delete",
+    action: isComputerUse ? "external_write" : "delete",
     resource: opts.resource,
     risk: "high",
-    reason: `Destructive ${opts.toolName} call requires confirmation (tools.require_confirm_destructive=true)`,
+    reason: `${isComputerUse ? "Computer-use" : "Destructive"} ${opts.toolName} call requires confirmation (${configFlag}=true)`,
     context: approvalContext,
     ttlMs: 10 * 60 * 1000,
   });
@@ -185,9 +243,10 @@ export function destructiveApprovalGate(opts: {
       tool: opts.toolName,
       preview: JSON.parse(previewPayload),
       instruction:
-        "This action is destructive and requires owner approval. Ask the owner to approve " +
-        "this request in the Web UI (Approvals) or via the Telegram approval command, then " +
-        "retry the same tool call including approval_request_id. Do not fabricate an approval_token.",
+        `This action ${isComputerUse ? "controls the local computer (mouse/keyboard/process) and" : "is destructive and"} requires owner approval. ` +
+        "Ask the owner to approve this request in the Web UI (Approvals) or via the Telegram " +
+        "approval command, then retry the same tool call including approval_request_id. " +
+        "Do not fabricate an approval_token.",
     }),
   };
 }

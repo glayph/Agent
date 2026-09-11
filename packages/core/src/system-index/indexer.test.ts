@@ -48,7 +48,7 @@ describe("SystemIndexer", () => {
       indexer.close();
       fs.rmSync(workspace, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   test("updates and removes individual paths", async () => {
     const workspace = makeWorkspace();

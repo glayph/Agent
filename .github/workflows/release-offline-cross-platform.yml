@@ -98,16 +98,8 @@ jobs:
           "MIKI_RELEASE_DIR=$(Join-Path $env:RUNNER_TEMP 'agent-miki-windows-x64-offline')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MIKI_LLAMA_BUILD_JOBS=2" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Run repository verification (Linux)
-        if: matrix.platform == 'linux-x64'
+      - name: Run repository verification
         run: npm run verify
-
-      - name: Explain Windows verification scope
-        if: matrix.platform == 'windows-x64'
-        shell: bash
-        run: |
-          echo "Windows release validation focuses on the native package build and archive checks."
-          echo "The full repository verification suite remains gated on Linux because several suites require Linux-only browser/voice fixtures."
 
       - name: Build offline package
         run: npm run build:release:offline

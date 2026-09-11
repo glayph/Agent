@@ -1,5 +1,6 @@
 import {
   ensureLocalRuntime,
+  firstConfiguredLocalModel,
   getLocalRuntimeHealth,
 } from "../../llama-cpp/runtime/local-runtime.js";
 import { openAICompatibleAdapter } from "../../../../llm/provider/openai-compatible-adapter.js";
@@ -98,7 +99,7 @@ export const llamaCppProviderPlugin: MikiProviderPlugin = {
     });
   },
   async listModels(context) {
-    const health = getLocalRuntimeHealth();
+    const health = getLocalRuntimeHealth(firstConfiguredLocalModel());
     context.log("provider.local.models.listed", {
       configured: health.configured,
       ready: health.ready,
@@ -112,7 +113,12 @@ export const llamaCppProviderPlugin: MikiProviderPlugin = {
     try {
       // A cached health flag is not sufficient: an external llama-server can
       // exit after the last successful probe while the dashboard stays open.
-      await ensureLocalRuntime("local-model");
+      // Probe whichever local model is actually configured rather than the
+      // literal placeholder id "local-model" - that name only matched the
+      // original seed catalog entry, so any user-added/renamed local model
+      // (e.g. a custom OpenAI-compatible loopback endpoint) was incorrectly
+      // reported as unreachable even when it was healthy and selected.
+      await ensureLocalRuntime(firstConfiguredLocalModel() ?? "local-model");
       const health = getLocalRuntimeHealth();
       context.log("provider.local.health", {
         ready: health.ready,

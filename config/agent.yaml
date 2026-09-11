@@ -70,6 +70,12 @@ agent:
   tools:
     auto_approve_safe: true
     require_confirm_destructive: true
+    # Require owner approval before mouse/keyboard/process actions
+    # (computer_click_at, computer_invoke, computer_drag, computer_set_text,
+    # computer_hotkey, computer_launch, computer_terminate_app, and
+    # clipboard set/clear). Read-only computer-use actions (observe,
+    # screenshot, scroll, list_*, verify, clipboard get) are unaffected.
+    require_confirm_computer_use: true
 self_improvement:
   enabled: true
   reflection_interval_minutes: 60

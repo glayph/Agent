@@ -422,39 +422,112 @@ export async function handleComputerFocus(
   return await this.computer.focus(args);
 }
 
+// AUDIT FIX: computer_invoke/set_text/hotkey/launch/clipboard(set|clear) can
+// move the mouse, type, press hotkeys, or start/kill processes on the real
+// desktop, but never consulted ApprovalInbox — unlike shell_execute/
+// file_write/file_delete which are gated below. Gate the state-changing
+// computer-use actions the same way; read-only ones (observe, focus,
+// screenshot, scroll, list_*, get_system_info, verify, clipboard "get") are
+// intentionally left ungated, matching how file_read is never gated.
 export async function handleComputerInvoke(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.invoke(args);
+  const locator =
+    (args["locator"] as string) ||
+    (args["automation_id"] as string) ||
+    (args["name"] as string) ||
+    "";
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_invoke",
+    resource: `computer:invoke:${locator || "unspecified"}`,
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.invoke(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerSetText(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.setText(args);
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_set_text",
+    resource: "computer:set_text",
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.setText(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerHotkey(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.hotkey(args);
+  const keys = (args["keys"] as string) || (args["key"] as string) || "";
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_hotkey",
+    resource: `computer:hotkey:${keys || "unspecified"}`,
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.hotkey(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerClipboard(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.clipboard(args);
+  const action = (args["action"] as string) || "get";
+  // Reading the clipboard is not mutating; only set/clear need confirmation.
+  if (action !== "set" && action !== "clear") {
+    return await this.computer.clipboard(args);
+  }
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_clipboard",
+    resource: `computer:clipboard:${action}`,
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.clipboard(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerLaunch(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.launch(args);
+  const command =
+    (args["command"] as string) ||
+    (args["app"] as string) ||
+    (args["path"] as string) ||
+    "";
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_launch",
+    resource: `computer:launch:${command || "unspecified"}`,
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.launch(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerVerify(
@@ -496,14 +569,36 @@ export async function handleComputerClickAt(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.clickAt(args);
+  const x = args["x"];
+  const y = args["y"];
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_click_at",
+    resource: `computer:click_at:${x},${y}`,
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.clickAt(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerDrag(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.drag(args);
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_drag",
+    resource: "computer:drag",
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.drag(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerScroll(
@@ -517,7 +612,22 @@ export async function handleComputerTerminateApp(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
 ): Promise<string> {
-  return await this.computer.terminateApp(args);
+  const target =
+    (args["process_name"] as string) ||
+    (args["processName"] as string) ||
+    (args["app"] as string) ||
+    (args["pid"] !== undefined ? String(args["pid"]) : "");
+  const { gate, response } = destructiveApprovalGate({
+    approvalInbox: this.approvalInbox,
+    configDir: this.runtimePaths.configDir,
+    toolName: "computer_terminate_app",
+    resource: `computer:terminate_app:${target || "unspecified"}`,
+    args,
+  });
+  if (response) return response;
+  const result = await this.computer.terminateApp(args);
+  if (gate) consumeDestructiveApproval(this.approvalInbox, gate);
+  return result;
 }
 
 export async function handleComputerListWindows(

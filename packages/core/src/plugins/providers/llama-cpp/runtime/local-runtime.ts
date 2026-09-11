@@ -153,6 +153,18 @@ export function normalizeLocalModelConfig(
   };
 }
 
+/**
+ * Returns the model_name of the first currently-configured llama.cpp local
+ * model, if any. Used as a fallback target for freshness probes (e.g.
+ * testConnection) that need *some* real, configured model to re-check
+ * instead of a hardcoded placeholder id that may not exist in this
+ * installation (see: BUG - testConnection always probed the literal
+ * string "local-model" regardless of what the user actually configured).
+ */
+export function firstConfiguredLocalModel(): string | undefined {
+  return configuredModels.keys().next().value;
+}
+
 export function configureLocalModels(models: unknown[]): void {
   configuredModels.clear();
   for (const raw of models) {
@@ -516,7 +528,8 @@ export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
   const baseUrl = localBaseUrl(entry);
   return {
     provider: "llama.cpp",
-    ready: Boolean(managedProcess) || externalReadyBaseUrl === baseUrl,
+    ready:
+      Boolean(managedProcess) || externalReadyBaseUrl === baseUrl,
     configured: Boolean(
       entry ||
       process.env.MIKI_LLAMA_BASE_URL ||

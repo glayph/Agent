@@ -19,7 +19,10 @@ export function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export function previewToolArgs(input: unknown, maxArgsLength: number): string {
+export function previewToolArgs(
+  input: unknown,
+  maxArgsLength: number,
+): string {
   const full = JSON.stringify(input || {});
   if (full.length <= maxArgsLength) return full;
   return full.slice(0, maxArgsLength) + "…";
@@ -90,12 +93,19 @@ export function toolResultDescription(
  * field did.
  */
 export type InspectorNodeType =
-  "tool" | "skill" | "plugin" | "file" | "command" | "pattern" | "system";
+  | "tool"
+  | "skill"
+  | "plugin"
+  | "file"
+  | "command"
+  | "pattern"
+  | "system";
 
 export function inferInspectorNodeType(label: string): InspectorNodeType {
   const lower = label.toLowerCase();
   if (lower.startsWith("skill:") || lower.includes("skill_")) return "skill";
-  if (lower.startsWith("plugin:") || lower.includes("plugin_")) return "plugin";
+  if (lower.startsWith("plugin:") || lower.includes("plugin_"))
+    return "plugin";
   if (
     lower.startsWith("file:") ||
     lower.includes("file_") ||
@@ -142,7 +152,11 @@ export function sendMikiFrame(
 }
 
 export type InspectorThoughtCategory =
-  "Plan" | "Action" | "Verification" | "Progress" | "Decision";
+  | "Plan"
+  | "Action"
+  | "Verification"
+  | "Progress"
+  | "Decision";
 
 export interface BuildInspectorThoughtInput {
   sessionId: string;
