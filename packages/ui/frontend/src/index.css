@@ -70,8 +70,8 @@
   --color-sidebar-ring: var(--md-sys-color-primary);
 
   /* Status colors (custom - keeping existing for now) */
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
+  --color-success: #FFB45C;
+  --color-warning: #b8b8b8;
 }
 
 /* =============================================================================
@@ -118,8 +118,8 @@
   --ring: var(--md-sys-color-primary);
 
   /* Status */
-  --success: #22c55e;
-  --warning: #f59e0b;
+  --success: #FFB45C;
+  --warning: #b8b8b8;
 
   /* Charts */
   --chart-1: var(--md-sys-color-primary);
@@ -148,11 +148,12 @@
   /* Bubble and alert-text/icon colors live in packages/ui/appearance.css now. */
   --chat-agent-bubble: transparent;
   --chat-agent-border: transparent;
-  --chat-composer-bg: #fffdfb;
-  --chat-composer-border: #efcdbb;
-  --chat-composer-focus-border: rgba(255, 107, 53, 0.92);
-  --chat-composer-shadow: 0 6px 24px rgba(194, 79, 24, 0.08);
-  --chat-composer-focus-shadow: 0 10px 34px rgba(194, 79, 24, 0.16);
+  --chat-composer-bg: var(--card);
+  --chat-composer-border: var(--border);
+  --chat-composer-focus-border: var(--primary);
+  --chat-composer-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+  --chat-composer-focus-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--primary) 16%, transparent);
   --chat-bubble-label: #686864;
   --chat-bubble-meta: #777771;
   --chat-alert-bg: #fff8df;
@@ -196,8 +197,8 @@
   --border: var(--md-sys-color-outline);
   --input: var(--md-sys-color-outline);
   --ring: var(--md-sys-color-primary);
-  --success: #4ade80;
-  --warning: #fbbf24;
+  --success: #FFB45C;
+  --warning: #b8b8b8;
   --chart-1: var(--md-sys-color-primary);
   --chart-2: var(--md-sys-color-secondary);
   --chart-3: var(--md-sys-color-tertiary);
@@ -214,11 +215,12 @@
   /* Bubble and alert-text/icon colors live in packages/ui/appearance.css now. */
   --chat-agent-bubble: transparent;
   --chat-agent-border: transparent;
-  --chat-composer-bg: #100b09;
-  --chat-composer-border: rgba(255, 140, 92, 0.22);
-  --chat-composer-focus-border: rgba(255, 138, 92, 0.96);
+  --chat-composer-bg: var(--card);
+  --chat-composer-border: var(--border);
+  --chat-composer-focus-border: var(--primary);
   --chat-composer-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
-  --chat-composer-focus-shadow: 0 12px 36px rgba(255, 107, 53, 0.18);
+  --chat-composer-focus-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--primary) 22%, transparent);
   --chat-bubble-label: #27272a;
   --chat-bubble-meta: #71717a;
   --chat-alert-bg: #1c1402;
@@ -732,19 +734,29 @@ select:focus-visible {
 /* =============================================================================
    STATUS COLOR OVERRIDES — Map to success/warning/destructive tokens
    ============================================================================= */
-[class*="text-green-"] {
+[class*="text-green-"],
+[class*="text-emerald-"] {
   color: var(--success) !important;
 }
-[class*="bg-green-500"] {
-  background-color: var(--success) !important;
-}
-[class*="bg-green-500/"],
-[class*="bg-green-600/"] {
+[class*="bg-green-"],
+[class*="bg-emerald-"] {
   background-color: color-mix(
     in srgb,
     var(--success) 10%,
     transparent
   ) !important;
+}
+[class*="bg-green-500"],
+[class*="bg-emerald-500"] {
+  background-color: var(--success) !important;
+}
+[class*="border-green-"],
+[class*="border-emerald-"] {
+  border-color: color-mix(in srgb, var(--success) 30%, transparent) !important;
+}
+[class*="ring-green-"],
+[class*="ring-emerald-"] {
+  --tw-ring-color: color-mix(in srgb, var(--success) 30%, transparent) !important;
 }
 
 [class*="text-amber-"],
@@ -764,7 +776,26 @@ select:focus-visible {
   border-color: color-mix(in srgb, var(--warning) 30%, transparent) !important;
 }
 
-/* Orange is the brand accent — map to primary */
+/* Red — map to the destructive/error token */
+[class*="text-red-"] {
+  color: var(--destructive) !important;
+}
+[class*="bg-red-"] {
+  background-color: color-mix(
+    in srgb,
+    var(--destructive) 10%,
+    transparent
+  ) !important;
+}
+[class*="border-red-"] {
+  border-color: color-mix(
+    in srgb,
+    var(--destructive) 30%,
+    transparent
+  ) !important;
+}
+
+/* Orange is the legacy brand accent — map to the global orange primary */
 [class*="text-orange-"] {
   color: var(--primary) !important;
 }
@@ -816,8 +847,8 @@ select:focus-visible {
 
 [data-launcher-auth-card="true"] {
   border-color: rgb(255 255 255 / 0.12) !important;
-  background: rgb(5 5 5 / 0.72) !important;
-  color: rgb(237 237 239);
+  background: color-mix(in srgb, var(--background) 72%, transparent) !important;
+  color: var(--foreground);
   box-shadow:
     0 24px 64px rgb(0 0 0 / 0.48),
     0 0 0 1px rgb(255 255 255 / 0.05),
@@ -827,28 +858,28 @@ select:focus-visible {
 }
 
 [data-launcher-auth-card="true"]:hover {
-  background: rgb(5 5 5 / 0.82) !important;
-  border-color: rgb(255 107 53 / 0.4) !important;
+  background: color-mix(in srgb, var(--background) 82%, transparent) !important;
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent) !important;
   transform: translateY(-1px);
 }
 
 [data-launcher-auth-card="true"] [data-slot="card-description"] {
-  color: rgb(237 237 239 / 0.65);
+  color: color-mix(in srgb, var(--foreground) 65%, transparent);
 }
 
 [data-launcher-auth-card="true"] [data-slot="input"] {
   border-color: rgb(255 255 255 / 0.14);
   background: rgb(0 0 0 / 0.35);
-  color: rgb(237 237 239);
+  color: var(--foreground);
 }
 
 [data-launcher-auth-card="true"] [data-slot="input"]::placeholder {
-  color: rgb(237 237 239 / 0.4);
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
 }
 
 [data-launcher-auth-card="true"] [data-slot="input"]:focus-visible {
-  border-color: rgb(255 107 53 / 0.7);
-  box-shadow: 0 0 0 2px rgb(255 107 53 / 0.18);
+  border-color: color-mix(in srgb, var(--primary) 70%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
 /* =============================================================================
@@ -1309,126 +1340,12 @@ body,
 }
 
 /* =============================================================================
-   GLOBAL INK & LIME APPLICATION
-   The reference style is intentionally shared by every authenticated Web UI page.
+   SHARED AUTHENTICATED SHELL CHROME
+   The reference style is intentionally shared by every authenticated Web UI
+   page. Palette values live solely in the THEME TOKENS block above (fed by
+   material-theme.css) — this section only carries structural chrome rules
+   that read from those tokens, so there is a single source of truth.
    ============================================================================= */
-:root {
-  --md-sys-color-primary: #a3e635;
-  --md-sys-color-on-primary: #11160b;
-  --md-sys-color-primary-container: #e8f7c4;
-  --md-sys-color-on-primary-container: #1d290d;
-  --md-sys-color-secondary: #6a7164;
-  --md-sys-color-on-secondary: #ffffff;
-  --md-sys-color-secondary-container: #eceee8;
-  --md-sys-color-on-secondary-container: #252a22;
-  --md-sys-color-tertiary: #70736c;
-  --md-sys-color-on-tertiary: #ffffff;
-  --md-sys-color-tertiary-container: #e6e9e1;
-  --md-sys-color-on-tertiary-container: #252a22;
-  --md-sys-color-error: #c2413b;
-  --md-sys-color-on-error: #ffffff;
-  --md-sys-color-error-container: #fce8e5;
-  --md-sys-color-on-error-container: #5f1713;
-  --md-sys-color-background: #f7f7f3;
-  --md-sys-color-on-background: #171817;
-  --md-sys-color-surface: #ffffff;
-  --md-sys-color-on-surface: #171817;
-  --md-sys-color-surface-variant: #eceee8;
-  --md-sys-color-on-surface-variant: #70736c;
-  --md-sys-color-outline: #dfe2d8;
-  --md-sys-color-outline-variant: #e9ebe5;
-  --md-sys-color-inverse-surface: #171817;
-  --md-sys-color-inverse-on-surface: #f7f7f3;
-  --md-sys-color-inverse-primary: #bef264;
-  --background: #f7f7f3;
-  --foreground: #171817;
-  --card: #ffffff;
-  --card-foreground: #171817;
-  --popover: #ffffff;
-  --popover-foreground: #171817;
-  --primary: #a3e635;
-  --primary-foreground: #11160b;
-  --secondary: #eceee8;
-  --secondary-foreground: #444740;
-  --muted: #eceee8;
-  --muted-foreground: #70736c;
-  --accent: #e8f7c4;
-  --accent-foreground: #24310e;
-  --destructive: #c2413b;
-  --destructive-foreground: #ffffff;
-  --border: #dfe2d8;
-  --input: #d4d8cf;
-  --ring: #7aa816;
-  --sidebar: #f1f2ed;
-  --sidebar-foreground: #171817;
-  --sidebar-primary: #a3e635;
-  --sidebar-primary-foreground: #11160b;
-  --sidebar-accent: #e8ebe3;
-  --sidebar-accent-foreground: #171817;
-  --sidebar-border: #dfe2d8;
-  --sidebar-ring: #7aa816;
-  --success: #238636;
-  --warning: #a16207;
-}
-
-html.dark {
-  --md-sys-color-primary: #bef264;
-  --md-sys-color-on-primary: #11160b;
-  --md-sys-color-primary-container: #273215;
-  --md-sys-color-on-primary-container: #e5f6bb;
-  --md-sys-color-secondary: #9ba394;
-  --md-sys-color-on-secondary: #151815;
-  --md-sys-color-secondary-container: #232823;
-  --md-sys-color-on-secondary-container: #dce2d5;
-  --md-sys-color-tertiary: #9ba394;
-  --md-sys-color-on-tertiary: #151815;
-  --md-sys-color-tertiary-container: #242a23;
-  --md-sys-color-on-tertiary-container: #dce2d5;
-  --md-sys-color-error: #f17b70;
-  --md-sys-color-on-error: #321310;
-  --md-sys-color-error-container: #471c19;
-  --md-sys-color-on-error-container: #ffd8d2;
-  --md-sys-color-background: #111311;
-  --md-sys-color-on-background: #eef0e9;
-  --md-sys-color-surface: #171a17;
-  --md-sys-color-on-surface: #eef0e9;
-  --md-sys-color-surface-variant: #232823;
-  --md-sys-color-on-surface-variant: #9ba394;
-  --md-sys-color-outline: #30372e;
-  --md-sys-color-outline-variant: #252b24;
-  --md-sys-color-inverse-surface: #eef0e9;
-  --md-sys-color-inverse-on-surface: #171817;
-  --md-sys-color-inverse-primary: #7ba52e;
-  --background: #111311;
-  --foreground: #eef0e9;
-  --card: #171a17;
-  --card-foreground: #eef0e9;
-  --popover: #171a17;
-  --popover-foreground: #eef0e9;
-  --primary: #bef264;
-  --primary-foreground: #11160b;
-  --secondary: #232823;
-  --secondary-foreground: #c5cbbd;
-  --muted: #232823;
-  --muted-foreground: #9ba394;
-  --accent: #273215;
-  --accent-foreground: #e5f6bb;
-  --destructive: #f17b70;
-  --destructive-foreground: #321310;
-  --border: #30372e;
-  --input: #3a4338;
-  --ring: #a3d94d;
-  --sidebar: #151815;
-  --sidebar-foreground: #eef0e9;
-  --sidebar-primary: #bef264;
-  --sidebar-primary-foreground: #11160b;
-  --sidebar-accent: #242a23;
-  --sidebar-accent-foreground: #eef0e9;
-  --sidebar-border: #30372e;
-  --sidebar-ring: #a3d94d;
-  --success: #69d17a;
-  --warning: #f0b44d;
-}
 
 /* Global page rhythm: quiet canvas, hairline rules, no decorative grid. */
 .app-background::after,

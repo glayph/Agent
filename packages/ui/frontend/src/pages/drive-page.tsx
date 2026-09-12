@@ -298,7 +298,7 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".css": {
     Icon: IconBrandSass,
     label: "CSS file",
-    swatch: "bg-blue-500/15 text-blue-300 border-blue-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".csv": {
     Icon: IconFileSpreadsheet,
@@ -308,7 +308,7 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".db": {
     Icon: IconDatabase,
     label: "Database file",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".deb": {
     Icon: IconPackage,
@@ -328,12 +328,12 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".doc": {
     Icon: IconFileTypeDoc,
     label: "Word document",
-    swatch: "bg-blue-500/15 text-blue-300 border-blue-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".docx": {
     Icon: IconFileTypeDocx,
     label: "Word document",
-    swatch: "bg-blue-500/15 text-blue-300 border-blue-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".dockerfile": {
     Icon: IconBrandDocker,
@@ -358,7 +358,7 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".go": {
     Icon: IconBrandGolang,
     label: "Go source",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".h": {
     Icon: IconFileCode,
@@ -408,7 +408,7 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".jsx": {
     Icon: IconBrandReact,
     label: "React source",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".kt": {
     Icon: IconBrandKotlin,
@@ -463,7 +463,7 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".ps1": {
     Icon: IconTerminal2,
     label: "PowerShell script",
-    swatch: "bg-blue-500/15 text-blue-300 border-blue-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".psd": {
     Icon: IconPalette,
@@ -513,17 +513,17 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".sql": {
     Icon: IconFileTypeSql,
     label: "SQL file",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".sqlite": {
     Icon: IconDatabase,
     label: "SQLite database",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".sqlite3": {
     Icon: IconDatabase,
     label: "SQLite database",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".svg": {
     Icon: IconPalette,
@@ -543,12 +543,12 @@ const fileIconConfigs: Record<string, FileIconConfig> = {
   ".ts": {
     Icon: IconBrandTypescript,
     label: "TypeScript source",
-    swatch: "bg-blue-500/15 text-blue-300 border-blue-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".tsx": {
     Icon: IconBrandReact,
     label: "React TypeScript source",
-    swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+    swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
   },
   ".rtf": {
     Icon: IconFileDescription,
@@ -652,7 +652,7 @@ function fileIconConfig(entry: FileEntry): FileIconConfig {
     return {
       Icon: IconDatabase,
       label: "Database file",
-      swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+      swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
     }
   }
   if (CONFIG_EXTENSIONS.has(extension)) {
@@ -694,7 +694,7 @@ function fileIconConfig(entry: FileEntry): FileIconConfig {
     return {
       Icon: IconSql,
       label: "SQL file",
-      swatch: "bg-cyan-500/15 text-cyan-300 border-cyan-400/20",
+      swatch: "bg-orange-500/15 text-orange-300 border-orange-400/20",
     }
   }
   if (extension === ".component" || extension === ".module") {

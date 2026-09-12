@@ -1,5 +1,10 @@
 import { geminiProviderPlugin } from "./gemini/index.js";
 import { llamaCppProviderPlugin } from "./llama-cpp/index.js";
+import {
+  openAICompatibleProviderPlugin,
+  openAIProviderPlugin,
+  openRouterProviderPlugin,
+} from "./compatible.js";
 import type { MikiProviderPlugin } from "../../../llm/provider/sdk/index.js";
 
 /**
@@ -8,8 +13,16 @@ import type { MikiProviderPlugin } from "../../../llm/provider/sdk/index.js";
  */
 export { geminiProviderPlugin } from "./gemini/index.js";
 export { llamaCppProviderPlugin } from "./llama-cpp/index.js";
+export {
+  openAICompatibleProviderPlugin,
+  openAIProviderPlugin,
+  openRouterProviderPlugin,
+} from "./compatible.js";
 
 export const builtinProviderPlugins: MikiProviderPlugin[] = [
   geminiProviderPlugin,
   llamaCppProviderPlugin,
+  openAIProviderPlugin,
+  openAICompatibleProviderPlugin,
+  openRouterProviderPlugin,
 ];

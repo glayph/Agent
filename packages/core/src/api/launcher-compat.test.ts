@@ -851,9 +851,15 @@ describe("launcher compatibility config validation", () => {
       expect(providers.status).toBe(200);
       expect(
         providerBody.providers.map((item: { id: string }) => item.id),
-      ).toEqual(["gemini", "llama.cpp"]);
+      ).toEqual([
+        "gemini",
+        "llama.cpp",
+        "openai",
+        "openai-compatible",
+        "openrouter",
+      ]);
 
-      const unsupported = await request("/oauth/token/openai");
+      const unsupported = await request("/oauth/token/opencode");
       expect(unsupported.status).toBe(404);
       expect(await unsupported.text()).not.toContain(fakeToken);
 
@@ -1268,7 +1274,7 @@ describe("launcher compatibility config validation", () => {
     });
   });
 
-  it("keeps launcher model provider options restricted to Gemini and llama.cpp", async () => {
+  it("exposes the built-in provider gateway options without loading external providers", async () => {
     await withLauncherCompatServer(async (request, workspaceDir) => {
       await registerLauncherPluginContracts(workspaceDir, {
         providers: [
@@ -1292,9 +1298,14 @@ describe("launcher compatibility config validation", () => {
         (provider: { id: string }) => provider.id,
       );
 
-      expect(providerIds).toEqual(["google", "llama.cpp"]);
+      expect(providerIds).toEqual([
+        "google",
+        "llama.cpp",
+        "openai",
+        "openai-compatible",
+        "openrouter",
+      ]);
       expect(providerIds).not.toContain("local-ai");
-      expect(providerIds).not.toContain("openai");
       expect(providerIds).not.toContain("opencode");
     });
   });

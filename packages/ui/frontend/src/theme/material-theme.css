@@ -1,48 +1,48 @@
 /* =============================================================================
-   MIKI DESIGN TOKEN SYSTEM — Dark Dev-Tool Aesthetic
-   Near-black surfaces · light text · vivid orange (#FF6B35) accent
-   Card-based layout with distinct borders · monospace dev accents
+   MIKI DESIGN TOKEN SYSTEM — Premium Monochrome Dark Aesthetic
+   Near-black surfaces · off-white text · restrained orange accent
+   Card-based layout with subtle borders · monospace dev accents
    ============================================================================= */
 
 @theme inline {
-  /* Primary — Vivid Orange (high-contrast accent) */
-  --md-sys-color-primary: #FF6B35;
+  /* Primary — reference active state orange */
+  --md-sys-color-primary: #FF9500;
   --md-sys-color-on-primary: #FFFFFF;
-  --md-sys-color-primary-container: #FFE1D1;
-  --md-sys-color-on-primary-container: #2B0D00;
+  --md-sys-color-primary-container: #5A3000;
+  --md-sys-color-on-primary-container: #FFE5C2;
 
   /* Secondary — Graphite */
-  --md-sys-color-secondary: #55555C;
-  --md-sys-color-on-secondary: #FFFFFF;
-  --md-sys-color-secondary-container: #F0F0F1;
-  --md-sys-color-on-secondary-container: #18181B;
+  --md-sys-color-secondary: #B8B8B8;
+  --md-sys-color-on-secondary: #151515;
+  --md-sys-color-secondary-container: #202020;
+  --md-sys-color-on-secondary-container: #E5E5E5;
 
   /* Tertiary — Warm gray */
-  --md-sys-color-tertiary: #6B6B70;
-  --md-sys-color-on-tertiary: #FFFFFF;
-  --md-sys-color-tertiary-container: #E4E4E7;
-  --md-sys-color-on-tertiary-container: #1C1C1F;
+  --md-sys-color-tertiary: #8F8F8F;
+  --md-sys-color-on-tertiary: #151515;
+  --md-sys-color-tertiary-container: #202020;
+  --md-sys-color-on-tertiary-container: #D8D8D8;
 
   /* Error — stays red for clear failure states */
-  --md-sys-color-error: #DC2626;
-  --md-sys-color-on-error: #FFFFFF;
-  --md-sys-color-error-container: #FEE2E2;
-  --md-sys-color-on-error-container: #450A0A;
+  --md-sys-color-error: #FF6B6B;
+  --md-sys-color-on-error: #2B0D0D;
+  --md-sys-color-error-container: #3F1414;
+  --md-sys-color-on-error-container: #FFD4D4;
 
   /* Neutral Palette - Backgrounds & Surfaces */
-  --md-sys-color-background: #FAFAFA;
-  --md-sys-color-on-background: #18181B;
-  --md-sys-color-surface: #FFFFFF;
-  --md-sys-color-on-surface: #18181B;
-  --md-sys-color-surface-variant: #F0F0F1;
-  --md-sys-color-on-surface-variant: #52525B;
-  --md-sys-color-outline: #E4E4E7;
-  --md-sys-color-outline-variant: #F0F0F1;
+  --md-sys-color-background: #111111;
+  --md-sys-color-on-background: #F5F5F5;
+  --md-sys-color-surface: #181818;
+  --md-sys-color-on-surface: #F5F5F5;
+  --md-sys-color-surface-variant: #202020;
+  --md-sys-color-on-surface-variant: #B8B8B8;
+  --md-sys-color-outline: #2A2A2A;
+  --md-sys-color-outline-variant: #1E1E1E;
 
   /* Inverse Colors */
-  --md-sys-color-inverse-surface: #18181B;
-  --md-sys-color-inverse-on-surface: #F4F4F5;
-  --md-sys-color-inverse-primary: #FF8A5C;
+  --md-sys-color-inverse-surface: #F5F5F5;
+  --md-sys-color-inverse-on-surface: #181818;
+  --md-sys-color-inverse-primary: #D97700;
 
   /* Elevation Shadows */
   --md-sys-elevation-0: none;
@@ -115,26 +115,28 @@
 }
 
 /* =============================================================================
-   DARK MODE (PRIMARY) — Near-black surfaces, vivid orange accent
+   DARK MODE (PRIMARY) — Near-black surfaces, restrained orange accent
+   Matches reference palette: #111111 bg / #181818 card / #202020 elevated /
+   #2A2A2A border / #F5F5F5 text / #B8B8B8 secondary / #777777 muted / #FF9500 accent
    ============================================================================= */
 .dark {
-  /* Primary — Vivid Orange */
-  --md-sys-color-primary: #FF6B35;
-  --md-sys-color-on-primary: #1A0600;
-  --md-sys-color-primary-container: #3A1A0E;
-  --md-sys-color-on-primary-container: #FFD9C7;
+  /* Primary — Restrained Orange */
+  --md-sys-color-primary: #FF9500;
+  --md-sys-color-on-primary: #FFFFFF;
+  --md-sys-color-primary-container: #5A3000;
+  --md-sys-color-on-primary-container: #FFE5C2;
 
-  /* Secondary — Graphite */
-  --md-sys-color-secondary: #9B9BA1;
-  --md-sys-color-on-secondary: #1A1A1D;
-  --md-sys-color-secondary-container: #242427;
-  --md-sys-color-on-secondary-container: #D4D4D8;
+  /* Secondary — Neutral gray (secondary text tier) */
+  --md-sys-color-secondary: #B8B8B8;
+  --md-sys-color-on-secondary: #1C1C1C;
+  --md-sys-color-secondary-container: #202020;
+  --md-sys-color-on-secondary-container: #E0E0E0;
 
-  /* Tertiary — Warm gray */
-  --md-sys-color-tertiary: #8E8E94;
-  --md-sys-color-on-tertiary: #1A1A1D;
-  --md-sys-color-tertiary-container: #2A2A2E;
-  --md-sys-color-on-tertiary-container: #C8C8CC;
+  /* Tertiary — Muted gray (tertiary text tier) */
+  --md-sys-color-tertiary: #A8A8A8;
+  --md-sys-color-on-tertiary: #1C1C1C;
+  --md-sys-color-tertiary-container: #202020;
+  --md-sys-color-on-tertiary-container: #C8C8C8;
 
   /* Error */
   --md-sys-color-error: #F87171;
@@ -143,19 +145,19 @@
   --md-sys-color-on-error-container: #FECACA;
 
   /* Neutral Palette - Dark Backgrounds */
-  --md-sys-color-background: #050505;
-  --md-sys-color-on-background: #EDEDEF;
-  --md-sys-color-surface: #0A0A0A;
-  --md-sys-color-on-surface: #EDEDEF;
-  --md-sys-color-surface-variant: #141416;
-  --md-sys-color-on-surface-variant: #9B9BA1;
-  --md-sys-color-outline: #2A2A2E;
-  --md-sys-color-outline-variant: #1B1B1E;
+  --md-sys-color-background: #111111;
+  --md-sys-color-on-background: #F5F5F5;
+  --md-sys-color-surface: #181818;
+  --md-sys-color-on-surface: #F5F5F5;
+  --md-sys-color-surface-variant: #202020;
+  --md-sys-color-on-surface-variant: #B8B8B8;
+  --md-sys-color-outline: #2A2A2A;
+  --md-sys-color-outline-variant: #1E1E1E;
 
   /* Inverse Colors */
-  --md-sys-color-inverse-surface: #EDEDEF;
-  --md-sys-color-inverse-on-surface: #18181B;
-  --md-sys-color-inverse-primary: #E8541C;
+  --md-sys-color-inverse-surface: #F5F5F5;
+  --md-sys-color-inverse-on-surface: #181818;
+  --md-sys-color-inverse-primary: #FF9500;
 
   /* Dark Mode Elevation (stronger shadows) */
   --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.5);

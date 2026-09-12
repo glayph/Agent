@@ -34,19 +34,19 @@ export const NODE_TYPE_LABEL: Record<MonitorNodeType, string> = {
 }
 
 export const NODE_TYPE_ACCENT: Record<MonitorNodeType, string> = {
-  tool: "#6ee7ff",
-  skill: "#c084fc",
-  plugin: "#fbbf24",
-  file: "#fb923c",
-  command: "#fdba74",
-  pattern: "#34d399",
-  system: "#f472b6",
+  tool: "#FFB45C",
+  skill: "#A8B8C8",
+  plugin: "#B8B8B8",
+  file: "#8F98A3",
+  command: "#777777",
+  pattern: "#FFC477",
+  system: "#5D6470",
 }
 
 export const STATUS_COLOR: Record<MonitorNodeStatus, string> = {
-  pending: "#6b7280",
-  running: "#38bdf8",
-  retrying: "#f59e0b",
-  completed: "#34d399",
+  pending: "#5D6470",
+  running: "#FFB45C",
+  retrying: "#B8B8B8",
+  completed: "#FFC477",
   failed: "#f87171",
 }

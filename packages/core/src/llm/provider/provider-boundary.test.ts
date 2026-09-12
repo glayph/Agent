@@ -16,27 +16,30 @@ import {
   LLMRateLimitError,
 } from "./errors.js";
 
-describe("isolated two-provider LLM boundary", () => {
-  it("keeps exactly Gemini and llama.cpp in the isolated catalog", () => {
+describe("provider gateway boundary", () => {
+  it("exposes Gemini, local, OpenAI, OpenAI-compatible, and OpenRouter", () => {
     expect(DIRECT_PROVIDERS.map((provider) => provider.id)).toEqual([
       "gemini",
       "llama.cpp",
+      "openai",
+      "openai-compatible",
+      "openrouter",
     ]);
     expect(getDirectProviderById("google")?.id).toBe("gemini");
-    expect(getDirectProviderById("openai")).toBeUndefined();
-    expect(getDirectProviderById("openrouter")).toBeUndefined();
+    expect(getDirectProviderById("openai")?.id).toBe("openai");
+    expect(getDirectProviderById("openrouter")?.id).toBe("openrouter");
     expect(getDirectProviderById("ollama")).toBeUndefined();
   });
 
-  it("routes only Gemini and local model names", () => {
+  it("routes supported provider model names through the gateway", () => {
     expect(directProviderForModel("gemini/gemini-2.0-flash")?.id).toBe(
       "gemini",
     );
     expect(directProviderForModel("llama.cpp/local-model")?.id).toBe(
       "llama.cpp",
     );
-    expect(directProviderForModel("gpt-4o")).toBeUndefined();
-    expect(directProviderForModel("openrouter/model-a")).toBeUndefined();
+    expect(directProviderForModel("gpt-4o")?.id).toBe("openai");
+    expect(directProviderForModel("openrouter/model-a")?.id).toBe("openrouter");
     expect(normalizeDirectModelName("gemini", "gemini/gemini-2.0-flash")).toBe(
       "gemini-2.0-flash",
     );
@@ -104,14 +107,15 @@ describe("isolated two-provider LLM boundary", () => {
     expect(error.retryable).toBe(true);
   });
 
-  it("exposes a stable registry facade with only the two providers", () => {
+  it("exposes a stable registry facade for the expanded provider set", () => {
     expect(providerRegistry.resolve("gemini/gemini-3.5-flash-lite")?.id).toBe(
       "gemini",
     );
     expect(providerRegistry.resolve("llama.cpp/local-model")?.id).toBe(
       "llama.cpp",
     );
-    expect(providerRegistry.resolve("gpt-4o")).toBeUndefined();
+    expect(providerRegistry.resolve("gpt-4o")?.id).toBe("openai");
+    expect(providerRegistry.resolve("openrouter/model-a")?.id).toBe("openrouter");
     expect(
       providerRegistry.adapterFor(getDirectProviderById("gemini")!).providerId,
     ).toBe("openai-compatible");

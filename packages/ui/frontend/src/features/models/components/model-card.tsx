@@ -62,13 +62,13 @@ export function ModelCard({
   const deleteDisabled = model.is_default || Boolean(model.is_virtual)
   const statusDotClass = (() => {
     if (model.is_default && model.available) {
-      return "bg-green-400 shadow-[0_0_0_2px_rgba(74,222,128,0.35)]"
+      return "bg-[#FFB45C] shadow-[0_0_0_2px_rgba(255,180,92,0.28)]"
     }
     if (model.is_default) {
-      return "bg-amber-500 shadow-[0_0_0_2px_rgba(245,158,11,0.25)]"
+      return "bg-[#B8B8B8] shadow-[0_0_0_2px_rgba(184,184,184,0.22)]"
     }
-    if (status === "available") return "bg-green-500"
-    if (status === "unreachable") return "bg-amber-500"
+    if (status === "available") return "bg-[#FFB45C]"
+    if (status === "unreachable") return "bg-[#B8B8B8]"
     return "bg-muted-foreground/25"
   })()
 

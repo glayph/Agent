@@ -243,10 +243,16 @@ describe("ProviderPluginRegistry", () => {
     ).toThrow(/duplicate/);
   });
 
-  it("exposes only the configured Gemini and llama.cpp built-ins", () => {
+  it("exposes the configured built-in provider gateway plugins", () => {
     expect(
       builtinProviderPlugins.map((provider) => provider.manifest.id),
-    ).toEqual(["gemini", "llama.cpp"]);
+    ).toEqual([
+      "gemini",
+      "llama.cpp",
+      "openai",
+      "openai-compatible",
+      "openrouter",
+    ]);
     expect(
       builtinProviderPlugins.every(
         (provider) => validateProviderManifest(provider.manifest).valid,

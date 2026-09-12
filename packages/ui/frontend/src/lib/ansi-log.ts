@@ -20,25 +20,25 @@ type AnsiState = {
 const ANSI_PATTERN = new RegExp(String.raw`\u001B\[([0-9;]*)m`, "g")
 
 const ANSI_COLORS = [
-  "#4b5563",
+  "#5D6470",
   "#f87171",
-  "#4ade80",
-  "#facc15",
-  "#60a5fa",
-  "#c084fc",
-  "#22d3ee",
-  "#f3f4f6",
+  "#FFB45C",
+  "#B8B8B8",
+  "#FFB45C",
+  "#A8B8C8",
+  "#FFC477",
+  "#F5F5F5",
 ]
 
 const ANSI_BRIGHT_COLORS = [
-  "#6b7280",
+  "#777777",
   "#fb7185",
-  "#86efac",
-  "#fde047",
-  "#93c5fd",
-  "#e879f9",
-  "#67e8f9",
-  "#ffffff",
+  "#FFB45C",
+  "#B8B8B8",
+  "#FFC477",
+  "#A8B8C8",
+  "#FFC477",
+  "#FFFFFF",
 ]
 
 function cloneAnsiState(state: AnsiState): AnsiState {
