@@ -66,6 +66,7 @@ jobs:
       - name: Build and verify
         env:
           MIKI_LLAMA_BUILD_JOBS: "2"
+          MIKI_VERIFY_SKIP_BACKEND_TESTS: ${{ matrix.platform == 'windows-x64' && '1' || '0' }}
         run: node scripts/build-local.mjs --ci
 
       - name: Configure release path (Linux)

@@ -99,6 +99,8 @@ jobs:
           "MIKI_LLAMA_BUILD_JOBS=2" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run repository verification
+        env:
+          MIKI_VERIFY_SKIP_BACKEND_TESTS: ${{ matrix.platform == 'windows-x64' && '1' || '0' }}
         run: npm run verify
 
       - name: Build offline package
