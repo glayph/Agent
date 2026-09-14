@@ -205,5 +205,6 @@ jobs:
             gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
               --title "$title" --notes "$notes"
           fi
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+          release_id=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -f make_latest=true >/dev/null
