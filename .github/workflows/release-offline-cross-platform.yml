@@ -205,3 +205,5 @@ jobs:
             gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
               --title "$title" --notes "$notes"
           fi
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            -f make_latest=true >/dev/null
