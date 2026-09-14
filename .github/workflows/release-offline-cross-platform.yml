@@ -180,10 +180,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release already exists: $RELEASE_TAG" >&2
-            exit 1
-          fi
           mapfile -t assets < <(
             find release-assets -type f \( \
               -name 'SHA256SUMS-linux-x64' -o \
@@ -199,6 +195,13 @@ jobs:
             printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
-            --title "Agent Miki ${RELEASE_TAG} — Windows x64 + Linux x64 offline" \
-            --notes "This release contains separate Windows x64 and Linux x64 offline packages. The embedded Node.js runtime, dashboard, gateway, core, memory, skills, llama.cpp server executable, and production dependencies are included for each platform. No answer-model GGUF or voice-to-text runtime/model is bundled; configure user-provided local assets or use an approved audio-capable cloud model. Each platform has its own SHA256 manifest."
+          title="Agent Miki ${RELEASE_TAG} — Windows x64 + Linux x64 offline"
+          notes="This release contains separate Windows x64 and Linux x64 offline packages. The embedded Node.js runtime, dashboard, gateway, core, memory, skills, llama.cpp server executable, and production dependencies are included for each platform. No answer-model GGUF or voice-to-text runtime/model is bundled; configure user-provided local assets or use an approved audio-capable cloud model. Each platform has its own SHA256 manifest."
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release exists; replacing its allow-listed assets: $RELEASE_TAG"
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$title" --notes "$notes"
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+              --title "$title" --notes "$notes"
+          fi
