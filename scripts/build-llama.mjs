@@ -26,11 +26,25 @@ const localRoot = path.join(
   "llm",
   "local",
 );
+const providerRuntimeRoot = path.join(
+  projectRoot,
+  "packages",
+  "core",
+  "src",
+  "plugins",
+  "providers",
+  "llama-cpp",
+  "runtime",
+);
 const sourceCandidates = [
   process.env.MIKI_LLAMA_SOURCE_DIR,
   path.join(localRoot, "miki-native-runtime"),
   path.join(
     localRoot,
+    "miki-native-runtime (keep it Always for windows build)",
+  ),
+  path.join(
+    providerRuntimeRoot,
     "miki-native-runtime (keep it Always for windows build)",
   ),
 ].filter(Boolean);
@@ -43,14 +57,7 @@ const executableName =
 const bundledExecutableCandidates = [
   path.join(localRoot, "native", platformKey, executableName),
   path.join(
-    projectRoot,
-    "packages",
-    "core",
-    "src",
-    "plugins",
-    "providers",
-    "llama-cpp",
-    "runtime",
+    providerRuntimeRoot,
     "native",
     platformKey,
     executableName,

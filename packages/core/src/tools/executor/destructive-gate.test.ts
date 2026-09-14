@@ -79,7 +79,9 @@ describe("destructiveApprovalGate — computer-use actions", () => {
     expect(retry.response).toBeNull();
     expect(retry.gate).not.toBeNull();
     if (retry.gate) {
-      expect(() => consumeDestructiveApproval(inbox, retry.gate!)).not.toThrow();
+      expect(() =>
+        consumeDestructiveApproval(inbox, retry.gate!),
+      ).not.toThrow();
     }
   });
 

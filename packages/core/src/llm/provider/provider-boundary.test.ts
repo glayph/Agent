@@ -115,7 +115,9 @@ describe("provider gateway boundary", () => {
       "llama.cpp",
     );
     expect(providerRegistry.resolve("gpt-4o")?.id).toBe("openai");
-    expect(providerRegistry.resolve("openrouter/model-a")?.id).toBe("openrouter");
+    expect(providerRegistry.resolve("openrouter/model-a")?.id).toBe(
+      "openrouter",
+    );
     expect(
       providerRegistry.adapterFor(getDirectProviderById("gemini")!).providerId,
     ).toBe("openai-compatible");

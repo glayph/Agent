@@ -19,7 +19,8 @@ export const openAICompatibleProviderPlugin = createOpenAICompatibleProvider({
   aliases: ["compatible", "openai_compatible"],
   modelPrefixes: ["compatible", "local"],
   apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY",
-  defaultBaseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL || "http://127.0.0.1:8000/v1",
+  defaultBaseUrl:
+    process.env.OPENAI_COMPATIBLE_BASE_URL || "http://127.0.0.1:8000/v1",
   iconSlug: "openai",
   domain: "",
   priority: 70,
@@ -37,5 +38,6 @@ export const openRouterProviderPlugin = createOpenAICompatibleProvider({
   iconSlug: "openrouter",
   domain: "openrouter.ai",
   priority: 80,
-  description: "OpenRouter multi-model routing through an OpenAI-compatible API.",
+  description:
+    "OpenRouter multi-model routing through an OpenAI-compatible API.",
 });

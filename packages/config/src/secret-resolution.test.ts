@@ -10,9 +10,7 @@ describe("resolveConfiguredSecret / setConfiguredSecret round trip", () => {
   let tempWorkspaceDir: string;
 
   beforeEach(() => {
-    tempConfigDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "miki-user-config-"),
-    );
+    tempConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-user-config-"));
     tempWorkspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-workspace-"),
     );

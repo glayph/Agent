@@ -18,7 +18,12 @@ import type { ApprovalInbox } from "../../security/approval-inbox.js";
 
 export type DestructiveApprovalGate = {
   requestId: string;
-  context: { runId: string; stepId: string; deliveryId: string; previewHash: string };
+  context: {
+    runId: string;
+    stepId: string;
+    deliveryId: string;
+    previewHash: string;
+  };
 };
 
 export type GatedToolName =
@@ -200,7 +205,10 @@ export function destructiveApprovalGate(opts: {
   const argsForPreview = { ...opts.args };
   delete argsForPreview.approval_request_id;
   delete argsForPreview.approval_token;
-  const previewPayload = JSON.stringify({ tool: opts.toolName, args: argsForPreview });
+  const previewPayload = JSON.stringify({
+    tool: opts.toolName,
+    args: argsForPreview,
+  });
   const previewHash = hashPreview(previewPayload);
   const approvalContext = {
     runId: `destructive:${previewHash.slice(0, 16)}`,
@@ -214,7 +222,11 @@ export function destructiveApprovalGate(opts: {
       ? opts.args.approval_request_id.trim()
       : "";
   if (requestId) {
-    opts.approvalInbox.assertApprovedByContext(requestId, approvalContext, actor);
+    opts.approvalInbox.assertApprovedByContext(
+      requestId,
+      approvalContext,
+      actor,
+    );
     return { gate: { requestId, context: approvalContext }, response: null };
   }
 

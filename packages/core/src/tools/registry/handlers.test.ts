@@ -31,13 +31,17 @@ describe("shell_execute handler input validation", () => {
 
 describe("computer-use handlers — approval gating (audit fix)", () => {
   function makeContext() {
-    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-handler-cfg-"));
+    const configDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-handler-cfg-"),
+    );
     fs.writeFileSync(
       path.join(configDir, "agent.yaml"),
       "agent:\n  tools:\n    require_confirm_computer_use: true\n",
       "utf-8",
     );
-    const inboxDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-handler-inbox-"));
+    const inboxDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-handler-inbox-"),
+    );
     const approvalInbox = new ApprovalInbox(
       path.join(inboxDir, "approvals.json"),
     );

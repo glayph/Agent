@@ -45,11 +45,18 @@ export function createOpenAICompatibleProvider(
   const provider: ProviderTransportConfig = {
     id: definition.id,
     displayName: definition.displayName,
-    baseUrl: process.env[`${definition.id.toUpperCase().replaceAll("-", "_")}_BASE_URL`] || definition.defaultBaseUrl,
+    baseUrl:
+      process.env[
+        `${definition.id.toUpperCase().replaceAll("-", "_")}_BASE_URL`
+      ] || definition.defaultBaseUrl,
     apiKeyEnv: definition.apiKeyEnv,
     emptyApiKeyAllowed: definition.allowEmptyKey ?? false,
   };
-  const prefixes = [definition.id, ...definition.aliases, ...definition.modelPrefixes];
+  const prefixes = [
+    definition.id,
+    ...definition.aliases,
+    ...definition.modelPrefixes,
+  ];
 
   return {
     manifest: {
@@ -108,14 +115,22 @@ export function createOpenAICompatibleProvider(
       });
     },
     async listModels(context) {
-      const discovered = await providerClient(provider, credential(context), 10_000).models.list().catch((error) => {
-        context.log("provider.models.discovery_failed", {
-          providerId: definition.id,
-          error: error instanceof Error ? error.message : String(error),
+      const discovered = await providerClient(
+        provider,
+        credential(context),
+        10_000,
+      )
+        .models.list()
+        .catch((error) => {
+          context.log("provider.models.discovery_failed", {
+            providerId: definition.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [];
         });
-        return [];
-      });
-      const items = Array.isArray(discovered) ? discovered : discovered.data || [];
+      const items = Array.isArray(discovered)
+        ? discovered
+        : discovered.data || [];
       return items.map((item) => model(item.id));
     },
     async testConnection(context): Promise<ProviderConnectionResult> {
@@ -124,7 +139,8 @@ export function createOpenAICompatibleProvider(
         provider,
         credential(context),
         10_000,
-      ).models.list()
+      )
+        .models.list()
         .then(() => ({ ok: true, latencyMs: Date.now() - started }))
         .catch((error) => ({
           ok: false,

@@ -301,13 +301,14 @@ function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
   }
   if (failedToolNames.size > 0) {
     parts.push(
-      "ব্যর্থ ধাপ: " + [...failedToolNames].join(", ") +
-      ". টুলটি সঠিকভাবে কাজ করেনি — ইনপুট বা কনফিগারেশন যাচাই করুন।",
+      "ব্যর্থ ধাপ: " +
+        [...failedToolNames].join(", ") +
+        ". টুলটি সঠিকভাবে কাজ করেনি — ইনপুট বা কনফিগারেশন যাচাই করুন।",
     );
   }
   parts.push(
     "মডেল কাজটি শেষ করেছে কিন্তু কোনো সারসংক্ষেপ উত্তর দেয়নি। " +
-    "পুনরায় জিজ্ঞেস করলে বা আরও নির্দিষ্টভাবে বললে আরও ভালো উত্তর পাওয়া যেতে পারে।",
+      "পুনরায় জিজ্ঞেস করলে বা আরও নির্দিষ্টভাবে বললে আরও ভালো উত্তর পাওয়া যেতে পারে।",
   );
   return parts.join(" ");
 }
@@ -390,13 +391,16 @@ else
   echo "PROCESS_STOPPED"
 fi`;
 
-function buildDeterministicProcessResponse(toolMessages: ChatMessage[]): string {
-  const shellResult = toolMessages.find(
-    (message) => message.name === "shell_execute",
-  )?.content || "";
+function buildDeterministicProcessResponse(
+  toolMessages: ChatMessage[],
+): string {
+  const shellResult =
+    toolMessages.find((message) => message.name === "shell_execute")?.content ||
+    "";
   const startedPid = shellResult.match(/STARTED_PID=(\d+)/)?.[1];
   const waitStatus = shellResult.match(/WAIT_STATUS=(-?\d+)/)?.[1];
-  const stopped = /PROCESS_STOPPED/.test(shellResult) &&
+  const stopped =
+    /PROCESS_STOPPED/.test(shellResult) &&
     !/PROCESS_STILL_RUNNING/.test(shellResult);
   if (startedPid && waitStatus === "143" && stopped) {
     return `Process stop verified: disposable PID ${startedPid} received SIGTERM and is no longer running (wait status ${waitStatus}).`;
@@ -443,7 +447,9 @@ function withTimeout<T>(
   let timer: NodeJS.Timeout | undefined;
   return new Promise<T>((resolve, reject) => {
     timer = setTimeout(() => {
-      abortController?.abort(new Error(`${label} timed out after ${timeoutMs}ms`));
+      abortController?.abort(
+        new Error(`${label} timed out after ${timeoutMs}ms`),
+      );
       reject(new Error(`${label} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     promise.then(resolve, reject).finally(() => timer && clearTimeout(timer));
@@ -811,7 +817,12 @@ export class AgentOrchestrator {
     // is missing, so a future edit to this list does not reintroduce the
     // same silent gap for file_delete or a newly-added tool.
     if (toolsMode === "custom" && !this._turnProfileGapWarned) {
-      const mutatingTools = ["file_read", "file_write", "file_delete", "shell_execute"];
+      const mutatingTools = [
+        "file_read",
+        "file_write",
+        "file_delete",
+        "shell_execute",
+      ];
       const missing = mutatingTools.filter((t) => !toolsAllow.has(t));
       if (missing.length > 0) {
         this._turnProfileGapWarned = true;
@@ -1433,7 +1444,11 @@ export class AgentOrchestrator {
     const fallbacks = [
       // For remote preferred, put local first so users with only a local
       // runtime still get a working response.
-      isLocalModelName(preferred) ? (complexity === "complex" ? complexModel : "") : localModel,
+      isLocalModelName(preferred)
+        ? complexity === "complex"
+          ? complexModel
+          : ""
+        : localModel,
       complexity === "complex" ? complexModel : "",
       complexModel,
       localModel,
@@ -1451,21 +1466,32 @@ export class AgentOrchestrator {
       const fallbackReadiness = await providerRegistry.isModelReady(fallback);
       if (fallbackReadiness.available) {
         console.warn(
-          "[Agent] Provider fallback: " + preferred + " unavailable (" +
-          (readiness.reason || "not ready") + "); using " + fallback + ".",
+          "[Agent] Provider fallback: " +
+            preferred +
+            " unavailable (" +
+            (readiness.reason || "not ready") +
+            "); using " +
+            fallback +
+            ".",
         );
         return fallback;
       }
     }
 
     throw new LLMMissingCredentialError(
-      "No available model could serve this turn. Preferred model \"" + preferred +
-      "\" is unavailable: " + (readiness.reason || "provider runtime is not ready") +
-      ". Tried fallbacks: " + (fallbacks.join(", ") || "none") + ".",
+      'No available model could serve this turn. Preferred model "' +
+        preferred +
+        '" is unavailable: ' +
+        (readiness.reason || "provider runtime is not ready") +
+        ". Tried fallbacks: " +
+        (fallbacks.join(", ") || "none") +
+        ".",
     );
   }
 
-  private static _compactToolParameters(value: unknown): Record<string, unknown> {
+  private static _compactToolParameters(
+    value: unknown,
+  ): Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return { type: "object", properties: {} };
     }
@@ -1473,17 +1499,29 @@ export class AgentOrchestrator {
     const result: Record<string, unknown> = {};
     if (typeof source.type === "string") result.type = source.type;
     if (Array.isArray(source.required)) {
-      result.required = source.required.filter((item): item is string => typeof item === "string");
+      result.required = source.required.filter(
+        (item): item is string => typeof item === "string",
+      );
     }
-    if (source.properties && typeof source.properties === "object" && !Array.isArray(source.properties)) {
+    if (
+      source.properties &&
+      typeof source.properties === "object" &&
+      !Array.isArray(source.properties)
+    ) {
       const properties: Record<string, unknown> = {};
-      for (const [key, raw] of Object.entries(source.properties as Record<string, unknown>)) {
+      for (const [key, raw] of Object.entries(
+        source.properties as Record<string, unknown>,
+      )) {
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
         const item = raw as Record<string, unknown>;
         const compact: Record<string, unknown> = {};
         if (typeof item.type === "string") compact.type = item.type;
         if (Array.isArray(item.enum)) compact.enum = item.enum;
-        if (item.items && typeof item.items === "object" && !Array.isArray(item.items)) {
+        if (
+          item.items &&
+          typeof item.items === "object" &&
+          !Array.isArray(item.items)
+        ) {
           compact.items = AgentOrchestrator._compactToolParameters(item.items);
         }
         properties[key] = compact;
@@ -1545,7 +1583,8 @@ export class AgentOrchestrator {
           function: {
             name,
             description: localModel
-              ? compactDescriptions[name] || String(fn.description || "Use this tool.")
+              ? compactDescriptions[name] ||
+                String(fn.description || "Use this tool.")
               : fn.description,
             parameters: compactParameters,
           },
@@ -2146,7 +2185,9 @@ export class AgentOrchestrator {
     const profileTools =
       localModel && turnProfile.toolsMode === "custom"
         ? allTools.filter((tool) =>
-            turnProfile.toolsAllow.has(String(tool.function?.name || "").trim()),
+            turnProfile.toolsAllow.has(
+              String(tool.function?.name || "").trim(),
+            ),
           )
         : adaptiveTools;
     const prunedTools =
@@ -2256,24 +2297,24 @@ export class AgentOrchestrator {
                 },
               ]
             : (deterministicIntent.files || []).flatMap((file) => [
-              {
-                id: crypto.randomUUID(),
-                function: {
-                  name: "file_write",
-                  arguments: JSON.stringify({
-                    path: file.path,
-                    content: file.content,
-                  }),
+                {
+                  id: crypto.randomUUID(),
+                  function: {
+                    name: "file_write",
+                    arguments: JSON.stringify({
+                      path: file.path,
+                      content: file.content,
+                    }),
+                  },
                 },
-              },
-              {
-                id: crypto.randomUUID(),
-                function: {
-                  name: "file_read",
-                  arguments: JSON.stringify({ path: file.path }),
+                {
+                  id: crypto.randomUUID(),
+                  function: {
+                    name: "file_read",
+                    arguments: JSON.stringify({ path: file.path }),
+                  },
                 },
-              },
-            ]);
+              ]);
       const deterministicMessages: ChatMessage[] = [];
       const toolMessagesBefore = deterministicMessages.length;
       for await (const event of this._executeToolCallsAndYield(
@@ -2477,7 +2518,9 @@ export class AgentOrchestrator {
               2048,
           ),
         );
-        const localToolTurnCap = taskProfile.signals.includes("artifact_workflow")
+        const localToolTurnCap = taskProfile.signals.includes(
+          "artifact_workflow",
+        )
           ? 192
           : localMaxTokens;
         const requestMaxTokens = localModel
@@ -2513,11 +2556,14 @@ export class AgentOrchestrator {
           maxTokens: requestMaxTokens,
         };
         const requestAbortController = new AbortController();
-        const forwardAbort = () => requestAbortController.abort(options.signal?.reason);
+        const forwardAbort = () =>
+          requestAbortController.abort(options.signal?.reason);
         if (options.signal?.aborted) {
           requestAbortController.abort(options.signal.reason);
         } else {
-          options.signal?.addEventListener("abort", forwardAbort, { once: true });
+          options.signal?.addEventListener("abort", forwardAbort, {
+            once: true,
+          });
         }
         let effectiveRequestModel = turnModel;
         try {
@@ -2555,8 +2601,8 @@ export class AgentOrchestrator {
             callErr instanceof LLMMissingCredentialError ||
             callErr instanceof LiteLLMMissingCredentialError;
           const localFallbackCandidate =
-            (asAgentConfig(this.config).agent?.model_routing
-              ?.local_model as string | undefined) || "";
+            (asAgentConfig(this.config).agent?.model_routing?.local_model as
+              string | undefined) || "";
           if (
             isMissingCredential &&
             !isLocalModelName(turnModel) &&
@@ -2564,12 +2610,17 @@ export class AgentOrchestrator {
             !options.requestedModel
           ) {
             await synchronizeLocalRuntimeForModel(localFallbackCandidate);
-            const fallbackReadiness =
-              await providerRegistry.isModelReady(localFallbackCandidate);
+            const fallbackReadiness = await providerRegistry.isModelReady(
+              localFallbackCandidate,
+            );
             if (fallbackReadiness.available) {
               console.warn(
-                "[Agent] BUG-04: " + turnModel + " call failed on missing credentials; " +
-                "retrying this turn once against local model " + localFallbackCandidate + ".",
+                "[Agent] BUG-04: " +
+                  turnModel +
+                  " call failed on missing credentials; " +
+                  "retrying this turn once against local model " +
+                  localFallbackCandidate +
+                  ".",
               );
               effectiveRequestModel = localFallbackCandidate;
               const retryAbortController = new AbortController();
@@ -2878,14 +2929,18 @@ export class AgentOrchestrator {
         if (toolCalls.length > 0 && !content) {
           let hasDuplicate = false;
           for (const tc of toolCalls) {
-            const fp = tc.function?.name + ":" + (tc.function?.arguments || "{}");
+            const fp =
+              tc.function?.name + ":" + (tc.function?.arguments || "{}");
             const prev = seenToolCallFingerprints.get(fp) ?? 0;
             seenToolCallFingerprints.set(fp, prev + 1);
             if (prev + 1 > MAX_IDENTICAL_TOOL_REPEATS) {
               hasDuplicate = true;
               console.warn(
-                "[Agent] BUG-06: Identical tool call detected " + (prev + 1) +
-                " times (" + tc.function?.name + "). Stopping loop to prevent runaway execution.",
+                "[Agent] BUG-06: Identical tool call detected " +
+                  (prev + 1) +
+                  " times (" +
+                  tc.function?.name +
+                  "). Stopping loop to prevent runaway execution.",
               );
             }
           }
@@ -2893,16 +2948,20 @@ export class AgentOrchestrator {
             const fallbackContent =
               buildToolOnlyFallbackResponse(llmMessages) ||
               "The model repeatedly requested the same tool call without making progress. " +
-              "The loop was stopped to prevent runaway execution.";
+                "The loop was stopped to prevent runaway execution.";
             await this._saveAssistantHistoryMessage(
-              sessionId, fallbackContent, options.responseMessageId,
+              sessionId,
+              fallbackContent,
+              options.responseMessageId,
             );
             this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
             yield JSON.stringify({
               type: "stream_chunk",
               content: fallbackContent,
               model_name: turnModel,
-              ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+              ...(latestContextUsage
+                ? { context_usage: latestContextUsage }
+                : {}),
             });
             yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
             return;

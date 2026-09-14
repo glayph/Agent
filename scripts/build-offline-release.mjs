@@ -368,8 +368,8 @@ export async function resolve(specifier, context, nextResolve) {
 }
 
 function stageNativeAndModels() {
-  const llamaSource =
-    process.env.MIKI_LLAMA_SERVER_BIN ||
+  const llamaCandidates = [
+    process.env.MIKI_LLAMA_SERVER_BIN,
     path.join(
       root,
       "packages",
@@ -380,7 +380,27 @@ function stageNativeAndModels() {
       "native",
       platformKey,
       llamaExecutableName,
-    );
+    ),
+    path.join(
+      root,
+      "packages",
+      "core",
+      "src",
+      "plugins",
+      "providers",
+      "llama-cpp",
+      "runtime",
+      "native",
+      platformKey,
+      llamaExecutableName,
+    ),
+  ].filter(Boolean);
+  const llamaSource = llamaCandidates.find((candidate) =>
+    fs.existsSync(candidate),
+  );
+  if (!llamaSource) {
+    fail(`Missing ${platformKey} ${llamaExecutableName}: ${llamaCandidates.join(", ")}`);
+  }
   const llamaDestination = path.join(runtimeDir, "native", llamaExecutableName);
   copyRequired(llamaSource, llamaDestination, `${platformKey} llama-server`);
   chmodExecutable(llamaDestination);
@@ -481,7 +501,7 @@ function stageNodeRuntime() {
 
 function stageNotices() {
   const licensesDir = path.join(stageDir, "licenses");
-  copyRequired(
+  const llamaLicenseCandidates = [
     path.join(
       root,
       "packages",
@@ -492,6 +512,27 @@ function stageNotices() {
       "miki-native-runtime (keep it Always for windows build)",
       "LICENSE",
     ),
+    path.join(
+      root,
+      "packages",
+      "core",
+      "src",
+      "plugins",
+      "providers",
+      "llama-cpp",
+      "runtime",
+      "miki-native-runtime (keep it Always for windows build)",
+      "LICENSE",
+    ),
+  ];
+  const llamaLicense = llamaLicenseCandidates.find((candidate) =>
+    fs.existsSync(candidate),
+  );
+  if (!llamaLicense) {
+    fail(`Missing llama.cpp/GGML license: ${llamaLicenseCandidates.join(", ")}`);
+  }
+  copyRequired(
+    llamaLicense,
     path.join(licensesDir, "LLAMA_CPP_AND_GGML_LICENSE"),
     "llama.cpp/GGML license",
   );

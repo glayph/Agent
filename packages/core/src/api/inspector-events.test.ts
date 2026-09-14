@@ -144,14 +144,7 @@ describe("toolResultDescription", () => {
       ),
     ).toBe("Deletion check completed: a.txt (5 ms)");
     expect(
-      toolResultDescription(
-        "file_delete",
-        { path: "a.txt" },
-        true,
-        "",
-        5,
-        200,
-      ),
+      toolResultDescription("file_delete", { path: "a.txt" }, true, "", 5, 200),
     ).toBe("File deletion completed: a.txt (5 ms)");
   });
 
