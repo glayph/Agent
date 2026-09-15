@@ -72,18 +72,18 @@
   /* ===========================================================
      CHAT
      =========================================================== */
-  --chat-surface: #f7f7f3;
+  --chat-surface: #111311;
 
   /* --- User's own bubble --- */
-  --chat-user-bubble: #eceeea;
-  --chat-user-text: #171817;
-  --chat-user-border: #d7dbd3;
+  --chat-user-bubble: #bef264;
+  --chat-user-text: #11160b;
+  --chat-user-border: #bef264;
   --chat-user-shadow: none;
 
   /* --- Miki's (assistant) bubble --- */
-  --chat-assistant-bubble: #ffffff;
-  --chat-assistant-text: #171817;
-  --chat-assistant-border: #dfe2d8;
+  --chat-assistant-bubble: #171a17;
+  --chat-assistant-text: #eef0e9;
+  --chat-assistant-border: #30372e;
   --chat-assistant-shadow: none;
 
   /* --- Chat alerts (errors shown inline in the conversation) --- */
