@@ -1,0 +1,188 @@
+/* =============================================================================
+   AGENT MIKI — APPEARANCE CONTROL PANEL
+   =============================================================================
+   This is the single manual switchboard for the whole web UI's theme.
+   It only contains: Bar, Page, Buttons, Chat, Skeleton, Text.
+
+   How it works: every value below is a CSS variable that the real
+   components already read from. This file is imported LAST (see
+   frontend/src/index.css), so whatever value you set here wins and
+   applies across the entire app immediately — no component code needs
+   to change. It is a manual switch, not an auto-generated theme: edit
+   a line, save, and that one thing changes everywhere it appears.
+   ============================================================================= */
+
+:root {
+  /* ===========================================================
+     BAR
+     =========================================================== */
+
+  /* --- Top bar (the strip at the top of every page) --- */
+  --topbar-bg: var(--card);
+  --topbar-border: var(--border);
+  --topbar-text: var(--foreground);
+  --topbar-icon: var(--muted-foreground);
+  --topbar-icon-hover-bg: var(--muted);
+  --topbar-icon-hover-text: var(--foreground);
+  --topbar-input-bg: var(--background);
+  --topbar-input-border: var(--border);
+
+  /* --- Left bar (sidebar / navigation rail) --- */
+  --leftbar-bg: var(--sidebar);
+  --leftbar-border: var(--sidebar-border);
+  --leftbar-text: var(--sidebar-foreground);
+  --leftbar-brand-bg: var(--card);
+  --leftbar-brand-border: var(--border);
+  --leftbar-item-text: var(--muted-foreground);
+  --leftbar-item-hover-bg: var(--sidebar-accent);
+  --leftbar-item-hover-text: var(--foreground);
+  --leftbar-item-active-bg: var(--foreground);
+  --leftbar-item-active-text: var(--background);
+
+  /* ===========================================================
+     PAGE
+     =========================================================== */
+  --page-bg: var(--background);
+  --page-text: var(--foreground);
+  --page-grid-line: var(--foreground);
+  --page-grid-opacity: 0.04;
+
+  /* ===========================================================
+     BUTTONS
+     =========================================================== */
+
+  /* --- Enabled buttons (normal, clickable, primary action) --- */
+  --button-enabled-bg: var(--primary);
+  --button-enabled-text: var(--primary-foreground);
+  --button-enabled-border: transparent;
+
+  /* --- Disabled buttons --- */
+  --button-disabled-opacity: 0.5;
+  --button-disabled-bg: inherit;
+  --button-disabled-text: inherit;
+
+  /* --- Default buttons / icons (outline, ghost, plain icon buttons) --- */
+  --button-default-bg: transparent;
+  --button-default-text: var(--muted-foreground);
+  --button-default-border: var(--border);
+  --button-default-hover-bg: var(--accent);
+  --button-default-hover-text: var(--accent-foreground);
+  --button-default-icon: var(--muted-foreground);
+
+  /* ===========================================================
+     CHAT
+     =========================================================== */
+  --chat-surface: #f7f7f3;
+
+  /* --- User's own bubble --- */
+  --chat-user-bubble: #eceeea;
+  --chat-user-text: #171817;
+  --chat-user-border: #d7dbd3;
+  --chat-user-shadow: none;
+
+  /* --- Miki's (assistant) bubble --- */
+  --chat-assistant-bubble: #ffffff;
+  --chat-assistant-text: #171817;
+  --chat-assistant-border: #dfe2d8;
+  --chat-assistant-shadow: none;
+
+  /* --- Chat alerts (errors shown inline in the conversation) --- */
+  --chat-alert-text: #9f302a;
+  --chat-alert-icon: #c2413b;
+
+  /* ===========================================================
+     SKELETON
+     One shimmer style covers every loading placeholder in the app.
+     =========================================================== */
+  --skeleton-bg: var(--muted);
+  --skeleton-shine: var(--background);
+  --skeleton-speed: 520ms;
+
+  /* ===========================================================
+     TEXT
+     Every recurring kind of text in the app, listed by role.
+     =========================================================== */
+  --text-heading: var(--foreground); /* h1 / h2 / page titles */
+  --text-body: var(--foreground); /* normal paragraph / message text */
+  --text-secondary: var(--muted-foreground); /* helper / description text */
+  --text-muted: var(--muted-foreground); /* faint captions, timestamps */
+  --text-placeholder: var(--muted-foreground); /* input placeholder text */
+  --text-link: var(--primary); /* links */
+  --text-code: var(--foreground); /* inline code / monospace text */
+  --text-badge: var(--secondary-foreground); /* text inside pills/badges */
+  --text-kbd: var(--muted-foreground); /* keyboard-shortcut hints */
+  --text-error: var(--destructive); /* error / destructive messages */
+  --text-success: var(--success); /* success messages */
+  --text-warning: var(--warning); /* warning messages */
+  --text-disabled: var(--muted-foreground); /* disabled labels/fields */
+  --text-topbar: var(--foreground); /* top bar title/labels */
+  --text-sidebar: var(--sidebar-foreground); /* left bar labels */
+  --text-chat-user: var(--chat-user-text); /* user bubble text */
+  --text-chat-assistant: var(--chat-assistant-text); /* Miki bubble text */
+}
+
+/* Dark mode overrides — only values that actually change in dark mode. */
+html.dark {
+  --chat-surface: #111311;
+  --chat-user-bubble: #bef264;
+  --chat-user-text: #11160b;
+  --chat-user-border: #bef264;
+  --chat-assistant-bubble: #171a17;
+  --chat-assistant-text: #eef0e9;
+  --chat-assistant-border: #30372e;
+  --chat-alert-text: #f7aaa0;
+  --chat-alert-icon: #f17b70;
+  --page-grid-opacity: 0.07;
+}
+
+/* =============================================================================
+   Wiring — connects the switch above to the few spots that don't already
+   read one of these variables by default. All the actual color decisions
+   still live in the variables above; nothing here sets a value directly.
+   ============================================================================= */
+
+/* --- Buttons --- */
+[data-slot="button"]:disabled {
+  opacity: var(--button-disabled-opacity);
+  background: var(--button-disabled-bg);
+  color: var(--button-disabled-text);
+}
+
+[data-slot="button"][data-variant="default"]:not(:disabled) {
+  background: var(--button-enabled-bg);
+  color: var(--button-enabled-text);
+  border-color: var(--button-enabled-border);
+}
+
+[data-slot="button"][data-variant="outline"]:not(:disabled),
+[data-slot="button"][data-variant="secondary"]:not(:disabled),
+[data-slot="button"][data-variant="ghost"]:not(:disabled) {
+  background: var(--button-default-bg);
+  color: var(--button-default-text);
+  border-color: var(--button-default-border);
+}
+
+[data-slot="button"][data-variant="outline"]:not(:disabled):hover,
+[data-slot="button"][data-variant="secondary"]:not(:disabled):hover,
+[data-slot="button"][data-variant="ghost"]:not(:disabled):hover {
+  background: var(--button-default-hover-bg);
+  color: var(--button-default-hover-text);
+}
+
+/* --- Text --- */
+a {
+  color: var(--text-link);
+}
+
+[data-slot="input"]::placeholder,
+[data-slot="textarea"]::placeholder {
+  color: var(--text-placeholder);
+}
+
+[data-slot="badge"][data-variant="secondary"] {
+  color: var(--text-badge);
+}
+
+kbd {
+  color: var(--text-kbd);
+}
