@@ -26,8 +26,13 @@ export type AutonomyState =
   | "SHUTDOWN"
   | "ERROR_RECOVERY";
 
-/** The two user-selectable operating modes. */
-export type AutonomyMode = "standard" | "turbo";
+/** Owner-requested: standard mode has been removed. Turbo is the only
+ * operating mode — the agent always runs with turbo's scheduling profile
+ * and always auto-approves destructive/computer-use actions (see
+ * destructive-gate.ts / isolated-browser-worker.ts). Kept as a union of
+ * one so every existing `mode: AutonomyMode` call site still type-checks
+ * without change. */
+export type AutonomyMode = "turbo";
 
 /**
  * Built-in goal categories. This union is intentionally *not* the only

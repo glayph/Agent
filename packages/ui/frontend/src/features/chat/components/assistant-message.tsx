@@ -123,7 +123,10 @@ export const AssistantMessage = memo(function AssistantMessage({
         <div
           data-chat-bubble="assistant"
           className={cn(
-            "group group/message-bubble relative flex w-fit max-w-full flex-col rounded-xl rounded-bl-sm border [border-color:var(--chat-assistant-border)] px-3 py-2 [box-shadow:var(--chat-assistant-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-assistant-bubble)]",
+            // Deliberately not a rounded, tailed "speech bubble" (that
+            // reads as GPT-style chat) -- a flat block with a quiet left
+            // accent rule, like reported output from an autonomous system.
+            "group group/message-bubble relative flex w-fit max-w-full flex-col rounded-md border-y-0 border-r-0 border-l-2 px-3 py-2 [border-left-color:var(--chat-assistant-accent)] transition-[background-color,border-color] [background:var(--chat-assistant-bubble)]",
             isCollapsedBlock &&
               "w-full rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
           )}

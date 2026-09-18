@@ -330,7 +330,6 @@ const runtimeRoot = path.resolve(process.env.MIKI_SOURCE_ROOT || loaderDir);
 const packageRoots = new Map([
   ["@miki/config", "packages/config/dist"],
   ["@miki/installer", "packages/installer/dist"],
-  ["@miki/skills", "packages/skills/dist"],
   ["@miki/memory", "packages/memory/src"],
   ["@miki/core", "packages/core/dist"],
   ["@miki/gateway", "packages/gateway/dist"],
@@ -338,7 +337,6 @@ const packageRoots = new Map([
 const packageEntrypoints = new Map([
   ["@miki/config", "packages/config/dist/index.js"],
   ["@miki/installer", "packages/installer/dist/index.js"],
-  ["@miki/skills", "packages/skills/dist/index.js"],
   ["@miki/memory", "packages/memory/src/index.js"],
   ["@miki/core", "packages/core/dist/api/index.js"],
   ["@miki/gateway", "packages/gateway/dist/index.js"],

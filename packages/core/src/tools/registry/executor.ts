@@ -2,27 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { ToolRegistrySchemas, ToolDefinition, ToolHandler } from "./schemas.js";
+// Miki's callable tool surface is intentionally restricted to the
+// computer_use family (mouse/keyboard/screen/vision) plus LLM text
+// generation. Handlers for shell/file/browser/scrape/web-search/model/
+// runtime/skill/admin tools have been removed so nothing can act as a
+// "preprogrammed command" in place of the agent generating and executing
+// its own action through computer_use.
 import {
-  handleShellExecute,
-  handleFileRead,
-  handleFileWrite,
-  handleFileDelete,
-  handleBrowserNavigate,
-  handleBrowserPlayMedia,
-  handleBrowserClick,
-  handleBrowserType,
-  handleBrowserInvoke,
-  handleBrowserFill,
-  handleBrowserPress,
-  handleBrowserExtract,
-  handleBrowserScreenshot,
-  handleBrowserScroll,
-  handleBrowserClose,
-  handlePlatformConnectionStart,
-  handlePlatformConnectionStatus,
-  handlePlatformConnectionComplete,
-  handlePlatformConnectionValidate,
-  handlePlatformConnectionRevoke,
   handleComputerObserve,
   handleComputerFocus,
   handleComputerInvoke,
@@ -41,21 +27,6 @@ import {
   handleComputerTerminateApp,
   handleComputerListWindows,
   handleComputerGridScreenshot,
-  handleScrapePage,
-  handleScrapeSelectors,
-  handleScrapePaginated,
-  handleScrapeInfiniteScroll,
-  handleScrapeJson,
-  handleScrapeTable,
-  handleModelList,
-  handleModelAdd,
-  handleModelDelete,
-  handleModelSelect,
-  handleDirectDownloadSearch,
-  handleWebSearch,
-  handleProjectWorkflowCreate,
-  handleRuntimeEnsure,
-  handleRuntimeEnsureStatus,
 } from "./handlers.js";
 import { ShellExecutor } from "../executor/shell.js";
 import { FileSecurityExecutor } from "../executor/file-security.js";
@@ -70,17 +41,6 @@ import { RuntimeFetcher } from "../../runtime-fetch/index.js";
 import type { SqlitePlatformConnectionStore } from "../../platform-connections.js";
 import type { ApprovalInbox } from "../../security/approval-inbox.js";
 import type { LauncherAdminController } from "../../api/launcher-compat.js";
-import {
-  handleSkillSearch,
-  handleSkillCreate,
-  handleSkillInstall,
-} from "./admin-skill-handlers.js";
-import {
-  handleAdminConfigGet,
-  handleAdminConfigValidate,
-  handleAdminConfigPatch,
-  handleAdminToolState,
-} from "./admin-control-handlers.js";
 
 export interface ToolResult {
   success: boolean;
@@ -170,7 +130,6 @@ export class ToolRegistry {
   public approvalInbox: ApprovalInbox | undefined;
   public adminController: LauncherAdminController | undefined;
   private handlers: Map<string, ToolHandler> = new Map();
-  private skillToolDefs: Map<string, ToolDefinition> = new Map();
   private pluginToolDefs: Map<string, ToolDefinition> = new Map();
 
   public fileOps: FileSecurityExecutor;
@@ -274,20 +233,6 @@ export class ToolRegistry {
     return this.handlers.has(name);
   }
 
-  registerSkillTool(
-    name: string,
-    handler: ToolHandler,
-    definition: ToolDefinition,
-  ): void {
-    this.handlers.set(name, handler);
-    this.skillToolDefs.set(name, definition);
-  }
-
-  unregisterSkillTool(name: string): void {
-    this.handlers.delete(name);
-    this.skillToolDefs.delete(name);
-  }
-
   registerPluginTool(
     name: string,
     handler: ToolHandler,
@@ -366,56 +311,14 @@ export class ToolRegistry {
     return null;
   }
 
-  getSkillToolNames(): string[] {
-    return Array.from(this.skillToolDefs.keys());
-  }
-
   getPluginToolNames(): string[] {
     return Array.from(this.pluginToolDefs.keys());
   }
 
   private registerBuiltins(): void {
-    this.registerHandler("shell_execute", handleShellExecute.bind(this));
-    this.registerHandler("file_read", handleFileRead.bind(this));
-    this.registerHandler("file_write", handleFileWrite.bind(this));
-    this.registerHandler("file_delete", handleFileDelete.bind(this));
-    this.registerHandler("browser_navigate", handleBrowserNavigate.bind(this));
-    this.registerHandler(
-      "browser_play_media",
-      handleBrowserPlayMedia.bind(this),
-    );
-    this.registerHandler("browser_click", handleBrowserClick.bind(this));
-    this.registerHandler("browser_type", handleBrowserType.bind(this));
-    this.registerHandler("browser_invoke", handleBrowserInvoke.bind(this));
-    this.registerHandler("browser_fill", handleBrowserFill.bind(this));
-    this.registerHandler("browser_press", handleBrowserPress.bind(this));
-    this.registerHandler("browser_extract", handleBrowserExtract.bind(this));
-    this.registerHandler(
-      "browser_screenshot",
-      handleBrowserScreenshot.bind(this),
-    );
-    this.registerHandler("browser_scroll", handleBrowserScroll.bind(this));
-    this.registerHandler("browser_close", handleBrowserClose.bind(this));
-    this.registerHandler(
-      "platform_connection_start",
-      handlePlatformConnectionStart.bind(this),
-    );
-    this.registerHandler(
-      "platform_connection_status",
-      handlePlatformConnectionStatus.bind(this),
-    );
-    this.registerHandler(
-      "platform_connection_complete",
-      handlePlatformConnectionComplete.bind(this),
-    );
-    this.registerHandler(
-      "platform_connection_validate",
-      handlePlatformConnectionValidate.bind(this),
-    );
-    this.registerHandler(
-      "platform_connection_revoke",
-      handlePlatformConnectionRevoke.bind(this),
-    );
+    // Only the computer_use tool family is registered. See the comment on
+    // the handler imports above: text generation + computer_use (hands,
+    // feet, and vision) are the agent's only two capabilities.
     this.registerHandler("computer_observe", handleComputerObserve.bind(this));
     this.registerHandler("computer_focus", handleComputerFocus.bind(this));
     this.registerHandler("computer_invoke", handleComputerInvoke.bind(this));
@@ -458,67 +361,15 @@ export class ToolRegistry {
       "computer_grid_screenshot",
       handleComputerGridScreenshot.bind(this),
     );
-    this.registerHandler("scrape_page", handleScrapePage.bind(this));
-    this.registerHandler("scrape_selectors", handleScrapeSelectors.bind(this));
-    this.registerHandler("scrape_paginated", handleScrapePaginated.bind(this));
-    this.registerHandler(
-      "scrape_infinite_scroll",
-      handleScrapeInfiniteScroll.bind(this),
-    );
-    this.registerHandler("scrape_json", handleScrapeJson.bind(this));
-    this.registerHandler("scrape_table", handleScrapeTable.bind(this));
-    this.registerHandler("model_list", handleModelList.bind(this));
-    this.registerHandler("model_add", handleModelAdd.bind(this));
-    this.registerHandler("model_delete", handleModelDelete.bind(this));
-    this.registerHandler("model_select", handleModelSelect.bind(this));
-    this.registerHandler(
-      "direct_download_search",
-      handleDirectDownloadSearch.bind(this),
-    );
-    this.registerHandler("web_search", handleWebSearch.bind(this));
-    this.registerHandler(
-      "project_workflow_create",
-      handleProjectWorkflowCreate.bind(this),
-    );
-    this.registerHandler("runtime_ensure", handleRuntimeEnsure.bind(this));
-    this.registerHandler(
-      "runtime_ensure_status",
-      handleRuntimeEnsureStatus.bind(this),
-    );
-    this.registerHandler("skill_search", handleSkillSearch.bind(this));
-    this.registerHandler("skill_create", handleSkillCreate.bind(this));
-    this.registerHandler("skill_install", handleSkillInstall.bind(this));
-    this.registerHandler("admin_config_get", handleAdminConfigGet.bind(this));
-    this.registerHandler(
-      "admin_config_validate",
-      handleAdminConfigValidate.bind(this),
-    );
-    this.registerHandler(
-      "admin_config_patch",
-      handleAdminConfigPatch.bind(this),
-    );
-    this.registerHandler("admin_tool_state", handleAdminToolState.bind(this));
   }
 
   getToolDefinitions(): ToolDefinition[] {
-    const builtins = [
-      ...ToolRegistrySchemas.shellSchema(),
-      ...ToolRegistrySchemas.fileSchemas(),
-      ...ToolRegistrySchemas.browserSchemas(),
-      ...ToolRegistrySchemas.platformConnectionSchemas(),
-      ...ToolRegistrySchemas.computerSchemas(),
-      ...ToolRegistrySchemas.scraperSchemas(),
-      ...ToolRegistrySchemas.modelSchemas(),
-      ...ToolRegistrySchemas.directDownloadSchema(),
-      ...ToolRegistrySchemas.webSearchSchema(),
-      ...ToolRegistrySchemas.projectWorkflowSchemas(),
-      ...ToolRegistrySchemas.runtimeSchema(),
-      ...ToolRegistrySchemas.skillSchemas(),
-      ...ToolRegistrySchemas.adminSchemas(),
-    ];
-    const skillTools = Array.from(this.skillToolDefs.values());
+    // Only the computer_use schema family is advertised to the model, plus
+    // any runtime plugin tools that happen to be registered (empty unless
+    // MCP is explicitly re-enabled in config/tools.yaml — see mcp.enabled).
+    const builtins = [...ToolRegistrySchemas.computerSchemas()];
     const pluginTools = Array.from(this.pluginToolDefs.values());
-    return [...builtins, ...skillTools, ...pluginTools].map((definition) => ({
+    return [...builtins, ...pluginTools].map((definition) => ({
       ...definition,
       risk: definition.risk || riskForTool(definition.function.name),
     }));

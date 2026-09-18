@@ -22,7 +22,7 @@ import type { AutonomyMode } from "./types.js";
  * an autonomous-decision-making check, and turbo mode has no bearing on it.
  */
 
-let currentMode: AutonomyMode = "standard";
+let currentMode: AutonomyMode = "turbo";
 
 export function setRuntimeAutonomyMode(mode: AutonomyMode): void {
   currentMode = mode;

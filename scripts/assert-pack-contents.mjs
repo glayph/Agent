@@ -11,7 +11,6 @@ const requiredFiles = [
   "runtime-loader.mjs",
   "packages/config/dist/index.js",
   "packages/installer/dist/index.js",
-  "packages/skills/dist/index.js",
   "packages/core/dist/api/index.js",
   "packages/gateway/dist/index.js",
   "packages/ui/frontend/dist/index.html",

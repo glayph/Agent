@@ -1573,10 +1573,9 @@ body,
 }
 
 [data-chat-bubble="assistant"] {
-  border-color: var(--chat-assistant-border) !important;
+  border-left-color: var(--chat-assistant-accent) !important;
   background: var(--chat-assistant-bubble) !important;
   color: var(--chat-assistant-text);
-  box-shadow: var(--chat-assistant-shadow) !important;
 }
 
 [data-chat-bubble="assistant"] [data-chat-message-actions] {

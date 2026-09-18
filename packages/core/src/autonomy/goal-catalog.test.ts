@@ -7,7 +7,7 @@ function baseContext(
   return {
     now: Date.now(),
     idleMins: 10,
-    mode: "standard",
+    mode: "turbo",
     unfinishedObjectives: [],
     recentObjectives: [],
     resource: {

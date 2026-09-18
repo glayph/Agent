@@ -80,10 +80,15 @@
   --chat-user-border: #d7dbd3;
   --chat-user-shadow: none;
 
-  /* --- Miki's (assistant) bubble --- */
+  /* --- Miki's (assistant) bubble ---
+     Miki is an autonomous agent narrating its own work, not a chat
+     partner, so its output is framed like a reported result (a quiet
+     left rule in the app's own brand color) rather than a rounded,
+     tailed speech bubble like a messaging app. See assistant-message.tsx. */
   --chat-assistant-bubble: #ffffff;
   --chat-assistant-text: #171817;
   --chat-assistant-border: #dfe2d8;
+  --chat-assistant-accent: var(--primary);
   --chat-assistant-shadow: none;
 
   /* --- Chat alerts (errors shown inline in the conversation) --- */

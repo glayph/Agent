@@ -12,7 +12,7 @@ function baseContext(
   return {
     now: Date.now(),
     idleMins: 10,
-    mode: "standard",
+    mode: "turbo",
     unfinishedObjectives: [],
     recentObjectives: [],
     resource: {
@@ -45,6 +45,14 @@ describe("AutonomousGoalManager.decide", () => {
     // "review coverage" nudge already satisfied recently. A non-empty
     // hints object also keeps PLANNING's fallback quiet (it only fires
     // when there is *nothing* else, including no hints at all).
+    // Turbo mode scans every goal category every cycle (categoriesPerScan:
+    // "all" — standard mode's rotating 6-category subset is gone along
+    // with standard mode itself), so every category's own "not done
+    // recently" check now runs every time instead of only on the cycles a
+    // subset scan happened to include it. DOCUMENTATION and
+    // MEMORY_MAINTENANCE are the two categories gated purely by recency
+    // (no hint array also has to be empty), so both need a satisfying
+    // recent objective below for this to still be a genuinely idle cycle.
     const ctx = baseContext({
       hints: { projects: [] },
       recentObjectives: [
@@ -59,7 +67,22 @@ describe("AutonomousGoalManager.decide", () => {
           priority: 0.3,
           progress: 1,
           plan: [],
-          context: {},
+          context: { documented: true },
+          result: null,
+          replans: 0,
+        },
+        {
+          id: "mm-recent",
+          type: "MEMORY_MAINTENANCE",
+          status: "completed",
+          title: "Organize recent memory",
+          rationale: "r",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          priority: 0.3,
+          progress: 1,
+          plan: [],
+          context: { documented: true },
           result: null,
           replans: 0,
         },
@@ -119,7 +142,7 @@ describe("AutonomousGoalManager.recordOutcome", () => {
     const updated = manager.recordOutcome(
       decision.objective.id,
       { success: true, summary: "fixed it" },
-      "standard",
+      "turbo",
     );
     expect(updated?.status).toBe("completed");
     expect(updated?.progress).toBe(1);
@@ -129,19 +152,19 @@ describe("AutonomousGoalManager.recordOutcome", () => {
     const ctx = baseContext({ hints: { failingTests: ["a.test.ts"] } });
     const decision = manager.decide(ctx)!;
     let last = decision.objective;
-    // Standard mode allows 3 replans (see mode-config.ts) before blocking.
-    for (let i = 0; i < 3; i++) {
+    // Turbo mode allows 5 replans (see mode-config.ts) before blocking.
+    for (let i = 0; i < 5; i++) {
       last = manager.recordOutcome(
         last.id,
         { success: false, summary: "still broken" },
-        "standard",
+        "turbo",
       )!;
       expect(last.status).toBe("pending");
     }
     last = manager.recordOutcome(
       last.id,
       { success: false, summary: "still broken" },
-      "standard",
+      "turbo",
     )!;
     expect(last.status).toBe("blocked");
   });
@@ -151,7 +174,7 @@ describe("AutonomousGoalManager.recordOutcome", () => {
       manager.recordOutcome(
         "nonexistent",
         { success: true, summary: "n/a" },
-        "standard",
+        "turbo",
       ),
     ).toBeUndefined();
   });

@@ -450,6 +450,20 @@ export class TelegramBot {
                     // Telegram may reject an edit when the text is unchanged.
                   }
                 },
+                undefined,
+                undefined,
+                async (progressText) => {
+                  // Adaptive Multi-Message Output System: a short, real
+                  // ("Reading file: X" / model's own action_update line)
+                  // status update, sent as its own message so it doesn't
+                  // get overwritten by the next streaming edit above.
+                  try {
+                    await ctx.reply(progressText);
+                  } catch {
+                    // Best-effort -- a dropped progress update should never
+                    // fail the turn.
+                  }
+                },
               ).then((full) => {
                 response = full;
               });
@@ -482,6 +496,15 @@ export class TelegramBot {
                   toStringId(ctx.chat.id),
                 ),
                 message,
+                undefined,
+                undefined,
+                async (progressText) => {
+                  try {
+                    await ctx.reply(progressText);
+                  } catch {
+                    // Best-effort.
+                  }
+                },
               );
               if (placeholder) {
                 try {
@@ -573,6 +596,13 @@ export class TelegramBot {
                   }),
             },
             ...(routed.mode === "cloud" ? { audio: routed.audio } : {}),
+          },
+          async (progressText) => {
+            try {
+              await ctx.reply(progressText);
+            } catch {
+              // Best-effort.
+            }
           },
         );
         for (const part of splitOutboundMessageForOrchestrator(

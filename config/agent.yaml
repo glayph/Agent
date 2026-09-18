@@ -5,18 +5,22 @@ agent:
   persona: >
     You are Miki, বাংলা-only RULEPLAY .
 
-    You operate as a workspace-scoped computer-based agent. Use approved tools
-    only within the active workspace by default, keep actions auditable, and
-    always verify your results. Destructive or external side effects require
-    explicit approval and must never be assumed from a default setting.
+    Your capabilities are strictly limited to two things: generating text
+    (thinking, responding, planning) and computer_use -- operating the
+    computer directly through mouse, keyboard, screenshots, and computer
+    vision, the same way a person would. There is no shell_execute,
+    file_read/write/delete, browser automation, web_search, or skill/plugin
+    tool available to you; every action that touches the system or the
+    outside world (running a command, editing a file, searching the web,
+    installing something) must be done by actually operating the computer
+    through computer_use -- open a terminal and type into it, open a file
+    manager or editor, open a browser and click and type -- never assumed or
+    shortcut through a specialized API. Use computer_use only within the
+    active workspace by default, keep actions auditable, and always verify
+    your results by looking at the screen. Destructive or external side
+    effects require explicit approval and must never be assumed from a
+    default setting.
 
-    When the active local answer model is missing or unavailable, you may use
-    the bounded model-runtime workflow: inspect the allow-listed catalog with
-    `npm run model:list`, install a named approved model with `npm run
-    model:install -- <model-id> --start`, then verify runtime health and use the
-    registered model. Never invent a model URL, bypass checksum checks, download
-    arbitrary binaries, or claim installation succeeded without an independent
-    health check.
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
@@ -121,10 +125,7 @@ heartbeat:
 # `max_actions_per_cycle` is never used to cap autonomous work.
 autonomy:
   enabled: true
-  mode: standard # standard | turbo — can be changed at runtime by telling
-                 # the agent in chat (e.g. "use turbo mode"), or the agent
-                 # can switch itself based on backlog — see auto_mode_switch
-                 # below.
+  mode: turbo # standard mode has been removed — turbo is the only mode.
   planning:
     enabled: true
   background_tasks:
@@ -137,17 +138,6 @@ autonomy:
     enabled: true
   self_evaluation:
     enabled: true
-  # Owner-requested: let the agent move itself standard -> turbo -> standard
-  # with no chat command needed. Escalates only when both thresholds below
-  # are met (backlog AND idle time), and only de-escalates a switch this
-  # same mechanism made — an operator-set turbo mode (via chat or the `mode`
-  # line above) is left alone. See autonomy/autonomy-controller.ts
-  # (_maybeAutoSwitchMode) for the exact logic.
-  auto_mode_switch:
-    enabled: true
-    escalate_unfinished_objectives_at_least: 3
-    escalate_idle_mins_at_least: 15
-    de_escalate_idle_mins_in_turbo: 30
   # Optional context hints the goal catalog probes against. All optional;
   # omit any you don't need. See packages/core/src/autonomy/goal-catalog.ts.
   hints:
@@ -155,7 +145,12 @@ autonomy:
     researchTopics: []
     knowledgeTopics: []
 skill_governance:
-  enabled: true
+  # Moot: skills are never loaded or registered as agent tools anymore (see
+  # AgentOrchestrator._loadSkillsAsync in packages/core/src/agent.ts), so
+  # there is nothing left for this governance engine to validate. Left
+  # present (disabled) rather than removed so the admin/launcher skill
+  # inspection API this config still feeds keeps working.
+  enabled: false
   validator:
     check_syntax: true
     check_dangerous_patterns: true
@@ -174,6 +169,23 @@ agents:
       enabled: true
       max_args_length: 300
       separate_messages: true
+    # Adaptive Multi-Message Output System (owner spec). Unifies/extends
+    # split_on_marker (Chatty Mode) and tool_feedback above into one
+    # switch covering every channel (Telegram, Discord, Slack, ..., and
+    # the Web UI): how many extra progress messages a turn may send, and
+    # how the final answer gets chunked. See
+    # packages/core/src/messaging/config.ts and
+    # packages/core/src/plugins/channels/_shared/agent-response.ts.
+    messaging:
+      adaptive: true
+      max_messages_per_response: 3
+      enable_chunking: true
+      enable_streaming: true
+      enable_progress_messages: true
+      max_chunk_length: 0 # 0 = no extra clamp beyond each channel's own hard limit
+      avoid_unnecessary_messages: true
+      min_ms_before_first_progress: 4000
+      min_ms_between_progress: 2500
     turn_profile:
       enabled: true
       history:
@@ -181,15 +193,16 @@ agents:
       system_prompt:
         mode: default
       skills:
-        mode: custom
+        mode: "off"
         allow: []
       tools:
-        mode: custom
-        allow:
-          - file_write
-          - file_read
-          - file_delete
-          - shell_execute
+        # "default" == every tool registered in the tool registry, which is
+        # now only the computer_use family (see
+        # packages/core/src/tools/registry/executor.ts). Not "custom" with a
+        # hand-listed allow-set, so this never drifts out of sync with what
+        # the registry actually exposes.
+        mode: default
+        allow: []
   router:
     enabled: true
     default_agent: Miki
@@ -237,9 +250,12 @@ agents:
         - standard
         - complex
       tools:
-        - shell_execute
-        - file_read
-        - file_write
+        # shell_execute/file_read/file_write no longer exist — code work now
+        # happens by operating a terminal/editor through computer_use.
+        - computer_launch
+        - computer_screenshot
+        - computer_invoke
+        - computer_set_text
       priority: 8
     researcher:
       name: Research Analyst
@@ -261,8 +277,12 @@ agents:
         - standard
         - complex
       tools:
-        - web_search
-        - scrape_page
+        # web_search/scrape_page no longer exist — research now happens by
+        # opening a real browser through computer_use and reading the screen.
+        - computer_launch
+        - computer_screenshot
+        - computer_click_at
+        - computer_set_text
       priority: 4
     planner:
       name: Workflow Planner
@@ -288,7 +308,9 @@ agents:
       complexities:
         - complex
       tools:
-        - project_workflow_create
+        # project_workflow_create no longer exists — planning is pure text
+        # generation; execution of the plan happens via computer_use.
+        []
       priority: 6
     miki:
       name: Miki
@@ -339,12 +361,27 @@ agents:
         - standard
         - complex
       tools:
-        - shell_execute
-        - file_read
-        - file_write
-        - web_search
-        - scrape_page
-        - project_workflow_create
+        # Miki's only real tools now — the full computer_use family (hands,
+        # feet, and vision). See config/tools.yaml and
+        # packages/core/src/tools/registry/executor.ts.
+        - computer_observe
+        - computer_focus
+        - computer_invoke
+        - computer_set_text
+        - computer_hotkey
+        - computer_clipboard
+        - computer_launch
+        - computer_verify
+        - computer_screenshot
+        - computer_list_processes
+        - computer_get_system_info
+        - computer_list_displays
+        - computer_click_at
+        - computer_drag
+        - computer_scroll
+        - computer_terminate_app
+        - computer_list_windows
+        - computer_grid_screenshot
       priority: 10
 session:
   dm_scope: per-channel-peer

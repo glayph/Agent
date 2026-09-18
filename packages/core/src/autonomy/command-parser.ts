@@ -13,11 +13,15 @@ export interface AutonomyCommand {
  * the existing `parseAutomationMessage` pattern in automation.ts (a small,
  * pre-LLM message check) rather than requiring a UI. Examples this matches:
  *   "Hey miki, use the turbo mode"
- *   "miki use standard mode"
  *   "switch to turbo mode"
  *   "turn off autonomy"
  *   "pause autonomous work"
  *   "what's your current objective?" → status
+ *
+ * Standard mode has been removed (owner-requested): turbo is the only
+ * operating mode, so "use standard/normal mode" is no longer a recognized
+ * command — it falls through and returns null like any other unrelated
+ * chat message, and the agent stays in turbo.
  *
  * Returns null for anything that isn't clearly an autonomy command, so
  * ordinary conversation is never misrouted.
@@ -32,14 +36,6 @@ export function parseAutonomyCommand(message: string): AutonomyCommand | null {
       /\bturbo mode\b/.test(text)
     ) {
       return { action: "set_mode", mode: "turbo" };
-    }
-  }
-  if (/\bstandard\b|\bnormal\b/.test(text) && /\bmode\b/.test(text)) {
-    if (
-      /\b(use|switch|go|enable|set|activate)\b/.test(text) ||
-      /\b(standard|normal) mode\b/.test(text)
-    ) {
-      return { action: "set_mode", mode: "standard" };
     }
   }
 

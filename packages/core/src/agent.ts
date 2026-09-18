@@ -1,7 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "node:crypto";
-import { pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
 import {
   settings,
@@ -52,11 +51,7 @@ import {
 } from "./automation.js";
 import { SqlitePlatformConnectionStore } from "./platform-connections.js";
 import { buildAgentTokenBudget } from "./agent-token-budget.js";
-import {
-  initSkillLoader,
-  resolveSkillRuntimeEntry,
-  SkillLoader,
-} from "./skill-loader.js";
+import { initSkillLoader, SkillLoader } from "./skill-loader.js";
 import { globalToolWarmer } from "./tools/tool-warmer.js";
 import {
   formatAdaptiveCapabilitySelection,
@@ -108,7 +103,6 @@ import {
   formatWorkflowDecisionPattern,
 } from "./workflow-accelerator.js";
 import type { ContextUsageSnapshot } from "./token-budget-manager.js";
-import { registerRuntimePluginTools } from "./plugins/plugin-tool-registration.js";
 import { CoreCapabilityPluginHost } from "./plugins/core-host.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
 import {
@@ -1251,47 +1245,20 @@ export class AgentOrchestrator {
     return Promise.all(tasks).then(() => {});
   }
 
+  /**
+   * INTENTIONALLY DISABLED. Miki's tool surface is restricted to exactly two
+   * capabilities: LLM text generation and the computer_use tool family
+   * (mouse/keyboard/screen + computer vision — see
+   * packages/core/src/plugins/computer-use). Skill files and runtime plugin
+   * contracts are no longer dynamically imported or registered as callable
+   * tools, so no preprogrammed/canned command can be invoked in place of the
+   * agent generating and executing its own action through computer_use. This
+   * method is kept as a no-op (rather than removed) so callers and the
+   * skill/plugin inspection APIs used by the admin UI continue to work; it
+   * simply never grants anything discovered here the ability to run.
+   */
   private async _loadSkillsAsync(): Promise<void> {
-    try {
-      const skills = await this.skillLoader.loadAll();
-      for (const skill of skills) {
-        if (!skill.index || skill.index.endsWith(".md")) {
-          continue;
-        }
-        // Dynamically import the skill module and register its tools
-        try {
-          const runtimeEntry = resolveSkillRuntimeEntry(skill.index);
-          const module = await import(pathToFileURL(runtimeEntry).href);
-          if (module && typeof module.registerSkills === "function") {
-            module.registerSkills(
-              this.tools.registerSkillTool.bind(this.tools),
-            );
-            this.skillLoader.markSkillCallable(skill.metadata.id);
-          }
-        } catch (err) {
-          console.warn(
-            `Failed to load skill module ${skill.metadata.id}:`,
-            err,
-          );
-        }
-      }
-      const pluginTools = await registerRuntimePluginTools(
-        this.tools,
-        this.runtimePaths,
-      );
-      if (pluginTools.registered.length > 0) {
-        console.log(
-          `Registered ${pluginTools.registered.length} runtime plugin tool(s).`,
-        );
-      }
-      if (pluginTools.skipped.length > 0) {
-        console.warn(
-          `Skipped ${pluginTools.skipped.length} runtime plugin tool contract(s).`,
-        );
-      }
-    } catch (err) {
-      console.error("Skill loading error:", err);
-    }
+    return;
   }
 
   private _startTaskScheduler(): void {
@@ -3709,16 +3676,10 @@ export class AgentOrchestrator {
     const capabilityReport = analyzePlanCapabilities(
       userMessage,
       {
-        skills:
-          turnProfile.skillsMode === "off"
-            ? []
-            : (await this.skillLoader.getAllSkillsMetadata()).filter(
-                (skill) => {
-                  if (turnProfile.skillsMode !== "custom") return true;
-                  const id = String(skill.id || skill.name || "").trim();
-                  return turnProfile.skillsAllow.has(id);
-                },
-              ),
+        // Skills are never loaded or registered as tools (see
+        // _loadSkillsAsync) — the agent's only capabilities are text
+        // generation and computer_use, so nothing is ever surfaced here.
+        skills: [],
         tools:
           turnProfile.toolsMode === "off"
             ? []

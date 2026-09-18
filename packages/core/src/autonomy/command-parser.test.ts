@@ -16,15 +16,9 @@ describe("parseAutonomyCommand", () => {
     });
   });
 
-  it("recognizes standard/normal mode requests", () => {
-    expect(parseAutonomyCommand("miki use the standard mode")).toEqual({
-      action: "set_mode",
-      mode: "standard",
-    });
-    expect(parseAutonomyCommand("go back to normal mode")).toEqual({
-      action: "set_mode",
-      mode: "standard",
-    });
+  it("no longer recognizes standard/normal mode (removed — turbo only)", () => {
+    expect(parseAutonomyCommand("miki use the standard mode")).toBeNull();
+    expect(parseAutonomyCommand("go back to normal mode")).toBeNull();
   });
 
   it("recognizes enable/disable/pause/resume", () => {

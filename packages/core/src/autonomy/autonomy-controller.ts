@@ -68,11 +68,6 @@ export class AutonomyController {
   private currentObjectiveId: string | null = null;
   private currentObjectiveStartedAt: number | null = null;
   private pulseCount = 0;
-  /** Set only by _maybeAutoSwitchMode(), never by an operator-issued
-   * setMode() (chat command or boot config) — this is what lets
-   * de-escalation reverse only its own switches and leave an operator's
-   * explicit "use turbo mode" alone. */
-  private _autoEscalatedAt: number | null = null;
 
   constructor(private deps: AutonomyControllerDeps) {
     this.store = new SqliteObjectiveStore(deps.db);
@@ -254,7 +249,7 @@ export class AutonomyController {
     if (!this.enabled || this.paused) return;
     if (this.state.current === "SHUTDOWN") return;
 
-    let profile = profileForMode(this.mode);
+    const profile = profileForMode(this.mode);
 
     if (this.state.current === "USER_TASK") {
       if (idleMins < profile.idleThresholdMins) return; // user still engaged
@@ -263,9 +258,6 @@ export class AutonomyController {
         logAutonomyEvent("AUTONOMOUS_RESUMED", { id: this.currentObjectiveId });
       }
     }
-
-    this._maybeAutoSwitchMode(idleMins);
-    profile = profileForMode(this.mode); // re-read: the line above may have just switched it
 
     await this._checkActiveObjective();
 
@@ -344,52 +336,6 @@ export class AutonomyController {
       taskId: scheduled.id,
       type: decision.objective.type,
     });
-  }
-
-  // ── Self-directed mode switching (owner-requested) ──────────────────────
-  /** Lets the agent move itself standard -> turbo -> standard without a
-   * chat command, based purely on backlog pressure. Called once per tick,
-   * only while genuinely idle (see call site in _tickInner). Escalation
-   * requires both a minimum backlog AND a minimum idle time, so a single
-   * queued objective right after a user leaves doesn't instantly flip the
-   * agent into the lower-oversight mode. De-escalation only ever undoes a
-   * switch this same method made (guarded by _autoEscalatedAt), so it can
-   * never override an operator's explicit "use turbo mode". */
-  private _maybeAutoSwitchMode(idleMins: number): void {
-    const cfg = this.deps.config.auto_mode_switch;
-    if (!cfg?.enabled) return;
-
-    const unfinishedCount = this.store.listUnfinished().length;
-
-    if (
-      this.mode === "standard" &&
-      idleMins >= cfg.escalate_idle_mins_at_least &&
-      unfinishedCount >= cfg.escalate_unfinished_objectives_at_least
-    ) {
-      this._autoEscalatedAt = Date.now();
-      this.setMode("turbo");
-      logAutonomyEvent("AUTO_MODE_ESCALATED", {
-        to: "turbo",
-        unfinishedObjectives: unfinishedCount,
-        idleMins: Math.round(idleMins),
-      });
-      return;
-    }
-
-    if (
-      this.mode === "turbo" &&
-      this._autoEscalatedAt !== null &&
-      unfinishedCount === 0 &&
-      Date.now() - this._autoEscalatedAt >=
-        cfg.de_escalate_idle_mins_in_turbo * 60_000
-    ) {
-      this.setMode("standard");
-      this._autoEscalatedAt = null;
-      logAutonomyEvent("AUTO_MODE_DEESCALATED", {
-        to: "standard",
-        idleMins: Math.round(idleMins),
-      });
-    }
   }
 
   private async _checkActiveObjective(): Promise<void> {

@@ -14,7 +14,6 @@ const requiredRuntimeFiles = [
   ["core API", "packages/core/dist/api/index.js"],
   ["config", "packages/config/dist/index.js"],
   ["installer", "packages/installer/dist/index.js"],
-  ["skills", "packages/skills/dist/index.js"],
   ["dashboard", "packages/ui/frontend/dist/index.html"],
 ];
 

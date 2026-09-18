@@ -33,7 +33,6 @@ function fixWorkspaceDeps() {
     "packages/core/package.json",
     "packages/gateway/package.json",
     "packages/installer/package.json",
-    "packages/skills/package.json",
   ];
 
   let fixedCount = 0;

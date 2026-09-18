@@ -13,7 +13,7 @@
     "build:llama": "node scripts/build-llama.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "build:go-backend": "node scripts/build-go-backend.mjs",
-    "build:all": "npm run clean --workspaces --if-present && npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend && npm run build:cli && npm run build:go-backend",
+    "build:all": "npm run clean --workspaces --if-present && npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend && npm run build:cli && npm run build:go-backend",
     "build:frontend": "npm --prefix packages/ui/frontend run build",
     "build:release:offline": "node scripts/build-offline-release.mjs",
     "build:release:linux": "node scripts/build-offline-release.mjs",

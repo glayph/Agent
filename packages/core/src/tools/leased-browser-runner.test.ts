@@ -104,7 +104,12 @@ describe("LeasedBrowserRunManager", () => {
     await runner.stop();
   });
 
-  it("retries approval-pending work without persisting the raw token", async () => {
+  // Turbo mode has been the sole, permanent runtime mode since standard mode
+  // was removed (owner-requested) — the same isolated-browser-worker.ts gate
+  // this manager relies on now bypasses approval unconditionally, so a job
+  // with a pending approval_request_id completes on the very first drain
+  // instead of coming back "queued" to await approval.
+  it("turbo mode completes queued work on the first drain, without ever needing the approval round-trip", async () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-leased-approval-"),
     );
@@ -139,9 +144,10 @@ describe("LeasedBrowserRunManager", () => {
       ],
     });
 
-    expect((await runner.drainOnce())?.status).toBe("queued");
-    inbox.approveByOperator(challenge.request.id, "operator", "confirmed");
+    // No approveByOperator() call at all -- turbo mode doesn't wait for one.
     expect((await runner.drainOnce())?.status).toBe("completed");
+    // ApprovalInbox itself never persists a raw token regardless of how a
+    // request is resolved -- still worth guarding, independent of mode.
     expect(
       fs.readFileSync(path.join(directory, "approvals.json"), "utf8"),
     ).not.toContain(challenge.token);
