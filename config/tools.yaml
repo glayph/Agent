@@ -16,13 +16,18 @@ permissions:
   # against a DISABLED/OFF/DENY/BLOCKED set independently of whether the
   # tool is registered with the LLM.
   shell_execute:
-    level: DISABLED
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: false
+    max_timeout_seconds: 30
   file_read:
-    level: DISABLED
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: true
   file_write:
-    level: DISABLED
+    level: TRUSTED_FULL_ACCESS
+    workspace_only: true
   file_delete:
-    level: DISABLED
+    level: REQUIRE_APPROVAL
+    workspace_only: true
   runtime_installer:
     level: DISABLED
   computer_use:
@@ -37,10 +42,6 @@ permissions:
 tool_state:
   tool_search_tool_regex: true
 disabled_tools:
-  - shell_execute
-  - file_read
-  - file_write
-  - file_delete
   - browser_navigate
   - browser_play_media
   - browser_click

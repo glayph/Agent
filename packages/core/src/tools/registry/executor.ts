@@ -27,6 +27,11 @@ import {
   handleComputerTerminateApp,
   handleComputerListWindows,
   handleComputerGridScreenshot,
+  handleShellExecute,
+  handleFileRead,
+  handleFileWrite,
+  handleFileDelete,
+  handleFileSearch,
 } from "./handlers.js";
 import { ShellExecutor } from "../executor/shell.js";
 import { FileSecurityExecutor } from "../executor/file-security.js";
@@ -361,13 +366,36 @@ export class ToolRegistry {
       "computer_grid_screenshot",
       handleComputerGridScreenshot.bind(this),
     );
+    this.registerHandler("shell_execute", handleShellExecute.bind(this));
+    this.registerHandler("file_read", handleFileRead.bind(this));
+    this.registerHandler("file_write", handleFileWrite.bind(this));
+    this.registerHandler("file_delete", handleFileDelete.bind(this));
+    this.registerHandler("file_search", handleFileSearch.bind(this));
   }
 
   getToolDefinitions(): ToolDefinition[] {
     // Only the computer_use schema family is advertised to the model, plus
     // any runtime plugin tools that happen to be registered (empty unless
     // MCP is explicitly re-enabled in config/tools.yaml — see mcp.enabled).
-    const builtins = [...ToolRegistrySchemas.computerSchemas()];
+    const builtins = [
+      ...ToolRegistrySchemas.shellSchema(),
+      ...ToolRegistrySchemas.fileSchemas(),
+      ...ToolRegistrySchemas.computerSchemas(),
+      {
+        type: "function" as const,
+        function: {
+          name: "file_search",
+          description: "Search workspace files for a literal text query.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Literal text to find." },
+            },
+            required: ["query"],
+          },
+        },
+      },
+    ];
     const pluginTools = Array.from(this.pluginToolDefs.values());
     return [...builtins, ...pluginTools].map((definition) => ({
       ...definition,

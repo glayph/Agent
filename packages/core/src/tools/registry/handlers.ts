@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AgentOrchestrator } from "../../agent.js";
 import type { BrowserTool } from "../browser.js";
 import type { ComputerAgent } from "../computer.js";
@@ -280,4 +282,90 @@ export async function handleComputerGridScreenshot(
   args: Record<string, unknown>,
 ): Promise<string> {
   return await this.computer.screenshot({ ...args, grid: true });
+}
+
+export async function handleShellExecute(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const cmd = String(args["cmd"] || args["command"] || "").trim();
+  if (!cmd) return "Error: cmd is required.";
+  const cwd = args["working_dir"] ? String(args["working_dir"]) : undefined;
+  const timeout = args["timeout"] != null ? Number(args["timeout"]) : undefined;
+  const result = await this.executor.runShell(cmd, cwd, timeout);
+  const parts = [
+    result.stdout?.trim() && `stdout:\n${result.stdout.trim()}`,
+    result.stderr?.trim() && `stderr:\n${result.stderr.trim()}`,
+    `exitCode: ${result.exitCode}`,
+    result.error && `error: ${result.error}`,
+  ].filter(Boolean);
+  return parts.join("\n");
+}
+
+export function handleFileRead(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): string {
+  const filePath = String(args["path"] || args["file"] || "").trim();
+  if (!filePath) return "Error: path is required.";
+  return this.fileOps.readFile(filePath);
+}
+
+export function handleFileWrite(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): string {
+  const filePath = String(args["path"] || args["file"] || "").trim();
+  if (!filePath) return "Error: path is required.";
+  return this.fileOps.writeFile(filePath, String(args["content"] ?? ""));
+}
+
+export function handleFileDelete(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): string {
+  const filePath = String(args["path"] || args["file"] || "").trim();
+  if (!filePath) return "Error: path is required.";
+  return this.fileOps.deleteFile(filePath, Boolean(args["dryRun"]));
+}
+
+export function handleFileSearch(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): string {
+  const query = String(args["query"] || args["text"] || "").trim();
+  if (!query) return "Error: query is required.";
+  const root = this.workspaceDir;
+  const matches: string[] = [];
+  const walk = (dir: string) => {
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (["node_modules", ".git", "dist", "data"].includes(name)) continue;
+      const full = path.join(dir, name);
+      let stat;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) walk(full);
+      else if (stat.isFile() && stat.size < 1_000_000) {
+        try {
+          if (fs.readFileSync(full, "utf8").includes(query)) {
+            matches.push(path.relative(root, full));
+          }
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  };
+  walk(root);
+  if (!matches.length) return `No matches for ${JSON.stringify(query)}.`;
+  return `Found ${matches.length} file(s):\n${matches.slice(0, 20).join("\n")}`;
 }

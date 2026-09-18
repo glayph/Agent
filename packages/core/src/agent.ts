@@ -2323,12 +2323,15 @@ export class AgentOrchestrator {
       const requiredToolNames =
         deterministicIntent.kind === "web_search"
           ? ["web_search"]
-          : deterministicIntent.kind === "process_control"
+          : deterministicIntent.kind === "process_control" ||
+              deterministicIntent.kind === "shell_execute"
             ? ["shell_execute"]
-            : (deterministicIntent.files || []).flatMap(() => [
-                "file_write",
-                "file_read",
-              ]);
+            : deterministicIntent.kind === "file_read"
+              ? ["file_read"]
+              : (deterministicIntent.files || []).flatMap(() => [
+                  "file_write",
+                  "file_read",
+                ]);
       const uniqueRequiredToolNames = [...new Set(requiredToolNames)];
       const allowedToolNames = new Set([
         ...toolsSchema.map((tool) => tool.function.name),
@@ -2366,6 +2369,27 @@ export class AgentOrchestrator {
                   },
                 },
               ]
+            : deterministicIntent.kind === "shell_execute"
+              ? [
+                  {
+                    id: crypto.randomUUID(),
+                    function: {
+                      name: "shell_execute",
+                      arguments: JSON.stringify({
+                        cmd: deterministicIntent.command || "uname -a",
+                        timeout: 20,
+                      }),
+                    },
+                  },
+                ]
+            : deterministicIntent.kind === "file_read"
+              ? (deterministicIntent.files || []).map((file) => ({
+                  id: crypto.randomUUID(),
+                  function: {
+                    name: "file_read",
+                    arguments: JSON.stringify({ path: file.path }),
+                  },
+                }))
             : (deterministicIntent.files || []).flatMap((file) => [
                 {
                   id: crypto.randomUUID(),
@@ -2408,11 +2432,17 @@ export class AgentOrchestrator {
             )
           : deterministicIntent.kind === "process_control"
             ? buildDeterministicProcessResponse(deterministicToolMessages)
-            : buildDeterministicFileResponse(
-                deterministicIntent.files || [],
-                deterministicToolMessages,
-                this.tools.workspaceDir,
-              );
+            : deterministicIntent.kind === "shell_execute" ||
+                deterministicIntent.kind === "file_read"
+              ? deterministicToolMessages
+                  .map((message) => message.content || "")
+                  .join("\n")
+                  .trim() || "No tool output."
+              : buildDeterministicFileResponse(
+                  deterministicIntent.files || [],
+                  deterministicToolMessages,
+                  this.tools.workspaceDir,
+                );
       await this._saveAssistantHistoryMessage(
         sessionId,
         deterministicResponse,
