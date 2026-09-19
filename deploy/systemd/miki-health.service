@@ -1,0 +1,15 @@
+[Unit]
+Description=Miki service health check and targeted recovery
+After=miki.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/miki-healthcheck
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+MemoryMax=64M
+CPUQuota=20%
+StandardOutput=journal
+StandardError=journal

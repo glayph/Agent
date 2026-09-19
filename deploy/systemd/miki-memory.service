@@ -1,0 +1,30 @@
+[Unit]
+Description=Miki memory service
+PartOf=miki.target
+After=local-fs.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=@MIKI_ROOT@
+EnvironmentFile=-/etc/miki/miki.env
+ExecStart=@MIKI_NODE@ @MIKI_ROOT@/packages/memory/src/api/server.js
+Restart=always
+RestartSec=3s
+TimeoutStopSec=10s
+KillSignal=SIGTERM
+SuccessExitStatus=0 143
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=@MIKI_ROOT@/data @MIKI_ROOT@/logs
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=128
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=miki.target
