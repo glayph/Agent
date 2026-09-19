@@ -57,6 +57,38 @@ describe("deterministic intent safeguards", () => {
     });
   });
 
+  it("extracts exact overwrite corrections without asking the model to choose tools", () => {
+    expect(
+      detectDeterministicIntent(
+        "Correct only /workspace/agentic-smoke-test.md by overwriting it with exactly these three lines:\n# Miki Agentic Smoke Test\nDate: 2026-09-19\nThis artifact was created by Miki during an agentic test.\nThen read the file back and report whether the contents match exactly.",
+      ),
+    ).toEqual({
+      kind: "file_workflow",
+      files: [
+        {
+          path: "/workspace/agentic-smoke-test.md",
+          content:
+            "# Miki Agentic Smoke Test\nDate: 2026-09-19\nThis artifact was created by Miki during an agentic test.",
+        },
+      ],
+      verificationRequested: true,
+    });
+  });
+
+  it("stops same-line correction content before the read-back instruction", () => {
+    expect(
+      detectDeterministicIntent(
+        "Correct only updated-agentic-test.md by overwriting it with exactly one line: CLEAN_UPDATED_MIKI. Then read the file back and report whether the contents match exactly.",
+      ),
+    ).toEqual({
+      kind: "file_workflow",
+      files: [
+        { path: "updated-agentic-test.md", content: "CLEAN_UPDATED_MIKI." },
+      ],
+      verificationRequested: true,
+    });
+  });
+
   it("answers standalone English and Bengali arithmetic deterministically", () => {
     expect(detectDeterministicIntent("What is 2 + 2?")).toEqual({
       kind: "math",
@@ -178,5 +210,18 @@ describe("deterministic intent safeguards", () => {
         );
       }
     }
+  });
+
+  it("routes source-requesting factual project questions to web search implicitly", () => {
+    const intent = detectDeterministicIntent(
+      "Hey Miki, what is the open-human Project? Please figure out what it is and give me a concise explanation with the sources you relied on.",
+    );
+    expect(intent).toEqual(
+      expect.objectContaining({
+        kind: "web_search",
+        verificationRequested: true,
+      }),
+    );
+    expect(intent?.query).toContain("open-human Project");
   });
 });

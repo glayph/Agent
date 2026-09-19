@@ -24,6 +24,11 @@ const FILE_OPERATION_PATTERN =
 const QUOTED_FILE_OPERATION_PATTERN =
   /([`'\"])([a-zA-Z0-9][a-zA-Z0-9._/-]*)\1\s+(?:containing|with(?:\s+the)?\s+(?:text|content))\s+(?:exactly\s*:?\s*)([`'\"])([\s\S]*?)\3/gi;
 
+// Exact correction requests should use the deterministic write/read path
+// rather than relying on a compact model to select file tools.
+const EXACT_FILE_CORRECTION_PATTERN =
+  /(?:overwrite|replace|correct|rewrite)\s+(?:only\s+)?(?:the\s+file\s+)?([^\s,;:()]+)[\s\S]*?with\s+exactly\s+(?:these\s+)?(?:(?:\d+|[a-z]+)\s+)?lines?\s*:\s*([\s\S]*?)(?=\s+(?:then|finally)\b|$)/i;
+
 function cleanFilePath(value: string): string | null {
   const candidate = value.trim().replace(/^['"`]|['"`]$/g, "");
   if (
@@ -86,6 +91,15 @@ function parseFileRequests(message: string): DeterministicFileRequest[] {
     addRequest(cleanFilePath(match[2] || ""), (match[4] || "").trim());
   }
   return requests;
+}
+
+function parseExactFileCorrection(message: string): DeterministicFileRequest[] {
+  const match = message.match(EXACT_FILE_CORRECTION_PATTERN);
+  if (!match) return [];
+  const rawPath = (match[1] || "").trim();
+  const filePath = rawPath.startsWith("/") ? rawPath : cleanFilePath(rawPath);
+  const content = (match[2] || "").trim();
+  return filePath && content ? [{ path: filePath, content }] : [];
 }
 
 function normalizeMathDigits(value: string): string {
@@ -210,7 +224,27 @@ function searchQueryFromMessage(message: string): string {
   const match = message.match(
     /(?:search|look\s+up|find)\s+(?:the\s+)?(?:web|internet)?\s*(?:for|about)?\s*(.+?)(?:\s+and\s+(?:return|give|tell)\b|$)/i,
   );
-  return (match?.[1] || message).trim();
+  if (match?.[1]) return match[1].trim();
+  const factualQuestion = message.match(
+    /(?:what|who)\s+is\s+(.+?)(?:\?|\.|\s+please\b|\s+and\s+give\b|\s+and\s+tell\b|$)/i,
+  );
+  return (factualQuestion?.[1] || message).trim();
+}
+
+function isImplicitResearchQuestion(message: string): boolean {
+  const normalized = message.trim();
+  const asksForEntityExplanation =
+    /\b(?:what|who)\s+is\b[\s\S]{0,180}\b(?:project|initiative|organization|company|program|movement|foundation|platform)\b/i.test(
+      normalized,
+    ) ||
+    /\b(?:tell\s+me\s+about|explain|identify|define)\b[\s\S]{0,180}\b(?:project|initiative|organization|company|program|movement|foundation|platform)\b/i.test(
+      normalized,
+    );
+  const asksForEvidence =
+    /\b(?:source|sources|citation|citations|reliable|recent|latest|figure\s+out|look\s+up|accurate)\b/i.test(
+      normalized,
+    );
+  return asksForEntityExplanation && asksForEvidence;
 }
 
 export function detectDeterministicIntent(
@@ -224,13 +258,25 @@ export function detectDeterministicIntent(
   const fileDelete = parseFileDeleteIntent(message);
   if (fileDelete) return fileDelete;
 
-  const files = parseFileRequests(message);
+  const files = [
+    ...parseExactFileCorrection(message),
+    ...parseFileRequests(message),
+  ].filter(
+    (request, index, requests) =>
+      requests.findIndex(
+        (candidate) =>
+          candidate.path === request.path &&
+          candidate.content === request.content,
+      ) === index,
+  );
   if (files.length > 0) {
     return {
       kind: "file_workflow",
       files,
       verificationRequested:
-        /\b(verify|check|confirm|exists|read\s+back)\b/i.test(message),
+        /\b(verify|check|confirm|exists|read(?:\s+the)?\s+\w*\s*back)\b/i.test(
+          message,
+        ),
     };
   }
 
@@ -244,7 +290,8 @@ export function detectDeterministicIntent(
     /\b(web\s+search|search\s+the\s+web|search\s+online|search\s+the\s+internet|look\s+it\s+up)\b/i.test(
       message,
     ) ||
-    /(?:ওয়েব|ওয়েব|অনলাইন).*(?:সার্চ|খুঁজ|অনুসন্ধান)/i.test(message)
+    /(?:ওয়েব|ওয়েব|অনলাইন).*(?:সার্চ|খুঁজ|অনুসন্ধান)/i.test(message) ||
+    isImplicitResearchQuestion(message)
   ) {
     return {
       kind: "web_search",

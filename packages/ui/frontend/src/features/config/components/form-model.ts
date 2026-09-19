@@ -116,7 +116,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   restrictToWorkspace: true,
   bypassRestrictions: false,
   splitOnMarker: false,
-  toolFeedbackEnabled: false,
+  toolFeedbackEnabled: true,
   toolFeedbackMaxArgsLength: "300",
   toolFeedbackSeparateMessages: false,
   execEnabled: true,

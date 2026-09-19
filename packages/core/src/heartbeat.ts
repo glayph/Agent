@@ -32,6 +32,9 @@ export interface IOrchestrator {
   taskQueue?: {
     cleanup: (ms: number) => number;
   };
+  scheduler?: {
+    heartbeat: () => void;
+  };
   selfImprovement: {
     _reflectionDue: () => boolean;
     _tuningDue: () => boolean;
@@ -158,6 +161,7 @@ export class HeartbeatEngine {
 
   private async _pulse(): Promise<void> {
     this._cycle++;
+    this.orchestrator.scheduler?.heartbeat();
     const activeModel = this.orchestrator.modelName || "";
     this._tokenBudget = CostCalibrator.effectiveBudget(
       this._nominalBudget,

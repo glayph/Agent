@@ -1066,7 +1066,7 @@ export function ChatPage() {
     <div className="flex items-center gap-2">
       {runtimeModelLabel && (
         <span
-          className="text-muted-foreground max-w-56 truncate text-[10px]"
+          className="text-muted-foreground max-w-96 truncate text-[10px]"
           data-testid="active-run-model"
           title={`Server-reported run model: ${runtimeModelLabel}`}
         >

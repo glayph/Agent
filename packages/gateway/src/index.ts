@@ -67,6 +67,9 @@ const config = {
   workspaceDir,
   runtimeRoot,
   corePort: positiveIntEnv("CORE_PORT", 8000),
+  // In bundled mode the gateway owns core recovery. Under systemd, core is a
+  // separate unit so a core failure must not cascade into the gateway.
+  manageCore: env("MIKI_GATEWAY_MANAGE_CORE", "true") !== "false",
   gatewayPort: positiveIntEnv("GATEWAY_PORT", 18800),
   gatewayHost: env("GATEWAY_HOST", "127.0.0.1"),
   enableMcp: env("ENABLE_MCP", "true") !== "false",
@@ -295,6 +298,10 @@ function startCore(): child_process.ChildProcess {
 }
 
 function attemptCoreRestart(): void {
+  if (!config.manageCore) {
+    log.warn("Core is externally supervised; leaving recovery to its service manager.");
+    return;
+  }
   if (shutdownInProgress || coreRestartTimer) {
     return;
   }
@@ -397,7 +404,9 @@ function startCoreHealthMonitor(): void {
         // A zombie process must be force-terminated before restarting,
         // since simply spawning a new core alongside the stuck one would
         // leave two processes fighting over the same port/state.
-        if (!coreProcess || coreProcess.killed) {
+        if (!config.manageCore) {
+          log.warn("Core health failure observed; external supervisor will recover core.");
+        } else if (!coreProcess || coreProcess.killed) {
           attemptCoreRestart();
         } else {
           log.warn(
@@ -868,8 +877,9 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
   activeWsConnections.clear();
   await closeWebSocketServer(wss);
 
-  // 3. Kill core backend
-  if (coreProcess) {
+  // 3. Kill core backend only when this gateway owns it. An external core unit
+  // must survive an ordinary gateway restart.
+  if (config.manageCore && coreProcess) {
     await terminateProcessTree(coreProcess, 2000);
     coreProcess = null;
   }
@@ -890,7 +900,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
 
 async function main(): Promise<void> {
   log.info(`Core target: 127.0.0.1:${config.corePort}`);
-  coreProcess = startCore();
+  if (config.manageCore) {
+    coreProcess = startCore();
+  } else {
+    log.info("Core process ownership disabled; waiting for external supervisor");
+  }
 
   try {
     await waitForCore();
@@ -907,7 +921,7 @@ async function main(): Promise<void> {
     } else {
       log.error("Gateway server error:", err.message);
     }
-    if (coreProcess) coreProcess.kill("SIGTERM");
+    if (config.manageCore && coreProcess) coreProcess.kill("SIGTERM");
     process.exit(1);
   });
 

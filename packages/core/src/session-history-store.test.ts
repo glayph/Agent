@@ -16,6 +16,23 @@ afterEach(() => {
 });
 
 describe("SqliteSessionHistoryStore", () => {
+  it("deduplicates optimistic and persisted copies by message ID", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "miki-session-history-"));
+    tempDirs.push(directory);
+    const store = new SqliteSessionHistoryStore(path.join(directory, "history.db"));
+    openStores.push(store);
+    store.save("miki-main-chat", [
+      { id: "user-1", role: "user", content: "line one\nline two", turn_id: "turn-1" },
+      { id: "user-1", role: "user", content: "line one\nline two", turn_id: "turn-1" },
+      { id: "assistant-1", role: "assistant", content: "done", turn_id: "turn-1", run_id: "run-1" },
+    ], { created: "2026-08-21T00:00:00.000Z", updated: "2026-08-21T00:00:01.000Z" });
+    const restored = store.load().get("miki-main-chat")?.messages ?? [];
+    expect(restored).toHaveLength(2);
+    expect(restored[0]?.content).toBe("line one\nline two");
+    expect(restored[1]?.turn_id).toBe("turn-1");
+    expect(restored[1]?.run_id).toBe("run-1");
+  });
+
   it("restores ordered messages and metadata after reopening the database", () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-session-history-"),

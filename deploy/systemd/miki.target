@@ -1,0 +1,7 @@
+[Unit]
+Description=Miki supervised service stack
+Wants=miki-memory.service miki-llama.service miki-core.service miki-gateway.service
+After=miki-memory.service miki-llama.service miki-core.service miki-gateway.service
+
+[Install]
+WantedBy=multi-user.target

@@ -37,7 +37,7 @@ import {
 import Database from "better-sqlite3";
 import { TaskQueue, AgentTask } from "./task-queue.js";
 import { ConcurrentTaskManager } from "./concurrent-manager.js";
-import { TaskScheduler, type ScheduledTask } from "./scheduler.js";
+import { TaskScheduler, type ScheduleOptions, type ScheduledTask, type TaskCompletionNotification } from "./scheduler.js";
 import {
   createAutonomyController,
   parseAutonomyConfig,
@@ -275,8 +275,13 @@ function buildToolOnlyFallbackResponse(messages: ChatMessage[]): string {
   }
 
   if (results.length > 0) {
-    const sourceCount = results.length;
-    return `আমি বিষয়টি খুঁজে দেখেছি, তবে এখনই নিশ্চিত synthesis দিতে পারছি না। ${sourceCount}টি source lead Inspector-এর Work/Thoughts-এ রাখা আছে—সেগুলো cross-check না করে কোনো leak বা rumor-কে confirmed তথ্য হিসেবে ধরবেন না।`;
+    const lines = results
+      .slice(0, 3)
+      .map(
+        (result, index) =>
+          `${index + 1}. [${result.title}](${result.url})${result.snippet ? ` — ${result.snippet}` : ""}`,
+      );
+    return `আমি বিষয়টি খুঁজে দেখেছি। পাওয়া source অনুযায়ী:\n\n${lines.join("\n\n")}\n\nউপরের source-গুলো cross-check করে ব্যবহার করুন।`;
   }
 
   const toolNames = new Set<string>();
@@ -341,9 +346,12 @@ function buildDeterministicSearchResponse(output: string): string {
     const lines = verified.slice(0, 3).map((item, index) => {
       const title = String(item.title).trim().slice(0, 180);
       const url = String(item.url).trim();
-      return `${index + 1}. ${title} — ${url}`;
+      const snippet = String(item.snippet || "")
+        .trim()
+        .slice(0, 360);
+      return `${index + 1}. [${title}](${url})${snippet ? ` — ${snippet}` : ""}`;
     });
-    return `ওয়েবে খুঁজে পাওয়া source:\n${lines.join("\n")}`;
+    return `ওয়েব সার্চ সম্পন্ন হয়েছে। পাওয়া তথ্য অনুযায়ী:\n\n${lines.join("\n\n")}\n\nSources উপরের লিংকগুলোতে দেওয়া আছে।`;
   } catch {
     return output.startsWith("Web search failed:")
       ? "ওয়েব সার্চ ব্যর্থ হয়েছে; কোনো verified ফলাফল পাওয়া যায়নি।"
@@ -730,6 +738,9 @@ export class AgentOrchestrator {
   public taskQueue: TaskQueue;
   public concurrentManager: ConcurrentTaskManager;
   public taskScheduler: TaskScheduler;
+  public get scheduler(): TaskScheduler {
+    return this.taskScheduler;
+  }
   public capabilityPlugins: CoreCapabilityPluginHost;
   public toolLockManager: ToolResourceLockManager;
   public toolConcurrencyMetrics: ToolConcurrencyMetrics;
@@ -1083,6 +1094,7 @@ export class AgentOrchestrator {
     const schedulerIntervalMs =
       this.concurrencyConfig.schedulerIntervalMs ?? 100;
     const cronConfig = asAgentConfig(this.config).tools?.cron;
+    const cronPolicy = (cronConfig ?? {}) as Record<string, unknown>;
     const execTimeoutMinutes =
       typeof cronConfig?.exec_timeout_minutes === "number"
         ? cronConfig.exec_timeout_minutes
@@ -1090,7 +1102,7 @@ export class AgentOrchestrator {
     this.taskQueue = new TaskQueue({
       maxSize: queueSize,
       defaultPriority: 0,
-      persistencePath: path.join(runtimePaths.dataDir, "task-queue.json"),
+      databasePath: path.join(runtimePaths.dataDir, "task-queue.db"),
     });
     this.concurrentManager = new ConcurrentTaskManager(maxConcurrent);
     this.taskScheduler = new TaskScheduler(
@@ -1105,12 +1117,27 @@ export class AgentOrchestrator {
         recoveryStaleAfterMs:
           this.concurrencyConfig.recoveryStaleAfterMs ?? 5 * 60_000,
         execTimeoutMinutes,
+        timezone:
+          typeof cronPolicy.timezone === "string" ? cronPolicy.timezone : undefined,
+        missedRunPolicy:
+          cronPolicy.missed_run_policy === "skip" || cronPolicy.missed_run_policy === "catch_up"
+            ? cronPolicy.missed_run_policy
+            : "run_once",
+        quietHours:
+          cronPolicy.quiet_hours && typeof cronPolicy.quiet_hours === "object"
+            ? (cronPolicy.quiet_hours as { start: string; end: string; timezone?: string })
+            : undefined,
+        perTaskConcurrencyLimit:
+          typeof cronPolicy.per_task_concurrency_limit === "number"
+            ? cronPolicy.per_task_concurrency_limit
+            : 1,
       },
       this.taskQueue,
       this.concurrentManager,
       (sessionId, message, task) =>
         this.runAgentLoopWithTask(sessionId, message, task),
       new SqliteScheduledTaskStore(schedulerDb),
+      (notification) => this._notifyTaskCompletion(notification),
     );
     this.automationManager = createAutomationRuntime(
       path.join(runtimePaths.dataDir, "automations.db"),
@@ -1837,23 +1864,9 @@ export class AgentOrchestrator {
     if (userIndex < 0) return null;
     const original = history[userIndex];
     if (!original) return null;
-    const now = new Date().toISOString();
-    const newSessionId = crypto.randomUUID();
-    const prefix = history.slice(0, userIndex).map((message) => ({
-      ...message,
-      id: crypto.randomUUID(),
-      created_at: message.created_at || now,
-    }));
-    this._messageHistory.set(newSessionId, prefix);
-    this._sessionMetadata.set(newSessionId, {
-      created: now,
-      updated: now,
-      title: `Retry of ${sessionId}`,
-    });
-    this._persistSession(newSessionId);
     return {
-      sessionId: newSessionId,
-      message: { ...original, id: crypto.randomUUID() },
+      sessionId,
+      message: { ...original, id: original.id },
     };
   }
 
@@ -1943,16 +1956,24 @@ export class AgentOrchestrator {
     content: string,
     messageId?: string,
     isError = false,
+    turnId?: string,
+    runId?: string,
   ): void {
     if (!content.trim()) return;
     const history = this._messageHistory.get(sessionId) || [];
-    history.push({
-      id: messageId || crypto.randomUUID(),
-      created_at: new Date().toISOString(),
+    const stableId = messageId || crypto.randomUUID();
+    const existing = history.find((message) => message.id === stableId);
+    const nextMessage: ChatMessage = {
+      id: stableId,
+      created_at: existing?.created_at || new Date().toISOString(),
       role: "assistant",
       content,
+      ...(turnId ? { turn_id: turnId } : {}),
+      ...(runId ? { run_id: runId } : {}),
       ...(isError ? { is_error: true } : {}),
-    });
+    };
+    if (existing) Object.assign(existing, nextMessage);
+    else history.push(nextMessage);
     this._messageHistory.set(sessionId, history);
     this._touchSession(sessionId);
   }
@@ -2174,6 +2195,10 @@ export class AgentOrchestrator {
       audio?: { data: Buffer; mimeType: string; filename?: string };
       /** Stable ID used for the completed assistant response. */
       responseMessageId?: string;
+      /** Stable ID shared by all persisted messages in this turn. */
+      turnId?: string;
+      /** Runtime ID shared with inspector/tool events for this turn. */
+      runId?: string;
       completionGuard?: () => {
         ok: boolean;
         missing?: string[];
@@ -2187,13 +2212,24 @@ export class AgentOrchestrator {
 
     {
       const history = this._messageHistory.get(sessionId) || [];
-      history.push({
-        id: options.messageId || crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-        role: "user",
-        content: userMessage,
-        ...(options.voice ? { voice: options.voice } : {}),
-      });
+      const messageId = options.messageId || crypto.randomUUID();
+      const existing = history.find((message) => message.id === messageId);
+      if (existing) {
+        existing.content = userMessage;
+        if (options.voice) existing.voice = options.voice;
+        if (options.turnId) existing.turn_id = options.turnId;
+        if (options.runId) existing.run_id = options.runId;
+      } else {
+        history.push({
+          id: messageId,
+          created_at: new Date().toISOString(),
+          role: "user",
+          content: userMessage,
+          ...(options.turnId ? { turn_id: options.turnId } : {}),
+          ...(options.runId ? { run_id: options.runId } : {}),
+          ...(options.voice ? { voice: options.voice } : {}),
+        });
+      }
       this._messageHistory.set(sessionId, history);
       this._touchSession(sessionId);
     }
@@ -2414,6 +2450,11 @@ export class AgentOrchestrator {
                     arguments: JSON.stringify({
                       path: file.path,
                       content: file.content,
+                      ...(/^(?:\s*)(?:overwrite|replace|correct|rewrite)\b/i.test(
+                        userMessage,
+                      )
+                        ? { __user_confirmed_deterministic_overwrite: true }
+                        : {}),
                     }),
                   },
                 },
@@ -2934,17 +2975,14 @@ export class AgentOrchestrator {
           model_name: turnModel,
           ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
         });
-        {
-          const history = this._messageHistory.get(sessionId) || [];
-          history.push({
-            id: options.responseMessageId || crypto.randomUUID(),
-            created_at: new Date().toISOString(),
-            role: "assistant",
-            content,
-          });
-          this._messageHistory.set(sessionId, history);
-          this._touchSession(sessionId);
-        }
+        this._saveAssistantHistoryMessage(
+          sessionId,
+          content,
+          options.responseMessageId,
+          false,
+          options.turnId,
+          options.runId,
+        );
         if (noToolsRequested) {
           this._logMemoryInteraction(sessionId, userMessage, content);
           yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
@@ -3636,7 +3674,7 @@ export class AgentOrchestrator {
     message: string,
     cronExpression?: string,
     runAt?: number,
-    options: { maxAttempts?: number } = {},
+    options: ScheduleOptions = {},
   ): ScheduledTask {
     return this.taskScheduler.schedule(
       sessionId,
@@ -3663,6 +3701,31 @@ export class AgentOrchestrator {
     return this.taskScheduler.getStats();
   }
 
+  private _notifyTaskCompletion(notification: TaskCompletionNotification): void {
+    const status = notification.status === "succeeded" ? "succeeded" : "failed";
+    const result = notification.resultSummary || notification.errorSummary || "No result summary was returned.";
+    const concise = result.length > 600 ? `${result.slice(0, 597)}...` : result;
+    const links = notification.artifactRefs.length > 0
+      ? `\nArtifacts: ${notification.artifactRefs.map((ref) => `[${ref}](${ref})`).join(", ")}`
+      : "";
+    const content = [
+      `Background task completed: ${notification.title}`,
+      `Status: ${status}`,
+      `Duration: ${Math.round(notification.durationMs / 100) / 10}s`,
+      `Result: ${concise}`,
+      links.trim(),
+      `Retry: ${notification.retryCommand}`,
+    ].filter(Boolean).join("\n");
+    this._saveAssistantHistoryMessage(
+      notification.sessionId,
+      content,
+      `task-notification-${notification.taskId}-${notification.completedAt}`,
+      status !== "succeeded",
+      notification.taskId,
+      `task-run-${notification.completedAt}`,
+    );
+  }
+
   getAutomationManager(): AutomationManager {
     return this.automationManager;
   }
@@ -3676,6 +3739,7 @@ export class AgentOrchestrator {
       waiting: this.concurrentManager.waitingCount,
       scheduler: {
         running: this.taskScheduler.isRunning(),
+        health: this.taskScheduler.getHealthMetrics(),
         processed: schedulerStats.processed,
         failed: schedulerStats.failed,
         dequeued: schedulerStats.dequeued,

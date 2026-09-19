@@ -784,25 +784,11 @@ export async function switchChatSession(sessionId: string) {
 }
 
 export async function newChatSession() {
-  if (getChatState().messages.length === 0) {
-    return
-  }
-
-  disconnectChatInternal({ clearDesiredConnection: false })
-  const nextSessionId = crypto.randomUUID()
-  setActiveSessionId(nextSessionId)
-  writeStoredSessionId(nextSessionId)
-  updateChatStore({
-    messages: [],
-    isTyping: false,
-    recentRunIds: [],
-    hasHydratedActiveSession: true,
-    contextUsage: undefined,
-  })
-
-  if (store.get(gatewayAtom).status === "running") {
-    shouldMaintainConnection = true
-    await connectChat()
+  // Telegram-style conversations are intentionally single-session. A new run
+  // or retry must append to the durable canonical transcript, never create a
+  // second chat that can diverge after a restart.
+  if (activeSessionIdRef !== SINGLE_CHAT_SESSION_ID) {
+    await switchChatSession(SINGLE_CHAT_SESSION_ID)
   }
 }
 

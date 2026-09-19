@@ -72,7 +72,7 @@
   /* ===========================================================
      CHAT
      =========================================================== */
-  --chat-surface: #f7f7f3;
+  --chat-surface: var(--background);
 
   /* --- User's own bubble --- */
   --chat-user-bubble: #eceeea;

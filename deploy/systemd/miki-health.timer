@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Miki health checks every 30 seconds
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+RandomizedDelaySec=5s
+Persistent=true
+Unit=miki-health.service
+
+[Install]
+WantedBy=timers.target

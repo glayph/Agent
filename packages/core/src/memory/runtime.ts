@@ -113,6 +113,32 @@ export function getTKG(): TemporalKnowledgeGraph | null {
   return _tkg;
 }
 
+/** Create a WAL-consistent backup of durable memory. */
+export async function backupMemory(destinationPath: string): Promise<void> {
+  if (!_tkg) throw new Error("memory is not initialized");
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  const db = _tkg as unknown as { db?: { backup?: (target: string) => Promise<void> } };
+  if (typeof db.db?.backup === "function") {
+    await db.db.backup(destinationPath);
+    return;
+  }
+  throw new Error("memory database backup is unavailable");
+}
+
+/** Restore a previously verified SQLite backup and reinitialize the bridge. */
+export function restoreMemory(backupPath: string, dataDir: string): AgentMemoryIntegration {
+  if (!fs.existsSync(backupPath)) throw new Error(`memory backup not found: ${backupPath}`);
+  _daemon?.stop?.();
+  _tkg?.close?.();
+  _daemon = null;
+  _tkg = null;
+  _integration = null;
+  _dbPath = null;
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.copyFileSync(backupPath, path.join(dataDir, "agent-memory.db"));
+  return initMemory(dataDir);
+}
+
 /**
  * Multi-hop retrieval (call → analysis → call loop).
  * Thin wrapper over TKG.multiHopRetrieve when available.

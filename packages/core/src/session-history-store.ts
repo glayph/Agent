@@ -47,6 +47,8 @@ interface MessageRow {
   image_urls: string | null;
   attachments_json: string | null;
   voice_json: string | null;
+  turn_id: string | null;
+  run_id: string | null;
   is_error: number;
 }
 
@@ -196,6 +198,8 @@ export class SqliteSessionHistoryStore {
           image_urls TEXT,
           attachments_json TEXT,
           voice_json TEXT,
+          turn_id TEXT,
+          run_id TEXT,
           PRIMARY KEY (session_id, position),
           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
@@ -212,6 +216,12 @@ export class SqliteSessionHistoryStore {
       }
       if (!columns.some((column) => column.name === "voice_json")) {
         this.db.exec("ALTER TABLE session_messages ADD COLUMN voice_json TEXT");
+      }
+      if (!columns.some((column) => column.name === "turn_id")) {
+        this.db.exec("ALTER TABLE session_messages ADD COLUMN turn_id TEXT");
+      }
+      if (!columns.some((column) => column.name === "run_id")) {
+        this.db.exec("ALTER TABLE session_messages ADD COLUMN run_id TEXT");
       }
       if (!columns.some((column) => column.name === "is_error")) {
         this.db.exec(
@@ -230,7 +240,7 @@ export class SqliteSessionHistoryStore {
       .all() as SessionRow[];
     const messages = this.db
       .prepare(
-        "SELECT session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json, is_error FROM session_messages ORDER BY session_id, position ASC",
+        "SELECT session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json, turn_id, run_id, is_error FROM session_messages ORDER BY session_id, position ASC",
       )
       .all() as MessageRow[];
     const bySession = new Map<string, ChatMessage[]>();
@@ -256,6 +266,8 @@ export class SqliteSessionHistoryStore {
         created_at: row.created_at,
         role: row.role as ChatMessage["role"],
         content: row.content,
+        ...(row.turn_id ? { turn_id: row.turn_id } : {}),
+        ...(row.run_id ? { run_id: row.run_id } : {}),
         ...(imageUrls && imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
         ...(attachments ? { attachments } : {}),
         ...(voice ? { voice } : {}),
@@ -287,6 +299,14 @@ export class SqliteSessionHistoryStore {
     metadata: SessionMetadata,
   ): void {
     const transaction = this.db.transaction(() => {
+      const uniqueMessages: ChatMessage[] = [];
+      const seen = new Set<string>();
+      for (const message of messages) {
+        const id = message.id || `${sessionId}-${uniqueMessages.length}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        uniqueMessages.push({ ...message, id });
+      }
       this.db
         .prepare(
           `INSERT INTO sessions (id, created_at, updated_at, title, pinned)
@@ -308,10 +328,10 @@ export class SqliteSessionHistoryStore {
         .prepare("DELETE FROM session_messages WHERE session_id = ?")
         .run(sessionId);
       const insert = this.db.prepare(
-        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json, is_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json, turn_id, run_id, is_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      messages.forEach((message, position) => {
+      uniqueMessages.forEach((message, position) => {
         const imageUrls = Array.isArray(message.image_urls)
           ? message.image_urls.filter(
               (value): value is string => typeof value === "string",
@@ -327,6 +347,8 @@ export class SqliteSessionHistoryStore {
           imageUrls.length > 0 ? JSON.stringify(imageUrls) : null,
           serializeAttachments(message.attachments),
           serializeVoiceMetadata(message.voice),
+          message.turn_id ?? null,
+          message.run_id ?? null,
           message.is_error ? 1 : 0,
         );
       });

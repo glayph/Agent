@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest"
 import { buildStatusPills } from "./chat-page"
 
 const labels = {
-  activeAgents: (count: number) => `${count} active agents`,
+  activeAgents: (count: number) =>
+    `${count} active agent${count === 1 ? "" : "s"}`,
   paused: "Paused",
   ready: "Ready",
   running: "Running",
@@ -34,7 +35,7 @@ describe("Chat workspace status pills", () => {
       }),
     ).toEqual([
       { label: "Running", tone: "success" },
-      { label: "1 active agents", tone: "info" },
+      { label: "1 active agent", tone: "info" },
     ])
   })
 

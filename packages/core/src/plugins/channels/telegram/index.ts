@@ -7,9 +7,10 @@ import {
   streamAgentResponse,
   splitOutboundMessageForOrchestrator,
 } from "../_shared/agent-response.js";
-import { resolveChannelSessionId } from "../_shared/session-scope.js";
 import { runWithCallContext } from "../../../tools/executor/call-context.js";
 import { VoiceInputRouter } from "../../../voice-routing.js";
+import { UNIVERSAL_SESSION_ID } from "../../../universal-session.js";
+import { TelegramStateStore } from "./state.js";
 
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 const TELEGRAM_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
@@ -40,6 +41,10 @@ export interface TelegramRuntimeConfig {
   streaming: { enabled: boolean; throttleMs: number; minGrowthChars: number };
   placeholder: { enabled: boolean; text: string };
   reconnect: boolean;
+  mode: "polling" | "webhook";
+  webhookUrl: string;
+  webhookSecret: string;
+  rateLimitPerMinute: number;
 }
 
 type TelegramContext = Context;
@@ -180,6 +185,13 @@ async function downloadTelegramAudio(
   return Buffer.concat(chunks, total);
 }
 
+function extractTelegramPhotoFileId(message: unknown): string {
+  const record = recordOrEmpty(message);
+  const photos = Array.isArray(record.photo) ? record.photo : [];
+  const largest = recordOrEmpty(photos[photos.length - 1]);
+  return stringOrEmpty(largest.file_id);
+}
+
 export function resolveTelegramRuntimeConfig(
   config: Record<string, unknown>,
   env: NodeJS.ProcessEnv = process.env,
@@ -187,9 +199,9 @@ export function resolveTelegramRuntimeConfig(
   const channels = recordOrEmpty(config.channels ?? config.channel_list);
   const raw = recordOrEmpty(channels.telegram);
   const settings = recordOrEmpty(raw.settings);
-  const token = stringOrEmpty(
-    env.TELEGRAM_BOT_TOKEN ?? settings.token ?? raw.token,
-  );
+  // Tokens are injected by the secret vault/environment layer. Never accept
+  // a plaintext token from ordinary config or prompt-controlled fields.
+  const token = stringOrEmpty(env.TELEGRAM_BOT_TOKEN);
 
   return {
     enabled:
@@ -246,6 +258,20 @@ export function resolveTelegramRuntimeConfig(
         ) || "Miki is thinking…",
     },
     reconnect: raw.reconnect !== false,
+    mode:
+      stringOrEmpty(settings.mode ?? raw.mode).toLowerCase() === "webhook"
+        ? "webhook"
+        : "polling",
+    webhookUrl: stringOrEmpty(
+      env.TELEGRAM_WEBHOOK_URL ?? settings.webhook_url ?? raw.webhook_url,
+    ),
+    webhookSecret: stringOrEmpty(
+      env.TELEGRAM_WEBHOOK_SECRET,
+    ),
+    rateLimitPerMinute: Math.max(
+      1,
+      Math.min(600, Number(settings.rate_limit_per_minute ?? raw.rate_limit_per_minute ?? 30) || 30),
+    ),
   };
 }
 
@@ -315,6 +341,7 @@ export class TelegramBot {
   private started = false;
   private runtimeConfig: TelegramRuntimeConfig | null = null;
   private readonly voiceRouter: VoiceInputRouter;
+  private state: TelegramStateStore | null = null;
   private launchInProgress = false;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_BASE_MS = 2000;
@@ -341,6 +368,8 @@ export class TelegramBot {
       return;
     }
 
+    this.state = new TelegramStateStore(this.orchestrator.runtimePaths.dataDir);
+
     this.bot = new Telegraf<TelegramContext>(config.token, {
       telegram: {
         apiRoot: config.apiRoot,
@@ -358,6 +387,27 @@ export class TelegramBot {
     this.connect();
   }
 
+  async handleWebhookUpdate(update: unknown): Promise<void> {
+    const config = this.runtimeConfig || resolveTelegramRuntimeConfig(this.orchestrator.config);
+    if (!config.enabled) throw new Error("Telegram channel is disabled");
+    this.runtimeConfig = config;
+    this.state ||= new TelegramStateStore(this.orchestrator.runtimePaths.dataDir);
+    if (!this.bot) {
+      this.bot = new Telegraf<TelegramContext>(config.token, {
+        telegram: {
+          apiRoot: config.apiRoot,
+          ...(config.proxy ? { agent: HttpsProxyAgent(config.proxy) as unknown as HttpAgent } : {}),
+        },
+      });
+      this.setupHandlers();
+    }
+    await this.bot.handleUpdate(update as never);
+  }
+
+  webhookSecret(): string {
+    return this.runtimeConfig?.webhookSecret || resolveTelegramRuntimeConfig(this.orchestrator.config).webhookSecret;
+  }
+
   stop(): void {
     this.stopping = true;
     this.started = false;
@@ -373,10 +423,41 @@ export class TelegramBot {
       }
       this.bot = null;
     }
+    this.state?.close();
+    this.state = null;
   }
 
   private setupHandlers(): void {
     if (!this.bot) return;
+
+    const updateId = (ctx: TelegramContext): string =>
+      toStringId((ctx.update as { update_id?: unknown }).update_id);
+    const senderId = (ctx: TelegramContext): string =>
+      toStringId(ctx.from?.id) || toStringId(ctx.chat?.id) || "unknown";
+    const replyWithRetry = async (ctx: TelegramContext, text: string): Promise<unknown> => {
+      const id = updateId(ctx);
+      const replyTo = toStringId((ctx.message as { message_id?: unknown } | undefined)?.message_id);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const options = replyTo
+            ? ({ reply_parameters: { message_id: Number(replyTo) } } as never)
+            : undefined;
+          const result = await ctx.reply(text, options);
+          this.state?.recordDelivery(id, toStringId(ctx.chat?.id), text, replyTo, attempt, "sent");
+          return result;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+        }
+      }
+      this.state?.recordDelivery(id, toStringId(ctx.chat?.id), text, replyTo, 3, "failed", lastError instanceof Error ? lastError.message : String(lastError));
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    };
+    const claim = (ctx: TelegramContext, config: TelegramRuntimeConfig): boolean => {
+      const id = updateId(ctx);
+      return Boolean(id && this.state?.claimUpdate(id) && this.state.allowRate(senderId(ctx), config.rateLimitPerMinute));
+    };
 
     this.bot.catch((err: unknown) => {
       console.error("Telegram channel polling error:", err);
@@ -397,6 +478,7 @@ export class TelegramBot {
 
       const message = extractTelegramText(ctx.message);
       if (!message) return;
+      if (!claim(ctx, config)) return;
       if (await this.handleAdminCommand(ctx, config, message)) return;
       if (!shouldHandleTelegramMessage(ctx, config)) return;
 
@@ -405,7 +487,7 @@ export class TelegramBot {
           await ctx.sendChatAction("typing");
         }
         const placeholder = config.placeholder.enabled
-          ? await ctx.reply(config.placeholder.text)
+          ? await replyWithRetry(ctx, config.placeholder.text)
           : null;
         await runWithCallContext(
           {
@@ -420,12 +502,7 @@ export class TelegramBot {
               let lastLength = 0;
               await streamAgentResponse(
                 this.orchestrator,
-                resolveChannelSessionId(
-                  this.orchestrator.config,
-                  "telegram",
-                  toStringId(ctx.from?.id),
-                  toStringId(ctx.chat.id),
-                ),
+                UNIVERSAL_SESSION_ID,
                 message,
                 async (delta) => {
                   response += delta;
@@ -442,7 +519,7 @@ export class TelegramBot {
                   try {
                     await ctx.telegram.editMessageText(
                       ctx.chat.id,
-                      placeholder.message_id,
+                      (placeholder as { message_id: number }).message_id,
                       undefined,
                       response.slice(0, TELEGRAM_MESSAGE_LIMIT),
                     );
@@ -457,37 +534,32 @@ export class TelegramBot {
                 try {
                   await ctx.telegram.editMessageText(
                     ctx.chat.id,
-                    placeholder.message_id,
+                    (placeholder as { message_id: number }).message_id,
                     undefined,
                     response.slice(0, TELEGRAM_MESSAGE_LIMIT),
                   );
                 } catch {
-                  await ctx.reply(response);
+                  await replyWithRetry(ctx, response);
                 }
                 for (const part of splitOutboundMessageForOrchestrator(
                   this.orchestrator,
                   response.slice(TELEGRAM_MESSAGE_LIMIT),
                   TELEGRAM_MESSAGE_LIMIT,
                 )) {
-                  if (part) await ctx.reply(part);
+                  if (part) await replyWithRetry(ctx, part);
                 }
               }
             } else {
               response = await collectAgentResponse(
                 this.orchestrator,
-                resolveChannelSessionId(
-                  this.orchestrator.config,
-                  "telegram",
-                  toStringId(ctx.from?.id),
-                  toStringId(ctx.chat.id),
-                ),
+                UNIVERSAL_SESSION_ID,
                 message,
               );
               if (placeholder) {
                 try {
                   await ctx.telegram.editMessageText(
                     ctx.chat.id,
-                    placeholder.message_id,
+                    (placeholder as { message_id: number }).message_id,
                     undefined,
                     response.slice(0, TELEGRAM_MESSAGE_LIMIT),
                   );
@@ -502,13 +574,15 @@ export class TelegramBot {
                 TELEGRAM_MESSAGE_LIMIT,
               );
               for (const part of parts) {
-                if (part) await ctx.reply(part);
+                if (part) await replyWithRetry(ctx, part);
               }
             }
           },
         );
+        this.state?.completeUpdate(updateId(ctx));
       } catch (err: unknown) {
-        await ctx.reply(
+        this.state?.failUpdate(updateId(ctx));
+        await replyWithRetry(ctx,
           `Error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
@@ -517,6 +591,7 @@ export class TelegramBot {
     this.bot.on(["voice", "audio", "document"], async (ctx) => {
       const config = this.runtimeConfig;
       if (!config || !shouldHandleTelegramMessage(ctx, config)) return;
+      if (!claim(ctx, config)) return;
       const reference = extractTelegramAudio(ctx.message);
       if (!reference) return;
       try {
@@ -533,12 +608,7 @@ export class TelegramBot {
           },
           this.orchestrator.modelName,
         );
-        const sessionId = resolveChannelSessionId(
-          this.orchestrator.config,
-          "telegram",
-          toStringId(ctx.from?.id),
-          toStringId(ctx.chat?.id),
-        );
+        const sessionId = UNIVERSAL_SESSION_ID;
         const caption = extractTelegramText(ctx.message);
         const message =
           routed.mode === "local"
@@ -580,12 +650,39 @@ export class TelegramBot {
           response,
           TELEGRAM_MESSAGE_LIMIT,
         )) {
-          if (part) await ctx.reply(part);
+          if (part) await replyWithRetry(ctx, part);
         }
+        this.state?.completeUpdate(updateId(ctx));
       } catch (err: unknown) {
-        await ctx.reply(
+        this.state?.failUpdate(updateId(ctx));
+        await replyWithRetry(ctx,
           `Voice message error: ${err instanceof Error ? err.message : String(err)}`,
         );
+      }
+    });
+
+    this.bot.on("photo", async (ctx) => {
+      const config = this.runtimeConfig;
+      if (!config || !shouldHandleTelegramMessage(ctx, config) || !claim(ctx, config)) return;
+      try {
+        const fileId = extractTelegramPhotoFileId(ctx.message);
+        if (!fileId) return;
+        const link = await ctx.telegram.getFileLink(fileId);
+        const caption = extractTelegramText(ctx.message) || "Please analyze this image.";
+        const response = await collectAgentResponse(
+          this.orchestrator,
+          UNIVERSAL_SESSION_ID,
+          caption,
+          TELEGRAM_MESSAGE_LIMIT * 3,
+          { imageUrls: [String(link)] },
+        );
+        for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, TELEGRAM_MESSAGE_LIMIT)) {
+          if (part) await replyWithRetry(ctx, part);
+        }
+        this.state?.completeUpdate(updateId(ctx));
+      } catch (error) {
+        this.state?.failUpdate(updateId(ctx));
+        await replyWithRetry(ctx, `Image message error: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
   }
@@ -680,6 +777,20 @@ export class TelegramBot {
         this.bot.stop();
       } catch {
         // Ignore "Bot is not running!" errors during restart.
+      }
+
+      if (this.runtimeConfig?.mode === "webhook") {
+        if (!this.runtimeConfig.webhookUrl) {
+          throw new Error("TELEGRAM_WEBHOOK_URL is required in webhook mode");
+        }
+        await this.bot.telegram.setWebhook(this.runtimeConfig.webhookUrl, {
+          ...(this.runtimeConfig.webhookSecret
+            ? { secret_token: this.runtimeConfig.webhookSecret }
+            : {}),
+        });
+        this.reconnectAttempts = 0;
+        console.log("Telegram channel started in webhook mode");
+        return;
       }
 
       const startupTimeoutMs = 15_000;

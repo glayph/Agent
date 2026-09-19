@@ -111,7 +111,7 @@ import {
 import { createMemoryRouter } from "./memory-router.js";
 import { createLinkPreviewRouter } from "./link-preview.js";
 import { createVoiceRouter } from "./voice-router.js";
-import { normalizeChatSessionId } from "./chat-session.js";
+import { SINGLE_CHAT_SESSION_ID } from "./chat-session.js";
 import { supportsAudioModel } from "../llm.js";
 import { providerRegistry } from "../llm/provider/registry.js";
 import {
@@ -1756,10 +1756,10 @@ mikiWss.on("connection", (ws, req) => {
     aliveWs.__alive = true;
   });
 
-  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
-  const sessionId = normalizeChatSessionId(
-    requestUrl.searchParams.get("session_id"),
-  );
+  // All web/channel turns share one durable conversation. The incoming ID is
+  // retained only for protocol compatibility and is never allowed to fork
+  // history across reconnects or retries.
+  const sessionId = SINGLE_CHAT_SESSION_ID;
 
   ws.on("message", async (raw) => {
     const data = _parseJsonMessage(
@@ -2040,6 +2040,8 @@ mikiWss.on("connection", (ws, req) => {
               },
               imageUrls: media,
               messageId: requestId,
+              turnId: requestId,
+              runId,
               ...(requestedModel ? { requestedModel } : {}),
               ...(voiceMetadata ? { voice: voiceMetadata } : {}),
               ...(ephemeralAudio && rawVoice.provider === "cloud"
@@ -2510,7 +2512,8 @@ mikiWss.on("connection", (ws, req) => {
               message_id: assistantMessageId,
               run_id: runId,
               content: fullResponse,
-              kind: providerFailureDetected || streamSawError ? "error" : "normal",
+              kind:
+                providerFailureDetected || streamSawError ? "error" : "normal",
               model_name: resolvedRunModel,
               context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
               ...(finalAttachments.length > 0
@@ -3230,11 +3233,11 @@ async function handleChatRequest(req: Request, res: Response): Promise<void> {
     });
     return;
   }
-  const { session_id, message } = req.body;
-  if (!session_id || !message) {
+  const { session_id: _requestedSessionId, message } = req.body;
+  if (!message) {
     if (!res.headersSent) {
       res.status(422).json({
-        detail: "session_id and message are required",
+        detail: "message is required; canonical_session_id is miki-main-chat",
         requestId: (req as AuthenticatedRequest).requestId,
       });
     }
@@ -3244,7 +3247,7 @@ async function handleChatRequest(req: Request, res: Response): Promise<void> {
     let fullResponse = "";
     await runWithCallOrigin(resolveCallOrigin(req), async () => {
       for await (const chunk of orchestrator.runAgentLoop(
-        session_id,
+        SINGLE_CHAT_SESSION_ID,
         message,
       )) {
         const data = JSON.parse(chunk);

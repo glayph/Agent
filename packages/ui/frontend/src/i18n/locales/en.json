@@ -1,6 +1,7 @@
 {
   "navigation": {
     "drive": "Drive",
+    "file": "File",
     "chat": "Chat",
     "model_group": "Models",
     "models": "Models",
@@ -8,6 +9,7 @@
     "credentials": "Credentials",
     "agent_group": "Agent",
     "hub": "Hub",
+    "search": "Search",
     "skills": "Skills",
     "tools": "Tools",
     "runs": "Runs",
@@ -18,6 +20,7 @@
     "show_more_channels": "More",
     "show_less_channels": "Less",
     "config": "Config",
+    "settings": "Settings",
     "system_index": "System Index",
     "logs": "Logs",
     "health": "Health",
@@ -128,7 +131,8 @@
     },
     "workspace": {
       "agentConsole": "Agent console",
-      "activeAgents": "{{count}} active agents",
+      "activeAgents_one": "{{count}} active agent",
+      "activeAgents_other": "{{count}} active agents",
       "assets": "Assets",
       "attachmentConversation": "Attachment conversation",
       "connection": "Connection",

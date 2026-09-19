@@ -1,11 +1,10 @@
 import {
+  IconActivity,
   IconFolder,
-  IconInfoCircle,
   IconMessageCircle,
   IconPuzzle,
   IconSearch,
   IconSettings,
-  IconTimeline,
 } from "@tabler/icons-react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
@@ -29,23 +28,25 @@ interface NavItem {
   titleKey: string
   url: string
   icon: React.ComponentType<{ className?: string }>
+  kind?: "link" | "plugin"
 }
 
 const primaryNav: NavItem[] = [
   { titleKey: "navigation.chat", url: "/", icon: IconMessageCircle },
-  { titleKey: "navigation.drive", url: "/drive", icon: IconFolder },
-  { titleKey: "navigation.hub", url: "/agent/hub", icon: IconSearch },
-  { titleKey: "navigation.control", url: "/control", icon: IconSettings },
-  { titleKey: "navigation.runs", url: "/agent/runs", icon: IconTimeline },
+  { titleKey: "navigation.file", url: "/drive", icon: IconFolder },
+  { titleKey: "navigation.search", url: "/agent/hub", icon: IconSearch },
+  { titleKey: "navigation.settings", url: "/config", icon: IconSettings },
+  {
+    titleKey: "navigation.plugins",
+    url: "/plugins",
+    icon: IconPuzzle,
+    kind: "plugin",
+  },
+  { titleKey: "navigation.health", url: "/health", icon: IconActivity },
 ]
 
 function isActivePath(pathname: string, url: string): boolean {
   return pathname === url || (url !== "/" && pathname.startsWith(`${url}/`))
-}
-
-function commandShortcutLabel(): string {
-  if (typeof navigator === "undefined") return "Ctrl K"
-  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? "Cmd K" : "Ctrl K"
 }
 
 const WORKSPACE_SIDEBAR_TOGGLE_EVENT = "Miki:toggle-workspace-sidebar"
@@ -56,7 +57,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { isMobile, setOpenMobile } = useSidebar()
   const [pluginSidebarOpen, setPluginSidebarOpen] = React.useState(false)
   const currentPath = routerState.location.pathname
-  const commandShortcut = commandShortcutLabel()
   const isPluginPath = [
     "/plugins",
     "/models",
@@ -72,11 +72,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   ].some((path) => isActivePath(currentPath, path))
 
   const closeMobileSidebar = () => {
-    if (isMobile) setOpenMobile(false)
-  }
-
-  const openCommand = () => {
-    window.dispatchEvent(new Event("Miki:command"))
     if (isMobile) setOpenMobile(false)
   }
 
@@ -127,33 +122,35 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
         <SidebarContent className="px-0 py-3">
           <SidebarMenu className="gap-1">
-            <SidebarMenuItem>
-              <Tooltip delayDuration={250}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setPluginSidebarOpen((open) => !open)}
-                    aria-label={t("navigation.plugins")}
-                    aria-expanded={pluginSidebarOpen}
-                    title={t("navigation.plugins")}
-                    data-active={pluginSidebarOpen || isPluginPath}
-                    className={cn(
-                      "miki-sidebar__nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
-                      (pluginSidebarOpen || isPluginPath) && "active",
-                    )}
-                  >
-                    <IconPuzzle className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {t("navigation.plugins")}
-                </TooltipContent>
-              </Tooltip>
-            </SidebarMenuItem>
             {primaryNav.map((item) => {
               const Icon = item.icon
               const isActive = isActivePath(currentPath, item.url)
               const label = t(item.titleKey)
+              if (item.kind === "plugin") {
+                return (
+                  <SidebarMenuItem key={item.url}>
+                    <Tooltip delayDuration={250}>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setPluginSidebarOpen((open) => !open)}
+                          aria-label={label}
+                          aria-expanded={pluginSidebarOpen}
+                          title={label}
+                          data-active={pluginSidebarOpen || isPluginPath}
+                          className={cn(
+                            "miki-sidebar__nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
+                            (pluginSidebarOpen || isPluginPath) && "active",
+                          )}
+                        >
+                          <Icon className="size-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{label}</TooltipContent>
+                    </Tooltip>
+                  </SidebarMenuItem>
+                )
+              }
               return (
                 <SidebarMenuItem key={item.url}>
                   <Tooltip delayDuration={250}>
@@ -180,51 +177,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenu>
         </SidebarContent>
 
-        <SidebarFooter className="miki-sidebar__footer border-t px-0 py-3">
-          <SidebarMenu className="gap-1">
-            <SidebarMenuItem>
-              <Tooltip delayDuration={250}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={openCommand}
-                    className="miki-sidebar__nav-item mx-auto flex h-9 w-9 items-center justify-center border border-transparent"
-                    aria-label={t("command.open")}
-                    title={t("command.open")}
-                  >
-                    <IconSearch className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {t("command.open")}{" "}
-                  <span className="opacity-60">{commandShortcut}</span>
-                </TooltipContent>
-              </Tooltip>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <Tooltip delayDuration={250}>
-                <TooltipTrigger asChild>
-                  <Link
-                    to="/about"
-                    onClick={closeMobileSidebar}
-                    aria-label={t("navigation.about")}
-                    title={t("navigation.about")}
-                    data-active={isActivePath(currentPath, "/about")}
-                    className={cn(
-                      "miki-sidebar__nav-item mx-auto flex size-9 items-center justify-center border border-transparent",
-                      isActivePath(currentPath, "/about") && "active",
-                    )}
-                  >
-                    <IconInfoCircle className="size-4" />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {t("navigation.about")}
-                </TooltipContent>
-              </Tooltip>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
+        <SidebarFooter className="miki-sidebar__footer border-t px-0 py-3" />
       </Sidebar>
     </>
   )

@@ -20,4 +20,4 @@
  * is the responsibility of the memory subsystem (context-window
  * read/retrieval algorithm), not of sessionId partitioning.
  */
-export const UNIVERSAL_SESSION_ID = "miki-universal";
+export const UNIVERSAL_SESSION_ID = "miki-main-chat";

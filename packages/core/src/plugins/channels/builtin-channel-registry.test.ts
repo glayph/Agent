@@ -56,6 +56,7 @@ describe("built-in channel Plug-in registry", () => {
     const fakeOrchestrator = {} as never;
     const mounted = builtinChannelRegistry.createRouters(fakeOrchestrator);
     expect(mounted.map((item) => item.channel)).toEqual([
+      "telegram",
       "feishu",
       "dingtalk",
       "qq",

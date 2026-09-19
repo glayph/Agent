@@ -115,7 +115,9 @@ export async function handleFileWrite(
   // BUG-08 FIX: overwriting an existing file is destructive (data loss);
   // creating a brand-new file is not. Only gate the overwrite case.
   let approvalHandle: ReturnType<typeof destructiveApprovalGate>["gate"] = null;
-  if (this.fileOps.fileExists(path)) {
+  const explicitDeterministicOverwrite =
+    args["__user_confirmed_deterministic_overwrite"] === true;
+  if (this.fileOps.fileExists(path) && !explicitDeterministicOverwrite) {
     const { gate, response } = destructiveApprovalGate({
       approvalInbox: this.approvalInbox,
       configDir: this.runtimePaths.configDir,
@@ -125,6 +127,10 @@ export async function handleFileWrite(
     });
     if (response) return response;
     approvalHandle = gate;
+  } else if (this.fileOps.fileExists(path) && explicitDeterministicOverwrite) {
+    console.warn(
+      `[destructive-gate] explicit user-requested deterministic overwrite approved for "${path}"`,
+    );
   }
 
   const output = this.fileOps.writeFile(

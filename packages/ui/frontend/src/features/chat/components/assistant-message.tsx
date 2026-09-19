@@ -138,7 +138,9 @@ export const AssistantMessage = memo(function AssistantMessage({
     () => (isError && hasText ? classifyErrorContent(trimmedContent) : null),
     [isError, hasText, trimmedContent],
   )
-  const visibleContent = visibleAssistantContent(trimmedContent)
+  const visibleContent = isActionUpdate
+    ? visibleAssistantContent(trimmedContent)
+    : trimmedContent
   return (
     <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-2 px-1">
       {(hasText || isCollapsedBlock || hasToolCalls) && (

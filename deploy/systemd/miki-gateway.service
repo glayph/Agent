@@ -1,0 +1,37 @@
+[Unit]
+StartLimitIntervalSec=120
+StartLimitBurst=10
+Description=Miki gateway and dashboard
+PartOf=miki.target
+After=network-online.target miki-memory.service miki-llama.service miki-core.service
+Wants=network-online.target miki-memory.service miki-llama.service miki-core.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=@MIKI_ROOT@
+EnvironmentFile=-/etc/miki/miki.env
+Environment=MIKI_GATEWAY_MANAGE_CORE=false
+Environment=PATH=/home/ubuntu/.nvm/versions/node/v22.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=@MIKI_NODE@ @MIKI_ROOT@/packages/gateway/dist/index.js
+Restart=always
+RestartSec=5s
+TimeoutStartSec=90s
+TimeoutStopSec=25s
+KillSignal=SIGTERM
+SuccessExitStatus=0 143
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=@MIKI_ROOT@/config @MIKI_ROOT@/data @MIKI_ROOT@/logs
+MemoryMax=768M
+CPUQuota=150%
+TasksMax=512
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=miki.target
