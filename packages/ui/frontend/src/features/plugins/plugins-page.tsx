@@ -29,6 +29,7 @@ import {
   getPluginManifests,
 } from "@/api/plugins"
 import { PageHeader } from "@/app/layout/page-header"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/shared/ui/badge"
 import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
@@ -118,15 +119,6 @@ function statusLabel(status: PluginRuntimeStatus): string {
   return status.replaceAll("_", " ")
 }
 
-function statusVariant(
-  status: PluginRuntimeStatus,
-): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "functional") return "default"
-  if (status === "partial" || status === "config_only") return "secondary"
-  if (status === "disabled" || status === "unsupported") return "destructive"
-  return "outline"
-}
-
 function actionForManifest(manifest: PluginManifest): {
   label: string
   to: string
@@ -212,117 +204,117 @@ function PluginInspector({
 
   return (
     <Card className="plugin-inspector h-fit lg:sticky lg:top-5">
-      <CardContent className="space-y-5 p-5">
-        <div className="flex items-start gap-3">
-          <span className="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-xl">
+      <CardContent className="space-y-5 p-0">
+        <div className="plugin-inspector__header flex items-start gap-3 p-5 pb-4">
+          <span className="plugin-inspector__icon flex size-11 shrink-0 items-center justify-center rounded-xl">
             {renderPluginIcon(manifest, "size-5")}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-base font-semibold">
-                {manifest.displayName}
-              </h2>
-              <Badge
-                variant={statusVariant(status)}
-                className="shrink-0 capitalize"
-              >
-                {statusLabel(status)}
-              </Badge>
-            </div>
-            <p className="text-muted-foreground mt-1 truncate font-mono text-[11px]">
+            <p className="plugin-inspector__eyebrow mb-1">Selected plugin</p>
+            <h2 className="truncate text-[15px] font-semibold tracking-tight">
+              {manifest.displayName}
+            </h2>
+            <p className="text-muted-foreground mt-1 truncate font-mono text-[10px]">
               {manifest.id}
             </p>
+            <div className="plugin-inspector__status mt-3 inline-flex items-center gap-1.5">
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  status === "functional"
+                    ? "bg-emerald-500"
+                    : status === "partial" || status === "config_only"
+                      ? "bg-amber-500"
+                      : "bg-muted-foreground/60",
+                )}
+                aria-hidden="true"
+              />
+              <span>{statusLabel(status)}</span>
+            </div>
           </div>
         </div>
 
-        <p className="text-muted-foreground text-sm leading-5">
+        <div className="plugin-inspector__body space-y-5 px-5 pb-5">
+          <p className="text-muted-foreground text-[13px] leading-5">
           {manifest.description || "No description provided by this Plugin."}
-        </p>
+          </p>
 
-        <div className="space-y-3">
-          <div>
-            <p className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-[0.16em] uppercase">
-              Capabilities
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {capabilities.length > 0 ? (
-                capabilities.map((capability) => (
-                  <Badge
-                    key={capability}
-                    variant="secondary"
-                    className="text-[11px]"
-                  >
-                    {capability.replaceAll("_", " ")}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-muted-foreground text-xs">
-                  Not declared
-                </span>
+          <div className="space-y-4">
+            <div>
+              <p className="plugin-inspector__label mb-2">Capabilities</p>
+              <div className="flex flex-wrap gap-1.5">
+                {capabilities.length > 0 ? (
+                  capabilities.map((capability) => (
+                    <Badge
+                      key={capability}
+                      variant="secondary"
+                      className="plugin-inspector__chip text-[11px]"
+                    >
+                      {capability.replaceAll("_", " ")}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-muted-foreground text-xs">Not declared</span>
+                )}
+              </div>
+            </div>
+
+            {permissions.length > 0 && (
+              <div>
+                <p className="plugin-inspector__label mb-2">Permissions</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {permissions.map((permission) => (
+                    <Badge
+                      key={permission}
+                      variant="outline"
+                      className="plugin-inspector__chip text-[11px]"
+                    >
+                      {permission}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="plugin-inspector__meta grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-4 text-xs">
+              <span>Version</span>
+              <span className="text-foreground text-right">v{manifest.version}</span>
+              <span>Mode</span>
+              <span className="text-foreground text-right">
+                {isCoreOwned(manifest) ? "Core-owned" : "Installable"}
+              </span>
+              {requirements.length > 0 && (
+                <>
+                  <span>Config</span>
+                  <span className="text-foreground text-right">
+                    {requirements.length} field
+                    {requirements.length === 1 ? "" : "s"}
+                  </span>
+                </>
               )}
             </div>
           </div>
 
-          {permissions.length > 0 && (
-            <div>
-              <p className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-[0.16em] uppercase">
-                Permissions
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {permissions.map((permission) => (
-                  <Badge
-                    key={permission}
-                    variant="outline"
-                    className="text-[11px]"
-                  >
-                    {permission}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+          {health?.message && (
+            <p
+              className={cn(
+                "plugin-inspector__health border-l-2 pl-3 text-xs leading-5",
+                health.ok ? "text-muted-foreground" : "text-destructive",
+              )}
+            >
+              {health.message}
+            </p>
           )}
 
-          <div className="text-muted-foreground grid grid-cols-2 gap-2 text-xs">
-            <span>Version</span>
-            <span className="text-foreground text-right">
-              v{manifest.version}
-            </span>
-            <span>Mode</span>
-            <span className="text-foreground text-right">
-              {isCoreOwned(manifest) ? "Core-owned" : "Installable"}
-            </span>
-            {requirements.length > 0 && (
-              <>
-                <span>Config</span>
-                <span className="text-foreground text-right">
-                  {requirements.length} field
-                  {requirements.length === 1 ? "" : "s"}
-                </span>
-              </>
-            )}
-          </div>
+          {action && (
+            <Link
+              to={action.to}
+              className="plugin-inspector__action bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-9 w-full items-center justify-center rounded-md text-xs font-semibold transition-colors"
+            >
+              {action.label}
+            </Link>
+          )}
         </div>
-
-        {health?.message && (
-          <p
-            className={
-              health.ok
-                ? "text-muted-foreground text-xs"
-                : "text-destructive text-xs"
-            }
-          >
-            {health.message}
-          </p>
-        )}
-
-        {action && (
-          <Link
-            to={action.to}
-            className="border-border/70 text-primary hover:bg-primary/5 inline-flex h-9 w-full items-center justify-center rounded-md border text-xs font-medium transition-colors"
-          >
-            {action.label}
-          </Link>
-        )}
       </CardContent>
     </Card>
   )
