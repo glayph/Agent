@@ -90,6 +90,34 @@ function copyRequired(source, destination, label) {
   if (!copyRecursive(source, destination)) fail(`Missing ${label}: ${source}`);
 }
 
+function copyFiltered(source, destination, predicate, label) {
+  if (!fs.existsSync(source)) fail(`Missing ${label}: ${source}`);
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) {
+    return copyFiltered(fs.realpathSync(source), destination, predicate, label);
+  }
+  if (stat.isDirectory()) {
+    fs.mkdirSync(destination, { recursive: true });
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+      copyFiltered(
+        path.join(source, entry.name),
+        path.join(destination, entry.name),
+        predicate,
+        label,
+      );
+    }
+    return true;
+  }
+  if (!predicate(source)) return true;
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
+  return true;
+}
+
+function writePackageManifest(destination, manifest) {
+  writeText(destination, JSON.stringify(manifest, null, 2));
+}
+
 function writeText(file, text, mode = 0o644) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, text.endsWith("\n") ? text : `${text}\n`, {
@@ -228,10 +256,15 @@ function stageProductionNodeModules() {
   const bundleNames = [];
   for (const [name, { source, manifest }] of packages) {
     const preferredRoot = path.join(root, "node_modules", ...name.split("/"));
+    const stagedLocalRoot = name.startsWith("@miki/")
+      ? path.join(runtimeDir, "packages", name.slice("@miki/".length))
+      : undefined;
     const materializedSource =
-      !name.startsWith("@miki/") && fs.existsSync(preferredRoot)
-        ? preferredRoot
-        : source;
+      stagedLocalRoot && fs.existsSync(stagedLocalRoot)
+        ? stagedLocalRoot
+        : !name.startsWith("@miki/") && fs.existsSync(preferredRoot)
+          ? preferredRoot
+          : source;
     const destination = packageInstallPath(name);
     copyRequired(materializedSource, destination, `package ${name}`);
     bundleNames.push(name);
@@ -252,12 +285,22 @@ function stageRuntimeTree() {
   for (const name of packageNames) {
     const source = path.join(root, "packages", name);
     const destination = path.join(runtimeDir, "packages", name);
+    const manifest = readPackage(path.join(source));
     if (name === "memory") {
-      copyRequired(
+      // Memory is plain CommonJS today, so its runtime build is a source-free
+      // dist tree containing only executable JS and no test fixtures.
+      copyFiltered(
         path.join(source, "src"),
-        path.join(destination, "src"),
-        "memory source",
+        path.join(destination, "dist"),
+        (file) =>
+          file.endsWith(".js") && !file.includes(`${path.sep}test${path.sep}`),
+        "memory runtime JS",
       );
+      manifest.main = "dist/index.js";
+      manifest.exports = {
+        ".": "./dist/index.js",
+        "./*": "./dist/*.js",
+      };
     } else {
       copyRequired(
         path.join(source, "dist"),
@@ -265,17 +308,16 @@ function stageRuntimeTree() {
         `${name} dist`,
       );
     }
-    copyRequired(
-      path.join(source, "package.json"),
-      path.join(destination, "package.json"),
-      `${name} package.json`,
-    );
-    if (name === "skills")
-      copyRequired(
+    if (name === "skills") {
+      // Markdown and JSON skill catalogs are runtime data, not source code.
+      copyFiltered(
         path.join(source, "src"),
-        path.join(destination, "src"),
-        "skills catalog",
+        path.join(destination, "dist", "catalog"),
+        (file) => [".md", ".json"].includes(path.extname(file).toLowerCase()),
+        "skills runtime catalog",
       );
+    }
+    writePackageManifest(path.join(destination, "package.json"), manifest);
   }
   copyRequired(
     path.join(root, "packages", "ui", "frontend", "dist"),
@@ -331,7 +373,7 @@ const packageRoots = new Map([
   ["@miki/config", "packages/config/dist"],
   ["@miki/installer", "packages/installer/dist"],
   ["@miki/skills", "packages/skills/dist"],
-  ["@miki/memory", "packages/memory/src"],
+  ["@miki/memory", "packages/memory/dist"],
   ["@miki/core", "packages/core/dist"],
   ["@miki/gateway", "packages/gateway/dist"],
 ]);
@@ -339,7 +381,7 @@ const packageEntrypoints = new Map([
   ["@miki/config", "packages/config/dist/index.js"],
   ["@miki/installer", "packages/installer/dist/index.js"],
   ["@miki/skills", "packages/skills/dist/index.js"],
-  ["@miki/memory", "packages/memory/src/index.js"],
+  ["@miki/memory", "packages/memory/dist/index.js"],
   ["@miki/core", "packages/core/dist/api/index.js"],
   ["@miki/gateway", "packages/gateway/dist/index.js"],
 ]);
@@ -399,7 +441,9 @@ function stageNativeAndModels() {
     fs.existsSync(candidate),
   );
   if (!llamaSource) {
-    fail(`Missing ${platformKey} ${llamaExecutableName}: ${llamaCandidates.join(", ")}`);
+    fail(
+      `Missing ${platformKey} ${llamaExecutableName}: ${llamaCandidates.join(", ")}`,
+    );
   }
   const llamaDestination = path.join(runtimeDir, "native", llamaExecutableName);
   copyRequired(llamaSource, llamaDestination, `${platformKey} llama-server`);
@@ -448,6 +492,46 @@ function assertAnswerModelNotBundled() {
   scan(runtimeDir);
   if (bundledGgufs.length > 0) {
     fail(`Answer-model GGUF must not be bundled: ${bundledGgufs.join(", ")}`);
+  }
+}
+
+function assertCompiledRuntimeOnly() {
+  const localPackageNames = [
+    "config",
+    "installer",
+    "skills",
+    "memory",
+    "core",
+    "gateway",
+  ];
+  const sourceTrees = localPackageNames
+    .map((name) => path.join(runtimeDir, "packages", name, "src"))
+    .filter((directory) => fs.existsSync(directory));
+  if (sourceTrees.length > 0) {
+    fail(`Source package trees must not be bundled: ${sourceTrees.join(", ")}`);
+  }
+
+  const sourceFiles = [];
+  function scan(directory) {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) scan(target);
+      else if (
+        /\.(c|m)?tsx?$/.test(entry.name) &&
+        !entry.name.endsWith(".d.ts") &&
+        !entry.name.endsWith(".d.mts") &&
+        !entry.name.endsWith(".d.cts")
+      ) {
+        sourceFiles.push(target);
+      }
+    }
+  }
+  scan(path.join(runtimeDir, "packages"));
+  if (sourceFiles.length > 0) {
+    fail(
+      `TypeScript source files must not be bundled: ${sourceFiles.join(", ")}`,
+    );
   }
 }
 
@@ -529,7 +613,9 @@ function stageNotices() {
     fs.existsSync(candidate),
   );
   if (!llamaLicense) {
-    fail(`Missing llama.cpp/GGML license: ${llamaLicenseCandidates.join(", ")}`);
+    fail(
+      `Missing llama.cpp/GGML license: ${llamaLicenseCandidates.join(", ")}`,
+    );
   }
   copyRequired(
     llamaLicense,
@@ -816,6 +902,7 @@ function main() {
   log(`Building ${packageName}@${version} into ${releaseDir}`);
   run(npmCommand, ["run", "build:all"], { cwd: root, shell: isWindows });
   stageRuntimeTree();
+  assertCompiledRuntimeOnly();
   writeRuntimeLoader();
   stageNativeAndModels();
   assertAnswerModelNotBundled();

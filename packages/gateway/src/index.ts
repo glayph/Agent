@@ -299,7 +299,9 @@ function startCore(): child_process.ChildProcess {
 
 function attemptCoreRestart(): void {
   if (!config.manageCore) {
-    log.warn("Core is externally supervised; leaving recovery to its service manager.");
+    log.warn(
+      "Core is externally supervised; leaving recovery to its service manager.",
+    );
     return;
   }
   if (shutdownInProgress || coreRestartTimer) {
@@ -405,7 +407,9 @@ function startCoreHealthMonitor(): void {
         // since simply spawning a new core alongside the stuck one would
         // leave two processes fighting over the same port/state.
         if (!config.manageCore) {
-          log.warn("Core health failure observed; external supervisor will recover core.");
+          log.warn(
+            "Core health failure observed; external supervisor will recover core.",
+          );
         } else if (!coreProcess || coreProcess.killed) {
           attemptCoreRestart();
         } else {
@@ -903,7 +907,9 @@ async function main(): Promise<void> {
   if (config.manageCore) {
     coreProcess = startCore();
   } else {
-    log.info("Core process ownership disabled; waiting for external supervisor");
+    log.info(
+      "Core process ownership disabled; waiting for external supervisor",
+    );
   }
 
   try {

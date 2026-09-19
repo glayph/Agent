@@ -117,7 +117,9 @@ export function getTKG(): TemporalKnowledgeGraph | null {
 export async function backupMemory(destinationPath: string): Promise<void> {
   if (!_tkg) throw new Error("memory is not initialized");
   fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-  const db = _tkg as unknown as { db?: { backup?: (target: string) => Promise<void> } };
+  const db = _tkg as unknown as {
+    db?: { backup?: (target: string) => Promise<void> };
+  };
   if (typeof db.db?.backup === "function") {
     await db.db.backup(destinationPath);
     return;
@@ -126,8 +128,12 @@ export async function backupMemory(destinationPath: string): Promise<void> {
 }
 
 /** Restore a previously verified SQLite backup and reinitialize the bridge. */
-export function restoreMemory(backupPath: string, dataDir: string): AgentMemoryIntegration {
-  if (!fs.existsSync(backupPath)) throw new Error(`memory backup not found: ${backupPath}`);
+export function restoreMemory(
+  backupPath: string,
+  dataDir: string,
+): AgentMemoryIntegration {
+  if (!fs.existsSync(backupPath))
+    throw new Error(`memory backup not found: ${backupPath}`);
   _daemon?.stop?.();
   _tkg?.close?.();
   _daemon = null;

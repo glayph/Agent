@@ -1749,7 +1749,7 @@ function _mikiContextUsage(
   };
 }
 
-mikiWss.on("connection", (ws, req) => {
+mikiWss.on("connection", (ws, _req) => {
   const aliveWs = ws as AliveWebSocket;
   aliveWs.__alive = true;
   ws.on("pong", () => {
@@ -3233,7 +3233,7 @@ async function handleChatRequest(req: Request, res: Response): Promise<void> {
     });
     return;
   }
-  const { session_id: _requestedSessionId, message } = req.body;
+  const { message } = req.body;
   if (!message) {
     if (!res.headersSent) {
       res.status(422).json({

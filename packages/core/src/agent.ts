@@ -37,7 +37,12 @@ import {
 import Database from "better-sqlite3";
 import { TaskQueue, AgentTask } from "./task-queue.js";
 import { ConcurrentTaskManager } from "./concurrent-manager.js";
-import { TaskScheduler, type ScheduleOptions, type ScheduledTask, type TaskCompletionNotification } from "./scheduler.js";
+import {
+  TaskScheduler,
+  type ScheduleOptions,
+  type ScheduledTask,
+  type TaskCompletionNotification,
+} from "./scheduler.js";
 import {
   createAutonomyController,
   parseAutonomyConfig,
@@ -1118,14 +1123,21 @@ export class AgentOrchestrator {
           this.concurrencyConfig.recoveryStaleAfterMs ?? 5 * 60_000,
         execTimeoutMinutes,
         timezone:
-          typeof cronPolicy.timezone === "string" ? cronPolicy.timezone : undefined,
+          typeof cronPolicy.timezone === "string"
+            ? cronPolicy.timezone
+            : undefined,
         missedRunPolicy:
-          cronPolicy.missed_run_policy === "skip" || cronPolicy.missed_run_policy === "catch_up"
+          cronPolicy.missed_run_policy === "skip" ||
+          cronPolicy.missed_run_policy === "catch_up"
             ? cronPolicy.missed_run_policy
             : "run_once",
         quietHours:
           cronPolicy.quiet_hours && typeof cronPolicy.quiet_hours === "object"
-            ? (cronPolicy.quiet_hours as { start: string; end: string; timezone?: string })
+            ? (cronPolicy.quiet_hours as {
+                start: string;
+                end: string;
+                timezone?: string;
+              })
             : undefined,
         perTaskConcurrencyLimit:
           typeof cronPolicy.per_task_concurrency_limit === "number"
@@ -3701,13 +3713,19 @@ export class AgentOrchestrator {
     return this.taskScheduler.getStats();
   }
 
-  private _notifyTaskCompletion(notification: TaskCompletionNotification): void {
+  private _notifyTaskCompletion(
+    notification: TaskCompletionNotification,
+  ): void {
     const status = notification.status === "succeeded" ? "succeeded" : "failed";
-    const result = notification.resultSummary || notification.errorSummary || "No result summary was returned.";
+    const result =
+      notification.resultSummary ||
+      notification.errorSummary ||
+      "No result summary was returned.";
     const concise = result.length > 600 ? `${result.slice(0, 597)}...` : result;
-    const links = notification.artifactRefs.length > 0
-      ? `\nArtifacts: ${notification.artifactRefs.map((ref) => `[${ref}](${ref})`).join(", ")}`
-      : "";
+    const links =
+      notification.artifactRefs.length > 0
+        ? `\nArtifacts: ${notification.artifactRefs.map((ref) => `[${ref}](${ref})`).join(", ")}`
+        : "";
     const content = [
       `Background task completed: ${notification.title}`,
       `Status: ${status}`,
@@ -3715,7 +3733,9 @@ export class AgentOrchestrator {
       `Result: ${concise}`,
       links.trim(),
       `Retry: ${notification.retryCommand}`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     this._saveAssistantHistoryMessage(
       notification.sessionId,
       content,

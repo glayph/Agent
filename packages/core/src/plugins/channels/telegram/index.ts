@@ -265,12 +265,15 @@ export function resolveTelegramRuntimeConfig(
     webhookUrl: stringOrEmpty(
       env.TELEGRAM_WEBHOOK_URL ?? settings.webhook_url ?? raw.webhook_url,
     ),
-    webhookSecret: stringOrEmpty(
-      env.TELEGRAM_WEBHOOK_SECRET,
-    ),
+    webhookSecret: stringOrEmpty(env.TELEGRAM_WEBHOOK_SECRET),
     rateLimitPerMinute: Math.max(
       1,
-      Math.min(600, Number(settings.rate_limit_per_minute ?? raw.rate_limit_per_minute ?? 30) || 30),
+      Math.min(
+        600,
+        Number(
+          settings.rate_limit_per_minute ?? raw.rate_limit_per_minute ?? 30,
+        ) || 30,
+      ),
     ),
   };
 }
@@ -388,15 +391,21 @@ export class TelegramBot {
   }
 
   async handleWebhookUpdate(update: unknown): Promise<void> {
-    const config = this.runtimeConfig || resolveTelegramRuntimeConfig(this.orchestrator.config);
+    const config =
+      this.runtimeConfig ||
+      resolveTelegramRuntimeConfig(this.orchestrator.config);
     if (!config.enabled) throw new Error("Telegram channel is disabled");
     this.runtimeConfig = config;
-    this.state ||= new TelegramStateStore(this.orchestrator.runtimePaths.dataDir);
+    this.state ||= new TelegramStateStore(
+      this.orchestrator.runtimePaths.dataDir,
+    );
     if (!this.bot) {
       this.bot = new Telegraf<TelegramContext>(config.token, {
         telegram: {
           apiRoot: config.apiRoot,
-          ...(config.proxy ? { agent: HttpsProxyAgent(config.proxy) as unknown as HttpAgent } : {}),
+          ...(config.proxy
+            ? { agent: HttpsProxyAgent(config.proxy) as unknown as HttpAgent }
+            : {}),
         },
       });
       this.setupHandlers();
@@ -405,7 +414,10 @@ export class TelegramBot {
   }
 
   webhookSecret(): string {
-    return this.runtimeConfig?.webhookSecret || resolveTelegramRuntimeConfig(this.orchestrator.config).webhookSecret;
+    return (
+      this.runtimeConfig?.webhookSecret ||
+      resolveTelegramRuntimeConfig(this.orchestrator.config).webhookSecret
+    );
   }
 
   stop(): void {
@@ -434,9 +446,14 @@ export class TelegramBot {
       toStringId((ctx.update as { update_id?: unknown }).update_id);
     const senderId = (ctx: TelegramContext): string =>
       toStringId(ctx.from?.id) || toStringId(ctx.chat?.id) || "unknown";
-    const replyWithRetry = async (ctx: TelegramContext, text: string): Promise<unknown> => {
+    const replyWithRetry = async (
+      ctx: TelegramContext,
+      text: string,
+    ): Promise<unknown> => {
       const id = updateId(ctx);
-      const replyTo = toStringId((ctx.message as { message_id?: unknown } | undefined)?.message_id);
+      const replyTo = toStringId(
+        (ctx.message as { message_id?: unknown } | undefined)?.message_id,
+      );
       let lastError: unknown;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -444,19 +461,44 @@ export class TelegramBot {
             ? ({ reply_parameters: { message_id: Number(replyTo) } } as never)
             : undefined;
           const result = await ctx.reply(text, options);
-          this.state?.recordDelivery(id, toStringId(ctx.chat?.id), text, replyTo, attempt, "sent");
+          this.state?.recordDelivery(
+            id,
+            toStringId(ctx.chat?.id),
+            text,
+            replyTo,
+            attempt,
+            "sent",
+          );
           return result;
         } catch (error) {
           lastError = error;
-          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+          if (attempt < 3)
+            await new Promise((resolve) => setTimeout(resolve, attempt * 500));
         }
       }
-      this.state?.recordDelivery(id, toStringId(ctx.chat?.id), text, replyTo, 3, "failed", lastError instanceof Error ? lastError.message : String(lastError));
-      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+      this.state?.recordDelivery(
+        id,
+        toStringId(ctx.chat?.id),
+        text,
+        replyTo,
+        3,
+        "failed",
+        lastError instanceof Error ? lastError.message : String(lastError),
+      );
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(String(lastError));
     };
-    const claim = (ctx: TelegramContext, config: TelegramRuntimeConfig): boolean => {
+    const claim = (
+      ctx: TelegramContext,
+      config: TelegramRuntimeConfig,
+    ): boolean => {
       const id = updateId(ctx);
-      return Boolean(id && this.state?.claimUpdate(id) && this.state.allowRate(senderId(ctx), config.rateLimitPerMinute));
+      return Boolean(
+        id &&
+        this.state?.claimUpdate(id) &&
+        this.state.allowRate(senderId(ctx), config.rateLimitPerMinute),
+      );
     };
 
     this.bot.catch((err: unknown) => {
@@ -582,7 +624,8 @@ export class TelegramBot {
         this.state?.completeUpdate(updateId(ctx));
       } catch (err: unknown) {
         this.state?.failUpdate(updateId(ctx));
-        await replyWithRetry(ctx,
+        await replyWithRetry(
+          ctx,
           `Error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
@@ -655,7 +698,8 @@ export class TelegramBot {
         this.state?.completeUpdate(updateId(ctx));
       } catch (err: unknown) {
         this.state?.failUpdate(updateId(ctx));
-        await replyWithRetry(ctx,
+        await replyWithRetry(
+          ctx,
           `Voice message error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
@@ -663,12 +707,18 @@ export class TelegramBot {
 
     this.bot.on("photo", async (ctx) => {
       const config = this.runtimeConfig;
-      if (!config || !shouldHandleTelegramMessage(ctx, config) || !claim(ctx, config)) return;
+      if (
+        !config ||
+        !shouldHandleTelegramMessage(ctx, config) ||
+        !claim(ctx, config)
+      )
+        return;
       try {
         const fileId = extractTelegramPhotoFileId(ctx.message);
         if (!fileId) return;
         const link = await ctx.telegram.getFileLink(fileId);
-        const caption = extractTelegramText(ctx.message) || "Please analyze this image.";
+        const caption =
+          extractTelegramText(ctx.message) || "Please analyze this image.";
         const response = await collectAgentResponse(
           this.orchestrator,
           UNIVERSAL_SESSION_ID,
@@ -676,13 +726,20 @@ export class TelegramBot {
           TELEGRAM_MESSAGE_LIMIT * 3,
           { imageUrls: [String(link)] },
         );
-        for (const part of splitOutboundMessageForOrchestrator(this.orchestrator, response, TELEGRAM_MESSAGE_LIMIT)) {
+        for (const part of splitOutboundMessageForOrchestrator(
+          this.orchestrator,
+          response,
+          TELEGRAM_MESSAGE_LIMIT,
+        )) {
           if (part) await replyWithRetry(ctx, part);
         }
         this.state?.completeUpdate(updateId(ctx));
       } catch (error) {
         this.state?.failUpdate(updateId(ctx));
-        await replyWithRetry(ctx, `Image message error: ${error instanceof Error ? error.message : String(error)}`);
+        await replyWithRetry(
+          ctx,
+          `Image message error: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     });
   }

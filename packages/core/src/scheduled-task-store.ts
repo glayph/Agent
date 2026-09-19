@@ -68,7 +68,13 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       ["artifact_refs", "TEXT"],
       ["notification_sent_at", "INTEGER"],
     ] as const) {
-      try { this.db.exec(`ALTER TABLE agent_scheduled_tasks ADD COLUMN ${column[0]} ${column[1]}`); } catch { /* already migrated */ }
+      try {
+        this.db.exec(
+          `ALTER TABLE agent_scheduled_tasks ADD COLUMN ${column[0]} ${column[1]}`,
+        );
+      } catch {
+        /* already migrated */
+      }
     }
   }
 

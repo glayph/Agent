@@ -147,16 +147,24 @@ export function parseCronToNextRun(
       field.split(",").some((part) => {
         if (part === "*") return true;
         const step = part.match(/^\*\/(\d+)$/);
-        if (step) return Number(step[1]) > 0 && (value - min) % Number(step[1]) === 0;
+        if (step)
+          return Number(step[1]) > 0 && (value - min) % Number(step[1]) === 0;
         const range = part.match(/^(\d+)-(\d+)(?:\/(\d+))?$/);
         if (range) {
           const start = Number(range[1]);
           const end = Number(range[2]);
           const increment = Number(range[3] || 1);
-          return value >= start && value <= end && (value - start) % increment === 0;
+          return (
+            value >= start && value <= end && (value - start) % increment === 0
+          );
         }
         const numeric = Number(part);
-        return Number.isInteger(numeric) && numeric >= min && numeric <= max && numeric === value;
+        return (
+          Number.isInteger(numeric) &&
+          numeric >= min &&
+          numeric <= max &&
+          numeric === value
+        );
       });
     const formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
@@ -167,15 +175,38 @@ export function parseCronToNextRun(
       weekday: "short",
       hourCycle: "h23",
     });
-    const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-    for (let candidate = Math.floor(time / 60_000) * 60_000 + 60_000; candidate <= time + 366 * 24 * 60 * 60_000; candidate += 60_000) {
-      const parts = Object.fromEntries(formatter.formatToParts(candidate).map((part) => [part.type, part.value]));
+    const weekdayMap: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    for (
+      let candidate = Math.floor(time / 60_000) * 60_000 + 60_000;
+      candidate <= time + 366 * 24 * 60 * 60_000;
+      candidate += 60_000
+    ) {
+      const parts = Object.fromEntries(
+        formatter
+          .formatToParts(candidate)
+          .map((part) => [part.type, part.value]),
+      );
       const minute = Number(parts.minute);
       const hour = Number(parts.hour);
       const day = Number(parts.day);
       const month = Number(parts.month);
       const weekday = weekdayMap[parts.weekday];
-      if (matches(fields[0], minute, 0, 59) && matches(fields[1], hour, 0, 23) && matches(fields[2], day, 1, 31) && matches(fields[3], month, 1, 12) && matches(fields[4], weekday, 0, 6)) return candidate;
+      if (
+        matches(fields[0], minute, 0, 59) &&
+        matches(fields[1], hour, 0, 23) &&
+        matches(fields[2], day, 1, 31) &&
+        matches(fields[3], month, 1, 12) &&
+        matches(fields[4], weekday, 0, 6)
+      )
+        return candidate;
     }
   }
 
@@ -200,7 +231,9 @@ export class TaskScheduler {
   private _lastHeartbeatAt = 0;
   private _missedRuns = 0;
   private _activeScheduledRuns = new Map<string, number>();
-  private _completionNotifier?: (notification: TaskCompletionNotification) => void | Promise<void>;
+  private _completionNotifier?: (
+    notification: TaskCompletionNotification,
+  ) => void | Promise<void>;
   private _stats = {
     processed: 0,
     failed: 0,
@@ -220,7 +253,9 @@ export class TaskScheduler {
       task?: AgentTask,
     ) => AsyncGenerator<string, void, unknown>,
     private _store?: ScheduledTaskStore,
-    completionNotifier?: (notification: TaskCompletionNotification) => void | Promise<void>,
+    completionNotifier?: (
+      notification: TaskCompletionNotification,
+    ) => void | Promise<void>,
   ) {
     this._taskQueue =
       taskQueue || new TaskQueue({ maxSize: config.taskQueueSize ?? 50 });
@@ -284,9 +319,10 @@ export class TaskScheduler {
     const now = Date.now();
     const normalizedCron = normalizeCronExpression(cronExpression);
     const timezone = options.timezone ?? this.config.timezone ?? "UTC";
-    const intervalMs = options.intervalMs !== undefined
-      ? Math.max(1_000, Math.floor(options.intervalMs))
-      : undefined;
+    const intervalMs =
+      options.intervalMs !== undefined
+        ? Math.max(1_000, Math.floor(options.intervalMs))
+        : undefined;
     const nextCronRun = normalizedCron
       ? parseCronToNextRun(normalizedCron, Date.now(), timezone)
       : null;
@@ -304,10 +340,18 @@ export class TaskScheduler {
       cronExpression: normalizedCron,
       intervalMs,
       timezone,
-      missedRunPolicy: options.missedRunPolicy ?? this.config.missedRunPolicy ?? "run_once",
-      timeoutMs: options.timeoutMs ?? (this.config.execTimeoutMinutes ? this.config.execTimeoutMinutes * 60_000 : undefined),
+      missedRunPolicy:
+        options.missedRunPolicy ?? this.config.missedRunPolicy ?? "run_once",
+      timeoutMs:
+        options.timeoutMs ??
+        (this.config.execTimeoutMinutes
+          ? this.config.execTimeoutMinutes * 60_000
+          : undefined),
       quietHours: options.quietHours ?? this.config.quietHours,
-      concurrencyLimit: Math.max(1, options.concurrencyLimit ?? this.config.perTaskConcurrencyLimit ?? 1),
+      concurrencyLimit: Math.max(
+        1,
+        options.concurrencyLimit ?? this.config.perTaskConcurrencyLimit ?? 1,
+      ),
       executionToken: `run_${now}_${Math.random().toString(36).slice(2, 10)}`,
       title: options.title ?? message.split("\n", 1)[0].trim().slice(0, 120),
       artifactRefs: [...(options.artifactRefs ?? [])],
@@ -395,7 +439,11 @@ export class TaskScheduler {
       if (this._concurrentManager.isAtCapacity()) break;
       if (scheduled.status !== "pending") continue;
       if (!scheduled.runAt || scheduled.runAt > now) continue;
-      if ((this._activeScheduledRuns.get(id) ?? 0) >= (scheduled.concurrencyLimit ?? 1)) continue;
+      if (
+        (this._activeScheduledRuns.get(id) ?? 0) >=
+        (scheduled.concurrencyLimit ?? 1)
+      )
+        continue;
       if (this._isQuietHours(scheduled, now)) {
         scheduled.runAt = now + 60_000;
         scheduled.lastError = "Deferred by quiet hours";
@@ -407,7 +455,10 @@ export class TaskScheduler {
       scheduled.status = "running";
       scheduled.lastRunAt = now;
       scheduled.updatedAt = now;
-      this._activeScheduledRuns.set(id, (this._activeScheduledRuns.get(id) ?? 0) + 1);
+      this._activeScheduledRuns.set(
+        id,
+        (this._activeScheduledRuns.get(id) ?? 0) + 1,
+      );
       this._store?.upsertTask(scheduled);
       this._runScheduledTask(id, scheduled);
     }
@@ -425,7 +476,8 @@ export class TaskScheduler {
     id: string,
     scheduled: ScheduledTask,
   ): Promise<void> {
-    const timeoutMs = scheduled.timeoutMs ??
+    const timeoutMs =
+      scheduled.timeoutMs ??
       (this.config.execTimeoutMinutes && this.config.execTimeoutMinutes > 0
         ? this.config.execTimeoutMinutes * 60_000
         : undefined);
@@ -453,9 +505,9 @@ export class TaskScheduler {
     // bounds it unconditionally, regardless of whether/when the executor
     // yields.
     const consume = (async () => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const chunk of iterator) {
-        if (typeof chunk === "string" && chunk.trim()) resultSummary = chunk.trim().slice(-1200);
+        if (typeof chunk === "string" && chunk.trim())
+          resultSummary = chunk.trim().slice(-1200);
         if (timedOut) break;
       }
     })();
@@ -525,13 +577,23 @@ export class TaskScheduler {
     }
   }
 
-  private _markScheduledSuccess(id: string, scheduled: ScheduledTask, resultSummary = ""): void {
+  private _markScheduledSuccess(
+    id: string,
+    scheduled: ScheduledTask,
+    resultSummary = "",
+  ): void {
     const now = Date.now();
     scheduled.status = "completed";
     scheduled.lastError = null;
     scheduled.resultSummary = resultSummary || undefined;
     scheduled.updatedAt = now;
-    this._emitCompletion(scheduled, "succeeded", resultSummary || undefined, undefined, now);
+    this._emitCompletion(
+      scheduled,
+      "succeeded",
+      resultSummary || undefined,
+      undefined,
+      now,
+    );
 
     if (scheduled.cronExpression || scheduled.intervalMs) {
       const nextRun = this._nextRunAfter(scheduled, now);
@@ -575,7 +637,13 @@ export class TaskScheduler {
     scheduled.status = "dead_letter";
     scheduled.completedAt = now;
     this._stats.deadLettered++;
-    this._emitCompletion(scheduled, "dead_letter", scheduled.resultSummary, errorMsg, now);
+    this._emitCompletion(
+      scheduled,
+      "dead_letter",
+      scheduled.resultSummary,
+      errorMsg,
+      now,
+    );
     this._store?.upsertTask(scheduled);
     this._scheduledTasks.delete(id);
   }
@@ -602,7 +670,9 @@ export class TaskScheduler {
       durationMs: Math.max(0, completedAt - (task.lastRunAt ?? task.createdAt)),
       completedAt,
     };
-    try { void this._completionNotifier(notification); } catch (error) {
+    try {
+      void this._completionNotifier(notification);
+    } catch (error) {
       console.warn("[Scheduler] completion notification failed:", error);
     }
   }
@@ -616,7 +686,13 @@ export class TaskScheduler {
   private _nextRunAfter(task: ScheduledTask, from: number): number {
     if (task.intervalMs) return from + task.intervalMs;
     if (task.cronExpression) {
-      return parseCronToNextRun(task.cronExpression, from, task.timezone ?? this.config.timezone ?? "UTC") ?? from + 60_000;
+      return (
+        parseCronToNextRun(
+          task.cronExpression,
+          from,
+          task.timezone ?? this.config.timezone ?? "UTC",
+        ) ?? from + 60_000
+      );
     }
     return from + 60_000;
   }
@@ -626,18 +702,32 @@ export class TaskScheduler {
     if (!quiet) return false;
     const [startHour, startMinute] = quiet.start.split(":").map(Number);
     const [endHour, endMinute] = quiet.end.split(":").map(Number);
-    if (![startHour, startMinute, endHour, endMinute].every(Number.isFinite)) return false;
+    if (![startHour, startMinute, endHour, endMinute].every(Number.isFinite))
+      return false;
     let parts: Record<string, string>;
     try {
-      parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
-        timeZone: quiet.timezone ?? task.timezone ?? this.config.timezone ?? "UTC",
-        hour: "numeric", minute: "numeric", hourCycle: "h23",
-      }).formatToParts(now).map((part) => [part.type, part.value]));
-    } catch { return false; }
+      parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone:
+            quiet.timezone ?? task.timezone ?? this.config.timezone ?? "UTC",
+          hour: "numeric",
+          minute: "numeric",
+          hourCycle: "h23",
+        })
+          .formatToParts(now)
+          .map((part) => [part.type, part.value]),
+      );
+    } catch {
+      return false;
+    }
     const minute = Number(parts.hour) * 60 + Number(parts.minute);
     const start = startHour * 60 + startMinute;
     const end = endHour * 60 + endMinute;
-    return start === end ? true : start < end ? minute >= start && minute < end : minute >= start || minute < end;
+    return start === end
+      ? true
+      : start < end
+        ? minute >= start && minute < end
+        : minute >= start || minute < end;
   }
 
   private _isTerminalStatus(status: ScheduledTask["status"]): boolean {
@@ -711,7 +801,8 @@ export class TaskScheduler {
     return {
       healthy:
         this.isRunning() &&
-        heartbeatAgeMs <= Math.max(5_000, (this.config.schedulerIntervalMs ?? 100) * 10),
+        heartbeatAgeMs <=
+          Math.max(5_000, (this.config.schedulerIntervalMs ?? 100) * 10),
       running: this.isRunning(),
       lastHeartbeatAt: this._lastHeartbeatAt,
       heartbeatAgeMs,

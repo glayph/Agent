@@ -9,7 +9,8 @@ const dirs: string[] = [];
 
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
-  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0))
+    fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe("TelegramStateStore", () => {
