@@ -11,9 +11,12 @@ const args = new Set(process.argv.slice(2));
 if (args.has("--help") || args.has("-h")) {
   console.log(`Usage: node scripts/model-smoke.mjs [--local] [--gemini] [--openai]
 
-Local llama.cpp/LFM:
-  MIKI_LOCAL_MODEL_ENDPOINT  default http://127.0.0.1:8080/v1
-  MIKI_LOCAL_MODEL           model id sent to /chat/completions (default lfm2-local)
+Local llama.cpp:
+  MIKI_LOCAL_MODEL_ENDPOINT  explicit endpoint
+  MIKI_LLAMA_BASE_URL        fallback endpoint
+  MIKI_LOCAL_PORT             fallback port (default 39200)
+  MIKI_LOCAL_MODEL           model id sent to /chat/completions
+  MIKI_LOCAL_MODEL_NAME or MIKI_MODEL_ID  registered model fallback
 
 Gemini:
   GEMINI_API_KEY              required; never print this value
@@ -90,9 +93,17 @@ function extractText(body) {
 
 async function testLocal() {
   const endpoint = (
-    process.env.MIKI_LOCAL_MODEL_ENDPOINT || "http://127.0.0.1:8080/v1"
+    process.env.MIKI_LOCAL_MODEL_ENDPOINT ||
+    process.env.MIKI_LLAMA_BASE_URL ||
+    (process.env.MIKI_LOCAL_PORT
+      ? `http://127.0.0.1:${process.env.MIKI_LOCAL_PORT}/v1`
+      : "http://127.0.0.1:39200/v1")
   ).replace(/\/$/, "");
-  const model = process.env.MIKI_LOCAL_MODEL || "lfm2-local";
+  const model =
+    process.env.MIKI_LOCAL_MODEL ||
+    process.env.MIKI_LOCAL_MODEL_NAME ||
+    process.env.MIKI_MODEL_ID ||
+    "local-model";
   const body = await requestJson(`${endpoint}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
