@@ -10,12 +10,12 @@ import {
 } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { IconAdjustmentsHorizontal } from "@tabler/icons-react"
 
 import type { SessionSummary } from "@/api/sessions"
 import { type VoiceCloudAudioResult, transcribeVoiceAudio } from "@/api/voice"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
-import { openChatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
 import { ModelSelector } from "@/features/chat/components/model-selector"
 import { SessionHistoryMenu } from "@/features/chat/components/session-history-menu"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
@@ -250,29 +250,6 @@ function timestampToIso(timestamp: ChatMessage["timestamp"] | undefined) {
     : date.toISOString()
 }
 
-function workspaceTitle({
-  activeSessionTitle,
-  fallbackTitle,
-  messages,
-}: {
-  activeSessionTitle?: string
-  fallbackTitle: string
-  messages: ChatMessage[]
-}): string {
-  const title = normalizePreview(activeSessionTitle ?? "")
-  if (title) return title
-
-  const firstUserPrompt = messages.find((message) => message.role === "user")
-  const promptTitle = normalizePreview(firstUserPrompt?.content ?? "")
-  if (promptTitle) {
-    return promptTitle.length > 72
-      ? `${promptTitle.slice(0, 69)}...`
-      : promptTitle
-  }
-
-  return fallbackTitle
-}
-
 // eslint-disable-next-line react-refresh/only-export-components -- kept exported for deterministic status tests
 export function buildStatusPills({
   connectionState,
@@ -408,7 +385,6 @@ export function ChatPage() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const hasLoadedSessionsRef = useRef(false)
   const isMobile = useIsMobile()
-  const openInspector = useSetAtom(openChatInspectorAtom)
 
   const {
     messages,
@@ -417,8 +393,6 @@ export function ChatPage() {
     activeSessionId,
     hasHydratedActiveSession,
     contextUsage,
-    activeRunModel,
-    activeRunProvider,
     sendMessage,
     deleteMessage,
     editMessage,
@@ -441,9 +415,6 @@ export function ChatPage() {
       .slice(0, 3)
       .reverse()
   }, [monitorState.nodes, monitorState.runs])
-  const handleWorkingClick = useCallback(() => {
-    openInspector({ chatId: activeSessionId, page: "overview" })
-  }, [activeSessionId, openInspector])
   const retryableMessageIds = useMemo(
     () => getRetryableMessageIds(messages),
     [messages],
@@ -1010,41 +981,6 @@ export function ChatPage() {
     () => mergeActiveSessionProjection(sessions, activeSessionProjection),
     [activeSessionProjection, sessions],
   )
-  const activeSession = useMemo(
-    () => displaySessions.find((session) => session.id === activeSessionId),
-    [activeSessionId, displaySessions],
-  )
-  const title = useMemo(
-    () =>
-      workspaceTitle({
-        activeSessionTitle: activeSession?.title,
-        fallbackTitle: t("chat.workspace.title"),
-        messages,
-      }),
-    [activeSession?.title, messages, t],
-  )
-  const subtitle = activeSession
-    ? t("chat.workspace.messagesSubtitle", {
-        count: activeSession.message_count,
-      })
-    : t("chat.workspace.eventsSubtitle", { count: messages.length })
-  const statusPills = useMemo(
-    () =>
-      buildStatusPills({
-        connectionState,
-        gatewayState: gwState,
-        isTyping,
-        labels: {
-          activeAgents: (count) => t("chat.workspace.activeAgents", { count }),
-          paused: t("chat.workspace.paused"),
-          ready: t("chat.workspace.ready"),
-          running: t("chat.workspace.running"),
-        },
-      }).map((status, index) =>
-        index === 0 ? { ...status, onClick: handleWorkingClick } : status,
-      ),
-    [connectionState, gwState, handleWorkingClick, isTyping, t],
-  )
   const handleForkMessage = useCallback(
     async (messageId: string) => {
       if (!(await forkFromMessage(messageId))) {
@@ -1062,20 +998,8 @@ export function ChatPage() {
     window.dispatchEvent(new Event("Miki:command"))
   }, [])
 
-  const runtimeModelLabel = activeRunModel
-    ? `${activeRunProvider ? `${activeRunProvider} / ` : ""}${activeRunModel}`
-    : undefined
   const headerControls = (
     <div className="flex items-center gap-2">
-      {runtimeModelLabel && (
-        <span
-          className="text-muted-foreground max-w-96 truncate text-[10px]"
-          data-testid="active-run-model"
-          title={`Server-reported run model: ${runtimeModelLabel}`}
-        >
-          Run: {runtimeModelLabel}
-        </span>
-      )}
       <SessionHistoryMenu
         sessions={displaySessions}
         activeSessionId={activeSessionId}
@@ -1096,14 +1020,12 @@ export function ChatPage() {
         <DropdownMenuTrigger asChild>
           <Button
             size="sm"
-            variant="outline"
-            className="max-sm:size-8 max-sm:gap-0 max-sm:rounded-full max-sm:px-0"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground size-8 px-0"
             aria-label={t("chat.showAssistantDetails")}
             title={t("chat.showAssistantDetails")}
           >
-            <span className="max-sm:hidden">
-              {t("chat.showAssistantDetails")}
-            </span>
+            <IconAdjustmentsHorizontal className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -1142,9 +1064,8 @@ export function ChatPage() {
       <WorkspaceShell
         header={
           <WorkspaceHeader
-            title={title}
-            subtitle={subtitle}
-            statuses={statusPills}
+            title="Miki"
+            statuses={[]}
             controls={headerControls}
             isWorking={isTyping}
           />
