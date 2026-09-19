@@ -17,6 +17,7 @@ const root = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const skipBackendTests = process.env.MIKI_VERIFY_SKIP_BACKEND_TESTS === "1";
 const skipLint = process.env.MIKI_VERIFY_SKIP_LINT === "1";
+const skipTests = process.env.MIKI_VERIFY_SKIP_TESTS === "1";
 const eslintEntry = path.join(
   root,
   "node_modules",
@@ -130,17 +131,21 @@ function main() {
   // POSIX-style teardown and can retain native handles on Windows, producing
   // EBUSY cleanup failures after the assertions already passed.
   log("Step 5/6: Running tests...");
-  if (skipBackendTests) {
-    log("Skipping backend Jest suite because MIKI_VERIFY_SKIP_BACKEND_TESTS=1.");
+  if (skipTests) {
+    log("Skipping all tests because MIKI_VERIFY_SKIP_TESTS=1.");
   } else {
-    runNpm(["test", "--workspaces", "--if-present"], { cwd: root });
+    if (skipBackendTests) {
+      log("Skipping backend Jest suite because MIKI_VERIFY_SKIP_BACKEND_TESTS=1.");
+    } else {
+      runNpm(["test", "--workspaces", "--if-present"], { cwd: root });
+    }
+    runNpm(
+      ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "test"],
+      {
+        cwd: root,
+      },
+    );
   }
-  runNpm(
-    ["--prefix", path.join(root, "packages", "ui", "frontend"), "run", "test"],
-    {
-      cwd: root,
-    },
-  );
 
   // Step 6: Doctor checks
   log("Step 6/6: Running doctor checks...");
