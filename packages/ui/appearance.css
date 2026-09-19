@@ -75,16 +75,16 @@
   --chat-surface: var(--background);
 
   /* --- User's own bubble --- */
-  --chat-user-bubble: linear-gradient(135deg, #4a9eff 0%, #347edb 100%);
-  --chat-user-text: #ffffff;
-  --chat-user-border: rgba(255, 255, 255, 0.2);
-  --chat-user-shadow: 0 8px 22px rgba(74, 158, 255, 0.2), 0 2px 5px rgba(23, 24, 23, 0.12);
+  --chat-user-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  --chat-user-text: var(--foreground);
+  --chat-user-border: color-mix(in srgb, var(--border) 50%, transparent);
+  --chat-user-shadow: none;
 
   /* --- Miki's (assistant) bubble --- */
-  --chat-assistant-bubble: linear-gradient(145deg, rgba(35, 49, 67, 0.96), rgba(25, 31, 43, 0.96));
-  --chat-assistant-text: #eaf4ff;
-  --chat-assistant-border: rgba(144, 195, 255, 0.22);
-  --chat-assistant-shadow: 0 8px 26px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --chat-assistant-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  --chat-assistant-text: var(--foreground);
+  --chat-assistant-border: color-mix(in srgb, var(--border) 50%, transparent);
+  --chat-assistant-shadow: none;
 
   /* --- Chat alerts (errors shown inline in the conversation) --- */
   --chat-alert-text: #9f302a;
@@ -129,14 +129,14 @@
 /* Dark mode overrides — only values that actually change in dark mode. */
 html.dark {
   --chat-surface: var(--background);
-  --chat-user-bubble: linear-gradient(135deg, #4a9eff 0%, #347edb 100%);
-  --chat-user-text: #ffffff;
-  --chat-user-border: rgba(147, 197, 253, 0.42);
-  --chat-user-shadow: 0 10px 28px rgba(37, 99, 235, 0.2), 0 2px 6px rgba(0, 0, 0, 0.28);
-  --chat-assistant-bubble: linear-gradient(145deg, rgba(35, 49, 67, 0.96), rgba(25, 31, 43, 0.96));
-  --chat-assistant-text: #eaf4ff;
-  --chat-assistant-border: rgba(144, 195, 255, 0.22);
-  --chat-assistant-shadow: 0 10px 30px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --chat-user-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  --chat-user-text: var(--foreground);
+  --chat-user-border: color-mix(in srgb, var(--border) 50%, transparent);
+  --chat-user-shadow: none;
+  --chat-assistant-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  --chat-assistant-text: var(--foreground);
+  --chat-assistant-border: color-mix(in srgb, var(--border) 50%, transparent);
+  --chat-assistant-shadow: none;
   --chat-alert-text: var(--md-sys-color-on-error-container);
   --chat-alert-icon: var(--md-sys-color-error);
   --chat-error-bubble: var(--md-sys-color-error-container);
@@ -145,75 +145,33 @@ html.dark {
   --page-grid-opacity: 0.07;
 }
 
-/* --- Chat bubble finish --- */
+/* --- Chat bubbles mirror the Models page cards --- */
 [data-chat-bubble="user"],
 [data-chat-bubble="assistant"] {
-  position: relative;
-  isolation: isolate;
+  border-radius: 0.75rem;
   transition:
-    transform var(--motion-duration-fast) var(--motion-ease-standard),
-    box-shadow var(--motion-duration-base) var(--motion-ease-standard),
-    border-color var(--motion-duration-base) var(--motion-ease-standard);
+    background-color var(--motion-duration-base) var(--motion-ease-standard),
+    box-shadow var(--motion-duration-base) var(--motion-ease-standard);
 }
 
-[data-chat-bubble="user"] {
-  overflow: hidden;
-  border-radius: 1.25rem 1.25rem 0.35rem 1.25rem;
-  letter-spacing: -0.005em;
+[data-chat-bubble="user"]:hover,
+[data-chat-bubble="assistant"]:hover {
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  box-shadow: var(--shadow-xs);
 }
 
-[data-chat-bubble="assistant"] {
-  overflow: hidden;
-  border-radius: 1.25rem 1.25rem 1.25rem 0.35rem;
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-}
-
-[data-chat-bubble="assistant"]::before,
-[data-chat-bubble="user"]::before {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  content: "";
+[data-chat-bubble="user"]:focus-within,
+[data-chat-bubble="assistant"]:focus-within {
+  border-color: var(--border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
 [data-chat-bubble="assistant"] .prose {
   color: var(--chat-assistant-text);
 }
 
-[data-chat-bubble="assistant"] .prose :is(strong, h1, h2, h3, h4, h5, h6) {
+[data-chat-bubble="assistant"] .prose :is(strong, h1, h2, h3, h4, h5, h6, code, pre) {
   color: var(--chat-assistant-text);
-}
-
-[data-chat-bubble="assistant"] .prose :is(code, pre) {
-  color: var(--chat-assistant-text);
-}
-
-[data-chat-bubble="assistant"]::before {
-  background: linear-gradient(110deg, rgba(74, 158, 255, 0.1), transparent 35%);
-}
-
-[data-chat-bubble="user"]::before {
-  background: linear-gradient(120deg, rgba(255, 255, 255, 0.16), transparent 45%);
-}
-
-[data-chat-bubble="user"]:hover,
-[data-chat-bubble="assistant"]:hover {
-  transform: translateY(-1px);
-}
-
-[data-chat-bubble="user"]:focus-within,
-[data-chat-bubble="assistant"]:focus-within {
-  border-color: color-mix(in srgb, var(--primary) 65%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent), var(--chat-assistant-shadow);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-chat-bubble="user"],
-  [data-chat-bubble="assistant"] {
-    transition: none;
-  }
 }
 
 /* =============================================================================
