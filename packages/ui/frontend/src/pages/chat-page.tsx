@@ -17,6 +17,7 @@ import type { ChatInputDisabledReason } from "@/features/chat/components/chat-co
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
 import { openChatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
 import { ModelSelector } from "@/features/chat/components/model-selector"
+import { SessionHistoryMenu } from "@/features/chat/components/session-history-menu"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
 import { Composer } from "@/features/chat/components/workspace/composer"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
@@ -414,6 +415,7 @@ export function ChatPage() {
     connectionState,
     isTyping,
     activeSessionId,
+    hasHydratedActiveSession,
     contextUsage,
     activeRunModel,
     activeRunProvider,
@@ -422,6 +424,7 @@ export function ChatPage() {
     editMessage,
     forkFromMessage,
     retryMessage,
+    switchSession,
     newChat,
   } = useMikiChat()
   const monitorState = useAtomValue(monitorAtom)
@@ -453,7 +456,15 @@ export function ChatPage() {
     }, 2600)
     return () => window.clearTimeout(timeoutId)
   }, [monitorState.selectedNodeId])
-  const { sessions, loadSessions } = useSessionHistory({
+  const {
+    sessions,
+    hasMore: hasMoreSessions,
+    loadError: sessionHistoryLoadError,
+    loadErrorMessage: sessionHistoryLoadErrorMessage,
+    observerRef: sessionHistoryObserverRef,
+    loadSessions,
+    handleDeleteSession,
+  } = useSessionHistory({
     activeSessionId,
     onDeletedActiveSession: () => {
       void newChat()
@@ -1065,6 +1076,22 @@ export function ChatPage() {
           Run: {runtimeModelLabel}
         </span>
       )}
+      <SessionHistoryMenu
+        sessions={displaySessions}
+        activeSessionId={activeSessionId}
+        hasMore={hasMoreSessions}
+        loadError={sessionHistoryLoadError}
+        loadErrorMessage={sessionHistoryLoadErrorMessage}
+        observerRef={sessionHistoryObserverRef}
+        onOpenChange={(open) => {
+          if (open) void loadSessions(true)
+        }}
+        onSwitchSession={(sessionId) => {
+          void switchSession(sessionId)
+        }}
+        onDeleteSession={handleDeleteSession}
+        compact={isMobile}
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -1128,6 +1155,7 @@ export function ChatPage() {
             messages={messages}
             assistantDetailVisibility={assistantDetailVisibility}
             isTyping={isTyping}
+            hasHydratedActiveSession={hasHydratedActiveSession}
             isGatewayRunning={isGatewayRunning}
             hasAvailableModels={hasAvailableModels}
             defaultModelName={defaultModelName}

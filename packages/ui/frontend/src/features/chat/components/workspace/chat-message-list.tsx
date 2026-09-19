@@ -14,6 +14,7 @@ interface ChatMessageListProps {
   messages: ChatMessage[]
   assistantDetailVisibility: AssistantDetailVisibility
   isTyping: boolean
+  hasHydratedActiveSession: boolean
   isGatewayRunning: boolean
   hasAvailableModels: boolean
   defaultModelName: string
@@ -31,6 +32,7 @@ export function ChatMessageList({
   messages,
   assistantDetailVisibility,
   isTyping,
+  hasHydratedActiveSession,
   isGatewayRunning,
   hasAvailableModels,
   defaultModelName,
@@ -75,7 +77,13 @@ export function ChatMessageList({
       className="h-full min-h-0 overflow-y-auto px-4 py-4 [background:var(--chat-surface)] sm:px-6 sm:py-7 lg:px-8"
     >
       <div className="mx-auto flex w-full max-w-[var(--chat-content-width)] flex-col gap-6 pb-8 sm:gap-7 sm:pb-10">
-        {messages.length === 0 && !isTyping && (
+        {!hasHydratedActiveSession && (
+          <div className="text-muted-foreground flex items-center justify-center py-12 text-sm">
+            {t("chat.loading", { defaultValue: "Loading conversation…" })}
+          </div>
+        )}
+
+        {hasHydratedActiveSession && messages.length === 0 && !isTyping && (
           <div className="border-0 bg-transparent py-4 sm:py-8">
             <ChatEmptyState
               hasAvailableModels={hasAvailableModels}
