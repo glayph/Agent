@@ -45,19 +45,6 @@ const defaultContext = Math.max(
 // documented artifacts; arbitrary URLs are intentionally not accepted.
 const MODEL_CATALOG = [
   {
-    id: "lfm2.5-230m-q4_0",
-    alias: "lfm2.5-local-230m",
-    provider: "llama.cpp",
-    display_name: "LFM2.5 230M Instruct Q4_0",
-    filename: "LFM2.5-230M-Q4_0.gguf",
-    url: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/main/LFM2.5-230M-Q4_0.gguf?download=true",
-    sha256: "430fbec5b1b355e9bb12cd0638c9f2a8f21fedd6eafb4103e42c7e88887daa73",
-    bytes: 149080928,
-    license: "lfm1.0",
-    source: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF",
-    context_size: 32768,
-  },
-  {
     id: "lfm2.5-1.2b-instruct-q4_0",
     alias: "lfm2.5-local-1.2b",
     provider: "llama.cpp",

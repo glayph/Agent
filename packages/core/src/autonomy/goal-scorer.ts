@@ -2,8 +2,8 @@ import type { AutonomyMode, GoalCandidate, GoalScoreFactors } from "./types.js";
 
 /**
  * Per-factor weights. Turbo mode leans harder into urgency/expectedValue and
- * tolerates more resource cost/risk — standard mode's weight table has been
- * removed since turbo is now the only operating mode (section 4).
+ * tolerates more resource cost/risk than Standard mode, which is the concrete
+ * behavioral difference the spec asks for beyond "a UI label" (section 4).
  */
 export interface GoalScoreWeights {
   priority: number;
@@ -16,6 +16,17 @@ export interface GoalScoreWeights {
   risk: number;
 }
 
+const STANDARD_WEIGHTS: GoalScoreWeights = {
+  priority: 1.0,
+  usefulness: 1.0,
+  urgency: 0.8,
+  relevance: 1.0,
+  expectedValue: 1.0,
+  unfinishedWorkBonus: 1.2,
+  resourceCost: 1.0,
+  risk: 1.4,
+};
+
 const TURBO_WEIGHTS: GoalScoreWeights = {
   priority: 1.1,
   usefulness: 1.2,
@@ -27,8 +38,8 @@ const TURBO_WEIGHTS: GoalScoreWeights = {
   risk: 0.9,
 };
 
-export function weightsForMode(_mode: AutonomyMode): GoalScoreWeights {
-  return TURBO_WEIGHTS;
+export function weightsForMode(mode: AutonomyMode): GoalScoreWeights {
+  return mode === "turbo" ? TURBO_WEIGHTS : STANDARD_WEIGHTS;
 }
 
 /**

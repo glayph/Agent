@@ -78,22 +78,22 @@
   --chat-user-bubble: #eceeea;
   --chat-user-text: #171817;
   --chat-user-border: #d7dbd3;
-  --chat-user-shadow: none;
+  --chat-user-shadow: 0 1px 2px rgba(23, 24, 23, 0.04);
 
-  /* --- Miki's (assistant) bubble ---
-     Miki is an autonomous agent narrating its own work, not a chat
-     partner, so its output is framed like a reported result (a quiet
-     left rule in the app's own brand color) rather than a rounded,
-     tailed speech bubble like a messaging app. See assistant-message.tsx. */
+  /* --- Miki's (assistant) bubble --- */
   --chat-assistant-bubble: #ffffff;
   --chat-assistant-text: #171817;
   --chat-assistant-border: #dfe2d8;
-  --chat-assistant-accent: var(--primary);
-  --chat-assistant-shadow: none;
+  --chat-assistant-shadow: 0 1px 3px rgba(23, 24, 23, 0.06);
 
   /* --- Chat alerts (errors shown inline in the conversation) --- */
   --chat-alert-text: #9f302a;
   --chat-alert-icon: #c2413b;
+
+  /* --- Chat error bubble (a whole assistant reply that failed) --- */
+  --chat-error-bubble: #fdf3f2;
+  --chat-error-border: #f0c4bf;
+  --chat-error-text: #7a241f;
 
   /* ===========================================================
      SKELETON
@@ -128,15 +128,20 @@
 
 /* Dark mode overrides — only values that actually change in dark mode. */
 html.dark {
-  --chat-surface: #111311;
-  --chat-user-bubble: #bef264;
-  --chat-user-text: #11160b;
-  --chat-user-border: #bef264;
-  --chat-assistant-bubble: #171a17;
-  --chat-assistant-text: #eef0e9;
-  --chat-assistant-border: #30372e;
-  --chat-alert-text: #f7aaa0;
-  --chat-alert-icon: #f17b70;
+  --chat-surface: var(--background);
+  --chat-user-bubble: color-mix(in srgb, var(--primary) 20%, var(--card));
+  --chat-user-text: var(--foreground);
+  --chat-user-border: color-mix(in srgb, var(--primary) 45%, transparent);
+  --chat-user-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --chat-assistant-bubble: var(--card);
+  --chat-assistant-text: var(--foreground);
+  --chat-assistant-border: var(--border);
+  --chat-assistant-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --chat-alert-text: var(--md-sys-color-on-error-container);
+  --chat-alert-icon: var(--md-sys-color-error);
+  --chat-error-bubble: var(--md-sys-color-error-container);
+  --chat-error-border: color-mix(in srgb, var(--md-sys-color-error) 45%, transparent);
+  --chat-error-text: var(--md-sys-color-on-error-container);
   --page-grid-opacity: 0.07;
 }
 

@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
 import {
   settings,
@@ -51,7 +52,11 @@ import {
 } from "./automation.js";
 import { SqlitePlatformConnectionStore } from "./platform-connections.js";
 import { buildAgentTokenBudget } from "./agent-token-budget.js";
-import { initSkillLoader, SkillLoader } from "./skill-loader.js";
+import {
+  initSkillLoader,
+  resolveSkillRuntimeEntry,
+  SkillLoader,
+} from "./skill-loader.js";
 import { globalToolWarmer } from "./tools/tool-warmer.js";
 import {
   formatAdaptiveCapabilitySelection,
@@ -103,6 +108,7 @@ import {
   formatWorkflowDecisionPattern,
 } from "./workflow-accelerator.js";
 import type { ContextUsageSnapshot } from "./token-budget-manager.js";
+import { registerRuntimePluginTools } from "./plugins/plugin-tool-registration.js";
 import { CoreCapabilityPluginHost } from "./plugins/core-host.js";
 import { normalizeRuntimePaths, type RuntimePaths } from "./paths.js";
 import {
@@ -1245,20 +1251,47 @@ export class AgentOrchestrator {
     return Promise.all(tasks).then(() => {});
   }
 
-  /**
-   * INTENTIONALLY DISABLED. Miki's tool surface is restricted to exactly two
-   * capabilities: LLM text generation and the computer_use tool family
-   * (mouse/keyboard/screen + computer vision — see
-   * packages/core/src/plugins/computer-use). Skill files and runtime plugin
-   * contracts are no longer dynamically imported or registered as callable
-   * tools, so no preprogrammed/canned command can be invoked in place of the
-   * agent generating and executing its own action through computer_use. This
-   * method is kept as a no-op (rather than removed) so callers and the
-   * skill/plugin inspection APIs used by the admin UI continue to work; it
-   * simply never grants anything discovered here the ability to run.
-   */
   private async _loadSkillsAsync(): Promise<void> {
-    return;
+    try {
+      const skills = await this.skillLoader.loadAll();
+      for (const skill of skills) {
+        if (!skill.index || skill.index.endsWith(".md")) {
+          continue;
+        }
+        // Dynamically import the skill module and register its tools
+        try {
+          const runtimeEntry = resolveSkillRuntimeEntry(skill.index);
+          const module = await import(pathToFileURL(runtimeEntry).href);
+          if (module && typeof module.registerSkills === "function") {
+            module.registerSkills(
+              this.tools.registerSkillTool.bind(this.tools),
+            );
+            this.skillLoader.markSkillCallable(skill.metadata.id);
+          }
+        } catch (err) {
+          console.warn(
+            `Failed to load skill module ${skill.metadata.id}:`,
+            err,
+          );
+        }
+      }
+      const pluginTools = await registerRuntimePluginTools(
+        this.tools,
+        this.runtimePaths,
+      );
+      if (pluginTools.registered.length > 0) {
+        console.log(
+          `Registered ${pluginTools.registered.length} runtime plugin tool(s).`,
+        );
+      }
+      if (pluginTools.skipped.length > 0) {
+        console.warn(
+          `Skipped ${pluginTools.skipped.length} runtime plugin tool contract(s).`,
+        );
+      }
+    } catch (err) {
+      console.error("Skill loading error:", err);
+    }
   }
 
   private _startTaskScheduler(): void {
@@ -1909,6 +1942,7 @@ export class AgentOrchestrator {
     sessionId: string,
     content: string,
     messageId?: string,
+    isError = false,
   ): void {
     if (!content.trim()) return;
     const history = this._messageHistory.get(sessionId) || [];
@@ -1917,6 +1951,7 @@ export class AgentOrchestrator {
       created_at: new Date().toISOString(),
       role: "assistant",
       content,
+      ...(isError ? { is_error: true } : {}),
     });
     this._messageHistory.set(sessionId, history);
     this._touchSession(sessionId);
@@ -2215,8 +2250,13 @@ export class AgentOrchestrator {
     // Decide the specialist and per-turn capability budget before prompting.
     // The selected catalog is also used as an execution allowlist below.
     const taskProfile = classifyAgentTask(userMessage);
+    // Error/failure notices (missing credential, timeout, budget exhausted,
+    // etc.) are excluded from the context sent back to the model — they
+    // are not useful conversational content and would otherwise burn
+    // context budget on later turns.
+    const contextEligibleHistory = history.filter((msg) => !msg.is_error);
     const pastMessages = selectAgentPromptHistory(
-      history,
+      contextEligibleHistory,
       taskProfile.complexity,
       turnProfile.historyMode,
       resource.messageHistoryLimit,
@@ -2323,15 +2363,12 @@ export class AgentOrchestrator {
       const requiredToolNames =
         deterministicIntent.kind === "web_search"
           ? ["web_search"]
-          : deterministicIntent.kind === "process_control" ||
-              deterministicIntent.kind === "shell_execute"
+          : deterministicIntent.kind === "process_control"
             ? ["shell_execute"]
-            : deterministicIntent.kind === "file_read"
-              ? ["file_read"]
-              : (deterministicIntent.files || []).flatMap(() => [
-                  "file_write",
-                  "file_read",
-                ]);
+            : (deterministicIntent.files || []).flatMap(() => [
+                "file_write",
+                "file_read",
+              ]);
       const uniqueRequiredToolNames = [...new Set(requiredToolNames)];
       const allowedToolNames = new Set([
         ...toolsSchema.map((tool) => tool.function.name),
@@ -2369,27 +2406,6 @@ export class AgentOrchestrator {
                   },
                 },
               ]
-            : deterministicIntent.kind === "shell_execute"
-              ? [
-                  {
-                    id: crypto.randomUUID(),
-                    function: {
-                      name: "shell_execute",
-                      arguments: JSON.stringify({
-                        cmd: deterministicIntent.command || "uname -a",
-                        timeout: 20,
-                      }),
-                    },
-                  },
-                ]
-            : deterministicIntent.kind === "file_read"
-              ? (deterministicIntent.files || []).map((file) => ({
-                  id: crypto.randomUUID(),
-                  function: {
-                    name: "file_read",
-                    arguments: JSON.stringify({ path: file.path }),
-                  },
-                }))
             : (deterministicIntent.files || []).flatMap((file) => [
                 {
                   id: crypto.randomUUID(),
@@ -2432,17 +2448,11 @@ export class AgentOrchestrator {
             )
           : deterministicIntent.kind === "process_control"
             ? buildDeterministicProcessResponse(deterministicToolMessages)
-            : deterministicIntent.kind === "shell_execute" ||
-                deterministicIntent.kind === "file_read"
-              ? deterministicToolMessages
-                  .map((message) => message.content || "")
-                  .join("\n")
-                  .trim() || "No tool output."
-              : buildDeterministicFileResponse(
-                  deterministicIntent.files || [],
-                  deterministicToolMessages,
-                  this.tools.workspaceDir,
-                );
+            : buildDeterministicFileResponse(
+                deterministicIntent.files || [],
+                deterministicToolMessages,
+                this.tools.workspaceDir,
+              );
       await this._saveAssistantHistoryMessage(
         sessionId,
         deterministicResponse,
@@ -2553,6 +2563,7 @@ export class AgentOrchestrator {
           sessionId,
           timeoutMessage,
           options.responseMessageId,
+          true,
         );
         yield JSON.stringify({
           type: "execution_timeout",
@@ -2563,6 +2574,7 @@ export class AgentOrchestrator {
           type: "stream_chunk",
           content: timeoutMessage,
           model_name: turnModel,
+          is_error: true,
         });
         yield streamDoneEvent(spentBudgetTokens);
         return;
@@ -2634,6 +2646,7 @@ export class AgentOrchestrator {
             sessionId,
             exhaustedMessage,
             options.responseMessageId,
+            true,
           );
           this._logMemoryInteraction(sessionId, userMessage, exhaustedMessage);
           yield JSON.stringify({
@@ -2641,6 +2654,7 @@ export class AgentOrchestrator {
             content: exhaustedMessage,
             model_name: turnModel,
             context_usage: latestContextUsage,
+            is_error: true,
           });
           yield streamDoneEvent(spentBudgetTokens);
           return;
@@ -2820,6 +2834,7 @@ export class AgentOrchestrator {
           sessionId,
           errorMessage,
           options.responseMessageId,
+          true,
         );
         if (providerError?.diagnostic) {
           yield JSON.stringify({
@@ -2835,6 +2850,7 @@ export class AgentOrchestrator {
           content: errorMessage,
           model_name: turnModel,
           ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+          is_error: true,
         });
         yield streamDoneEvent(0);
         return;
@@ -2893,6 +2909,7 @@ export class AgentOrchestrator {
           sessionId,
           contractFailureMessage,
           options.responseMessageId,
+          true,
         );
         this._logMemoryInteraction(
           sessionId,
@@ -2904,6 +2921,7 @@ export class AgentOrchestrator {
           content: contractFailureMessage,
           model_name: turnModel,
           ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+          is_error: true,
         });
         yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
         return;
@@ -2976,6 +2994,7 @@ export class AgentOrchestrator {
             sessionId,
             noToolViolationMessage,
             options.responseMessageId,
+            true,
           );
           this._logMemoryInteraction(
             sessionId,
@@ -2989,6 +3008,7 @@ export class AgentOrchestrator {
             ...(latestContextUsage
               ? { context_usage: latestContextUsage }
               : {}),
+            is_error: true,
           });
           yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
           return;
@@ -3001,13 +3021,15 @@ export class AgentOrchestrator {
           requestedWebSearchCalls > 0 &&
           webSearchCallsUsed >= resource.webSearchMaxCallsPerTurn
         ) {
+          const builtFallback = buildToolOnlyFallbackResponse(llmMessages);
           const fallbackContent =
-            buildToolOnlyFallbackResponse(llmMessages) ||
+            builtFallback ||
             `I reached the web-search safety limit (${resource.webSearchMaxCallsPerTurn} call${resource.webSearchMaxCallsPerTurn === 1 ? "" : "s"}) for this turn before a final synthesis was returned. Please ask me to continue the research in a new turn.`;
           this._saveAssistantHistoryMessage(
             sessionId,
             fallbackContent,
             options.responseMessageId,
+            !builtFallback,
           );
           this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
           yield JSON.stringify({
@@ -3017,6 +3039,7 @@ export class AgentOrchestrator {
             ...(latestContextUsage
               ? { context_usage: latestContextUsage }
               : {}),
+            ...(builtFallback ? {} : { is_error: true }),
           });
           yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
           return;
@@ -3045,14 +3068,16 @@ export class AgentOrchestrator {
             }
           }
           if (hasDuplicate) {
+            const builtFallback = buildToolOnlyFallbackResponse(llmMessages);
             const fallbackContent =
-              buildToolOnlyFallbackResponse(llmMessages) ||
+              builtFallback ||
               "The model repeatedly requested the same tool call without making progress. " +
                 "The loop was stopped to prevent runaway execution.";
             await this._saveAssistantHistoryMessage(
               sessionId,
               fallbackContent,
               options.responseMessageId,
+              !builtFallback,
             );
             this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
             yield JSON.stringify({
@@ -3062,6 +3087,7 @@ export class AgentOrchestrator {
               ...(latestContextUsage
                 ? { context_usage: latestContextUsage }
                 : {}),
+              ...(builtFallback ? {} : { is_error: true }),
             });
             yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
             return;
@@ -3069,13 +3095,15 @@ export class AgentOrchestrator {
         }
 
         if (consecutiveToolOnly >= MAX_AGENT_TURNS_NO_OUTPUT) {
+          const builtFallback = buildToolOnlyFallbackResponse(llmMessages);
           const fallbackContent =
-            buildToolOnlyFallbackResponse(llmMessages) ||
+            builtFallback ||
             "I completed the available execution steps, but the model did not return a final narrative summary.";
           await this._saveAssistantHistoryMessage(
             sessionId,
             fallbackContent,
             options.responseMessageId,
+            !builtFallback,
           );
           this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
           yield JSON.stringify({
@@ -3085,6 +3113,7 @@ export class AgentOrchestrator {
             ...(latestContextUsage
               ? { context_usage: latestContextUsage }
               : {}),
+            ...(builtFallback ? {} : { is_error: true }),
           });
           yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
           return;
@@ -3174,6 +3203,7 @@ export class AgentOrchestrator {
         sessionId,
         fallbackContent,
         options.responseMessageId,
+        true,
       );
       this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
       yield JSON.stringify({
@@ -3181,6 +3211,7 @@ export class AgentOrchestrator {
         content: fallbackContent,
         model_name: turnModel,
         ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
+        is_error: true,
       });
       yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
       return;
@@ -3706,10 +3737,16 @@ export class AgentOrchestrator {
     const capabilityReport = analyzePlanCapabilities(
       userMessage,
       {
-        // Skills are never loaded or registered as tools (see
-        // _loadSkillsAsync) — the agent's only capabilities are text
-        // generation and computer_use, so nothing is ever surfaced here.
-        skills: [],
+        skills:
+          turnProfile.skillsMode === "off"
+            ? []
+            : (await this.skillLoader.getAllSkillsMetadata()).filter(
+                (skill) => {
+                  if (turnProfile.skillsMode !== "custom") return true;
+                  const id = String(skill.id || skill.name || "").trim();
+                  return turnProfile.skillsAllow.has(id);
+                },
+              ),
         tools:
           turnProfile.toolsMode === "off"
             ? []

@@ -36,6 +36,11 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** True when this assistant message is an error/failure notice rather than
+   * a real answer (missing credential, timeout, budget exhausted, etc.).
+   * Error turns are excluded from session message counts and from the
+   * context sent back to the model on later turns. */
+  is_error?: boolean;
 }
 
 export interface ContextUsage {

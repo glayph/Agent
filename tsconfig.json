@@ -4,6 +4,7 @@
     { "path": "packages/config" },
     { "path": "packages/installer" },
     { "path": "packages/core" },
-    { "path": "packages/gateway" }
+    { "path": "packages/gateway" },
+    { "path": "packages/skills" }
   ]
 }

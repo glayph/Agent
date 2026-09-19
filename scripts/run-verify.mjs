@@ -89,6 +89,7 @@ function main() {
       "packages/gateway/src/**/*.ts",
       "packages/installer/src/**/*.ts",
       "packages/memory/src/**/*.ts",
+      "packages/skills/src/**/*.ts",
       "--ignore-pattern",
       "packages/core/src/plugins/providers/llama-cpp/runtime/vendor/**",
       "--ignore-pattern",
@@ -101,7 +102,7 @@ function main() {
   // Step 2: Build workspace dependencies so package exports and declarations
   // exist before strict typechecking on a clean checkout.
   log("Step 2/6: Building workspace dependencies...");
-  for (const workspace of ["@miki/config", "@miki/installer", "@miki/memory"]) {
+  for (const workspace of ["@miki/config", "@miki/installer", "@miki/skills", "@miki/memory"]) {
     runNpm(["run", "build", "--workspace=" + workspace], { cwd: root });
   }
 

@@ -3,11 +3,20 @@ agent:
   name: Miki
   project: Miki
   persona: >
-    You are Miki, a local-first workspace agent. Use file_read, file_write,
-    file_delete, file_search for files. Use shell_execute for terminal,
-    processes, system info, logs, and packages. Use computer_list_processes,
-    computer_get_system_info, computer_terminate_app when those tools fit. Stay
-    inside the workspace when writing files.
+    You are Miki, বাংলা-only RULEPLAY .
+
+    You operate as a workspace-scoped computer-based agent. Use approved tools
+    only within the active workspace by default, keep actions auditable, and
+    always verify your results. Destructive or external side effects require
+    explicit approval and must never be assumed from a default setting.
+
+    When the active local answer model is missing or unavailable, you may use
+    the bounded model-runtime workflow: inspect the allow-listed catalog with
+    `npm run model:list`, install a named approved model with `npm run
+    model:install -- <model-id> --start`, then verify runtime health and use the
+    registered model. Never invent a model URL, bypass checksum checks, download
+    arbitrary binaries, or claim installation succeeded without an independent
+    health check.
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
@@ -99,7 +108,7 @@ heartbeat:
     max_idle_minutes: 5
 autonomy:
   enabled: true
-  mode: turbo
+  mode: standard
   planning:
     enabled: true
   background_tasks:
@@ -112,12 +121,17 @@ autonomy:
     enabled: true
   self_evaluation:
     enabled: true
+  auto_mode_switch:
+    enabled: true
+    escalate_unfinished_objectives_at_least: 3
+    escalate_idle_mins_at_least: 15
+    de_escalate_idle_mins_in_turbo: 30
   hints:
     projects: []
     researchTopics: []
     knowledgeTopics: []
 skill_governance:
-  enabled: false
+  enabled: true
   validator:
     check_syntax: true
     check_dangerous_patterns: true
@@ -136,16 +150,6 @@ agents:
       enabled: true
       max_args_length: 300
       separate_messages: true
-    messaging:
-      adaptive: true
-      max_messages_per_response: 3
-      enable_chunking: true
-      enable_streaming: true
-      enable_progress_messages: true
-      max_chunk_length: 0
-      avoid_unnecessary_messages: true
-      min_ms_before_first_progress: 4000
-      min_ms_between_progress: 2500
     turn_profile:
       enabled: true
       history:
@@ -153,11 +157,15 @@ agents:
       system_prompt:
         mode: default
       skills:
-        mode: 'off'
+        mode: custom
         allow: []
       tools:
-        mode: default
-        allow: []
+        mode: custom
+        allow:
+          - file_write
+          - file_read
+          - file_delete
+          - shell_execute
   router:
     enabled: true
     default_agent: Miki
@@ -205,10 +213,9 @@ agents:
         - standard
         - complex
       tools:
-        - computer_launch
-        - computer_screenshot
-        - computer_invoke
-        - computer_set_text
+        - shell_execute
+        - file_read
+        - file_write
       priority: 8
     researcher:
       name: Research Analyst
@@ -230,10 +237,8 @@ agents:
         - standard
         - complex
       tools:
-        - computer_launch
-        - computer_screenshot
-        - computer_click_at
-        - computer_set_text
+        - web_search
+        - scrape_page
       priority: 4
     planner:
       name: Workflow Planner
@@ -258,7 +263,8 @@ agents:
         - multi_step_language
       complexities:
         - complex
-      tools: []
+      tools:
+        - project_workflow_create
       priority: 6
     miki:
       name: Miki
@@ -309,24 +315,12 @@ agents:
         - standard
         - complex
       tools:
-        - computer_observe
-        - computer_focus
-        - computer_invoke
-        - computer_set_text
-        - computer_hotkey
-        - computer_clipboard
-        - computer_launch
-        - computer_verify
-        - computer_screenshot
-        - computer_list_processes
-        - computer_get_system_info
-        - computer_list_displays
-        - computer_click_at
-        - computer_drag
-        - computer_scroll
-        - computer_terminate_app
-        - computer_list_windows
-        - computer_grid_screenshot
+        - shell_execute
+        - file_read
+        - file_write
+        - web_search
+        - scrape_page
+        - project_workflow_create
       priority: 10
 session:
   dm_scope: per-channel-peer

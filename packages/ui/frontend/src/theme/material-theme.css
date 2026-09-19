@@ -1,84 +1,99 @@
 /* =============================================================================
-   MIKI DESIGN TOKEN SYSTEM — Premium Monochrome Dark Aesthetic
-   Near-black surfaces · off-white text · restrained orange accent
-   Card-based layout with subtle borders · monospace dev accents
+   MIKI DESIGN TOKEN SYSTEM — "Kimi Dark" (Material Design 3 Dark + Glassmorphism)
+   Deep black/graphite surfaces · cool blue accent · pill-shaped controls
+   Glass headers/cards · soft glow states · 8px-aligned spacing
    ============================================================================= */
 
 @theme inline {
-  /* Primary — reference active state orange */
-  --md-sys-color-primary: #FF9500;
+  /* Primary — cool blue accent */
+  --md-sys-color-primary: #4A9EFF;
   --md-sys-color-on-primary: #FFFFFF;
-  --md-sys-color-primary-container: #5A3000;
-  --md-sys-color-on-primary-container: #FFE5C2;
+  --md-sys-color-primary-container: #1B3A5C;
+  --md-sys-color-on-primary-container: #CFE6FF;
 
-  /* Secondary — Graphite */
-  --md-sys-color-secondary: #B8B8B8;
-  --md-sys-color-on-secondary: #151515;
-  --md-sys-color-secondary-container: #202020;
-  --md-sys-color-on-secondary-container: #E5E5E5;
+  /* Secondary — light gray text tier */
+  --md-sys-color-secondary: #E0E0E0;
+  --md-sys-color-on-secondary: #1A1A1A;
+  --md-sys-color-secondary-container: #2C2C2C;
+  --md-sys-color-on-secondary-container: #E0E0E0;
 
-  /* Tertiary — Warm gray */
-  --md-sys-color-tertiary: #8F8F8F;
-  --md-sys-color-on-tertiary: #151515;
-  --md-sys-color-tertiary-container: #202020;
-  --md-sys-color-on-tertiary-container: #D8D8D8;
+  /* Tertiary — muted gray text tier */
+  --md-sys-color-tertiary: #9E9E9E;
+  --md-sys-color-on-tertiary: #1A1A1A;
+  --md-sys-color-tertiary-container: #2C2C2C;
+  --md-sys-color-on-tertiary-container: #9E9E9E;
 
-  /* Error — stays red for clear failure states */
-  --md-sys-color-error: #FF6B6B;
-  --md-sys-color-on-error: #2B0D0D;
+  /* Error — clear failure red */
+  --md-sys-color-error: #FF5252;
+  --md-sys-color-on-error: #FFFFFF;
   --md-sys-color-error-container: #3F1414;
   --md-sys-color-on-error-container: #FFD4D4;
 
-  /* Neutral Palette - Backgrounds & Surfaces */
-  --md-sys-color-background: #111111;
-  --md-sys-color-on-background: #F5F5F5;
-  --md-sys-color-surface: #181818;
-  --md-sys-color-on-surface: #F5F5F5;
-  --md-sys-color-surface-variant: #202020;
-  --md-sys-color-on-surface-variant: #B8B8B8;
-  --md-sys-color-outline: #2A2A2A;
-  --md-sys-color-outline-variant: #1E1E1E;
+  /* Neutral Palette - Backgrounds & Surfaces (Kimi Dark 4-step ramp) */
+  --md-sys-color-background: #121212;
+  --md-sys-color-on-background: #FFFFFF;
+  --md-sys-color-surface: #1A1A1A;
+  --md-sys-color-on-surface: #FFFFFF;
+  --md-sys-color-surface-variant: #2C2C2C;
+  --md-sys-color-on-surface-variant: #9E9E9E;
+  --md-sys-color-outline: rgba(255, 255, 255, 0.12);
+  --md-sys-color-outline-variant: rgba(255, 255, 255, 0.08);
 
   /* Inverse Colors */
-  --md-sys-color-inverse-surface: #F5F5F5;
-  --md-sys-color-inverse-on-surface: #181818;
-  --md-sys-color-inverse-primary: #D97700;
+  --md-sys-color-inverse-surface: #FFFFFF;
+  --md-sys-color-inverse-on-surface: #1A1A1A;
+  --md-sys-color-inverse-primary: #6BB3FF;
 
-  /* Elevation Shadows */
+  /* Kimi Dark extras — not part of base M3, used by components/utilities below */
+  --md-sys-color-surface-elevated: #333333;      /* bg-elevated */
+  --md-sys-color-border-strong: rgba(255, 255, 255, 0.2);
+  --md-sys-color-primary-hover: #6BB3FF;
+  --md-sys-color-primary-pressed: #3D8BEF;
+  --md-sys-color-primary-glow: rgba(74, 158, 255, 0.3);
+  --md-sys-color-success: #4CAF50;
+  --md-sys-color-warning: #FFC107;
+
+  /* Glass */
+  --md-sys-glass-bg: rgba(255, 255, 255, 0.08);
+  --md-sys-glass-border: rgba(255, 255, 255, 0.1);
+  --md-sys-glass-blur: blur(20px) saturate(180%);
+
+  /* Elevation Shadows (spec sm/md/lg spread across the 5 M3 tiers, plus glow) */
   --md-sys-elevation-0: none;
-  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.06), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
-  --md-sys-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.06), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
-  --md-sys-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.07), 0px 1px 3px 0px rgba(0, 0, 0, 0.08);
-  --md-sys-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.08), 0px 2px 3px 0px rgba(0, 0, 0, 0.08);
-  --md-sys-elevation-5: 0px 8px 12px 6px rgba(0, 0, 0, 0.10), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.35);
+  --md-sys-elevation-2: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --md-sys-elevation-3: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-4: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --md-sys-elevation-5: 0 12px 40px rgba(0, 0, 0, 0.65);
+  --md-sys-elevation-glow: 0 0 20px var(--md-sys-color-primary-glow);
 
   /* State Layer Opacities */
   --md-sys-state-hover-opacity: 0.08;
   --md-sys-state-focus-opacity: 0.12;
   --md-sys-state-pressed-opacity: 0.12;
 
-  /* Typography Scale */
-  --md-sys-typescale-display-large: 400 57px/64px 'Inter Variable', system-ui;
-  --md-sys-typescale-display-medium: 400 45px/52px 'Inter Variable', system-ui;
-  --md-sys-typescale-display-small: 400 36px/44px 'Inter Variable', system-ui;
+  /* Typography Scale — Inter, spec sizes (Display/H1/H2/H3/Body/Body Small/Caption/Button) */
+  --md-sys-typescale-display-large: 700 32px/40px 'Inter Variable', system-ui;
+  --md-sys-typescale-display-medium: 700 28px/36px 'Inter Variable', system-ui;
+  --md-sys-typescale-display-small: 700 24px/32px 'Inter Variable', system-ui;
 
-  --md-sys-typescale-headline-large: 400 32px/40px 'Inter Variable', system-ui;
-  --md-sys-typescale-headline-medium: 400 28px/36px 'Inter Variable', system-ui;
-  --md-sys-typescale-headline-small: 400 24px/32px 'Inter Variable', system-ui;
+  --md-sys-typescale-headline-large: 600 28px/36px 'Inter Variable', system-ui;   /* H1 */
+  --md-sys-typescale-headline-medium: 600 24px/32px 'Inter Variable', system-ui;  /* H2 */
+  --md-sys-typescale-headline-small: 500 20px/28px 'Inter Variable', system-ui;   /* H3 */
 
-  --md-sys-typescale-title-large: 400 22px/28px 'Inter Variable', system-ui;
-  --md-sys-typescale-title-medium: 500 16px/24px 'Inter Variable', system-ui;
-  --md-sys-typescale-title-small: 500 14px/20px 'Inter Variable', system-ui;
+  --md-sys-typescale-title-large: 600 20px/28px 'Inter Variable', system-ui;
+  --md-sys-typescale-title-medium: 600 16px/24px 'Inter Variable', system-ui;
+  --md-sys-typescale-title-small: 600 14px/20px 'Inter Variable', system-ui;
 
-  --md-sys-typescale-body-large: 400 16px/24px 'Inter Variable', system-ui;
-  --md-sys-typescale-body-medium: 400 14px/20px 'Inter Variable', system-ui;
+  --md-sys-typescale-body-large: 400 16px/24px 'Inter Variable', system-ui;       /* Body */
+  --md-sys-typescale-body-medium: 400 14px/20px 'Inter Variable', system-ui;      /* Body Small */
   --md-sys-typescale-body-small: 400 12px/16px 'Inter Variable', system-ui;
 
-  --md-sys-typescale-label-large: 500 14px/20px 'Inter Variable', system-ui;
-  --md-sys-typescale-label-medium: 500 12px/16px 'Inter Variable', system-ui;
+  --md-sys-typescale-label-large: 500 14px/20px 'Inter Variable', system-ui;      /* Button (tracking +0.5px applied via .type-button) */
+  --md-sys-typescale-label-medium: 500 12px/16px 'Inter Variable', system-ui;     /* Caption */
   --md-sys-typescale-label-small: 500 11px/16px 'Inter Variable', system-ui;
 
-  /* Spacing Scale (4px base) */
+  /* Spacing Scale (4px base — a superset of the spec's 8px grid: 8/16/24/32/48/64 all present) */
   --md-sys-spacing-1: 4px;
   --md-sys-spacing-2: 8px;
   --md-sys-spacing-3: 12px;
@@ -94,77 +109,85 @@
   --md-sys-spacing-20: 80px;
   --md-sys-spacing-24: 96px;
 
-  /* Radius Scale — sharper for a technical feel */
+  /* Radius Scale — pill-friendly. Buttons/inputs use radius-full; cards use lg/xl */
   --md-sys-radius-none: 0px;
   --md-sys-radius-xs: 4px;
-  --md-sys-radius-sm: 6px;
-  --md-sys-radius-md: 8px;
-  --md-sys-radius-lg: 10px;
-  --md-sys-radius-xl: 12px;
-  --md-sys-radius-2xl: 16px;
+  --md-sys-radius-sm: 8px;
+  --md-sys-radius-md: 12px;
+  --md-sys-radius-lg: 16px;
+  --md-sys-radius-xl: 20px;
+  --md-sys-radius-2xl: 24px;
   --md-sys-radius-full: 9999px;
+  --md-sys-radius-pill: 9999px; /* explicit alias for pill-shaped controls */
 
-  /* Motion */
+  /* Motion — single standard easing per spec, applied across all tiers */
   --md-sys-motion-duration-short: 150ms;
   --md-sys-motion-duration-medium: 250ms;
   --md-sys-motion-duration-long: 350ms;
-  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0.0, 0, 1.0);
-  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0.0, 0, 1.0);
-  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
-  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0.0, 0.8, 0.15);
+  --md-sys-motion-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.4, 0, 0.2, 1);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.4, 0, 0.2, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* =============================================================================
-   DARK MODE (PRIMARY) — Near-black surfaces, restrained orange accent
-   Matches reference palette: #111111 bg / #181818 card / #202020 elevated /
-   #2A2A2A border / #F5F5F5 text / #B8B8B8 secondary / #777777 muted / #FF9500 accent
+   DARK MODE (PRIMARY) — Kimi Dark palette
+   #121212 bg / #1A1A1A surface / #2C2C2C surface-variant / #333333 elevated /
+   #FFFFFF text / #E0E0E0 secondary / #9E9E9E muted / #4A9EFF accent
    ============================================================================= */
 .dark {
-  /* Primary — Restrained Orange */
-  --md-sys-color-primary: #FF9500;
+  --md-sys-color-primary: #4A9EFF;
   --md-sys-color-on-primary: #FFFFFF;
-  --md-sys-color-primary-container: #5A3000;
-  --md-sys-color-on-primary-container: #FFE5C2;
+  --md-sys-color-primary-container: #1B3A5C;
+  --md-sys-color-on-primary-container: #CFE6FF;
 
-  /* Secondary — Neutral gray (secondary text tier) */
-  --md-sys-color-secondary: #B8B8B8;
-  --md-sys-color-on-secondary: #1C1C1C;
-  --md-sys-color-secondary-container: #202020;
+  --md-sys-color-secondary: #E0E0E0;
+  --md-sys-color-on-secondary: #1A1A1A;
+  --md-sys-color-secondary-container: #2C2C2C;
   --md-sys-color-on-secondary-container: #E0E0E0;
 
-  /* Tertiary — Muted gray (tertiary text tier) */
-  --md-sys-color-tertiary: #A8A8A8;
-  --md-sys-color-on-tertiary: #1C1C1C;
-  --md-sys-color-tertiary-container: #202020;
-  --md-sys-color-on-tertiary-container: #C8C8C8;
+  --md-sys-color-tertiary: #9E9E9E;
+  --md-sys-color-on-tertiary: #1A1A1A;
+  --md-sys-color-tertiary-container: #2C2C2C;
+  --md-sys-color-on-tertiary-container: #9E9E9E;
 
-  /* Error */
-  --md-sys-color-error: #F87171;
-  --md-sys-color-on-error: #2B0D0D;
+  --md-sys-color-error: #FF5252;
+  --md-sys-color-on-error: #FFFFFF;
   --md-sys-color-error-container: #3F1414;
-  --md-sys-color-on-error-container: #FECACA;
+  --md-sys-color-on-error-container: #FFD4D4;
 
-  /* Neutral Palette - Dark Backgrounds */
-  --md-sys-color-background: #111111;
-  --md-sys-color-on-background: #F5F5F5;
-  --md-sys-color-surface: #181818;
-  --md-sys-color-on-surface: #F5F5F5;
-  --md-sys-color-surface-variant: #202020;
-  --md-sys-color-on-surface-variant: #B8B8B8;
-  --md-sys-color-outline: #2A2A2A;
-  --md-sys-color-outline-variant: #1E1E1E;
+  --md-sys-color-background: #121212;
+  --md-sys-color-on-background: #FFFFFF;
+  --md-sys-color-surface: #1A1A1A;
+  --md-sys-color-on-surface: #FFFFFF;
+  --md-sys-color-surface-variant: #2C2C2C;
+  --md-sys-color-on-surface-variant: #9E9E9E;
+  --md-sys-color-outline: rgba(255, 255, 255, 0.12);
+  --md-sys-color-outline-variant: rgba(255, 255, 255, 0.08);
 
-  /* Inverse Colors */
-  --md-sys-color-inverse-surface: #F5F5F5;
-  --md-sys-color-inverse-on-surface: #181818;
-  --md-sys-color-inverse-primary: #FF9500;
+  --md-sys-color-inverse-surface: #FFFFFF;
+  --md-sys-color-inverse-on-surface: #1A1A1A;
+  --md-sys-color-inverse-primary: #6BB3FF;
 
-  /* Dark Mode Elevation (stronger shadows) */
-  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.5);
-  --md-sys-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.5);
-  --md-sys-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.3), 0px 1px 3px 0px rgba(0, 0, 0, 0.5);
-  --md-sys-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.3), 0px 2px 3px 0px rgba(0, 0, 0, 0.5);
-  --md-sys-elevation-5: 0px 8px 12px 6px rgba(0, 0, 0, 0.3), 0px 2px 4px 0px rgba(0, 0, 0, 0.5);
+  --md-sys-color-surface-elevated: #333333;
+  --md-sys-color-border-strong: rgba(255, 255, 255, 0.2);
+  --md-sys-color-primary-hover: #6BB3FF;
+  --md-sys-color-primary-pressed: #3D8BEF;
+  --md-sys-color-primary-glow: rgba(74, 158, 255, 0.3);
+  --md-sys-color-success: #4CAF50;
+  --md-sys-color-warning: #FFC107;
+
+  --md-sys-glass-bg: rgba(255, 255, 255, 0.08);
+  --md-sys-glass-border: rgba(255, 255, 255, 0.1);
+  --md-sys-glass-blur: blur(20px) saturate(180%);
+
+  /* Dark Mode Elevation (same values — the palette is dark-first) */
+  --md-sys-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.3), 0px 1px 2px 0px rgba(0, 0, 0, 0.35);
+  --md-sys-elevation-2: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --md-sys-elevation-3: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-4: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --md-sys-elevation-5: 0 12px 40px rgba(0, 0, 0, 0.65);
+  --md-sys-elevation-glow: 0 0 20px var(--md-sys-color-primary-glow);
 }
 
 /* =============================================================================
@@ -178,6 +201,7 @@
 .surface-elevation-3 { box-shadow: var(--md-sys-elevation-3); }
 .surface-elevation-4 { box-shadow: var(--md-sys-elevation-4); }
 .surface-elevation-5 { box-shadow: var(--md-sys-elevation-5); }
+.surface-elevation-glow { box-shadow: var(--md-sys-elevation-glow); }
 
 /* State layers */
 .state-layer-hover::after {
@@ -228,6 +252,11 @@
 .type-label-medium { font: var(--md-sys-typescale-label-medium); }
 .type-label-small { font: var(--md-sys-typescale-label-small); }
 
+.type-button {
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: 0.5px;
+}
+
 /* Spacing utilities */
 .spacing-1 { padding: var(--md-sys-spacing-1); }
 .spacing-2 { padding: var(--md-sys-spacing-2); }
@@ -248,3 +277,43 @@
 .radius-xl { border-radius: var(--md-sys-radius-xl); }
 .radius-2xl { border-radius: var(--md-sys-radius-2xl); }
 .radius-full { border-radius: var(--md-sys-radius-full); }
+.radius-pill { border-radius: var(--md-sys-radius-pill); }
+
+/* =============================================================================
+   KIMI DARK — special effects (glassmorphism, glow, gradients, touch targets)
+   ============================================================================= */
+
+/* Glass surface — headers, hero panels, glass cards */
+.glass,
+.glass-card {
+  background: var(--md-sys-glass-bg);
+  backdrop-filter: var(--md-sys-glass-blur);
+  -webkit-backdrop-filter: var(--md-sys-glass-blur);
+  border: 1px solid var(--md-sys-glass-border);
+}
+.glass-card { border-radius: var(--md-sys-radius-xl); }
+
+/* Accent glow — hover/active/focus rings on primary controls */
+.glow-accent { box-shadow: var(--md-sys-elevation-glow); }
+
+/* Gradient overlays (spec 6) */
+.gradient-fade-bottom {
+  background: linear-gradient(180deg, transparent 0%, var(--md-sys-color-background) 100%);
+}
+.gradient-radial-glow {
+  background: radial-gradient(circle, var(--md-sys-color-primary-glow) 0%, transparent 70%);
+}
+
+/* Accessibility — minimum touch target (spec section 7) */
+.touch-target-min {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow-accent,
+  .glass,
+  .glass-card {
+    transition: none !important;
+  }
+}

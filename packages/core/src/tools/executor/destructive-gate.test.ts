@@ -4,8 +4,7 @@ import * as path from "node:path";
 import { ApprovalInbox } from "../../security/approval-inbox.js";
 import {
   destructiveApprovalGate,
-  requireConfirmDestructive,
-  requireConfirmComputerUse,
+  consumeDestructiveApproval,
   isDestructiveShellCommand,
 } from "./destructive-gate.js";
 
@@ -29,16 +28,61 @@ agent:
     require_confirm_computer_use: true
 `;
 
-// These read agent.yaml directly and don't go through destructiveApprovalGate,
-// so they stay meaningful regardless of runtime mode -- unlike
-// destructiveApprovalGate itself, this parsing isn't short-circuited by
-// turbo mode. Kept from before the standard-mode removal since the
-// nested-agent.tools-shape bug they guard against is unrelated to it.
-describe("requireConfirmDestructive / requireConfirmComputerUse (config parsing)", () => {
-  it("default to true when unset", () => {
-    const configDir = makeConfigDir("agent:\n  name: Miki\n");
-    expect(requireConfirmDestructive(configDir)).toBe(true);
-    expect(requireConfirmComputerUse(configDir)).toBe(true);
+describe("destructiveApprovalGate — computer-use actions", () => {
+  it("blocks computer_click_at without approval and never returns a gate to consume", () => {
+    const configDir = makeConfigDir(DEFAULT_YAML);
+    const { inbox } = makeInbox();
+    const { gate, response } = destructiveApprovalGate({
+      approvalInbox: inbox,
+      configDir,
+      toolName: "computer_click_at",
+      resource: "computer:click_at:100,200",
+      args: { x: 100, y: 200 },
+    });
+    expect(gate).toBeNull();
+    expect(response).not.toBeNull();
+    const parsed = JSON.parse(response as string);
+    expect(parsed.approval_required).toBe(true);
+    expect(parsed.tool).toBe("computer_click_at");
+    expect(typeof parsed.request_id).toBe("string");
+  });
+
+  it("lets the same call through once approved via the Web UI operator path, and consume succeeds", () => {
+    const configDir = makeConfigDir(DEFAULT_YAML);
+    const { inbox } = makeInbox();
+    const args = { keys: "alt+f4" };
+
+    // Step 1: model calls the tool, gets an approval_required response.
+    const first = destructiveApprovalGate({
+      approvalInbox: inbox,
+      configDir,
+      toolName: "computer_hotkey",
+      resource: "computer:hotkey:alt+f4",
+      args,
+    });
+    expect(first.response).not.toBeNull();
+    const { request_id } = JSON.parse(first.response as string);
+
+    // Step 2: the owner approves from the authenticated Web UI (no raw
+    // token involved — that's the same approveByOperator() path the real
+    // admin approvals endpoint uses).
+    inbox.approveByOperator(request_id, "owner");
+
+    // Step 3: model retries the identical tool call with approval_request_id.
+    const retry = destructiveApprovalGate({
+      approvalInbox: inbox,
+      configDir,
+      toolName: "computer_hotkey",
+      resource: "computer:hotkey:alt+f4",
+      args: { ...args, approval_request_id: request_id },
+    });
+    expect(retry.response).toBeNull();
+    expect(retry.gate).not.toBeNull();
+    if (retry.gate) {
+      expect(() =>
+        consumeDestructiveApproval(inbox, retry.gate!),
+      ).not.toThrow();
+    }
   });
 
   it("honors require_confirm_computer_use=false independently of require_confirm_destructive", () => {
@@ -48,8 +92,26 @@ agent:
     require_confirm_destructive: true
     require_confirm_computer_use: false
 `);
-    expect(requireConfirmDestructive(configDir)).toBe(true);
-    expect(requireConfirmComputerUse(configDir)).toBe(false);
+    const { inbox } = makeInbox();
+
+    const computerUse = destructiveApprovalGate({
+      approvalInbox: inbox,
+      configDir,
+      toolName: "computer_set_text",
+      resource: "computer:set_text",
+      args: { text: "hello" },
+    });
+    expect(computerUse.response).toBeNull();
+    expect(computerUse.gate).toBeNull();
+
+    const shell = destructiveApprovalGate({
+      approvalInbox: inbox,
+      configDir,
+      toolName: "shell_execute",
+      resource: "shell:rm -rf /tmp/x",
+      args: { cmd: "rm -rf /tmp/x" },
+    });
+    expect(shell.response).not.toBeNull();
   });
 
   it("reads require_confirm_computer_use from the real nested agent.tools shape (regression guard for the config-path bug)", () => {
@@ -63,75 +125,32 @@ agent:
   tools:
     require_confirm_computer_use: false
 `);
-    expect(requireConfirmComputerUse(configDir)).toBe(false);
-  });
-
-  it("still classifies destructive shell commands the same way", () => {
-    expect(isDestructiveShellCommand("rm -rf /workspace/build")).toBe(true);
-    expect(isDestructiveShellCommand("ls -la")).toBe(false);
-  });
-});
-
-// Turbo mode has been the sole, permanent runtime mode since standard mode
-// was removed (owner-requested): destructiveApprovalGate() checks
-// isTurboModeActive() first and, whenever it's true, bypasses everything
-// below unconditionally -- the require_confirm_destructive/
-// require_confirm_computer_use checks above are still parsed correctly (see
-// the describe block above) but destructiveApprovalGate() itself never
-// reaches them anymore, for any tool, under any config. There is no
-// remaining chat command or config value that restores the old blocking
-// behavior; only reverting this code change would.
-describe("destructiveApprovalGate — turbo mode bypasses it unconditionally", () => {
-  it("auto-approves computer_click_at even with require_confirm_computer_use: true", () => {
-    const configDir = makeConfigDir(DEFAULT_YAML);
     const { inbox } = makeInbox();
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-
     const { gate, response } = destructiveApprovalGate({
       approvalInbox: inbox,
       configDir,
-      toolName: "computer_click_at",
-      resource: "computer:click_at:100,200",
-      args: { x: 100, y: 200 },
+      toolName: "computer_launch",
+      resource: "computer:launch:notepad.exe",
+      args: { command: "notepad.exe" },
     });
-    expect(gate).toBeNull();
-    expect(response).toBeNull(); // no approval_required round-trip anymore
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("TURBO MODE"),
-    );
-    warn.mockRestore();
-  });
-
-  it("auto-approves shell_execute even with require_confirm_destructive: true and no approvalInbox wired up", () => {
-    const configDir = makeConfigDir(DEFAULT_YAML);
-    const { gate, response } = destructiveApprovalGate({
-      approvalInbox: undefined,
-      configDir,
-      toolName: "shell_execute",
-      resource: "shell:rm -rf /tmp/x",
-      args: { cmd: "rm -rf /tmp/x" },
-    });
-    // Before turbo mode was permanent, missing approvalInbox + gateEnabled
-    // would throw here. Turbo's check runs first, so it never gets that far.
-    expect(gate).toBeNull();
     expect(response).toBeNull();
+    expect(gate).toBeNull();
   });
 
-  it("bypasses file_delete regardless of require_confirm_destructive: false too (turbo doesn't care either way)", () => {
-    const configDir = makeConfigDir(`
-agent:
-  tools:
-    require_confirm_destructive: false
-`);
+  it("still classifies shell commands and gates shell_execute exactly as before", () => {
+    expect(isDestructiveShellCommand("rm -rf /workspace/build")).toBe(true);
+    expect(isDestructiveShellCommand("ls -la")).toBe(false);
+
+    const configDir = makeConfigDir(DEFAULT_YAML);
     const { inbox } = makeInbox();
-    const { gate, response } = destructiveApprovalGate({
+    const { response } = destructiveApprovalGate({
       approvalInbox: inbox,
       configDir,
       toolName: "file_delete",
       resource: "file:/workspace/notes.txt",
       args: { path: "/workspace/notes.txt" },
     });
-    expect(gate).toBeNull();
-    expect(response).toBeNull();
+    expect(response).not.toBeNull();
+    expect(JSON.parse(response as string).tool).toBe("file_delete");
   });
 });

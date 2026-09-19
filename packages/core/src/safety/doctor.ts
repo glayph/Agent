@@ -39,6 +39,7 @@ const REQUIRED_RUNTIME_FILES = [
   "packages/core/dist/api/index.js",
   "packages/config/dist/index.js",
   "packages/installer/dist/index.js",
+  "packages/skills/dist/index.js",
   "packages/ui/frontend/dist/index.html",
 ];
 

@@ -47,6 +47,7 @@
     "@miki/config": "file:../config",
     "@miki/installer": "file:../installer",
     "@miki/memory": "file:../memory",
+    "@miki/skills": "file:../skills",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",

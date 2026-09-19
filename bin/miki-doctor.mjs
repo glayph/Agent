@@ -52,6 +52,10 @@ const RUNTIME_FILE_CANDIDATES = [
     "dist/runtime/packages/installer/dist/index.js",
   ],
   [
+    "packages/skills/dist/index.js",
+    "dist/runtime/packages/skills/dist/index.js",
+  ],
+  [
     "packages/ui/frontend/dist/index.html",
     "dist/runtime/packages/ui/frontend/dist/index.html",
   ],

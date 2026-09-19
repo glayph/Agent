@@ -49,7 +49,7 @@ export interface ChatToolCall {
 }
 
 export type AssistantMessageKind =
-  "normal" | "thought" | "tool_calls" | "action_update"
+  "normal" | "thought" | "tool_calls" | "action_update" | "error"
 
 export type AssistantThoughtCategory =
   "Plan" | "Action" | "Verification" | "Progress" | "Decision" | "Thought"

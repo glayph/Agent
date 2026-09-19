@@ -389,16 +389,6 @@ export class DiscordBot {
         message.channel_id,
       ),
       prompt,
-      undefined,
-      undefined,
-      async (progressText) => {
-        try {
-          await this.postMessage(message.channel_id, progressText);
-        } catch {
-          // Adaptive Multi-Message Output System: a dropped progress
-          // update is best-effort and must never fail the turn.
-        }
-      },
     );
     for (const part of splitOutboundMessageForOrchestrator(
       this.orchestrator,

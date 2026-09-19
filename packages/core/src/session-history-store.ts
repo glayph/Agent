@@ -47,6 +47,7 @@ interface MessageRow {
   image_urls: string | null;
   attachments_json: string | null;
   voice_json: string | null;
+  is_error: number;
 }
 
 function parseVoiceMetadata(
@@ -212,6 +213,11 @@ export class SqliteSessionHistoryStore {
       if (!columns.some((column) => column.name === "voice_json")) {
         this.db.exec("ALTER TABLE session_messages ADD COLUMN voice_json TEXT");
       }
+      if (!columns.some((column) => column.name === "is_error")) {
+        this.db.exec(
+          "ALTER TABLE session_messages ADD COLUMN is_error INTEGER NOT NULL DEFAULT 0",
+        );
+      }
     });
     initializeSchema();
   }
@@ -224,7 +230,7 @@ export class SqliteSessionHistoryStore {
       .all() as SessionRow[];
     const messages = this.db
       .prepare(
-        "SELECT session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json FROM session_messages ORDER BY session_id, position ASC",
+        "SELECT session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json, is_error FROM session_messages ORDER BY session_id, position ASC",
       )
       .all() as MessageRow[];
     const bySession = new Map<string, ChatMessage[]>();
@@ -253,6 +259,7 @@ export class SqliteSessionHistoryStore {
         ...(imageUrls && imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
         ...(attachments ? { attachments } : {}),
         ...(voice ? { voice } : {}),
+        ...(row.is_error ? { is_error: true } : {}),
       };
       const history = bySession.get(row.session_id) || [];
       history.push(message);
@@ -301,8 +308,8 @@ export class SqliteSessionHistoryStore {
         .prepare("DELETE FROM session_messages WHERE session_id = ?")
         .run(sessionId);
       const insert = this.db.prepare(
-        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO session_messages (session_id, position, id, created_at, role, content, image_urls, attachments_json, voice_json, is_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       messages.forEach((message, position) => {
         const imageUrls = Array.isArray(message.image_urls)
@@ -320,6 +327,7 @@ export class SqliteSessionHistoryStore {
           imageUrls.length > 0 ? JSON.stringify(imageUrls) : null,
           serializeAttachments(message.attachments),
           serializeVoiceMetadata(message.voice),
+          message.is_error ? 1 : 0,
         );
       });
     });
@@ -337,7 +345,7 @@ export class SqliteSessionHistoryStore {
            s.updated_at,
            s.title,
            s.pinned,
-           COUNT(m.position) AS message_count,
+           COUNT(CASE WHEN m.is_error = 1 THEN NULL ELSE m.position END) AS message_count,
            COALESCE(
              (SELECT content FROM session_messages
               WHERE session_id = s.id AND role = 'user'
@@ -345,7 +353,7 @@ export class SqliteSessionHistoryStore {
            ) AS first_user_content,
            COALESCE(
              (SELECT content FROM session_messages
-              WHERE session_id = s.id
+              WHERE session_id = s.id AND is_error = 0
               ORDER BY position DESC LIMIT 1), ''
            ) AS last_content
          FROM sessions s

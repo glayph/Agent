@@ -54,7 +54,7 @@ function makeController(opts: {
     },
     isProviderHealthy: opts.providerHealthy ?? (() => true),
     hints: () => opts.hints ?? {},
-    config: { ...DEFAULT_AUTONOMY_CONFIG, mode: opts.mode ?? "turbo" },
+    config: { ...DEFAULT_AUTONOMY_CONFIG, mode: opts.mode ?? "standard" },
   });
 }
 
@@ -78,15 +78,19 @@ describe("AutonomyController — idle gating", () => {
     expect(controller.getStatus().currentObjective).toBeNull();
   });
 
-  it("respects turbo's planningEveryNPulses (fires on every pulse)", async () => {
+  it("respects planningEveryNPulses in standard mode", async () => {
     const scheduler = makeFakeScheduler();
     const controller = makeController({
       db,
       scheduler,
-      mode: "turbo", // planningEveryNPulses = 1, idleThresholdMins = 1
+      mode: "standard", // planningEveryNPulses = 4, idleThresholdMins = 5
       hints: { failingTests: ["a.test.ts"] },
     });
-    await controller.tick(10, { free_mem_pct: 50, cpus: 4 }); // pulse 1 → fires immediately
+    await controller.tick(10, { free_mem_pct: 50, cpus: 4 }); // pulse 1
+    await controller.tick(10, { free_mem_pct: 50, cpus: 4 }); // pulse 2
+    await controller.tick(10, { free_mem_pct: 50, cpus: 4 }); // pulse 3
+    expect(scheduler.tasks.size).toBe(0);
+    await controller.tick(10, { free_mem_pct: 50, cpus: 4 }); // pulse 4 → fires
     expect(scheduler.tasks.size).toBe(1);
   });
 });
@@ -240,27 +244,21 @@ describe("AutonomyController — mode switching & chat commands", () => {
   });
   afterEach(() => db.close());
 
-  it("boots directly into turbo — no standard mode to switch out of", async () => {
+  it("changes behavior, not just a label, between standard and turbo", async () => {
     const scheduler = makeFakeScheduler();
     const controller = makeController({
       db,
       scheduler,
+      mode: "standard",
       hints: { failingTests: ["a.test.ts"] },
     });
-    expect(controller.getMode()).toBe("turbo");
-    // idleMins=2 clears turbo's threshold (1) immediately — no waiting on a
-    // "standard" idle threshold that no longer exists.
+    // idleMins=2 is below standard's threshold (5) ...
+    await controller.tick(2, { free_mem_pct: 60, cpus: 4 });
+    expect(scheduler.tasks.size).toBe(0);
+
+    controller.setMode("turbo"); // idleThresholdMins drops to 1
     await controller.tick(2, { free_mem_pct: 60, cpus: 4 });
     expect(scheduler.tasks.size).toBe(1);
-  });
-
-  it("a 'use standard mode' chat command is not recognized and leaves turbo active", () => {
-    const scheduler = makeFakeScheduler();
-    const controller = makeController({ db, scheduler });
-    expect(
-      controller.handleChatCommand("miki use the standard mode"),
-    ).toBeNull();
-    expect(controller.getMode()).toBe("turbo");
   });
 
   it("lets ordinary chat control mode/enable/pause without a UI", () => {

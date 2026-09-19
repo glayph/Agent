@@ -5,16 +5,8 @@ export interface DeterministicFileRequest {
 
 export interface DeterministicIntent {
   kind:
-    | "web_search"
-    | "file_workflow"
-    | "process_control"
-    | "math"
-    | "file_delete"
-    | "shell_execute"
-    | "file_read"
-    | "file_search";
+    "web_search" | "file_workflow" | "process_control" | "math" | "file_delete";
   query?: string;
-  command?: string;
   files?: DeterministicFileRequest[];
   deletePaths?: string[];
   expression?: string;
@@ -221,50 +213,6 @@ function searchQueryFromMessage(message: string): string {
   return (match?.[1] || message).trim();
 }
 
-function parseShellIntent(message: string): DeterministicIntent | null {
-  const quoted = message.match(
-    /(?:run|execute|exec)\s+(?:this\s+)?(?:terminal\s+)?(?:command|program)?\s*[:=]?\s+(?:`([^`]+)`|'([^']+)'|"([^"]+)")/i,
-  );
-  if (quoted) {
-    const command = (quoted[1] || quoted[2] || quoted[3] || "").trim();
-    if (command) {
-      return {
-        kind: "shell_execute",
-        command,
-        verificationRequested: true,
-      };
-    }
-  }
-  const mapped: Array<[RegExp, string]> = [
-    [/\b(uname|kernel|os version|operating system)\b/i, "uname -a"],
-    [
-      /\b(list|show|locate).{0,30}(process|processes|pid)\b/i,
-      "ps -eo pid,comm --no-headers | head -25",
-    ],
-    [/\b(cpu|ram|memory|disk usage|free -h|df -h)\b/i, "free -h; df -h /"],
-    [
-      /\b(system information|system info|gather system)\b/i,
-      "uname -a; nproc; free -h; df -h /",
-    ],
-    [/\b(read|show|check).{0,20}(log|logs)\b/i, "tail -20 /tmp/miki.log"],
-    [/\bnpm -v|node -v\b/i, "node -v; npm -v"],
-    [
-      /\b(install).{0,20}(package|dependency|npm)\b/i,
-      "mkdir -p /tmp/agent-repo/level2-pkg && cd /tmp/agent-repo/level2-pkg && npm init -y",
-    ],
-  ];
-  for (const [re, cmd] of mapped) {
-    if (re.test(message)) {
-      return {
-        kind: "shell_execute",
-        command: cmd,
-        verificationRequested: true,
-      };
-    }
-  }
-  return null;
-}
-
 export function detectDeterministicIntent(
   message: string,
 ): DeterministicIntent | null {
@@ -275,23 +223,6 @@ export function detectDeterministicIntent(
   // first keeps intent priority explicit as more file-intent kinds are added.
   const fileDelete = parseFileDeleteIntent(message);
   if (fileDelete) return fileDelete;
-
-  const shell = parseShellIntent(message);
-  if (shell) return shell;
-
-  const readMatch = message.match(
-    /\b(?:read|quote|open|show)\b[\s\S]{0,80}?([A-Za-z0-9][A-Za-z0-9._/-]*\.[A-Za-z0-9]{1,8})\b/i,
-  );
-  if (readMatch?.[1]) {
-    const filePath = cleanFilePath(readMatch[1]);
-    if (filePath) {
-      return {
-        kind: "file_read",
-        files: [{ path: filePath, content: "" }],
-        verificationRequested: true,
-      };
-    }
-  }
 
   const files = parseFileRequests(message);
   if (files.length > 0) {
@@ -341,9 +272,7 @@ export function isExplicitToolIntent(
     return toolName === "file_write" || toolName === "file_read";
   }
   if (intent.kind === "file_delete") return toolName === "file_delete";
-  if (intent.kind === "file_read") return toolName === "file_read";
-  if (intent.kind === "file_search") return toolName === "file_search";
-  if (intent.kind === "shell_execute" || intent.kind === "process_control") {
+  if (intent.kind === "process_control") {
     return toolName === "shell_execute";
   }
   return false;

@@ -2,8 +2,10 @@ import {
   IconAlertCircle,
   IconBrain,
   IconChevronDown,
+  IconClock,
   IconDownload,
   IconFileText,
+  IconGauge,
   IconKey,
   IconTool,
 } from "@tabler/icons-react"
@@ -59,11 +61,40 @@ function isCredentialConnectionError(content: string): boolean {
   return (
     !isRateLimitConnectionError(normalized) &&
     (normalized.includes("model needs credentials") ||
+      normalized.includes("credential was missing or rejected") ||
       (normalized.includes("error calling llm") &&
         (normalized.includes("no connected db") ||
           normalized.includes("check credentials") ||
           normalized.includes("credential"))))
   )
+}
+
+function isTimeoutError(content: string): boolean {
+  const normalized = content.toLowerCase()
+  return (
+    normalized.includes("time limit") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout")
+  )
+}
+
+function isBudgetError(content: string): boolean {
+  const normalized = content.toLowerCase()
+  return (
+    normalized.includes("budget exhausted") ||
+    normalized.includes("context budget") ||
+    normalized.includes("safety limit")
+  )
+}
+
+type ErrorCategory = "rate-limit" | "credential" | "timeout" | "budget" | "generic"
+
+function classifyErrorContent(content: string): ErrorCategory {
+  if (isRateLimitConnectionError(content)) return "rate-limit"
+  if (isCredentialConnectionError(content)) return "credential"
+  if (isTimeoutError(content)) return "timeout"
+  if (isBudgetError(content)) return "budget"
+  return "generic"
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
@@ -83,6 +114,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const isThought = kind === "thought"
   const isToolCalls = kind === "tool_calls"
   const isActionUpdate = kind === "action_update"
+  const isError = kind === "error"
   const isCollapsedBlock = isThought || isToolCalls
   const trimmedContent = content.trim()
   const hasText = trimmedContent.length > 0
@@ -102,19 +134,9 @@ export const AssistantMessage = memo(function AssistantMessage({
     ? t("chat.reasoningLabel")
     : t("chat.toolCallsLabel")
   const trimmedModelName = modelName?.trim() ?? ""
-  const isRateLimitError = useMemo(
-    () =>
-      !isCollapsedBlock &&
-      hasText &&
-      isRateLimitConnectionError(trimmedContent),
-    [hasText, isCollapsedBlock, trimmedContent],
-  )
-  const isCredentialError = useMemo(
-    () =>
-      !isCollapsedBlock &&
-      hasText &&
-      isCredentialConnectionError(trimmedContent),
-    [hasText, isCollapsedBlock, trimmedContent],
+  const errorCategory = useMemo(
+    () => (isError && hasText ? classifyErrorContent(trimmedContent) : null),
+    [isError, hasText, trimmedContent],
   )
   const visibleContent = visibleAssistantContent(trimmedContent)
   return (
@@ -122,13 +144,13 @@ export const AssistantMessage = memo(function AssistantMessage({
       {(hasText || isCollapsedBlock || hasToolCalls) && (
         <div
           data-chat-bubble="assistant"
+          data-chat-kind={isError ? "error" : undefined}
           className={cn(
-            // Deliberately not a rounded, tailed "speech bubble" (that
-            // reads as GPT-style chat) -- a flat block with a quiet left
-            // accent rule, like reported output from an autonomous system.
-            "group group/message-bubble relative flex w-fit max-w-full flex-col rounded-md border-y-0 border-r-0 border-l-2 px-3 py-2 [border-left-color:var(--chat-assistant-accent)] transition-[background-color,border-color] [background:var(--chat-assistant-bubble)]",
+            "group group/message-bubble relative flex w-fit max-w-full flex-col rounded-xl rounded-bl-sm border [border-color:var(--chat-assistant-border)] px-3 py-2 [box-shadow:var(--chat-assistant-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-assistant-bubble)]",
             isCollapsedBlock &&
               "w-full rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
+            isError &&
+              "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)]",
           )}
           title={formattedTimestamp || undefined}
         >
@@ -136,6 +158,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             className={cn(
               "relative [color:var(--chat-assistant-text)]",
               isCollapsedBlock && "text-muted-foreground",
+              isError && "[color:var(--chat-error-text)]",
             )}
           >
             {isActionUpdate && hasText && (
@@ -272,64 +295,75 @@ export const AssistantMessage = memo(function AssistantMessage({
                   })}
                 </div>
               )}
-            {isRateLimitError && (
+            {isError && errorCategory && (
               <div className="py-0.5 text-[14px] leading-6">
                 <div
-                  data-chat-alert="rate-limit"
+                  data-chat-alert={errorCategory}
                   className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1"
                 >
-                  <IconAlertCircle
-                    className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
-                    aria-hidden="true"
-                  />
+                  {errorCategory === "timeout" ? (
+                    <IconClock
+                      className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
+                      aria-hidden="true"
+                    />
+                  ) : errorCategory === "budget" ? (
+                    <IconGauge
+                      className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <IconAlertCircle
+                      className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
+                      aria-hidden="true"
+                    />
+                  )}
                   <span className="min-w-0 flex-1 truncate text-[12.5px] leading-5 font-semibold [color:var(--chat-alert-text)]">
-                    {t("chat.errors.rateLimitTitle", {
-                      defaultValue: "Model quota or rate limit reached",
-                    })}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {isCredentialError && (
-              <div className="py-0.5 text-[14px] leading-6">
-                <div
-                  data-chat-alert="credentials"
-                  className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1"
-                >
-                  <IconAlertCircle
-                    className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] leading-5 font-semibold [color:var(--chat-alert-text)]">
-                    {t("chat.errors.credentialsTitle", {
-                      defaultValue: "Model needs credentials",
-                    })}
-                  </span>
-                  <Button
-                    asChild
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 shrink-0 rounded-md bg-transparent [color:var(--chat-alert-text)] hover:bg-transparent hover:[color:var(--chat-alert-icon)]"
-                  >
-                    <a
-                      href="/credentials"
-                      aria-label={t("chat.errors.openCredentials", {
-                        defaultValue: "Credentials",
+                    {errorCategory === "rate-limit" &&
+                      t("chat.errors.rateLimitTitle", {
+                        defaultValue: "Model quota or rate limit reached",
                       })}
-                      title={t("chat.errors.openCredentials", {
-                        defaultValue: "Credentials",
+                    {errorCategory === "credential" &&
+                      t("chat.errors.credentialsTitle", {
+                        defaultValue: "Model needs credentials",
                       })}
+                    {errorCategory === "timeout" &&
+                      t("chat.errors.timeoutTitle", {
+                        defaultValue: "Stopped — time limit reached",
+                      })}
+                    {errorCategory === "budget" &&
+                      t("chat.errors.budgetTitle", {
+                        defaultValue: "Stopped — context limit reached",
+                      })}
+                    {errorCategory === "generic" &&
+                      t("chat.errors.genericTitle", {
+                        defaultValue: "Something went wrong",
+                      })}
+                  </span>
+                  {errorCategory === "credential" && (
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 shrink-0 rounded-md bg-transparent [color:var(--chat-alert-text)] hover:bg-transparent hover:[color:var(--chat-alert-icon)]"
                     >
-                      <IconKey className="size-3.5" />
-                    </a>
-                  </Button>
+                      <a
+                        href="/credentials"
+                        aria-label={t("chat.errors.openCredentials", {
+                          defaultValue: "Credentials",
+                        })}
+                        title={t("chat.errors.openCredentials", {
+                          defaultValue: "Credentials",
+                        })}
+                      >
+                        <IconKey className="size-3.5" />
+                      </a>
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
 
             {!isActionUpdate &&
-              !isCredentialError &&
               (!isCollapsedBlock || isExpanded) &&
               !isToolCalls &&
               hasText && (
@@ -339,6 +373,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                     isThought
                       ? "prose-p:my-1 prose-p:whitespace-pre-wrap py-0 text-[13px] leading-6 opacity-70"
                       : "prose-p:whitespace-pre-wrap py-0 text-[14px] leading-6",
+                    isError && "text-[13px] opacity-90",
                   )}
                 >
                   <Suspense

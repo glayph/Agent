@@ -9,114 +9,44 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AboutRouteImport } from './routes/about'
-import { Route as AgentRouteImport } from './routes/agent'
-import { Route as AgentsRouteImport } from './routes/agents'
-import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
-import { Route as ChatRouteImport } from './routes/chat'
-import { Route as ConfigRouteImport } from './routes/config'
-import { Route as ControlRouteImport } from './routes/control'
-import { Route as CredentialsRouteImport } from './routes/credentials'
-import { Route as DriveRouteImport } from './routes/drive'
-import { Route as HealthRouteImport } from './routes/health'
-import { Route as LauncherLoginRouteImport } from './routes/launcher-login'
-import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
-import { Route as LogsRouteImport } from './routes/logs'
-import { Route as MemoryRouteImport } from './routes/memory'
-import { Route as ModelsRouteImport } from './routes/models'
 import { Route as PluginsRouteImport } from './routes/plugins'
-import { Route as AgentAutomationsRouteImport } from './routes/agent/automations'
-import { Route as AgentHubRouteImport } from './routes/agent/hub'
-import { Route as AgentMonitorRouteImport } from './routes/agent/monitor'
-import { Route as AgentRunRouteImport } from './routes/agent/run'
-import { Route as AgentRunsRouteImport } from './routes/agent/runs'
-import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
-import { Route as AgentToolsRouteImport } from './routes/agent/tools'
+import { Route as ModelsRouteImport } from './routes/models'
+import { Route as MemoryRouteImport } from './routes/memory'
+import { Route as LogsRouteImport } from './routes/logs'
+import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
+import { Route as LauncherLoginRouteImport } from './routes/launcher-login'
+import { Route as HealthRouteImport } from './routes/health'
+import { Route as DriveRouteImport } from './routes/drive'
+import { Route as CredentialsRouteImport } from './routes/credentials'
+import { Route as ControlRouteImport } from './routes/control'
+import { Route as ConfigRouteImport } from './routes/config'
+import { Route as ChatRouteImport } from './routes/chat'
+import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AgentRouteImport } from './routes/agent'
+import { Route as AboutRouteImport } from './routes/about'
+import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
-import { Route as AgentsIdRouteImport } from './routes/agents.$id'
-import { Route as AgentsSwarmRouteImport } from './routes/agents.swarm'
-import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
 import { Route as ConfigRawRouteImport } from './routes/config.raw'
+import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
+import { Route as AgentsSwarmRouteImport } from './routes/agents.swarm'
+import { Route as AgentsIdRouteImport } from './routes/agents.$id'
+import { Route as AgentToolsRouteImport } from './routes/agent/tools'
+import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
+import { Route as AgentRunsRouteImport } from './routes/agent/runs'
+import { Route as AgentRunRouteImport } from './routes/agent/run'
+import { Route as AgentMonitorRouteImport } from './routes/agent/monitor'
+import { Route as AgentHubRouteImport } from './routes/agent/hub'
+import { Route as AgentAutomationsRouteImport } from './routes/agent/automations'
 import { Route as AgentAutomationsIndexRouteImport } from './routes/agent/automations.index'
-import { Route as AgentAutomationsConnectionsRouteImport } from './routes/agent/automations.connections'
-import { Route as AgentAutomationsCreateRouteImport } from './routes/agent/automations.create'
-import { Route as AgentAutomationsHistoryRouteImport } from './routes/agent/automations.history'
 import { Route as AgentAutomationsListRouteImport } from './routes/agent/automations.list'
+import { Route as AgentAutomationsHistoryRouteImport } from './routes/agent/automations.history'
+import { Route as AgentAutomationsCreateRouteImport } from './routes/agent/automations.create'
+import { Route as AgentAutomationsConnectionsRouteImport } from './routes/agent/automations.connections'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentRoute = AgentRouteImport.update({
-  id: '/agent',
-  path: '/agent',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsRoute = AgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
-  id: '/channels',
-  path: '/channels',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConfigRoute = ConfigRouteImport.update({
-  id: '/config',
-  path: '/config',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ControlRoute = ControlRouteImport.update({
-  id: '/control',
-  path: '/control',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CredentialsRoute = CredentialsRouteImport.update({
-  id: '/credentials',
-  path: '/credentials',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DriveRoute = DriveRouteImport.update({
-  id: '/drive',
-  path: '/drive',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HealthRoute = HealthRouteImport.update({
-  id: '/health',
-  path: '/health',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LauncherLoginRoute = LauncherLoginRouteImport.update({
-  id: '/launcher-login',
-  path: '/launcher-login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LauncherSetupRoute = LauncherSetupRouteImport.update({
-  id: '/launcher-setup',
-  path: '/launcher-setup',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LogsRoute = LogsRouteImport.update({
-  id: '/logs',
-  path: '/logs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MemoryRoute = MemoryRouteImport.update({
-  id: '/memory',
-  path: '/memory',
+const PluginsRoute = PluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsRoute = ModelsRouteImport.update({
@@ -124,49 +54,99 @@ const ModelsRoute = ModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PluginsRoute = PluginsRouteImport.update({
-  id: '/plugins',
-  path: '/plugins',
+const MemoryRoute = MemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentAutomationsRoute = AgentAutomationsRouteImport.update({
-  id: '/automations',
-  path: '/automations',
-  getParentRoute: () => AgentRoute,
+const LogsRoute = LogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentHubRoute = AgentHubRouteImport.update({
-  id: '/hub',
-  path: '/hub',
-  getParentRoute: () => AgentRoute,
+const LauncherSetupRoute = LauncherSetupRouteImport.update({
+  id: '/launcher-setup',
+  path: '/launcher-setup',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentMonitorRoute = AgentMonitorRouteImport.update({
-  id: '/monitor',
-  path: '/monitor',
-  getParentRoute: () => AgentRoute,
+const LauncherLoginRoute = LauncherLoginRouteImport.update({
+  id: '/launcher-login',
+  path: '/launcher-login',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentRunRoute = AgentRunRouteImport.update({
-  id: '/run',
-  path: '/run',
-  getParentRoute: () => AgentRoute,
+const HealthRoute = HealthRouteImport.update({
+  id: '/health',
+  path: '/health',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentRunsRoute = AgentRunsRouteImport.update({
-  id: '/runs',
-  path: '/runs',
-  getParentRoute: () => AgentRoute,
+const DriveRoute = DriveRouteImport.update({
+  id: '/drive',
+  path: '/drive',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentSkillsRoute = AgentSkillsRouteImport.update({
-  id: '/skills',
-  path: '/skills',
-  getParentRoute: () => AgentRoute,
+const CredentialsRoute = CredentialsRouteImport.update({
+  id: '/credentials',
+  path: '/credentials',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentToolsRoute = AgentToolsRouteImport.update({
-  id: '/tools',
-  path: '/tools',
-  getParentRoute: () => AgentRoute,
+const ControlRoute = ControlRouteImport.update({
+  id: '/control',
+  path: '/control',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConfigRoute = ConfigRouteImport.update({
+  id: '/config',
+  path: '/config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentRoute = AgentRouteImport.update({
+  id: '/agent',
+  path: '/agent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const ConfigRawRoute = ConfigRawRouteImport.update({
+  id: '/raw',
+  path: '/raw',
+  getParentRoute: () => ConfigRoute,
+} as any)
+const ChannelsNameRoute = ChannelsNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => ChannelsRouteRoute,
+} as any)
+const AgentsSwarmRoute = AgentsSwarmRouteImport.update({
+  id: '/swarm',
+  path: '/swarm',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsIdRoute = AgentsIdRouteImport.update({
@@ -174,24 +154,59 @@ const AgentsIdRoute = AgentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AgentsRoute,
 } as any)
-const AgentsSwarmRoute = AgentsSwarmRouteImport.update({
-  id: '/swarm',
-  path: '/swarm',
-  getParentRoute: () => AgentsRoute,
+const AgentToolsRoute = AgentToolsRouteImport.update({
+  id: '/tools',
+  path: '/tools',
+  getParentRoute: () => AgentRoute,
 } as any)
-const ChannelsNameRoute = ChannelsNameRouteImport.update({
-  id: '/$name',
-  path: '/$name',
-  getParentRoute: () => ChannelsRouteRoute,
+const AgentSkillsRoute = AgentSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AgentRoute,
 } as any)
-const ConfigRawRoute = ConfigRawRouteImport.update({
-  id: '/raw',
-  path: '/raw',
-  getParentRoute: () => ConfigRoute,
+const AgentRunsRoute = AgentRunsRouteImport.update({
+  id: '/runs',
+  path: '/runs',
+  getParentRoute: () => AgentRoute,
+} as any)
+const AgentRunRoute = AgentRunRouteImport.update({
+  id: '/run',
+  path: '/run',
+  getParentRoute: () => AgentRoute,
+} as any)
+const AgentMonitorRoute = AgentMonitorRouteImport.update({
+  id: '/monitor',
+  path: '/monitor',
+  getParentRoute: () => AgentRoute,
+} as any)
+const AgentHubRoute = AgentHubRouteImport.update({
+  id: '/hub',
+  path: '/hub',
+  getParentRoute: () => AgentRoute,
+} as any)
+const AgentAutomationsRoute = AgentAutomationsRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => AgentRoute,
 } as any)
 const AgentAutomationsIndexRoute = AgentAutomationsIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
+const AgentAutomationsListRoute = AgentAutomationsListRouteImport.update({
+  id: '/list',
+  path: '/list',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
+const AgentAutomationsHistoryRoute = AgentAutomationsHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AgentAutomationsRoute,
+} as any)
+const AgentAutomationsCreateRoute = AgentAutomationsCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
   getParentRoute: () => AgentAutomationsRoute,
 } as any)
 const AgentAutomationsConnectionsRoute =
@@ -200,21 +215,6 @@ const AgentAutomationsConnectionsRoute =
     path: '/connections',
     getParentRoute: () => AgentAutomationsRoute,
   } as any)
-const AgentAutomationsCreateRoute = AgentAutomationsCreateRouteImport.update({
-  id: '/create',
-  path: '/create',
-  getParentRoute: () => AgentAutomationsRoute,
-} as any)
-const AgentAutomationsHistoryRoute = AgentAutomationsHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
-  getParentRoute: () => AgentAutomationsRoute,
-} as any)
-const AgentAutomationsListRoute = AgentAutomationsListRouteImport.update({
-  id: '/list',
-  path: '/list',
-  getParentRoute: () => AgentAutomationsRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -454,109 +454,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agent': {
-      id: '/agent'
-      path: '/agent'
-      fullPath: '/agent'
-      preLoaderRoute: typeof AgentRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents': {
-      id: '/agents'
-      path: '/agents'
-      fullPath: '/agents'
-      preLoaderRoute: typeof AgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/channels': {
-      id: '/channels'
-      path: '/channels'
-      fullPath: '/channels'
-      preLoaderRoute: typeof ChannelsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/config': {
-      id: '/config'
-      path: '/config'
-      fullPath: '/config'
-      preLoaderRoute: typeof ConfigRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/control': {
-      id: '/control'
-      path: '/control'
-      fullPath: '/control'
-      preLoaderRoute: typeof ControlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/credentials': {
-      id: '/credentials'
-      path: '/credentials'
-      fullPath: '/credentials'
-      preLoaderRoute: typeof CredentialsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/drive': {
-      id: '/drive'
-      path: '/drive'
-      fullPath: '/drive'
-      preLoaderRoute: typeof DriveRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/health': {
-      id: '/health'
-      path: '/health'
-      fullPath: '/health'
-      preLoaderRoute: typeof HealthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/launcher-login': {
-      id: '/launcher-login'
-      path: '/launcher-login'
-      fullPath: '/launcher-login'
-      preLoaderRoute: typeof LauncherLoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/launcher-setup': {
-      id: '/launcher-setup'
-      path: '/launcher-setup'
-      fullPath: '/launcher-setup'
-      preLoaderRoute: typeof LauncherSetupRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logs': {
-      id: '/logs'
-      path: '/logs'
-      fullPath: '/logs'
-      preLoaderRoute: typeof LogsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/memory': {
-      id: '/memory'
-      path: '/memory'
-      fullPath: '/memory'
-      preLoaderRoute: typeof MemoryRouteImport
+    '/plugins': {
+      id: '/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof PluginsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models': {
@@ -566,67 +468,137 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModelsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/plugins': {
-      id: '/plugins'
-      path: '/plugins'
-      fullPath: '/plugins'
-      preLoaderRoute: typeof PluginsRouteImport
+    '/memory': {
+      id: '/memory'
+      path: '/memory'
+      fullPath: '/memory'
+      preLoaderRoute: typeof MemoryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agent/automations': {
-      id: '/agent/automations'
-      path: '/automations'
-      fullPath: '/agent/automations'
-      preLoaderRoute: typeof AgentAutomationsRouteImport
-      parentRoute: typeof AgentRoute
+    '/logs': {
+      id: '/logs'
+      path: '/logs'
+      fullPath: '/logs'
+      preLoaderRoute: typeof LogsRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/agent/hub': {
-      id: '/agent/hub'
-      path: '/hub'
-      fullPath: '/agent/hub'
-      preLoaderRoute: typeof AgentHubRouteImport
-      parentRoute: typeof AgentRoute
+    '/launcher-setup': {
+      id: '/launcher-setup'
+      path: '/launcher-setup'
+      fullPath: '/launcher-setup'
+      preLoaderRoute: typeof LauncherSetupRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/agent/monitor': {
-      id: '/agent/monitor'
-      path: '/monitor'
-      fullPath: '/agent/monitor'
-      preLoaderRoute: typeof AgentMonitorRouteImport
-      parentRoute: typeof AgentRoute
+    '/launcher-login': {
+      id: '/launcher-login'
+      path: '/launcher-login'
+      fullPath: '/launcher-login'
+      preLoaderRoute: typeof LauncherLoginRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/agent/run': {
-      id: '/agent/run'
-      path: '/run'
-      fullPath: '/agent/run'
-      preLoaderRoute: typeof AgentRunRouteImport
-      parentRoute: typeof AgentRoute
+    '/health': {
+      id: '/health'
+      path: '/health'
+      fullPath: '/health'
+      preLoaderRoute: typeof HealthRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/agent/runs': {
-      id: '/agent/runs'
-      path: '/runs'
-      fullPath: '/agent/runs'
-      preLoaderRoute: typeof AgentRunsRouteImport
-      parentRoute: typeof AgentRoute
+    '/drive': {
+      id: '/drive'
+      path: '/drive'
+      fullPath: '/drive'
+      preLoaderRoute: typeof DriveRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/agent/skills': {
-      id: '/agent/skills'
-      path: '/skills'
-      fullPath: '/agent/skills'
-      preLoaderRoute: typeof AgentSkillsRouteImport
-      parentRoute: typeof AgentRoute
+    '/credentials': {
+      id: '/credentials'
+      path: '/credentials'
+      fullPath: '/credentials'
+      preLoaderRoute: typeof CredentialsRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/agent/tools': {
-      id: '/agent/tools'
-      path: '/tools'
-      fullPath: '/agent/tools'
-      preLoaderRoute: typeof AgentToolsRouteImport
-      parentRoute: typeof AgentRoute
+    '/control': {
+      id: '/control'
+      path: '/control'
+      fullPath: '/control'
+      preLoaderRoute: typeof ControlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/config': {
+      id: '/config'
+      path: '/config'
+      fullPath: '/config'
+      preLoaderRoute: typeof ConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent': {
+      id: '/agent'
+      path: '/agent'
+      fullPath: '/agent'
+      preLoaderRoute: typeof AgentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/channels': {
+      id: '/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof ChannelsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/agents/': {
       id: '/agents/'
       path: '/'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/config/raw': {
+      id: '/config/raw'
+      path: '/raw'
+      fullPath: '/config/raw'
+      preLoaderRoute: typeof ConfigRawRouteImport
+      parentRoute: typeof ConfigRoute
+    }
+    '/channels/$name': {
+      id: '/channels/$name'
+      path: '/$name'
+      fullPath: '/channels/$name'
+      preLoaderRoute: typeof ChannelsNameRouteImport
+      parentRoute: typeof ChannelsRouteRoute
+    }
+    '/agents/swarm': {
+      id: '/agents/swarm'
+      path: '/swarm'
+      fullPath: '/agents/swarm'
+      preLoaderRoute: typeof AgentsSwarmRouteImport
       parentRoute: typeof AgentsRoute
     }
     '/agents/$id': {
@@ -636,26 +608,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIdRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/swarm': {
-      id: '/agents/swarm'
-      path: '/swarm'
-      fullPath: '/agents/swarm'
-      preLoaderRoute: typeof AgentsSwarmRouteImport
-      parentRoute: typeof AgentsRoute
+    '/agent/tools': {
+      id: '/agent/tools'
+      path: '/tools'
+      fullPath: '/agent/tools'
+      preLoaderRoute: typeof AgentToolsRouteImport
+      parentRoute: typeof AgentRoute
     }
-    '/channels/$name': {
-      id: '/channels/$name'
-      path: '/$name'
-      fullPath: '/channels/$name'
-      preLoaderRoute: typeof ChannelsNameRouteImport
-      parentRoute: typeof ChannelsRouteRoute
+    '/agent/skills': {
+      id: '/agent/skills'
+      path: '/skills'
+      fullPath: '/agent/skills'
+      preLoaderRoute: typeof AgentSkillsRouteImport
+      parentRoute: typeof AgentRoute
     }
-    '/config/raw': {
-      id: '/config/raw'
-      path: '/raw'
-      fullPath: '/config/raw'
-      preLoaderRoute: typeof ConfigRawRouteImport
-      parentRoute: typeof ConfigRoute
+    '/agent/runs': {
+      id: '/agent/runs'
+      path: '/runs'
+      fullPath: '/agent/runs'
+      preLoaderRoute: typeof AgentRunsRouteImport
+      parentRoute: typeof AgentRoute
+    }
+    '/agent/run': {
+      id: '/agent/run'
+      path: '/run'
+      fullPath: '/agent/run'
+      preLoaderRoute: typeof AgentRunRouteImport
+      parentRoute: typeof AgentRoute
+    }
+    '/agent/monitor': {
+      id: '/agent/monitor'
+      path: '/monitor'
+      fullPath: '/agent/monitor'
+      preLoaderRoute: typeof AgentMonitorRouteImport
+      parentRoute: typeof AgentRoute
+    }
+    '/agent/hub': {
+      id: '/agent/hub'
+      path: '/hub'
+      fullPath: '/agent/hub'
+      preLoaderRoute: typeof AgentHubRouteImport
+      parentRoute: typeof AgentRoute
+    }
+    '/agent/automations': {
+      id: '/agent/automations'
+      path: '/automations'
+      fullPath: '/agent/automations'
+      preLoaderRoute: typeof AgentAutomationsRouteImport
+      parentRoute: typeof AgentRoute
     }
     '/agent/automations/': {
       id: '/agent/automations/'
@@ -664,18 +664,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentAutomationsIndexRouteImport
       parentRoute: typeof AgentAutomationsRoute
     }
-    '/agent/automations/connections': {
-      id: '/agent/automations/connections'
-      path: '/connections'
-      fullPath: '/agent/automations/connections'
-      preLoaderRoute: typeof AgentAutomationsConnectionsRouteImport
-      parentRoute: typeof AgentAutomationsRoute
-    }
-    '/agent/automations/create': {
-      id: '/agent/automations/create'
-      path: '/create'
-      fullPath: '/agent/automations/create'
-      preLoaderRoute: typeof AgentAutomationsCreateRouteImport
+    '/agent/automations/list': {
+      id: '/agent/automations/list'
+      path: '/list'
+      fullPath: '/agent/automations/list'
+      preLoaderRoute: typeof AgentAutomationsListRouteImport
       parentRoute: typeof AgentAutomationsRoute
     }
     '/agent/automations/history': {
@@ -685,11 +678,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentAutomationsHistoryRouteImport
       parentRoute: typeof AgentAutomationsRoute
     }
-    '/agent/automations/list': {
-      id: '/agent/automations/list'
-      path: '/list'
-      fullPath: '/agent/automations/list'
-      preLoaderRoute: typeof AgentAutomationsListRouteImport
+    '/agent/automations/create': {
+      id: '/agent/automations/create'
+      path: '/create'
+      fullPath: '/agent/automations/create'
+      preLoaderRoute: typeof AgentAutomationsCreateRouteImport
+      parentRoute: typeof AgentAutomationsRoute
+    }
+    '/agent/automations/connections': {
+      id: '/agent/automations/connections'
+      path: '/connections'
+      fullPath: '/agent/automations/connections'
+      preLoaderRoute: typeof AgentAutomationsConnectionsRouteImport
       parentRoute: typeof AgentAutomationsRoute
     }
   }

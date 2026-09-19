@@ -4337,20 +4337,18 @@ export function createLauncherCompatRouter({
     // silently returns a "credential missing" message as the reply text.
     let defaultModelConfigured = false;
     try {
-      const models = state.models || [];
-      const defaultIndex = models.findIndex(
+      const defaultIndex = (state.models || []).findIndex(
         (model) =>
           model.model_name === settings.defaultModel ||
-          runtimeModelName(model) === settings.defaultModel ||
-          `llama.cpp/${model.model_name}` === settings.defaultModel,
+          runtimeModelName(model) === settings.defaultModel,
       );
-      const indexes = defaultIndex >= 0 ? [defaultIndex] : models.map((_, i) => i);
-      for (const index of indexes) {
-        const info = modelInfoFromStored(models[index], index, paths.configDir);
-        if (info.available) {
-          defaultModelConfigured = true;
-          break;
-        }
+      if (defaultIndex >= 0) {
+        const info = modelInfoFromStored(
+          state.models[defaultIndex],
+          defaultIndex,
+          paths.configDir,
+        );
+        defaultModelConfigured = info.available;
       }
     } catch {
       // Non-fatal: if this check fails for any reason, fall back to not

@@ -69,24 +69,26 @@ describe("IsolatedBrowserWorker", () => {
     await worker.close();
   });
 
-  // Turbo mode has been the sole, permanent runtime mode since standard mode
-  // was removed (owner-requested) — isolated-browser-worker.ts bypasses the
-  // approval-inbox check unconditionally whenever it's active, so a browser
-  // side effect now runs immediately with only a console.warn audit trail,
-  // regardless of whether an approvalInbox is even wired up.
-  it("turbo mode auto-approves a browser side effect immediately, without ever touching the approval inbox", async () => {
+  it("blocks a browser side effect until the approval inbox records an approval", async () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-browser-approval-"),
     );
     const modulePath = path.join(directory, "fake-browser.mjs");
     fs.writeFileSync(modulePath, FAKE_BROWSER_MODULE, "utf8");
     const inbox = new ApprovalInbox(path.join(directory, "approvals.json"));
+    const challenge = inbox.request({
+      runId: "run-side-effect",
+      actor: "agent",
+      action: "external_write",
+      resource: "crm:1",
+      risk: "high",
+      reason: "sync",
+    });
     const worker = new IsolatedBrowserWorker({
       dataDir: directory,
       browserModulePath: modulePath,
       approvalInbox: inbox,
     });
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(
       worker.execute({
@@ -94,11 +96,21 @@ describe("IsolatedBrowserWorker", () => {
         args: { url: "https://example.test" },
         action: "external_write",
       }),
-    ).resolves.toBe("navigated:https://example.test");
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("TURBO MODE"),
+    ).rejects.toThrow(/Human approval/);
+    await inbox.approveByOperator(
+      challenge.request.id,
+      "operator",
+      "confirmed",
     );
-    warn.mockRestore();
+    await expect(
+      worker.execute({
+        command: "navigate",
+        args: { url: "https://example.test" },
+        action: "external_write",
+        approvalRequestId: challenge.request.id,
+        approvalToken: challenge.token,
+      }),
+    ).resolves.toBe("navigated:https://example.test");
     await worker.close();
   });
 });

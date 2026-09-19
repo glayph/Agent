@@ -12,6 +12,7 @@ const targets = [
   "packages/core/dist",
   "packages/gateway/dist",
   "packages/installer/dist",
+  "packages/skills/dist",
   "packages/ui/frontend/dist",
   "packages/ui/backend/dist",
   "packages/Miki-cli/dist",

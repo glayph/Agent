@@ -47,11 +47,6 @@ import { createSkillsRouter } from "../skill-api.js";
 import { PluginChannelRuntimeManager } from "../plugins/plugin-channel-runtime.js";
 import { summarizeAgentRoute } from "../agent-router.js";
 import {
-  isChattyModeEnabled,
-  splitForChattyMode,
-} from "../plugins/channels/_shared/agent-response.js";
-import { getMessagingConfig } from "../messaging/config.js";
-import {
   buildWorkflowAccelerationPlan,
   buildWorkflowDecisionPattern,
 } from "../workflow-accelerator.js";
@@ -1964,6 +1959,7 @@ mikiWss.on("connection", (ws, req) => {
         let artifactContract: ArtifactContract | null = null;
         let lastContextUsage: mikiContextUsage | null = null;
         let providerFailureDetected = false;
+        let streamSawError = false;
         let finalAttachments: ChatAttachment[] = [];
         const toolFeedback = _getToolFeedbackConfig();
         const streaming = _getmikiStreamingConfig();
@@ -2080,6 +2076,9 @@ mikiWss.on("connection", (ws, req) => {
             if (event.type === "stream_chunk") {
               fullResponse +=
                 typeof event.content === "string" ? event.content : "";
+              if (event.is_error === true) {
+                streamSawError = true;
+              }
               const now = Date.now();
               const grewEnough =
                 fullResponse.length - lastStreamSentLength >=
@@ -2102,7 +2101,7 @@ mikiWss.on("connection", (ws, req) => {
                     message_id: assistantMessageId,
                     run_id: runId,
                     content: fullResponse,
-                    kind: "normal",
+                    kind: streamSawError ? "error" : "normal",
                     model_name: resolvedRunModel,
                     context_usage: _mikiContextUsage(
                       fullResponse,
@@ -2502,64 +2501,23 @@ mikiWss.on("connection", (ws, req) => {
             }
           }
 
-          {
-            const messagingCfg = getMessagingConfig(orchestrator);
-            const chunkingEnabled =
-              isChattyModeEnabled(orchestrator) ||
-              (messagingCfg.adaptive && messagingCfg.enableChunking);
-            // Only the settled reply is affected -- the live token-by-token
-            // message.update stream above (which every other channel lacks)
-            // is untouched. This is what keeps a long, naturally-divisible
-            // reply from settling as one long single bubble (the "GPT chat"
-            // look this exists to move away from): it settles as just its
-            // first part, and the remaining parts arrive right after as
-            // their own new bubbles, the way a person sending several short
-            // messages in a row would read. Off (today's exact behavior)
-            // whenever neither config flag is set, same default as every
-            // other channel.
-            const bubbles = chunkingEnabled
-              ? splitForChattyMode(fullResponse)
-              : [fullResponse];
-            const firstContent = bubbles[0] ?? fullResponse;
-
-            _sendmiki(ws, {
-              type: streaming.enabled ? "message.update" : "message.create",
-              id: crypto.randomUUID(),
-              session_id: sessionId,
-              timestamp: Date.now(),
-              payload: {
-                message_id: assistantMessageId,
-                run_id: runId,
-                content: firstContent,
-                kind: "normal",
-                model_name: resolvedRunModel,
-                context_usage: _mikiContextUsage(
-                  firstContent,
-                  lastContextUsage,
-                ),
-                ...(finalAttachments.length > 0
-                  ? { attachments: finalAttachments }
-                  : {}),
-              },
-            });
-
-            for (let i = 1; i < bubbles.length; i++) {
-              await new Promise((resolve) => setTimeout(resolve, 350));
-              _sendmiki(ws, {
-                type: "message.create",
-                id: crypto.randomUUID(),
-                session_id: sessionId,
-                timestamp: Date.now(),
-                payload: {
-                  message_id: `${assistantMessageId}-part-${i}`,
-                  run_id: runId,
-                  content: bubbles[i],
-                  kind: "normal",
-                  model_name: resolvedRunModel,
-                },
-              });
-            }
-          }
+          _sendmiki(ws, {
+            type: streaming.enabled ? "message.update" : "message.create",
+            id: crypto.randomUUID(),
+            session_id: sessionId,
+            timestamp: Date.now(),
+            payload: {
+              message_id: assistantMessageId,
+              run_id: runId,
+              content: fullResponse,
+              kind: providerFailureDetected || streamSawError ? "error" : "normal",
+              model_name: resolvedRunModel,
+              context_usage: _mikiContextUsage(fullResponse, lastContextUsage),
+              ...(finalAttachments.length > 0
+                ? { attachments: finalAttachments }
+                : {}),
+            },
+          });
           if (fullResponse.trim()) {
             _sendInspectorThought(
               ws,
@@ -2609,7 +2567,7 @@ mikiWss.on("connection", (ws, req) => {
               message_id: assistantMessageId,
               run_id: runId,
               content: userFacingError,
-              kind: "normal",
+              kind: "error",
               model_name: resolvedRunModel,
             },
           });
