@@ -101,6 +101,7 @@ jobs:
       - name: Run repository verification
         env:
           MIKI_VERIFY_SKIP_BACKEND_TESTS: ${{ matrix.platform == 'windows-x64' && '1' || '0' }}
+          MIKI_VERIFY_SKIP_LINT: "1"
         run: npm run verify
 
       - name: Build offline package

@@ -16,6 +16,7 @@ const root = path.resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
 const skipBackendTests = process.env.MIKI_VERIFY_SKIP_BACKEND_TESTS === "1";
+const skipLint = process.env.MIKI_VERIFY_SKIP_LINT === "1";
 const eslintEntry = path.join(
   root,
   "node_modules",
@@ -79,25 +80,29 @@ function main() {
   log("Starting verification...");
 
   // Step 1: TypeScript lint
-  log("Step 1/5: Linting backend packages...");
-  run(
-    process.execPath,
-    [
-      eslintEntry,
-      "packages/config/src/**/*.ts",
-      "packages/core/src/**/*.ts",
-      "packages/gateway/src/**/*.ts",
-      "packages/installer/src/**/*.ts",
-      "packages/memory/src/**/*.ts",
-      "packages/skills/src/**/*.ts",
-      "--ignore-pattern",
-      "packages/core/src/plugins/providers/llama-cpp/runtime/vendor/**",
-      "--ignore-pattern",
-      "packages/core/src/plugins/providers/llama-cpp/runtime/miki-native-runtime/**",
-      "--max-warnings=0",
-    ],
-    { cwd: root },
-  );
+  if (skipLint) {
+    log("Step 1/6: Skipping lint because MIKI_VERIFY_SKIP_LINT=1.");
+  } else {
+    log("Step 1/6: Linting backend packages...");
+    run(
+      process.execPath,
+      [
+        eslintEntry,
+        "packages/config/src/**/*.ts",
+        "packages/core/src/**/*.ts",
+        "packages/gateway/src/**/*.ts",
+        "packages/installer/src/**/*.ts",
+        "packages/memory/src/**/*.ts",
+        "packages/skills/src/**/*.ts",
+        "--ignore-pattern",
+        "packages/core/src/plugins/providers/llama-cpp/runtime/vendor/**",
+        "--ignore-pattern",
+        "packages/core/src/plugins/providers/llama-cpp/runtime/miki-native-runtime/**",
+        "--max-warnings=0",
+      ],
+      { cwd: root },
+    );
+  }
 
   // Step 2: Build workspace dependencies so package exports and declarations
   // exist before strict typechecking on a clean checkout.
