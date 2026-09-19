@@ -1,6 +1,6 @@
 # Agent Miki — Complete Setup Guide
 
-**Version:** 1.3.6
+**Version:** 1.3.8
 **Project type:** Local-first autonomous AI agent  
 **Audience:** Users installing Agent Miki from a clean Linux or Windows machine  
 **Author:** Manus AI
