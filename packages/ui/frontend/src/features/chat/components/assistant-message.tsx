@@ -3,8 +3,6 @@ import {
   IconBrain,
   IconChevronDown,
   IconClock,
-  IconDownload,
-  IconFileText,
   IconGauge,
   IconKey,
   IconTool,
@@ -13,6 +11,7 @@ import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
+import { AttachmentCard } from "@/features/chat/components/attachment-card"
 import { LinkPreviewCards } from "@/features/chat/components/link-preview-cards"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { MessageCodeBlock } from "@/features/chat/components/message-code-block"
@@ -474,30 +473,13 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
 
       {fileAttachments.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-3">
+        <div className="mt-1 flex flex-wrap gap-1.5">
           {fileAttachments.map((attachment, index) => (
-            <a
+            <AttachmentCard
               key={`${attachment.url}-${index}`}
-              href={attachment.url}
-              download={attachment.filename}
-              className="group/file bg-card/86 focus-visible:ring-ring/30 flex w-fit max-w-sm min-w-[min(100%,220px)] items-center gap-3 rounded-lg px-3 py-2.5 transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:outline-none"
-            >
-              <div className="text-primary bg-primary/10 flex size-10 shrink-0 items-center justify-center rounded-lg">
-                <IconFileText className="size-5" />
-              </div>
-              <div className="flex min-w-0 flex-1 flex-col pr-1">
-                <span className="text-foreground group-hover/file:text-primary truncate text-[14px] leading-tight font-medium transition-colors">
-                  {attachment.filename || t("chat.downloadFile")}
-                </span>
-                <span className="text-muted-foreground/70 mt-1 text-[12px] font-medium">
-                  {attachment.filename?.split(".").pop()?.toUpperCase() ||
-                    t("chat.fileFallback")}
-                </span>
-              </div>
-              <div className="bg-muted text-muted-foreground group-hover/file:bg-primary group-hover/file:text-primary-foreground flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color] duration-200">
-                <IconDownload className="size-4 transition-transform duration-200 group-hover/file:-translate-y-[1px]" />
-              </div>
-            </a>
+              attachment={attachment}
+              downloadLabel={t("chat.downloadFile")}
+            />
           ))}
         </div>
       )}

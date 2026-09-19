@@ -160,10 +160,16 @@ html.dark {
   box-shadow: var(--shadow-xs);
 }
 
-[data-chat-bubble="user"]:focus-within,
+[data-chat-bubble="user"]:focus-within {
+  border-color: var(--chat-user-border);
+  box-shadow: none;
+  outline: none;
+}
+
 [data-chat-bubble="assistant"]:focus-within {
-  border-color: var(--border);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+  border-color: var(--chat-assistant-border);
+  box-shadow: none;
+  outline: none;
 }
 
 [data-chat-bubble="assistant"] .prose {

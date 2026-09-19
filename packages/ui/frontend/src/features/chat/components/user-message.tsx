@@ -1,6 +1,7 @@
 import { type FocusEvent, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { AttachmentCard } from "@/features/chat/components/attachment-card"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
 import { cn } from "@/lib/utils"
@@ -38,6 +39,10 @@ export const UserMessage = memo(function UserMessage({
     () => attachments.filter((attachment) => attachment.type === "image"),
     [attachments],
   )
+  const fileAttachments = useMemo(
+    () => attachments.filter((attachment) => attachment.type !== "image"),
+    [attachments],
+  )
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
   const [actionsVisible, setActionsVisible] = useState(false)
@@ -65,6 +70,18 @@ export const UserMessage = memo(function UserMessage({
               loading="lazy"
               decoding="async"
               className="border-border/60 max-h-[clamp(10rem,34svh,18rem)] max-w-full rounded-2xl border object-cover shadow-sm"
+            />
+          ))}
+        </div>
+      )}
+
+      {fileAttachments.length > 0 && (
+        <div className="flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1.5">
+          {fileAttachments.map((attachment, index) => (
+            <AttachmentCard
+              key={`${attachment.url}-${index}`}
+              attachment={attachment}
+              downloadLabel={t("chat.downloadFile")}
             />
           ))}
         </div>

@@ -8,13 +8,13 @@ import {
   IconPhotoPlus,
   IconPlayerStop,
   IconPlus,
-  IconX,
 } from "@tabler/icons-react"
 import { type KeyboardEvent as ReactKeyboardEvent, useId, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
 
 import { ContextUsageRing } from "@/features/chat/components/context-usage-ring"
+import { AttachmentCard } from "@/features/chat/components/attachment-card"
 import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import {
@@ -211,31 +211,14 @@ export function ChatComposer({
         )}
       >
         {attachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5 px-1.5">
+          <div className="mb-2 flex max-w-full flex-col gap-1.5 px-1.5 sm:flex-row sm:flex-wrap">
             {attachments.map((attachment, index) => (
-              <div
+              <AttachmentCard
                 key={`${attachment.url}-${index}`}
-                className="bg-muted/40 border-border/70 relative size-[clamp(3.5rem,15vw,4.75rem)] overflow-hidden rounded-xl border"
-              >
-                <img
-                  src={attachment.url}
-                  alt={attachment.filename || t("chat.uploadedImage")}
-                  width={96}
-                  height={96}
-                  loading="lazy"
-                  decoding="async"
-                  className="h-full w-full object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => onRemoveAttachment(index)}
-                  className="bg-background/90 text-foreground hover:bg-primary hover:text-primary-foreground border-border/70 absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border shadow-sm transition-colors"
-                  aria-label={t("chat.removeImage")}
-                  title={t("chat.removeImage")}
-                >
-                  <IconX className="size-3.5" />
-                </button>
-              </div>
+                attachment={attachment}
+                removeLabel={t("chat.removeImage")}
+                onRemove={() => onRemoveAttachment(index)}
+              />
             ))}
           </div>
         )}
