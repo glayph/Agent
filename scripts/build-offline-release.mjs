@@ -15,9 +15,9 @@ const rootPackage = JSON.parse(
 const version = rootPackage.version;
 const isWindows = process.platform === "win32";
 const isLinux = process.platform === "linux";
-const isX64 = process.arch === "x64";
+const isSupportedLinuxArch = ["x64", "arm64"].includes(process.arch);
 const platformKey = `${process.platform}-${process.arch}`;
-const artifactPlatform = isWindows ? "windows-x64" : "linux-x64";
+const artifactPlatform = isWindows ? "windows-x64" : `linux-${process.arch}`;
 const packageName = `agent-miki-${artifactPlatform}-offline`;
 const releaseName = `${packageName}-${version}`;
 const llamaExecutableName = isWindows ? "llama-server.exe" : "llama-server";
@@ -29,7 +29,7 @@ const runtimeDir = path.join(stageDir, "runtime");
 const nodeVersion = "v22.23.2";
 const nodeArchiveName = isWindows
   ? `node-${nodeVersion}-win-x64.zip`
-  : `node-${nodeVersion}-linux-x64.tar.xz`;
+  : `node-${nodeVersion}-linux-${process.arch}.tar.xz`;
 const nodeArchiveUrl = `https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName}`;
 const npmCommand = isWindows ? "npm.cmd" : "npm";
 
@@ -894,8 +894,14 @@ function packageAndArchive() {
 }
 
 function main() {
-  if ((!isLinux && !isWindows) || !isX64) {
-    fail("This builder only creates Linux x64 or Windows x64 artifacts.");
+  if (
+    (!isLinux && !isWindows) ||
+    (isLinux && !isSupportedLinuxArch) ||
+    (isWindows && process.arch !== "x64")
+  ) {
+    fail(
+      "This builder only creates Linux x64, Linux ARM64, or Windows x64 artifacts.",
+    );
   }
   fs.rmSync(releaseDir, { recursive: true, force: true });
   fs.mkdirSync(stageDir, { recursive: true });
