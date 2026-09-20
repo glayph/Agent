@@ -647,6 +647,12 @@ function stageLauncher() {
   );
   chmodExecutable(path.join(stageDir, "bin", "miki-offline.js"));
   if (isWindows) {
+    const commandWrapper = `@echo off
+set "SCRIPT_DIR=%~dp0"
+"%SCRIPT_DIR%..\runtime\node\bin\node.exe" "%SCRIPT_DIR%miki-offline.js" %*
+exit /b %ERRORLEVEL%
+`;
+    writeText(path.join(stageDir, "bin", "miki.cmd"), commandWrapper);
     const installScript = `$ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $NodeBin = Join-Path $ScriptDir "runtime\\node\\bin\\node.exe"
@@ -656,6 +662,13 @@ exit $LASTEXITCODE
 `;
     writeText(path.join(stageDir, "install-offline.ps1"), installScript);
   } else {
+    const commandWrapper = `#!/usr/bin/env sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$SCRIPT_DIR/../runtime/node/bin/node" "$SCRIPT_DIR/miki-offline.js" "$@"
+`;
+    writeText(path.join(stageDir, "bin", "miki"), commandWrapper, 0o755);
+    chmodExecutable(path.join(stageDir, "bin", "miki"));
     const installScript = `#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -683,8 +696,8 @@ function writePackageMetadata(productionPackages) {
     type: "module",
     main: "bin/miki-offline.js",
     bin: {
-      miki: "bin/miki-offline.js",
-      "agent-miki": "bin/miki-offline.js",
+      miki: isWindows ? "bin/miki.cmd" : "bin/miki",
+      "agent-miki": isWindows ? "bin/miki.cmd" : "bin/miki",
     },
     os: [process.platform],
     cpu: [process.arch],
