@@ -664,7 +664,9 @@ exit $LASTEXITCODE
   } else {
     const commandWrapper = `#!/usr/bin/env sh
 set -eu
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# npm global installs expose bin files through a symlink in <prefix>/bin.
+SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
 exec "$SCRIPT_DIR/../runtime/node/bin/node" "$SCRIPT_DIR/miki-offline.js" "$@"
 `;
     writeText(path.join(stageDir, "bin", "miki"), commandWrapper, 0o755);
