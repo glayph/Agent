@@ -1,6 +1,7 @@
 {
   "navigation": {
     "drive": "Drive",
+    "file": "Arquivo",
     "chat": "Chat",
     "model_group": "Modelos",
     "models": "Modelos",
@@ -8,6 +9,7 @@
     "credentials": "Credenciais",
     "agent_group": "Agente",
     "hub": "Hub",
+    "search": "Pesquisar",
     "skills": "Skills",
     "tools": "Ferramentas",
     "runs": "Runs",
@@ -18,6 +20,7 @@
     "show_more_channels": "Mais",
     "show_less_channels": "Menos",
     "config": "Configuração",
+    "settings": "Configurações",
     "system_index": "Indice do sistema",
     "logs": "Logs",
     "health": "Saude",
@@ -128,7 +131,8 @@
     },
     "workspace": {
       "agentConsole": "Console do agente",
-      "activeAgents": "{{count}} agentes ativos",
+      "activeAgents_one": "{{count}} agente ativo",
+      "activeAgents_other": "{{count}} agentes ativos",
       "assets": "Arquivos",
       "attachmentConversation": "Conversa com anexo",
       "connection": "Conexão",
