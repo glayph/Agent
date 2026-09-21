@@ -18,6 +18,18 @@ printed web UI URL to log in and configure a cloud model (Gemini, OpenAI,
 etc.) or use the bundled local llama.cpp model — either way, `miki` is the
 only command you type.
 
+## Installation feedback
+
+After npm has unpacked the release, the package runs a small dependency-free
+installation check. In an interactive terminal it updates one compact line
+through the stages **preparing**, **checking the bundled runtime**,
+**registering the package**, and **initializing Agent Miki**, then prints the
+command to run. In CI and other non-TTY environments it uses one plain line
+per stage, so output is readable and never depends on cursor-control support.
+The check never downloads source code, installs extra dependencies, or starts
+the gateway. Set `MIKI_INSTALL_TUI=0` to suppress it when a package manager
+already provides its own progress UI.
+
 ## Commands
 
 ```bash

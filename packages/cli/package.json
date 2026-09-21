@@ -8,9 +8,11 @@
   },
   "files": [
     "dist/pack/**",
+    "scripts/install-tui.mjs",
     "README.md"
   ],
   "scripts": {
+    "postinstall": "node scripts/install-tui.mjs",
     "prepack": "node scripts/pack-self-contained.mjs"
   },
   "license": "MIT",
