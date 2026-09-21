@@ -50,6 +50,12 @@ function copyRecursive(source, destination) {
 // ran `npm run build` and `prepare-runtime-package.mjs` themselves, e.g. in
 // CI where those are separate, cacheable steps.
 const skipBuild = process.env.MIKI_PACK_SKIP_BUILD === "1";
+const skipNativeRebuild = process.env.MIKI_PACK_SKIP_NATIVE_REBUILD === "1";
+
+if (!skipNativeRebuild) {
+  console.log("[pack-self-contained] Rebuilding better-sqlite3 for the packaging Node.js runtime...");
+  run("npm", ["rebuild", "better-sqlite3"], { cwd: repoRoot });
+}
 
 if (!skipBuild) {
   console.log("[pack-self-contained] Building the full Agent Miki runtime...");
