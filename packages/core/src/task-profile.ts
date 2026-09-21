@@ -121,6 +121,20 @@ const ARTIFACT_OPERATION_TERMS = [
   "পাঠাও",
 ];
 
+const RICH_ARTIFACT_TERMS = [
+  "browser",
+  "screenshot",
+  "screen capture",
+  "attachment",
+  "attach",
+  "png",
+  "html",
+  "index.html",
+  "ব্রাউজার",
+  "স্ক্রিনশট",
+  "অ্যাটাচ",
+];
+
 const MULTI_STEP_TERMS = [
   "after",
   "and",
@@ -145,6 +159,22 @@ const SPEED_TERMS = [
   "তাড়াতাড়ি",
   "তারাতারি",
   "তাড়াতাড়ি",
+];
+
+const LANGUAGE_TASK_TERMS = [
+  "answer",
+  "summarize",
+  "summary",
+  "translate",
+  "translation",
+  "rewrite",
+  "rephrase",
+  "extract",
+  "classify",
+  "সংক্ষেপ",
+  "অনুবাদ",
+  "পুনর্লিখ",
+  "নিষ্কাশন",
 ];
 
 function hasAny(text: string, terms: string[]): boolean {
@@ -248,9 +278,15 @@ export function classifyAgentTask(message: string): AgentTaskProfile {
     signals.push("multi_step_language");
   }
 
+  const hasRichArtifactSurface = hasAny(normalized, RICH_ARTIFACT_TERMS);
+  const hasMultiStepArtifact =
+    hasAny(normalized, MULTI_STEP_TERMS) &&
+    hasAny(normalized, ARTIFACT_WORKFLOW_TERMS);
   if (
     hasAny(normalized, ARTIFACT_WORKFLOW_TERMS) &&
-    hasAny(normalized, ARTIFACT_OPERATION_TERMS)
+    hasAny(normalized, ARTIFACT_OPERATION_TERMS) &&
+    !hasAny(normalized, LANGUAGE_TASK_TERMS) &&
+    (hasRichArtifactSurface || hasMultiStepArtifact)
   ) {
     score += 4;
     signals.push("artifact_workflow");
@@ -259,6 +295,9 @@ export function classifyAgentTask(message: string): AgentTaskProfile {
   if (hasAny(normalized, SPEED_TERMS)) {
     signals.push("speed_priority");
   }
+
+  const isLanguageTask = hasAny(normalized, LANGUAGE_TASK_TERMS);
+  if (isLanguageTask) signals.push("language_task");
 
   if (/[`{}[\]();]/.test(message)) {
     score += 1;
@@ -292,6 +331,22 @@ export function classifyAgentTask(message: string): AgentTaskProfile {
       "Answer or act directly with minimal context and avoid unnecessary tool calls.";
     verification =
       "Verification is optional unless the task changes files or runtime state.";
+  }
+
+  // Content supplied for a summary/translation/rewrite/extraction can contain
+  // words such as "create", "Miki", or "workflow". Those are data, not
+  // execution instructions; keep explicit language transformations on the
+  // fast local-model path unless they also request tools or verification.
+  if (
+    isLanguageTask &&
+    !signals.includes("artifact_workflow") &&
+    !signals.includes("technical_syntax")
+  ) {
+    complexity = "simple";
+    executionStyle =
+      "Answer or transform the supplied text directly with the local model and avoid unnecessary tool calls.";
+    verification =
+      "Verification is optional unless the user requests a structured format.";
   }
 
   const normalizedSignals = signals.length > 0 ? signals : ["low_complexity"];

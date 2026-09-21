@@ -10,6 +10,24 @@ describe("agent task profile", () => {
     expect(profile.executionStyle).toContain("minimal context");
   });
 
+  it("keeps ordinary summaries on the local-model path", () => {
+    const profile = classifyAgentTask(
+      "Summarize this in one sentence: Miki is a local-first agent. It can read files, create artifacts, and run safe tools. Users should verify important results.",
+    );
+
+    expect(profile.complexity).toBe("simple");
+    expect(profile.signals).not.toContain("artifact_workflow");
+  });
+
+  it("does not escalate a single file operation to an artifact workflow", () => {
+    const profile = classifyAgentTask(
+      "Create the file data/level1.txt with exactly this content: local gemma passed",
+    );
+
+    expect(profile.complexity).toBe("simple");
+    expect(profile.signals).not.toContain("artifact_workflow");
+  });
+
   it("classifies scoped implementation requests as standard", () => {
     const profile = classifyAgentTask(
       "Fix the config validation test and run it",
