@@ -87,6 +87,12 @@ const HEAVY_TASK_TERMS = [
 
 const ARTIFACT_WORKFLOW_TERMS = [
   "file",
+  "repository",
+  "repo",
+  "source code",
+  "git clone",
+  "clone",
+  "download",
   "index.html",
   "screenshot",
   "screen capture",
@@ -110,6 +116,9 @@ const ARTIFACT_OPERATION_TERMS = [
   "save",
   "capture",
   "take",
+  "download",
+  "clone",
+  "checkout",
   "open",
   "send",
   "attach",

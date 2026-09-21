@@ -53,6 +53,16 @@ describe("agent task profile", () => {
     expect(profile.verification).toContain("required");
   });
 
+  it("classifies repository download plus screenshot as an artifact workflow", () => {
+    const profile = classifyAgentTask(
+      "Download the source code from glayph/tajaos.git and give me a screenshot of this repo.",
+    );
+
+    expect(profile.complexity).toBe("complex");
+    expect(profile.verificationDepth).toBe("integration");
+    expect(profile.signals).toContain("artifact_workflow");
+  });
+
   it("classifies plugin or dashboard integration work as medium", () => {
     const profile = classifyAgentTask(
       "Add a dashboard and backend contract update for plugin runtime smoke",

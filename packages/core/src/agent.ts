@@ -3256,13 +3256,15 @@ export class AgentOrchestrator {
         continue;
       }
 
+      const builtFallback = buildToolOnlyFallbackResponse(llmMessages);
       const fallbackContent =
+        builtFallback ||
         "I could not produce a final answer for this turn. The run was stopped safely; please retry the request.";
       await this._saveAssistantHistoryMessage(
         sessionId,
         fallbackContent,
         options.responseMessageId,
-        true,
+        !builtFallback,
       );
       this._logMemoryInteraction(sessionId, userMessage, fallbackContent);
       yield JSON.stringify({
@@ -3270,7 +3272,7 @@ export class AgentOrchestrator {
         content: fallbackContent,
         model_name: turnModel,
         ...(latestContextUsage ? { context_usage: latestContextUsage } : {}),
-        is_error: true,
+        ...(builtFallback ? {} : { is_error: true }),
       });
       yield streamDoneEvent(AgentOrchestrator._extractUsage(response));
       return;
@@ -3964,12 +3966,22 @@ export class AgentOrchestrator {
       `When a request asks you to read a file and report, quote, or return its contents (in whole or in part), you must place that content directly in your final visible reply after the file_read tool call returns — a tool call alone is not a response. Do not end the turn with only a status statement like "reading the file now"; the reply must contain the actual text the user asked for.\n`;
 
     if (localModel) {
+      const selectedToolNames = adaptiveSelection?.selectedToolNames || [];
       return (
         `${memoryContextBlock}` +
         `${screenshotBlock}${turnProfile.systemPromptMode === "off" ? "" : systemPersona}` +
+        `${taskProfileBlock}` +
+        `${agentRouteBlock}` +
+        `${executionIdentityBlock}` +
+        `${accelerationBlock}` +
+        `${decisionPatternBlock}` +
+        `${adaptiveBlock}` +
+        `${capabilityBlock}` +
         `${artifactWorkflowBlock}` +
+        `AVAILABLE TOOL CONTRACT:\n` +
+        `The runtime has already inspected the registered tool catalog for this turn. Available selected tools: ${selectedToolNames.join(", ") || "none"}. Use a selected tool when it can complete the request; do not claim a capability is unavailable before checking this list and attempting the relevant tool. If the request needs multiple capabilities, execute them in sequence and verify each result.\n\n` +
         `LOCAL TOOL-CALL CONTRACT:\n` +
-        `For any request that asks to use file, shell, browser, or other tools, emit a native structured function call using the provided tool schema. Never write \\"tool_code\\", markdown pseudo-calls, or a prose substitute. Use canonical tool names only: file_write creates or replaces files, file_read reads files, and shell_execute runs commands. There is no file_edit tool; edit an existing file by calling file_write with the complete replacement content. Use one call at a time and wait for the tool result before continuing.\n` +
+        `For any request that asks to use file, shell, browser, screenshot, or other tools, emit a native structured function call using the provided tool schema. Never write \\"tool_code\\", markdown pseudo-calls, or a prose substitute. Use only the canonical tool names present in the selected tool list and provided schemas. There is no file_edit tool; edit an existing file by calling file_write with the complete replacement content. Use one call at a time and wait for the tool result before continuing.\n` +
         `When a request asks you to read a file and report, quote, or return its contents, place that content directly in your final visible reply after the file_read tool result — a tool call alone is not a response.\n\n` +
         `ACTION UPDATES:\n` +
         `When you need to use a tool, first write one short, natural sentence (maximum 12 words) telling the user what you will do immediately. Then call the tool. If no tool is needed, answer directly.\n\n` +

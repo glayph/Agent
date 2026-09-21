@@ -470,4 +470,82 @@ describe("AgentOrchestrator workflow acceleration", () => {
       }),
     );
   });
+
+  it("reports a successful file tool when the model omits the final narrative", async () => {
+    workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "Miki-agent-file-tool-finalization-"),
+    );
+    orchestrator = new AgentOrchestrator(makeRuntimePaths(workspaceDir));
+    const internal = orchestrator as unknown as {
+      _callLlmApi: () => Promise<unknown>;
+      _executeToolCallsAndYield: (
+        sessionId: string,
+        userMessage: string,
+        toolCalls: unknown,
+        llmMessages: ChatMessage[],
+        turn: number,
+      ) => AsyncGenerator<string, void, unknown>;
+    };
+    let calls = 0;
+    internal._callLlmApi = async () => {
+      calls += 1;
+      return calls === 1
+        ? {
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      id: "tool-call-write",
+                      function: {
+                        name: "file_write",
+                        arguments: JSON.stringify({
+                          path: "result.txt",
+                          content: "ok",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }
+        : { choices: [{ message: { content: "" } }] };
+    };
+    internal._executeToolCallsAndYield = async function* (
+      _sessionId,
+      _userMessage,
+      _toolCalls,
+      llmMessages,
+    ) {
+      llmMessages.push({
+        role: "tool",
+        name: "file_write",
+        tool_call_id: "tool-call-write",
+        content: "Success: File written to 'result.txt' successfully.",
+      });
+      yield JSON.stringify({
+        type: "tool_result",
+        tool: "file_write",
+        ok: true,
+        output: "Success: File written to 'result.txt' successfully.",
+      });
+    };
+
+    const events: Array<Record<string, unknown>> = [];
+    for await (const rawEvent of orchestrator.runAgentLoop(
+      "file-tool-finalization-session",
+      "Create result.txt with exactly this content: ok",
+    )) {
+      events.push(JSON.parse(rawEvent) as Record<string, unknown>);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "stream_chunk",
+        content: expect.stringContaining("file_write"),
+      }),
+    );
+    expect(events.some((event) => event.is_error === true)).toBe(false);
+  });
 });

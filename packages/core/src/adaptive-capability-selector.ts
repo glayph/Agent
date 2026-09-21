@@ -76,6 +76,20 @@ function isExplicitMediaRequest(userMessage: string): boolean {
   );
 }
 
+function isRepositoryTask(userMessage: string): boolean {
+  const normalized = normalize(userMessage);
+  return /\b(git\s+clone|clone|download|repository|repo|source\s+code)\b/.test(
+    normalized,
+  );
+}
+
+function isScreenshotRequest(userMessage: string): boolean {
+  const normalized = normalize(userMessage);
+  return /\b(screenshot|screen\s+capture|capture\s+the\s+screen|take\s+a\s+picture)\b/.test(
+    normalized,
+  );
+}
+
 function maxToolsFor(profile: AgentTaskProfile): number {
   if (
     profile.verificationDepth === "release" ||
@@ -131,10 +145,18 @@ export function selectAdaptiveCapabilities(
   const requiredMediaTools = isExplicitMediaRequest(userMessage)
     ? ["browser_navigate", "browser_play_media"]
     : [];
+  const requiredRepositoryTools = isRepositoryTask(userMessage)
+    ? ["shell_execute", "file_read"]
+    : [];
+  const requiredScreenshotTools = isScreenshotRequest(userMessage)
+    ? ["browser_navigate", "browser_screenshot"]
+    : [];
   const requiredTools = new Set([
     ...explicitTools,
     ...requiredArtifactTools,
     ...requiredMediaTools,
+    ...requiredRepositoryTools,
+    ...requiredScreenshotTools,
   ]);
   const ambiguousTurn =
     profile.complexity === "simple" && profile.verificationDepth === "none";
@@ -219,6 +241,12 @@ export function selectAdaptiveCapabilities(
   }
   if (requiredMediaTools.length > 0) {
     rationale.push("explicit_media_request");
+  }
+  if (requiredRepositoryTools.length > 0) {
+    rationale.push("repository_task");
+  }
+  if (requiredScreenshotTools.length > 0) {
+    rationale.push("screenshot_request");
   }
   if (
     preferredTools.some((item) =>

@@ -27,6 +27,7 @@
     "model:smoke": "node scripts/model-smoke.mjs",
     "test:native": "node scripts/test-native-sqlite.mjs",
     "test:cli-readonly": "node scripts/test-cli-readonly.mjs",
+    "test:cookie": "node --test scripts/cookie-jar.test.mjs",
     "test:model-manager": "node --test scripts/miki-model.test.mjs",
     "dev": "node scripts/dev.js",
     "start": "node bin/miki.js",

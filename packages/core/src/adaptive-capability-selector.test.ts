@@ -76,6 +76,37 @@ describe("adaptive capability selector", () => {
     expect(selection.rationale.join(" ")).toContain("required_tools");
   });
 
+  it("retains shell, browser navigation, and screenshot tools for repository tasks", () => {
+    const message =
+      "Download the source code from glayph/tajaos.git and give me a screenshot of this repo.";
+    const profile = classifyAgentTask(message);
+    const decision = routeAgentTask(message, {}, profile);
+    const selection = selectAdaptiveCapabilities(
+      message,
+      [
+        tool("shell_execute", "Execute shell commands including git clone"),
+        tool("file_read", "Read a local file"),
+        tool("browser_navigate", "Open a browser page"),
+        tool("browser_screenshot", "Capture a browser screenshot"),
+        tool("web_search", "Search the web"),
+      ],
+      decision,
+      profile,
+    );
+
+    expect(selection.selectedToolNames).toEqual(
+      expect.arrayContaining([
+        "shell_execute",
+        "file_read",
+        "browser_navigate",
+        "browser_screenshot",
+      ]),
+    );
+    expect(selection.rationale).toEqual(
+      expect.arrayContaining(["repository_task", "screenshot_request"]),
+    );
+  });
+
   it("retains the explicit media playback tool for verified video requests", () => {
     const message =
       "Use browser_play_media to play this public video with muted playback and report verified=true only after readyState >= 2 and paused=false";

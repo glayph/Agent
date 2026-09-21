@@ -38,8 +38,16 @@ const envPath = path.join(configDir, ".env");
 const defaultPort = Number.parseInt(process.env.MIKI_LOCAL_PORT || "39200", 10) || 39200;
 const defaultContext = Math.max(
   8192,
-  Number.parseInt(process.env.MIKI_LOCAL_CONTEXT_SIZE || "32768", 10) || 32768,
+  Number.parseInt(process.env.MIKI_LOCAL_CONTEXT_SIZE || "16384", 10) || 16384,
 );
+function contextSizeFor(model) {
+  return Math.max(
+    8192,
+    Number.parseInt(process.env.MIKI_LOCAL_CONTEXT_SIZE || "", 10) ||
+      Number(model?.context_size) ||
+      defaultContext,
+  );
+}
 
 // Only models listed here may be fetched. URLs and hashes are pinned to public,
 // documented artifacts; arbitrary URLs are intentionally not accepted.
@@ -244,7 +252,7 @@ function updateState(model, modelPath) {
       model_path: modelPath,
       model_format: "gguf",
       display_name: model.display_name,
-      context_size: model.context_size || defaultContext,
+      context_size: contextSizeFor(model),
       gpu_layers: "auto",
       enabled: true,
       auto_start: true,
@@ -272,7 +280,7 @@ function updateState(model, modelPath) {
     MIKI_MODEL_PATH: modelPath,
     MIKI_MODEL_ID: model.id,
     MIKI_LOCAL_MODEL_NAME: model.alias,
-    MIKI_LOCAL_CONTEXT_SIZE: String(model.context_size || defaultContext),
+    MIKI_LOCAL_CONTEXT_SIZE: String(contextSizeFor(model)),
   });
   return record;
 }
@@ -333,7 +341,7 @@ async function start(model, record) {
     "--model", path.join(modelRoot, model.filename),
     "--host", "127.0.0.1",
     "--port", String(port),
-    "--ctx-size", String(model.context_size || defaultContext),
+    "--ctx-size", String(contextSizeFor(model)),
     "--n-predict", process.env.MIKI_LOCAL_MAX_TOKENS || "2048",
     "--alias", model.id,
     "--chat-template-kwargs", '{"enable_thinking":false}',
