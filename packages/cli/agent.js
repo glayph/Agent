@@ -12,7 +12,12 @@ const packageDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(packageDir, "..", "..");
 
 const args = process.argv.slice(2);
-const command = args[0] || "start";
+const command =
+  args[0] === "--version" || args[0] === "-v"
+    ? "version"
+    : args[0] === "--help" || args[0] === "-h"
+      ? "help"
+      : args[0] || "start";
 const options = args.slice(1);
 const isWindowsInstaller =
   process.platform === "win32" && process.env.MIKI_INSTALLER === "1";
@@ -78,6 +83,9 @@ async function runCommand() {
       break;
     case "version":
       await showVersion();
+      break;
+    case "weke":
+      showWeke();
       break;
     case "help":
     default:
@@ -232,6 +240,10 @@ async function showVersion() {
   }
 }
 
+function showWeke() {
+  console.log("miki weke: ready (runtime services are not started by this command)");
+}
+
 function showHelp() {
   console.log("=== miki CLI Command Reference ===\n");
   console.log("Commands:");
@@ -241,6 +253,7 @@ function showHelp() {
   console.log("  miki uninstall                Remove the CLI workspace registration but retain data");
   console.log("  miki uninstall --purge        Delete the workspace data, logs, and config directories");
   console.log("  miki version                   Show version information");
+  console.log("  miki weke                      Check CLI readiness without starting services");
   console.log("  miki help                      Show this help information");
   console.log("\nFlags:");
   console.log("  --tray                         Request tray mode (gateway fallback on headless systems)");

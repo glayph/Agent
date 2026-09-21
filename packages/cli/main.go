@@ -18,9 +18,11 @@ func main() {
 	switch cfg.Command {
 	case commandHelp:
 		printHelp()
-	case commandVersion:
-		fmt.Println(cfg.Version)
-	default:
+		case commandVersion:
+			fmt.Println(cfg.Version)
+		case commandWeke:
+			fmt.Println("miki weke: ready (runtime services are not started by this command)")
+		default:
 		if cfg.Plain || !term.IsTerminal(int(os.Stdout.Fd())) {
 			os.Exit(runPlain(cfg))
 		}

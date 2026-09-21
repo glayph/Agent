@@ -16,6 +16,7 @@ const (
 	commandStart   Command = "start"
 	commandHelp    Command = "help"
 	commandVersion Command = "version"
+	commandWeke    Command = "weke"
 )
 
 type Config struct {
@@ -60,6 +61,8 @@ func parseConfig(args []string) (Config, error) {
 			cfg.Command = commandHelp
 		case arg == "version" || arg == "-v" || arg == "--version":
 			cfg.Command = commandVersion
+		case arg == "weke":
+			cfg.Command = commandWeke
 		case arg == "--debug" || arg == "-d":
 			cfg.Debug = true
 		case arg == "--plain":

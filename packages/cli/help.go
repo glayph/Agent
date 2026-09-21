@@ -23,6 +23,7 @@ Miki [start] [--host <host>] [--port <port>] [--debug] [--plain]
 - **start** - open the TUI and start the runtime
 - **help** - show this help
 - **version** - show version
+- **weke** - check CLI readiness without starting runtime services
 
 ## Keys
 

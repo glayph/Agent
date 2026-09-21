@@ -330,6 +330,27 @@ process.on("SIGTERM", stop);
 
 const argv = process.argv.slice(2);
 
+// Read-only commands must never build or start the runtime. This is important
+// for package managers, shell completion, health probes, and `miki --help`.
+if (
+  argv[0] === "help" ||
+  argv[0] === "--help" ||
+  argv[0] === "-h" ||
+  argv[0] === "version" ||
+  argv[0] === "--version" ||
+  argv[0] === "-v" ||
+  argv[0] === "weke"
+) {
+  const agentScript = runtimePath(path.join("packages", "cli", "agent.js"));
+  const result = spawnSync(process.execPath, [agentScript, ...argv], {
+    cwd: PROJECT_ROOT,
+    env: process.env,
+    stdio: "inherit",
+    shell: false,
+  });
+  process.exit(result.status ?? 1);
+}
+
 // Delegate setup/config commands to the config launcher
 if (argv[0] === "setup" || argv[0] === "config") {
   const result = spawnSync(process.execPath, [

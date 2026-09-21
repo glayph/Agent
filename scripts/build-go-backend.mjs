@@ -33,9 +33,9 @@ const result = spawnSync(
   },
 );
 
-if (result.error && result.error.code === 'ENOENT') {
-  console.warn("Go is not installed on this system. Skipping go-backend build.");
-  process.exit(0);
+if (result.error && result.error.code === "ENOENT") {
+  console.error("Go is required to build Miki-web; refusing to publish an incomplete release.");
+  process.exit(1);
 }
 
 if (result.status !== 0) {

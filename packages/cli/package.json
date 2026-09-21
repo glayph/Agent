@@ -1,6 +1,6 @@
 {
   "name": "@miki/cli",
-  "version": "1.0.0",
+  "version": "1.3.14",
   "description": "Agent Miki — self-contained npm package. A single `miki` command starts the full runtime (gateway, core, memory, web UI) and opens the terminal dashboard.",
   "type": "module",
   "bin": {

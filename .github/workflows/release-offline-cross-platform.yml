@@ -24,8 +24,63 @@ env:
   NODE_VERSION: "22.23.2"
 
 jobs:
+  go-binaries:
+    name: Verify Go binaries (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+            suffix: ""
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+            suffix: ""
+          - target: windows-amd64
+            goos: windows
+            goarch: amd64
+            suffix: .exe
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Agent Miki
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Build and inspect Go binaries
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/go-binaries"
+          (cd packages/cli && go build -trimpath -buildvcs=false -ldflags '-s -w' -o "$RUNNER_TEMP/go-binaries/Miki-cli-${{ matrix.target }}${{ matrix.suffix }}" .)
+          (cd packages/ui/backend && go build -trimpath -buildvcs=false -ldflags '-s -w' -o "$RUNNER_TEMP/go-binaries/Miki-web-${{ matrix.target }}${{ matrix.suffix }}" .)
+          test -s "$RUNNER_TEMP/go-binaries/Miki-cli-${{ matrix.target }}${{ matrix.suffix }}"
+          test -s "$RUNNER_TEMP/go-binaries/Miki-web-${{ matrix.target }}${{ matrix.suffix }}"
+          file "$RUNNER_TEMP/go-binaries"/*
+          if [ "${{ matrix.target }}" = "linux-amd64" ]; then
+            MIKI_PACKAGE_VERSION="${{ inputs.release_tag }}" "$RUNNER_TEMP/go-binaries/Miki-cli-${{ matrix.target }}" --version
+          fi
+      - name: Upload verified Go binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-binaries-${{ matrix.target }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/go-binaries/*
+
   build:
     name: Build ${{ matrix.platform }} offline package
+    needs: go-binaries
     strategy:
       fail-fast: false
       matrix:
@@ -82,6 +137,9 @@ jobs:
 
       - name: Rebuild native JavaScript addons
         run: npm rebuild better-sqlite3
+
+      - name: Test native better-sqlite3 binding
+        run: npm run test:native
 
       - name: Configure release inputs (Linux)
         if: startsWith(matrix.platform, 'linux-')
@@ -182,10 +240,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout source for validation scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
+          pattern: agent-miki-*-offline
+          merge-multiple: true
+
+      - name: Validate exact release asset set and SHA256 manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          version="${version%-offline}"
+          node scripts/validate-release-assets.mjs release-assets "$version"
 
       - name: Publish GitHub Release
         env:
@@ -194,24 +267,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t assets < <(
-            find release-assets -type f \( \
-              -name 'SHA256SUMS-linux-x64' -o \
-              -name 'SHA256SUMS-linux-arm64' -o \
-              -name 'agent-miki-linux-x64-offline-*.tar.gz' -o \
-              -name 'agent-miki-linux-x64-offline-*.tgz' -o \
-              -name 'agent-miki-linux-arm64-offline-*.tar.gz' -o \
-              -name 'agent-miki-linux-arm64-offline-*.tgz' -o \
-              -name 'SHA256SUMS-windows-x64' -o \
-              -name 'agent-miki-windows-x64-offline-*.zip' -o \
-              -name 'agent-miki-windows-x64-offline-*.tgz' \
-            \) -print | sort
-          )
-          if [ "${#assets[@]}" -ne 9 ]; then
-            printf 'Expected exactly 9 allow-listed release assets, found %s:\n' "${#assets[@]}" >&2
-            printf '%s\n' "${assets[@]}" >&2
-            exit 1
-          fi
+          mapfile -t assets < <(find release-assets -type f \( -name 'SHA256SUMS-*' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.zip' \) -print | sort)
           title="Agent Miki ${RELEASE_TAG} — Windows x64 + Linux x64 + Linux ARM64 offline"
           notes="This release contains separate Windows x64, Linux x64, and Linux ARM64 offline packages. The embedded Node.js runtime, dashboard, gateway, core, memory, skills, llama.cpp server executable, and production dependencies are included for each platform. No answer-model GGUF or voice-to-text runtime/model is bundled; configure user-provided local assets or use an approved audio-capable cloud model. Each platform has its own SHA256 manifest."
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

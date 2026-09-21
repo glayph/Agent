@@ -69,13 +69,9 @@ function buildGoBackend() {
   );
 
   if (result.error && result.error.code === "ENOENT") {
-    log("WARNING: Go not installed — skipping Miki-web build");
-    return;
+    fatal("Go is required to build Miki-web; refusing to continue without the binary");
   }
-  if (result.status !== 0) {
-    log("WARNING: Miki-web build failed — continuing without it");
-    return;
-  }
+  if (result.status !== 0) fatal("Miki-web build failed");
   log(`Built ${exe}`);
 }
 
@@ -93,14 +89,8 @@ function buildGoCli() {
     { cwd: cliDir, stdio: "inherit", shell: false }
   );
 
-  if (result.error && result.error.code === "ENOENT") {
-    log("WARNING: Go not installed — skipping Miki-cli build");
-    return;
-  }
-  if (result.status !== 0) {
-    log("WARNING: Miki-cli build failed — continuing without it");
-    return;
-  }
+  if (result.error && result.error.code === "ENOENT") fatal("Go is required to build Miki-cli");
+  if (result.status !== 0) fatal("Miki-cli build failed");
   log(`Built ${exe}`);
 }
 

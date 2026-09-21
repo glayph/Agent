@@ -27,6 +27,8 @@ jobs:
         include:
           - platform: linux-x64
             os: ubuntu-latest
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
           - platform: windows-x64
             os: windows-latest
     defaults:
@@ -52,7 +54,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Linux native prerequisites
-        if: matrix.platform == 'linux-x64'
+        if: startsWith(matrix.platform, 'linux-')
         shell: bash
         run: |
           sudo apt-get update
@@ -69,10 +71,13 @@ jobs:
           MIKI_VERIFY_SKIP_BACKEND_TESTS: ${{ matrix.platform == 'windows-x64' && '1' || '0' }}
         run: node scripts/build-local.mjs --ci
 
+      - name: Verify better-sqlite3 native binding
+        run: npm run test:native
+
       - name: Configure release path (Linux)
-        if: matrix.platform == 'linux-x64'
+        if: startsWith(matrix.platform, 'linux-')
         shell: bash
-        run: echo "MIKI_RELEASE_DIR=$RUNNER_TEMP/agent-miki-linux-x64-offline" >> "$GITHUB_ENV"
+        run: echo "MIKI_RELEASE_DIR=$RUNNER_TEMP/agent-miki-${{ matrix.platform }}-offline" >> "$GITHUB_ENV"
 
       - name: Configure release path (Windows)
         if: matrix.platform == 'windows-x64'
@@ -87,15 +92,15 @@ jobs:
         run: node scripts/build-local.mjs --ci --skip-install --skip-verify --release
 
       - name: Upload Linux offline artifacts
-        if: matrix.platform == 'linux-x64'
+        if: startsWith(matrix.platform, 'linux-')
         uses: actions/upload-artifact@v4
         with:
-          name: agent-miki-linux-x64-offline
+          name: agent-miki-${{ matrix.platform }}-offline
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tgz
-            ${{ runner.temp }}/agent-miki-linux-x64-offline/*.tar.gz
-            ${{ runner.temp }}/agent-miki-linux-x64-offline/SHA256SUMS
+            ${{ runner.temp }}/agent-miki-${{ matrix.platform }}-offline/*.tgz
+            ${{ runner.temp }}/agent-miki-${{ matrix.platform }}-offline/*.tar.gz
+            ${{ runner.temp }}/agent-miki-${{ matrix.platform }}-offline/SHA256SUMS
 
       - name: Upload Windows offline artifacts
         if: matrix.platform == 'windows-x64'
