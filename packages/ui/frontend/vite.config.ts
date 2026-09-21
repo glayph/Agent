@@ -124,5 +124,10 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // The hosted preview URL uses a dynamic *.manus.computer hostname. Vite's
+    // preview host allowlist is separate from the dev server's host binding.
+    preview: {
+      allowedHosts: [".manus.computer"],
+    },
   }
 })
