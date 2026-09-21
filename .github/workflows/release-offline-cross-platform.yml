@@ -230,7 +230,7 @@ jobs:
           if-no-files-found: error
           path: |
             ${{ runner.temp }}/agent-miki-windows-x64-offline/*.tgz
-            ${{ runner.temp }}/agent-miki-windows-x64-offline/*.zip
+            ${{ runner.temp }}/agent-miki-windows-x64-offline/agent-miki-windows-x64-offline-*.zip
             ${{ runner.temp }}/agent-miki-windows-x64-offline/SHA256SUMS-windows-x64
 
   publish:
