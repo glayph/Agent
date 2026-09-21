@@ -160,12 +160,7 @@ agents:
         mode: custom
         allow: []
       tools:
-        mode: custom
-        allow:
-          - file_write
-          - file_read
-          - file_delete
-          - shell_execute
+        mode: default
   router:
     enabled: true
     default_agent: Miki
