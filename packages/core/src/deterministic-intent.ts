@@ -5,10 +5,16 @@ export interface DeterministicFileRequest {
 
 export interface DeterministicIntent {
   kind:
-    "web_search" | "file_workflow" | "process_control" | "math" | "file_delete";
+    | "web_search"
+    | "file_workflow"
+    | "process_control"
+    | "shell_command"
+    | "math"
+    | "file_delete";
   query?: string;
   files?: DeterministicFileRequest[];
   deletePaths?: string[];
+  command?: string;
   expression?: string;
   answer?: string;
   verificationRequested: boolean;
@@ -28,6 +34,41 @@ const QUOTED_FILE_OPERATION_PATTERN =
 // rather than relying on a compact model to select file tools.
 const EXACT_FILE_CORRECTION_PATTERN =
   /(?:overwrite|replace|correct|rewrite)\s+(?:only\s+)?(?:the\s+file\s+)?([^\s,;:()]+)[\s\S]*?with\s+exactly\s+(?:these\s+)?(?:(?:\d+|[a-z]+)\s+)?lines?\s*:\s*([\s\S]*?)(?=\s+(?:then|finally)\b|$)/i;
+
+const SAFE_SHELL_COMMAND_PATTERN =
+  /^(?:pwd|ls(?:\s+-[la1]+)?|whoami|date|uname(?:\s+-a)?|python(?:3)?\s+--version|node\s+--version|npm\s+--version|git\s+status|echo\s+[^;&|<>$\n]{1,200})$/i;
+
+const SHELL_REQUEST_PATTERN =
+  /^(?:please\s+)?(?:run|execute|use\s+(?:the\s+)?(?:shell|terminal)\s+(?:to\s+)?run|চালাও|এক্সিকিউট)\s+[`'\"]?([^`'\"\n]+?)[`'\"]?\s*[.!?]?$/i;
+
+const BARE_SAFE_SHELL_PATTERN =
+  /^\s*(pwd|ls(?:\s+-[la1]+)?|whoami|date|uname(?:\s+-a)?|python(?:3)?\s+--version|node\s+--version|npm\s+--version|git\s+status)\s*$/i;
+
+function parseSafeShellCommand(message: string): DeterministicIntent | null {
+  const requested =
+    message.match(SHELL_REQUEST_PATTERN)?.[1]?.trim() ||
+    message.match(BARE_SAFE_SHELL_PATTERN)?.[1]?.trim() ||
+    "";
+  const command = requested.replace(/[.!?]+$/, "").trim();
+  if (!command || !SAFE_SHELL_COMMAND_PATTERN.test(command)) return null;
+  return { kind: "shell_command", command, verificationRequested: true };
+}
+
+function parseSimplePythonArtifact(message: string): DeterministicFileRequest[] {
+  if (
+    !/(?:create|write|make|generate|build|তৈরি|লিখ|বানাও)/i.test(message) ||
+    !/\bpython\b|\bpy\b|পাইথন/i.test(message) ||
+    !/(?:script|file|স্ক্রিপ্ট|ফাইল)/i.test(message) ||
+    !/(?:hello\s*world|hello|হ্যালো)/i.test(message)
+  ) {
+    return [];
+  }
+  const filename =
+    message.match(/(?:named|called|as|নামে)\s+[`'\"]?([a-zA-Z0-9._/-]+\.py)/i)?.[1] ||
+    "hello.py";
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*\.py$/i.test(filename)) return [];
+  return [{ path: filename, content: 'print("Hello, World!")' }];
+}
 
 function cleanFilePath(value: string): string | null {
   const candidate = value.trim().replace(/^['"`]|['"`]$/g, "");
@@ -261,6 +302,7 @@ export function detectDeterministicIntent(
   const files = [
     ...parseExactFileCorrection(message),
     ...parseFileRequests(message),
+    ...parseSimplePythonArtifact(message),
   ].filter(
     (request, index, requests) =>
       requests.findIndex(
@@ -279,6 +321,9 @@ export function detectDeterministicIntent(
         ),
     };
   }
+
+  const shellCommand = parseSafeShellCommand(message);
+  if (shellCommand) return shellCommand;
 
   const processControl = parseProcessControlIntent(message);
   if (processControl) return processControl;
@@ -319,6 +364,7 @@ export function isExplicitToolIntent(
     return toolName === "file_write" || toolName === "file_read";
   }
   if (intent.kind === "file_delete") return toolName === "file_delete";
+  if (intent.kind === "shell_command") return toolName === "shell_execute";
   if (intent.kind === "process_control") {
     return toolName === "shell_execute";
   }

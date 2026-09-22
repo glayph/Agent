@@ -130,6 +130,40 @@ describe("deterministic intent safeguards", () => {
     ).toEqual(expect.objectContaining({ kind: "file_workflow" }));
   });
 
+  it("routes allowlisted shell commands without a model tool decision", () => {
+    expect(detectDeterministicIntent("run pwd")).toEqual({
+      kind: "shell_command",
+      command: "pwd",
+      verificationRequested: true,
+    });
+    expect(detectDeterministicIntent("execute echo hello world")).toEqual({
+      kind: "shell_command",
+      command: "echo hello world",
+      verificationRequested: true,
+    });
+    expect(isExplicitToolIntent("run pwd", "shell_execute")).toBe(true);
+    expect(detectDeterministicIntent("run rm -rf workspace")).toBeNull();
+  });
+
+  it("creates a bounded hello-world Python artifact from context", () => {
+    expect(
+      detectDeterministicIntent("Create a hello world Python script"),
+    ).toEqual({
+      kind: "file_workflow",
+      files: [{ path: "hello.py", content: 'print("Hello, World!")' }],
+      verificationRequested: false,
+    });
+    expect(
+      detectDeterministicIntent(
+        "তৈরি করো hello world Python স্ক্রিপ্ট named demo.py",
+      ),
+    ).toEqual({
+      kind: "file_workflow",
+      files: [{ path: "demo.py", content: 'print("Hello, World!")' }],
+      verificationRequested: false,
+    });
+  });
+
   it("marks only the required tools as explicit for a file workflow", () => {
     const message =
       "Create task-smoke.txt containing exactly task smoke passed, then verify it exists.";

@@ -47,6 +47,7 @@ function explicitToolNames(userMessage: string): Set<string> {
   if (intent.kind === "file_workflow") {
     return new Set(["file_write", "file_read"]);
   }
+  if (intent.kind === "shell_command") return new Set(["shell_execute"]);
   // BUG-09 FIX: an explicit "delete <file>" request must make file_delete
   // available for the turn even when the turn is otherwise classified as
   // "ambiguous" (isSafeForAmbiguousTurn strips any tool whose name contains

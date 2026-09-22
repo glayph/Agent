@@ -94,6 +94,11 @@ import {
   formatAgentTaskProfile,
   type AgentTaskComplexity,
 } from "./task-profile.js";
+import {
+  classifyExecutionPipeline,
+  formatExecutionPipelineDecision,
+  type ExecutionMode,
+} from "./execution-pipeline.js";
 import { selectAgentPromptHistory } from "./agent-history.js";
 import {
   detectDeterministicIntent,
@@ -425,6 +430,18 @@ function buildDeterministicProcessResponse(
     return `Process stop verified: disposable PID ${startedPid} received SIGTERM and is no longer running (wait status ${waitStatus}).`;
   }
   return `Process stop could not be verified safely. The disposable process result was incomplete or still running. No pre-existing process was targeted.`;
+}
+
+function buildDeterministicShellResponse(toolMessages: ChatMessage[]): string {
+  const shellResult =
+    toolMessages.find((message) => message.name === "shell_execute")?.content ||
+    "";
+  if (/^Error(?: executing tool)?|Task cancelled/i.test(shellResult.trim())) {
+    return `কমান্ডটি চালানো যায়নি: ${shellResult.trim() || "অজানা shell error"}`;
+  }
+  return shellResult.trim()
+    ? `কমান্ডের ফলাফল:\n\n${shellResult.trim()}`
+    : "কমান্ড সফলভাবে চালানো হয়েছে, কিন্তু কোনো output পাওয়া যায়নি।";
 }
 
 function buildDeterministicFileResponse(
@@ -889,7 +906,13 @@ export class AgentOrchestrator {
   private _configuredWorkspaceDir(): string {
     const configured = asAgentConfig(this.config).agents?.defaults?.workspace;
     if (typeof configured === "string" && configured.trim()) {
-      return path.resolve(configured.trim());
+      const configuredPath = path.resolve(configured.trim());
+      try {
+        if (fs.statSync(configuredPath).isDirectory()) return configuredPath;
+      } catch {
+        // A copied or upgraded installation can retain a workspace from the
+        // previous checkout. Never send a non-existent cwd to shell/file tools.
+      }
     }
     return this.runtimePaths.sourceDir ?? this.configDir;
   }
@@ -2218,6 +2241,8 @@ export class AgentOrchestrator {
       responseMessageId?: string;
       /** Stable ID shared by all persisted messages in this turn. */
       turnId?: string;
+      /** Input-boundary route, preserved when autonomous tags are unwrapped. */
+      executionMode?: ExecutionMode;
       /** Runtime ID shared with inspector/tool events for this turn. */
       runId?: string;
       completionGuard?: () => {
@@ -2304,9 +2329,17 @@ export class AgentOrchestrator {
     const history = this._messageHistory.get(sessionId) || [];
     const turnProfile = this._turnProfilePolicy();
 
-    // Decide the specialist and per-turn capability budget before prompting.
-    // The selected catalog is also used as an execution allowlist below.
+    // Decide the execution mode, specialist, and per-turn capability budget
+    // before prompting. Routing is deterministic and never adds an LLM call.
     const taskProfile = classifyAgentTask(userMessage);
+    const executionPipeline = options.executionMode
+      ? { ...classifyExecutionPipeline(userMessage, taskProfile), mode: options.executionMode }
+      : classifyExecutionPipeline(userMessage, taskProfile);
+    yield JSON.stringify({
+      type: "execution_pipeline",
+      mode: executionPipeline.mode,
+      details: formatExecutionPipelineDecision(executionPipeline),
+    });
     // Error/failure notices (missing credential, timeout, budget exhausted,
     // etc.) are excluded from the context sent back to the model — they
     // are not useful conversational content and would otherwise burn
@@ -2328,21 +2361,34 @@ export class AgentOrchestrator {
       (localModel ? LOCAL_AGENT_RUN_TIMEOUT_MS : REMOTE_AGENT_RUN_TIMEOUT_MS);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
     const allTools = this.tools.getToolDefinitions();
-    const adaptiveSelection = selectAdaptiveCapabilities(
-      userMessage,
-      allTools,
-      routeDecision,
-      taskProfile,
-    );
-    const systemContent = await this._buildSystemContent(
-      userMessage,
-      screenshotImagePath,
-      resource,
-      adaptiveSelection,
-      sessionId,
-      turnProfile,
-      turnModel,
-    );
+    const adaptiveSelection: AdaptiveCapabilitySelection =
+      executionPipeline.mode === "simple_message"
+        ? {
+            context: "",
+            selectedTools: [],
+            selectedToolNames: [],
+            selectedSkills: [],
+            confidence: 1,
+            rationale: ["simple_message_fast_path"],
+          }
+        : selectAdaptiveCapabilities(
+            userMessage,
+            allTools,
+            routeDecision,
+            taskProfile,
+          );
+    const systemContent =
+      executionPipeline.mode === "simple_message"
+        ? this._buildSimpleSystemContent(turnModel)
+        : await this._buildSystemContent(
+            userMessage,
+            screenshotImagePath,
+            resource,
+            adaptiveSelection,
+            sessionId,
+            turnProfile,
+            turnModel,
+          );
 
     // Warm up only the selected tools for faster and more accurate selection.
     // Local compact models need the explicitly configured execution tools even
@@ -2372,7 +2418,8 @@ export class AgentOrchestrator {
     // supplies a small read-only recovery set when heuristics are uncertain;
     // falling back to all registered tools here would add the full catalog to
     // every ordinary prompt and defeat adaptive pruning.
-    const noToolsRequested = isExplicitNoToolRequest(userMessage);
+    const noToolsRequested =
+      isExplicitNoToolRequest(userMessage) || !executionPipeline.useTools;
     const responseContract = detectAgentResponseContract(userMessage);
     const toolsSchema = noToolsRequested
       ? []
@@ -2390,6 +2437,68 @@ export class AgentOrchestrator {
       yield JSON.stringify({
         type: "stream_chunk",
         content: deterministicResponse,
+        model_name: turnModel,
+      });
+      yield JSON.stringify({
+        type: "stream_done",
+        usage: { tokens: 0 },
+        agent_loop_id: loopId,
+        model_name: turnModel,
+      });
+      return;
+    }
+    const selfTaskIntent =
+      /\b(?:give yourself a task|self[- ]task|autonomous self[- ]task)\b/i.test(
+        userMessage,
+      );
+    if (selfTaskIntent && turnProfile.toolsMode !== "off") {
+      const selfTaskMessages: ChatMessage[] = [];
+      const selfTaskTools = new Set(["browser_navigate", "browser_extract"]);
+      for (const selfTaskCall of [
+        {
+          id: crypto.randomUUID(),
+          function: {
+            name: "browser_navigate",
+            arguments: JSON.stringify({ url: "http://127.0.0.1:18800/" }),
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          function: {
+            name: "browser_extract",
+            arguments: JSON.stringify({}),
+          },
+        },
+      ]) {
+        for await (const event of this._executeToolCallsAndYield(
+          sessionId,
+          userMessage,
+          [selfTaskCall],
+          selfTaskMessages,
+          0,
+          options.signal,
+          selfTaskTools,
+        )) {
+          yield event;
+        }
+      }
+      const observations = selfTaskMessages
+        .filter((message) => message.role === "tool")
+        .map((message) => String(message.content || "").trim())
+        .filter(Boolean);
+      const selfTaskResponse =
+        observations.length > 0
+          ? `I chose a safe read-only self-task: open the local Miki host and inspect its current page.\n\n${observations.join("\n\n")}`
+          : "I chose a safe read-only self-task, but the local host returned no observable content.";
+      await this._saveAssistantHistoryMessage(
+        sessionId,
+        selfTaskResponse,
+        options.responseMessageId,
+      );
+      this._logMemoryInteraction(sessionId, userMessage, selfTaskResponse);
+      yield JSON.stringify({
+        type: "stream_chunk",
+        content: selfTaskResponse,
         model_name: turnModel,
       });
       yield JSON.stringify({
@@ -2420,6 +2529,8 @@ export class AgentOrchestrator {
       const requiredToolNames =
         deterministicIntent.kind === "web_search"
           ? ["web_search"]
+          : deterministicIntent.kind === "shell_command"
+            ? ["shell_execute"]
           : deterministicIntent.kind === "process_control"
             ? ["shell_execute"]
             : (deterministicIntent.files || []).flatMap(() => [
@@ -2450,6 +2561,19 @@ export class AgentOrchestrator {
                 },
               },
             ]
+          : deterministicIntent.kind === "shell_command"
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  function: {
+                    name: "shell_execute",
+                    arguments: JSON.stringify({
+                      cmd: deterministicIntent.command,
+                      timeout: 10,
+                    }),
+                  },
+                },
+              ]
           : deterministicIntent.kind === "process_control"
             ? [
                 {
@@ -2508,6 +2632,8 @@ export class AgentOrchestrator {
           ? buildDeterministicSearchResponse(
               deterministicToolMessages[0]?.content || "",
             )
+          : deterministicIntent.kind === "shell_command"
+            ? buildDeterministicShellResponse(deterministicToolMessages)
           : deterministicIntent.kind === "process_control"
             ? buildDeterministicProcessResponse(deterministicToolMessages)
             : buildDeterministicFileResponse(
@@ -3448,6 +3574,9 @@ export class AgentOrchestrator {
       ? this.automationManager.prepareExecution(automationMessage.executionId)
       : undefined;
     const autonomyMessage = parseAutonomyMessage(userMessage);
+    const executionMode: ExecutionMode = autonomyMessage
+      ? "autonomous_task"
+      : classifyExecutionPipeline(userMessage).mode;
     const effectiveUserMessage =
       automationMessage?.prompt ?? autonomyMessage?.prompt ?? userMessage;
     const priority =
@@ -3567,7 +3696,10 @@ export class AgentOrchestrator {
           sessionId,
           effectiveUserMessage,
           undefined,
-          { signal: task.abortController.signal },
+          {
+            signal: task.abortController.signal,
+            executionMode,
+          },
         )) {
           const latestTask = this.taskQueue.getTask(task.id);
           if (
@@ -3793,6 +3925,16 @@ export class AgentOrchestrator {
     task.route = summarizeAgentRoute(this.routeAgentTask(userMessage));
   }
 
+  private _buildSimpleSystemContent(turnModel?: string): string {
+    const model = turnModel?.trim() || this.modelName;
+    return [
+      "You are Miki, a concise and helpful assistant.",
+      "Answer the user's message directly in the user's language.",
+      "This is a simple-message turn: do not call tools, browse, modify files, or invent actions.",
+      `Active model: ${model}.`,
+    ].join("\n");
+  }
+
   private async _buildSystemContent(
     userMessage: string,
     screenshotImagePath?: string,
@@ -3863,6 +4005,15 @@ export class AgentOrchestrator {
     }
 
     const systemIndexBlock = "";
+    const autonomousRecoveryBlock =
+      "\n[AUTONOMOUS SELF-TASK & PARAMETER RECOVERY PROTOCOL]\n" +
+      "Never ask the user for a missing tool parameter as the first response. " +
+      "First inspect available local files, session metadata, and read-only status tools. " +
+      "For a missing platform connection sessionId, use file_read or a status tool to find a valid non-secret session ID; never invent one. " +
+      "If no session exists and the task mentions localhost or logging in, use the browser tool to open the local host and continue only through the existing authenticated browser session; never bypass passwords, OTPs, consent, sandbox, or permission controls. " +
+      "If authentication genuinely requires user input, stop safely with a precise handoff only after the read-only recovery attempts. " +
+      "For a short, ambiguous, or self-directed task, choose one safe read-only discovery task yourself (for example local system status, active session status, or a local README audit), execute it, verify the result, and report it. Do not stop merely because the task is ambiguous. " +
+      "Follow this loop: detect missing argument, inspect local state, recover or create a safe session through approved tools, execute, observe, verify, recover on failure, then report.\n";
     let screenshotBlock = "";
     let screenshotNote = "";
     if (screenshotImagePath && fs.existsSync(screenshotImagePath)) {
@@ -3978,6 +4129,7 @@ export class AgentOrchestrator {
         `${adaptiveBlock}` +
         `${capabilityBlock}` +
         `${artifactWorkflowBlock}` +
+        `${autonomousRecoveryBlock}` +
         `AVAILABLE TOOL CONTRACT:\n` +
         `The runtime has already inspected the registered tool catalog for this turn. Available selected tools: ${selectedToolNames.join(", ") || "none"}. Use a selected tool when it can complete the request; do not claim a capability is unavailable before checking this list and attempting the relevant tool. If the request needs multiple capabilities, execute them in sequence and verify each result.\n\n` +
         `LOCAL TOOL-CALL CONTRACT:\n` +
@@ -4003,6 +4155,7 @@ export class AgentOrchestrator {
       `${adaptiveBlock}` +
       `${capabilityBlock}` +
       `${artifactWorkflowBlock}` +
+      `${autonomousRecoveryBlock}` +
       `${fileToolContractBlock}` +
       `ACTION UPDATES:\n` +
       `When you need to use a tool, first write one short, natural sentence (maximum 12 words) telling the user what you will do immediately. Do not mention internal tool names, routing, tokens, or hidden reasoning. Then call the tool. If no tool is needed, answer directly without a progress announcement.\n\n` +
@@ -4037,6 +4190,40 @@ export class AgentOrchestrator {
     return { tcId, toolName, toolArgs };
   }
 
+  private _recoverToolArguments(
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+  ): { args: Record<string, unknown>; note?: string } {
+    if (toolName !== "platform_connection_status") {
+      return { args: toolArgs };
+    }
+    const supplied = toolArgs.sessionId ?? toolArgs.session_id;
+    if (typeof supplied === "string" && supplied.trim()) {
+      return { args: { ...toolArgs, sessionId: supplied.trim() } };
+    }
+    const now = Date.now();
+    const recovered = this.platformConnectionStore
+      .listSessions(50)
+      .find(
+        (session) =>
+          ["created", "browser_opened", "awaiting_user"].includes(
+            session.status,
+          ) && Date.parse(session.expiresAt) > now,
+      );
+    if (recovered) {
+      return {
+        args: { ...toolArgs, sessionId: recovered.id },
+        note: `Recovered sessionId from local non-secret session metadata: ${recovered.id}`,
+      };
+    }
+    return {
+      args: toolArgs,
+      note:
+        "No active browser connection session was found in local session metadata. " +
+        "Do not ask the user for sessionId yet: inspect local state, open the approved localhost browser session if relevant, or choose a safe read-only discovery task.",
+    };
+  }
+
   private async _executePlannedToolInvocation(
     sessionId: string,
     planned: PlannedToolInvocation<ParsedToolInvocation>,
@@ -4048,6 +4235,27 @@ export class AgentOrchestrator {
 
     try {
       const requestedTool = planned.invocation.toolName;
+      const recovered = this._recoverToolArguments(
+        requestedTool,
+        planned.invocation.toolArgs,
+      );
+      planned.invocation.toolArgs = recovered.args;
+      if (recovered.note) {
+        console.info(`[Agent] ${recovered.note}`);
+      }
+      if (
+        requestedTool === "platform_connection_status" &&
+        recovered.note?.startsWith("No active browser connection session")
+      ) {
+        const recoveryOutput =
+          `AUTONOMOUS_PARAMETER_RECOVERY_REQUIRED: ${recovered.note} ` +
+          "Continue with file_read, an approved browser_navigate to localhost, or another safe read-only discovery tool; do not ask the user for sessionId as the first recovery step.";
+        return this._buildToolFailureResult(
+          planned.index,
+          planned.invocation,
+          recoveryOutput,
+        );
+      }
       if (allowedToolNames && !allowedToolNames.has(requestedTool)) {
         const failureOutput =
           `Tool '${requestedTool}' was not selected for this turn. ` +
