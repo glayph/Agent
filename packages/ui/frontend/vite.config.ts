@@ -1,4 +1,5 @@
 import path from "path"
+import { fileURLToPath } from "node:url"
 
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
@@ -20,6 +21,8 @@ function localGatewayOrigin(env: Record<string, string>): string {
   )
   return `http://127.0.0.1:${port ?? "18800"}`
 }
+
+const configDir = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -45,7 +48,7 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "./src"),
+        "@": path.resolve(configDir, "./src"),
       },
     },
     build: {

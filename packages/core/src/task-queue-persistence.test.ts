@@ -30,7 +30,7 @@ describe("TaskQueue persistence", () => {
     expect(reopened.getStats()).toMatchObject({ pending: 2, running: 0 });
   });
 
-  it("retains terminal task records and ignores a corrupt snapshot safely", () => {
+  it("retains terminal task records and fails visibly on a corrupt snapshot", () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "miki-task-queue-"),
     );
@@ -46,12 +46,13 @@ describe("TaskQueue persistence", () => {
     expect(reopened.getStats()).toMatchObject({ completed: 1, total: 1 });
 
     fs.writeFileSync(persistencePath, "not-json", "utf8");
-    const afterCorruption = new TaskQueue({ maxSize: 10, persistencePath });
-    expect(afterCorruption.getStats()).toEqual({
-      pending: 0,
-      running: 0,
-      completed: 0,
-      total: 0,
-    });
+    expect(() => new TaskQueue({ maxSize: 10, persistencePath })).toThrow(
+      /Task queue snapshot is corrupt/,
+    );
+    expect(
+      fs
+        .readdirSync(directory)
+        .some((name) => name.startsWith("task-queue.json.corrupt.")),
+    ).toBe(true);
   });
 });

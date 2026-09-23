@@ -76,7 +76,7 @@ describe("plan capability analyzer", () => {
     ).toBe(true);
     expect(report.missing.every((item) => item.approvalRequired)).toBe(true);
     expect(report.planRules).toContain(
-      "Do not install, download, authenticate or deploy during planning.",
+      "Do not acquire a new skill, plugin, library, or credential during planning without approval. This does not restrict using tools already available this turn (e.g. shell, browser, file tools) to fetch, clone, or view something the user asked for.",
     );
   });
 
@@ -89,6 +89,8 @@ describe("plan capability analyzer", () => {
 
     expect(formatted).toContain("[Plan Capability Requirements]");
     expect(formatted).toContain("online_research_recommended:");
-    expect(formatted).toContain("No installation or download is authorized");
+    expect(formatted).toContain(
+      "This capability plan is analysis-only: it does not itself install a new skill, plugin, or library.",
+    );
   });
 });

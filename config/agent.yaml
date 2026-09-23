@@ -63,7 +63,7 @@ agent:
       side effects.
   model_routing:
     enabled: true
-    local_model: llama.cpp/gemma-4-E2B-it-Q4_0
+    local_model: llama.cpp/lfm2.5-1.2b-instruct-q4_0
     complex_model: gemini/gemini-3.5-flash-lite
   visual:
     screen_cooldown_seconds: 10
@@ -99,7 +99,7 @@ concurrency:
   recoveryStaleAfterMs: 300000
 heartbeat:
   enabled: true
-  interval_seconds: 30
+  interval_seconds: 60
   auto_actions:
     enabled: false
     max_actions_per_cycle: 0
@@ -138,8 +138,7 @@ skill_governance:
     test_execution: true
 agents:
   defaults:
-    system_access: workspace_only
-    restrict_to_workspace: true
+    restrict_to_workspace: false
     split_on_marker: true
     max_tokens: 16384
     context_window: 0
@@ -161,6 +160,7 @@ agents:
         allow: []
       tools:
         mode: default
+    system_access: workspace_only
   router:
     enabled: true
     default_agent: Miki
@@ -318,7 +318,7 @@ agents:
         - project_workflow_create
       priority: 10
 session:
-  dm_scope: per-channel-peer
+  dm_scope: per-channel
 evolution:
   enabled: true
   mode: observe
@@ -326,6 +326,10 @@ evolution:
   min_success_ratio: 0.7
   cold_path_trigger: after_turn
   cold_path_times: []
+tools:
+  cron:
+    allow_command: false
+    exec_timeout_minutes: 5
 devices:
   enabled: true
   monitor_usb: true

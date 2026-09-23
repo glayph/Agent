@@ -11,6 +11,7 @@ export interface LocalLlamaModelConfig {
   gpu_layers?: number | "auto";
   batch_size?: number;
   ubatch_size?: number;
+  parallel?: number;
   threads?: number;
   temperature?: number;
   top_p?: number;
@@ -127,6 +128,7 @@ export function normalizeLocalModelConfig(
     gpu_layers: numberOrUndefined(input.gpu_layers) ?? existing?.gpu_layers,
     batch_size: numberOrUndefined(input.batch_size) ?? existing?.batch_size,
     ubatch_size: numberOrUndefined(input.ubatch_size) ?? existing?.ubatch_size,
+    parallel: numberOrUndefined(input.parallel) ?? existing?.parallel,
     threads: numberOrUndefined(input.threads) ?? existing?.threads,
     temperature: numberOrUndefined(input.temperature) ?? existing?.temperature,
     top_p: numberOrUndefined(input.top_p) ?? existing?.top_p,
@@ -163,6 +165,19 @@ export function normalizeLocalModelConfig(
  */
 export function firstConfiguredLocalModel(): string | undefined {
   return configuredModels.keys().next().value;
+}
+
+export function fallbackConfiguredLocalModel(
+  selectedModel?: string,
+): string | undefined {
+  const selected = selectedModel?.toLowerCase();
+  for (const [key, entry] of configuredModels) {
+    if (selected && key === selected) continue;
+    const config = localConfig(entry);
+    if (config.enabled && config.model_path)
+      return entry.model_name || entry.model || key;
+  }
+  return undefined;
 }
 
 export function configureLocalModels(models: unknown[]): void {
@@ -396,6 +411,8 @@ function runtimeArgs(
     args.push("--batch-size", String(config.batch_size));
   if (config.ubatch_size !== undefined)
     args.push("--ubatch-size", String(config.ubatch_size));
+  if (config.parallel !== undefined)
+    args.push("--parallel", String(config.parallel));
   if (config.threads !== undefined)
     args.push("--threads", String(config.threads));
   if (config.use_mmap === false) args.push("--no-mmap");

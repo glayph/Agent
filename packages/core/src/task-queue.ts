@@ -386,8 +386,18 @@ export class TaskQueue {
           this.tasks.set(t.id, t);
           this.index(t);
         }
-      } catch {
-        /* missing/corrupt snapshots start empty */
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        const backup = `${this.jsonPath}.corrupt.${Date.now()}`;
+        try {
+          fs.copyFileSync(this.jsonPath, backup);
+        } catch {
+          // Preserve the original error even when backup creation fails.
+        }
+        throw new Error(
+          `Task queue snapshot is corrupt; preserved a recovery copy at ${backup}.`,
+          { cause: error },
+        );
       }
     }
   }

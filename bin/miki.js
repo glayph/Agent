@@ -60,16 +60,14 @@ function cliPath() {
   if (runtimeRoot !== PROJECT_ROOT) {
     const packaged = runtimePath(path.join("bin", CLI_EXE));
     if (exists(packaged)) return packaged;
-    // Go CLI is optional. Relocated Node distributions can use the
-    // repository's Node CLI entrypoint until the native CLI is built.
+    const typescriptCli = runtimePath(path.join("packages", "cli", "dist", "cli.js"));
+    if (exists(typescriptCli)) return typescriptCli;
     const nodeCli = runtimePath(path.join("packages", "cli", "agent.js"));
     if (exists(nodeCli)) return nodeCli;
     return packaged;
   }
-  const compiled = path.join(PROJECT_ROOT, "packages", "cli", "dist", "bin", CLI_EXE);
+  const compiled = path.join(PROJECT_ROOT, "packages", "cli", "dist", "cli.js");
   if (exists(compiled)) return compiled;
-  // The repository ships a Node CLI source entrypoint; use it directly when
-  // the optional Go CLI artifact has not been built.
   return path.join(PROJECT_ROOT, "packages", "cli", "agent.js");
 }
 
@@ -134,8 +132,9 @@ async function start(argv) {
   const nodeCliFallback =
     path.resolve(executable) ===
     path.resolve(PROJECT_ROOT, "packages", "cli", "agent.js");
-  const childExecutable = nodeCliFallback ? process.execPath : executable;
-  const childArgs = nodeCliFallback ? [executable, ...argv] : argv;
+  const nodeCli = nodeCliFallback || path.extname(executable) === ".js";
+  const childExecutable = nodeCli ? process.execPath : executable;
+  const childArgs = nodeCli ? [executable, ...argv] : argv;
   const env = {
     ...process.env,
     // New canonical env vars

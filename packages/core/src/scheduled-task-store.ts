@@ -26,6 +26,7 @@ interface ScheduledTaskRow {
   updated_at: number;
   last_run_at: number | null;
   completed_at: number | null;
+  catch_up_remaining: number | null;
 }
 
 export class SqliteScheduledTaskStore implements ScheduledTaskStore {
@@ -67,6 +68,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       ["result_summary", "TEXT"],
       ["artifact_refs", "TEXT"],
       ["notification_sent_at", "INTEGER"],
+      ["catch_up_remaining", "INTEGER"],
     ] as const) {
       try {
         this.db.exec(
@@ -115,8 +117,8 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
           missed_run_policy, timeout_ms, quiet_hours, concurrency_limit,
           execution_token, run_at, status, attempts, max_attempts, last_error,
           title, result_summary, artifact_refs, notification_sent_at,
-          created_at, updated_at, last_run_at, completed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_at, updated_at, last_run_at, completed_at, catch_up_remaining)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.id,
@@ -143,6 +145,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         task.updatedAt,
         task.lastRunAt ?? null,
         task.completedAt ?? null,
+        task.catchUpRemaining ?? null,
       );
   }
 
@@ -172,6 +175,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       updatedAt: row.updated_at,
       lastRunAt: row.last_run_at ?? undefined,
       completedAt: row.completed_at ?? undefined,
+      catchUpRemaining: row.catch_up_remaining ?? undefined,
     };
   }
 }

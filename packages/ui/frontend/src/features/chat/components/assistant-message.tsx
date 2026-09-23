@@ -7,7 +7,14 @@ import {
   IconKey,
   IconTool,
 } from "@tabler/icons-react"
-import { Suspense, lazy, memo, useMemo, useState } from "react"
+import {
+  type FocusEvent,
+  Suspense,
+  lazy,
+  memo,
+  useMemo,
+  useState,
+} from "react"
 import { useTranslation } from "react-i18next"
 
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
@@ -127,6 +134,16 @@ export const AssistantMessage = memo(function AssistantMessage({
     [attachments],
   )
   const [isExpanded, setIsExpanded] = useState(true)
+  const [, setActionsVisible] = useState(false)
+  const hideActionsIfFocusLeaves = (event: FocusEvent<HTMLDivElement>) => {
+    const nextFocused = event.relatedTarget
+    if (
+      !(nextFocused instanceof Node) ||
+      !event.currentTarget.contains(nextFocused)
+    ) {
+      setActionsVisible(false)
+    }
+  }
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
   const collapsedLabel = isThought
@@ -147,17 +164,40 @@ export const AssistantMessage = memo(function AssistantMessage({
           data-chat-bubble="assistant"
           data-chat-kind={isError ? "error" : undefined}
           className={cn(
-            "group group/message-bubble relative flex w-fit max-w-full flex-col rounded-xl rounded-bl-sm border [border-color:var(--chat-assistant-border)] px-3 py-2 [box-shadow:var(--chat-assistant-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-assistant-bubble)]",
-            isCollapsedBlock &&
+            "group group/message-bubble relative flex w-fit max-w-[var(--chat-user-message-max)] flex-col rounded-xl rounded-bl-sm border px-3 py-2 [border-color:var(--chat-user-border)] [box-shadow:var(--chat-user-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)]",
+            isThought &&
               "w-full rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
+            isToolCalls && hasToolCalls && "cursor-pointer",
             isError &&
               "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)]",
           )}
+          onClick={() => {
+            if (isToolCalls && hasToolCalls) setIsExpanded((expanded) => !expanded)
+          }}
+          onKeyDown={(event) => {
+            if (
+              isToolCalls &&
+              hasToolCalls &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              event.preventDefault()
+              setIsExpanded((expanded) => !expanded)
+            }
+          }}
+          role={isToolCalls && hasToolCalls ? "button" : undefined}
+          tabIndex={isToolCalls && hasToolCalls ? 0 : undefined}
+          aria-expanded={isToolCalls && hasToolCalls ? isExpanded : undefined}
           title={formattedTimestamp || undefined}
+          onPointerEnter={() => setActionsVisible(true)}
+          onPointerLeave={() => setActionsVisible(false)}
+          onMouseEnter={() => setActionsVisible(true)}
+          onMouseLeave={() => setActionsVisible(false)}
+          onFocusCapture={() => setActionsVisible(true)}
+          onBlurCapture={hideActionsIfFocusLeaves}
         >
-          <div
-            className={cn(
-              "relative [color:var(--chat-assistant-text)]",
+            <div
+              className={cn(
+              "relative [color:var(--chat-user-text)]",
               isCollapsedBlock && "text-muted-foreground",
               isError && "[color:var(--chat-error-text)]",
             )}
@@ -178,7 +218,10 @@ export const AssistantMessage = memo(function AssistantMessage({
               <button
                 type="button"
                 className="text-muted-foreground/75 hover:text-muted-foreground focus-visible:ring-ring/25 mb-1 flex w-full cursor-pointer items-center justify-between rounded-md px-0 py-1 text-left text-[13px] font-medium transition-[color,box-shadow] select-none focus-visible:ring-2 focus-visible:outline-none"
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setIsExpanded((expanded) => !expanded)
+                }}
                 aria-expanded={isExpanded}
                 aria-label={t("chat.toggleAssistantDetails", {
                   defaultValue: "Toggle assistant details",
@@ -425,6 +468,10 @@ export const AssistantMessage = memo(function AssistantMessage({
                 defaultValue: "Fork from here",
               })}
               canRetry={canRetry}
+              // Keep assistant actions mounted and hit-testable. Hover-only
+              // opacity made Retry/Edit/Delete appear visible but intercept no
+              // pointer events in the chat viewport.
+              visible={true}
               placement="inline"
               className="mt-0 group-focus-within/message:mt-1 group-hover/message:mt-1"
               onEdit={onEdit}

@@ -4,6 +4,10 @@ import process from "node:process";
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 1) {
   const key = process.argv[index];
+  if (key === "--no-memory") {
+    args.set("no-memory", "true");
+    continue;
+  }
   const value = process.argv[index + 1];
   if (key?.startsWith("--") && value && !value.startsWith("--")) {
     args.set(key.slice(2), value);
@@ -17,8 +21,13 @@ const timeoutMs = Math.max(500, Number(args.get("timeout-ms") || 3000));
 const endpoints = [
   ["core", args.get("core") || "http://127.0.0.1:8000/health"],
   ["gateway", args.get("gateway") || "http://127.0.0.1:18800/gateway/health"],
-  ["memory", args.get("memory") || "http://127.0.0.1:18700/health"],
 ];
+if (!args.has("no-memory")) {
+  endpoints.push([
+    "memory",
+    args.get("memory") || "http://127.0.0.1:18700/health",
+  ]);
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const samples = [];
@@ -39,7 +48,14 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       error = caught instanceof Error ? caught.message : String(caught);
     }
     const latencyMs = Math.round((performance.now() - started) * 100) / 100;
-    samples.push({ attempt, name, ok, status, latencyMs, ...(error ? { error } : {}) });
+    samples.push({
+      attempt,
+      name,
+      ok,
+      status,
+      latencyMs,
+      ...(error ? { error } : {}),
+    });
     console.log(JSON.stringify(samples.at(-1)));
   }
   if (attempt < attempts) await sleep(intervalMs);

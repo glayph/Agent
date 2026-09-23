@@ -5,7 +5,9 @@ import path from "node:path";
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(name);
-  return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
+  return index >= 0 && process.argv[index + 1]
+    ? process.argv[index + 1]
+    : fallback;
 }
 
 function numberArg(name, fallback, minimum) {
@@ -15,12 +17,13 @@ function numberArg(name, fallback, minimum) {
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.log(
-    "Usage: node scripts/soak-agent.mjs [--url URL] [--duration-minutes N] [--interval-ms N] [--request-timeout-ms N] [--output PATH] [--api-key-env NAME]",
+    "Usage: node scripts/soak-agent.mjs [--url URL] [--metrics-url URL] [--duration-minutes N] [--interval-ms N] [--request-timeout-ms N] [--output PATH] [--api-key-env NAME]",
   );
   process.exit(0);
 }
 
 const baseUrl = arg("--url", "http://127.0.0.1:18800").replace(/\/$/, "");
+const metricsUrl = arg("--metrics-url", "http://127.0.0.1:8000/metrics");
 const durationMs = numberArg("--duration-minutes", 10, 0.01) * 60_000;
 const intervalMs = numberArg("--interval-ms", 10_000, 250);
 const requestTimeoutMs = numberArg("--request-timeout-ms", 5_000, 250);
@@ -69,26 +72,52 @@ async function sample() {
     else failedHealthChecks += 1;
   } catch (cause) {
     failedHealthChecks += 1;
-    error = cause?.name === "AbortError" ? "health_timeout" : "health_unreachable";
+    error =
+      cause?.name === "AbortError" ? "health_timeout" : "health_unreachable";
   }
 
   try {
     const headers = apiKey ? { "x-api-key": apiKey } : undefined;
-    const response = await fetchWithTimeout(`${baseUrl}/metrics/prometheus`, {
+    const response = await fetchWithTimeout(metricsUrl, {
       headers,
     });
     metricsStatus = response.status;
     if (response.ok) {
-      const text = await response.text();
-      rssBytes = metricValue(text, "miki_process_rss_bytes");
-      openFileDescriptors = metricValue(text, "miki_process_open_file_descriptors");
-      activeResources = metricValue(text, "miki_process_active_resources");
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        const gauges = payload?.collector?.gauges || {};
+        rssBytes = Number(gauges.process_rss_bytes) || null;
+        openFileDescriptors =
+          Number(gauges.process_open_file_descriptors) || null;
+        activeResources = Number(gauges.process_active_resources) || null;
+      } else {
+        const text = await response.text();
+        rssBytes = metricValue(text, "miki_process_rss_bytes");
+        openFileDescriptors = metricValue(
+          text,
+          "miki_process_open_file_descriptors",
+        );
+        activeResources = metricValue(text, "miki_process_active_resources");
+      }
+      if (
+        rssBytes === null &&
+        openFileDescriptors === null &&
+        activeResources === null
+      ) {
+        metricsFailures += 1;
+        if (!error) error = "metrics_payload_invalid";
+      }
     } else {
       metricsFailures += 1;
     }
   } catch (cause) {
     metricsFailures += 1;
-    if (!error) error = cause?.name === "AbortError" ? "metrics_timeout" : "metrics_unreachable";
+    if (!error)
+      error =
+        cause?.name === "AbortError"
+          ? "metrics_timeout"
+          : "metrics_unreachable";
   }
 
   const sampleRecord = {
@@ -110,7 +139,8 @@ function summarize(values) {
   const filtered = values.filter((value) => Number.isFinite(value));
   if (filtered.length === 0) return null;
   const sorted = [...filtered].sort((a, b) => a - b);
-  const percentile = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+  const percentile = (p) =>
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
   return {
     count: sorted.length,
     min: sorted[0],
@@ -127,13 +157,16 @@ function stop() {
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
-console.log(`Starting Agent Miki soak: ${baseUrl} for ${durationMs / 60000} minute(s) at ${intervalMs}ms intervals.`);
+console.log(
+  `Starting Agent Miki soak: ${baseUrl} for ${durationMs / 60000} minute(s) at ${intervalMs}ms intervals.`,
+);
 const deadline = Date.now() + durationMs;
 while (!stopped && Date.now() < deadline) {
   const record = await sample();
   if (record.error) console.warn(`soak sample warning: ${record.error}`);
   const remaining = Math.max(0, Math.min(intervalMs, deadline - Date.now()));
-  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+  if (remaining > 0)
+    await new Promise((resolve) => setTimeout(resolve, remaining));
 }
 
 const report = {
@@ -150,20 +183,35 @@ const report = {
   samples: samples.length,
   latency: summarize(samples.map((item) => item.latencyMs)),
   rssBytes: summarize(samples.map((item) => item.rssBytes)),
-  openFileDescriptors: summarize(samples.map((item) => item.openFileDescriptors)),
+  openFileDescriptors: summarize(
+    samples.map((item) => item.openFileDescriptors),
+  ),
   activeResources: summarize(samples.map((item) => item.activeResources)),
+  errorSamples: samples.filter((item) => item.error),
+  errorCounts: samples.reduce((counts, item) => {
+    if (item.error) counts[item.error] = (counts[item.error] || 0) + 1;
+    return counts;
+  }, {}),
   lastSample: samples.at(-1) || null,
 };
 
 fs.mkdirSync(path.dirname(path.resolve(outputPath)), { recursive: true });
-fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, {
+  mode: 0o600,
+});
 console.log(`Soak report written to ${outputPath}`);
-console.log(JSON.stringify({
-  durationSeconds: report.durationSeconds,
-  successfulHealthChecks,
-  failedHealthChecks,
-  metricsFailures,
-  rssBytes: report.rssBytes,
-  openFileDescriptors: report.openFileDescriptors,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      durationSeconds: report.durationSeconds,
+      successfulHealthChecks,
+      failedHealthChecks,
+      metricsFailures,
+      rssBytes: report.rssBytes,
+      openFileDescriptors: report.openFileDescriptors,
+    },
+    null,
+    2,
+  ),
+);
 process.exitCode = failedHealthChecks > 0 ? 1 : 0;

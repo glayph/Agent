@@ -63,6 +63,20 @@ interface RequirementSeed {
   suggestedSources: string[];
   installSpec?: string;
   approvalRequired?: boolean;
+  // ROOT CAUSE FIX (tool-capability false-negative): `terms` is also fed
+  // into matchTools()/matchSkills() to decide whether a requirement is
+  // "available". For `kind: "tool"` seeds this silently failed whenever a
+  // seed's user-facing detection terms (e.g. "git", "clone", "repository",
+  // "screenshot") did not happen to appear in the *tool's own* name/
+  // description text. That produced a `status: "missing"` / "approval
+  // required" verdict for capabilities that were, in fact, registered and
+  // selectable — which the model then read as an authoritative "you do not
+  // have this" signal and refused the task on. `toolNames`, when present,
+  // matches by exact registered tool name instead of fuzzy term overlap, so
+  // detection language and tool-matching are decoupled and a real tool is
+  // never invisible to this report just because its description doesn't
+  // happen to repeat the words a user used to ask for it.
+  toolNames?: string[];
 }
 
 function normalize(value: string): string {
@@ -96,6 +110,16 @@ function matchTools(tools: ToolDefinition[], terms: string[]): string[] {
     .filter((tool) => hasAny(toolText(tool), terms))
     .map(toolName)
     .slice(0, 8);
+}
+
+// Exact-name matching against the real registered tool catalog. Preferred
+// over matchTools() for `toolNames`-bearing seeds because it can't miss a
+// registered tool just because its description text doesn't restate the
+// seed's detection terms (see the `toolNames` doc comment on RequirementSeed
+// above for why that gap mattered).
+function matchToolNames(tools: ToolDefinition[], names: string[]): string[] {
+  const registered = new Set(tools.map(toolName));
+  return names.filter((name) => registered.has(name)).slice(0, 8);
 }
 
 function matchSkills(skills: SkillMetadata[], terms: string[]): string[] {
@@ -289,6 +313,7 @@ function buildSeeds(message: string): RequirementSeed[] {
         "refactor",
       ],
       suggestedSources: ["file_read", "file_write", "file_edit"],
+      toolNames: ["file_read", "file_write", "file_edit"],
     },
     {
       id: "runtime-verification",
@@ -308,6 +333,51 @@ function buildSeeds(message: string): RequirementSeed[] {
         "web app",
       ],
       suggestedSources: ["shell_execute", "test runner"],
+      toolNames: ["shell_execute"],
+    },
+    {
+      id: "repository-access",
+      kind: "tool",
+      label: "Repository / source code retrieval",
+      reason:
+        "Obtain or inspect a public or configured source-code repository (e.g. via git) using the already-available shell and file tools.",
+      risk: "low",
+      terms: [
+        "git",
+        "clone",
+        "repository",
+        "repo",
+        "source code",
+        "github",
+        "gitlab",
+        "download",
+      ],
+      suggestedSources: ["shell_execute", "file_read"],
+      toolNames: ["shell_execute", "file_read"],
+    },
+    {
+      id: "web-capture",
+      kind: "tool",
+      label: "Web page access and screenshot capture",
+      reason:
+        "Open a web page or repository URL and capture a screenshot of it using the already-available browser tools.",
+      risk: "low",
+      terms: [
+        "screenshot",
+        "screen capture",
+        "browse",
+        "navigate",
+        "webpage",
+        "web page",
+        "visit",
+        "open the page",
+      ],
+      suggestedSources: ["browser_navigate", "browser_screenshot"],
+      toolNames: [
+        "browser_navigate",
+        "browser_screenshot",
+        "computer_screenshot",
+      ],
     },
     {
       id: "external-access",
@@ -356,7 +426,9 @@ export function analyzePlanCapabilities(
         seed.kind === "skill"
           ? matchSkills(inventory.skills, seed.terms)
           : seed.kind === "tool"
-            ? matchTools(inventory.tools, seed.terms)
+            ? seed.toolNames && seed.toolNames.length > 0
+              ? matchToolNames(inventory.tools, seed.toolNames)
+              : matchTools(inventory.tools, seed.terms)
             : [];
       const status = classifyStatus(seed, matchedIds);
       const approvalRequired =
@@ -400,9 +472,27 @@ export function analyzePlanCapabilities(
       "Understand requirements and constraints before implementation.",
       "When a plan is shown to the user, include the required, available, missing and approval-gated capabilities.",
       "Prefer the smallest existing capability set that can complete the task.",
-      "Do not install, download, authenticate or deploy during planning.",
+      // ROOT CAUSE FIX: this used to read "Do not install, download,
+      // authenticate or deploy during planning" with no qualifier. The word
+      // "download" collided with ordinary, already-sanctioned tool use (e.g.
+      // "download the source code" -> git clone via shell_execute; fetching
+      // a page via browser_navigate). The model treated that line as a
+      // blanket ban on the user's literal request instead of what it was
+      // meant to gate: acquiring a *new* skill/plugin/library/credential the
+      // agent does not already have. Scoping the wording removes that
+      // collision without weakening the actual approval gate below.
+      "Do not acquire a new skill, plugin, library, or credential during planning without approval. This does not restrict using tools already available this turn (e.g. shell, browser, file tools) to fetch, clone, or view something the user asked for.",
       "Ask for approval before acquiring a missing skill, plugin, library or access credential.",
       "Implement, test, verify and document evidence before delivery.",
+      // ROOT CAUSE FIX (false "unsupported capability" claims): this report
+      // only covers the fixed set of requirement categories defined above —
+      // it is a planning aid, not the exhaustive or authoritative list of
+      // tools available this turn. Before this line existed, an absent
+      // category here (e.g. no seed matched "repository access") was
+      // indistinguishable from a genuinely unavailable capability, and the
+      // model would report the task as unsupported without ever checking
+      // the actual tool schema or attempting a tool call.
+      "This report is a planning aid, not the full list of tools available this turn. The tool schema provided with this turn (see the Adaptive Capability Plan's selected_tools) is authoritative for what can be called. Never claim a capability is unsupported without first checking that schema and attempting the relevant tool call.",
     ],
     requirements,
     available,
@@ -429,7 +519,7 @@ export function formatPlanCapabilityReport(
     report.summary,
     `task_class: ${report.taskClass}`,
     `online_research_recommended: ${report.onlineResearchRecommended}`,
-    "The plan is analysis-only. No installation or download is authorized at this stage.",
+    "This capability plan is analysis-only: it does not itself install a new skill, plugin, or library. It does not restrict calling tools already available this turn to fetch, clone, browse, or capture content the user asked for.",
     ...rows,
   ].join("\n");
 }

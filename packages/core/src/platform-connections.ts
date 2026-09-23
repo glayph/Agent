@@ -540,6 +540,15 @@ export class SqlitePlatformConnectionStore {
     return row ? toSession(row) : undefined;
   }
 
+  listSessions(limit = 100): BrowserConnectionSession[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM browser_connection_sessions ORDER BY created_at DESC LIMIT ?",
+      )
+      .all(Math.max(1, Math.min(500, limit))) as Record<string, unknown>[];
+    return rows.map(toSession);
+  }
+
   complete(
     sessionId: string,
     input: CompleteConnectionInput,

@@ -69,4 +69,27 @@ describe("platform integration readiness", () => {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("lists active browser sessions for autonomous parameter recovery", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "miki-platform-session-recovery-test-"),
+    );
+    const dbPath = path.join(directory, "platform.sqlite");
+    try {
+      const store = new SqlitePlatformConnectionStore(dbPath);
+      const created = store.begin({ provider: "youtube" });
+      const sessions = store.listSessions();
+      expect(sessions[0]).toEqual(
+        expect.objectContaining({
+          id: created.id,
+          provider: "youtube",
+          status: "awaiting_user",
+        }),
+      );
+      expect(sessions[0]).not.toHaveProperty("credential");
+      expect(sessions[0]).not.toHaveProperty("password");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

@@ -39,6 +39,7 @@ export interface ScheduledTask {
   lastRunAt?: number;
   completedAt?: number;
   missedRuns?: number;
+  catchUpRemaining?: number;
   heartbeatAt?: number;
 }
 
@@ -221,6 +222,12 @@ export class TaskScheduler {
   private _taskQueue: TaskQueue;
   private _concurrentManager: ConcurrentTaskManager;
   private _intervalId: NodeJS.Timeout | null = null;
+  private _wakeTimer: NodeJS.Timeout | null = null;
+  private _onSlotReleased = (): void => {
+    if (this._intervalId) this._scheduleWake(0);
+  };
+  private static readonly MIN_WAKE_MS = 250;
+  private static readonly MAX_WAKE_MS = 30_000;
   private _executeTask: (
     sessionId: string,
     message: string,
@@ -288,8 +295,11 @@ export class TaskScheduler {
     if (this._intervalId) return;
 
     this.recoverPersistedTasks();
-    const interval = this.config.schedulerIntervalMs ?? 100;
-    this._intervalId = setInterval(() => this._processPendingTasks(), interval);
+    // Marker: a non-null _intervalId means "running". Actual scheduling now
+    // uses an adaptive setTimeout (_wakeTimer) rather than a fixed-interval
+    // setInterval, so we don't burn CPU polling an empty/idle task set.
+    this._intervalId = setInterval(() => {}, TaskScheduler.MAX_WAKE_MS);
+    this._concurrentManager.on("release", this._onSlotReleased);
     this._processPendingTasks();
   }
 
@@ -298,11 +308,55 @@ export class TaskScheduler {
       clearInterval(this._intervalId);
       this._intervalId = null;
     }
+    if (this._wakeTimer) {
+      clearTimeout(this._wakeTimer);
+      this._wakeTimer = null;
+    }
+    this._concurrentManager.off("release", this._onSlotReleased);
   }
 
   heartbeat(): void {
     this._lastHeartbeatAt = Date.now();
     if (this._intervalId) this._processPendingTasks();
+  }
+
+  /** (Re)arms the wake timer for the earliest of: an explicit delay, or the
+   * soonest pending scheduled task's runAt. Coalesces multiple callers
+   * (schedule(), release events, post-run rescheduling) into one timer. */
+  private _scheduleWake(explicitDelayMs?: number): void {
+    if (!this._intervalId) return;
+    if (this._wakeTimer) {
+      clearTimeout(this._wakeTimer);
+      this._wakeTimer = null;
+    }
+    const now = Date.now();
+    let delay =
+      explicitDelayMs !== undefined
+        ? explicitDelayMs
+        : TaskScheduler.MAX_WAKE_MS;
+    if (explicitDelayMs === undefined) {
+      for (const task of this._scheduledTasks.values()) {
+        if (task.status !== "pending" || task.runAt === undefined) continue;
+        delay = Math.min(delay, Math.max(0, task.runAt - now));
+      }
+      // Non-scheduled queued tasks waiting for capacity should be picked up
+      // promptly too; the "release" event handles the common case, but a
+      // task enqueued while already at capacity still needs a bound.
+      if (
+        this._taskQueue.getPendingTasks().length > 0 &&
+        !this._concurrentManager.isAtCapacity()
+      ) {
+        delay = 0;
+      }
+    }
+    delay = Math.min(
+      TaskScheduler.MAX_WAKE_MS,
+      Math.max(explicitDelayMs === 0 ? 0 : TaskScheduler.MIN_WAKE_MS, delay),
+    );
+    this._wakeTimer = setTimeout(() => {
+      this._wakeTimer = null;
+      this._processPendingTasks();
+    }, delay);
   }
 
   schedule(
@@ -343,10 +397,11 @@ export class TaskScheduler {
       missedRunPolicy:
         options.missedRunPolicy ?? this.config.missedRunPolicy ?? "run_once",
       timeoutMs:
-        options.timeoutMs ??
-        (this.config.execTimeoutMinutes
-          ? this.config.execTimeoutMinutes * 60_000
-          : undefined),
+        options.timeoutMs !== undefined
+          ? Math.max(1_000, Math.floor(options.timeoutMs))
+          : this.config.execTimeoutMinutes && this.config.execTimeoutMinutes > 0
+            ? this.config.execTimeoutMinutes * 60_000
+            : undefined,
       quietHours: options.quietHours ?? this.config.quietHours,
       concurrencyLimit: Math.max(
         1,
@@ -366,6 +421,7 @@ export class TaskScheduler {
 
     this._scheduledTasks.set(scheduled.id, scheduled);
     this._store?.upsertTask(scheduled);
+    this._scheduleWake();
     return scheduled;
   }
 
@@ -421,6 +477,13 @@ export class TaskScheduler {
           if (task.missedRunPolicy === "skip") {
             task.runAt = this._nextRunAfter(task, now);
             task.lastError = "Skipped missed scheduled run by policy";
+          } else if (task.missedRunPolicy === "catch_up") {
+            task.catchUpRemaining = Math.max(
+              0,
+              this._countMissedRuns(task, now) - 1,
+            );
+            task.runAt = now;
+            task.lastError = `Catching up ${task.catchUpRemaining + 1} missed scheduled run(s)`;
           }
           this._store.upsertTask(task);
         }
@@ -465,11 +528,13 @@ export class TaskScheduler {
 
     while (!this._concurrentManager.isAtCapacity()) {
       const task = this._taskQueue.dequeue();
-      if (!task) return;
+      if (!task) break;
 
       this._stats.dequeued++;
       this._runQueuedTask(task);
     }
+
+    this._scheduleWake();
   }
 
   private async _runScheduledTask(
@@ -551,7 +616,7 @@ export class TaskScheduler {
           id,
           scheduled,
           new Error(
-            `Scheduled task timed out after ${this.config.execTimeoutMinutes} minutes.`,
+            `Scheduled task timed out after ${timeoutMs}ms.`,
           ),
         );
         this._stats.failed++;
@@ -574,6 +639,10 @@ export class TaskScheduler {
       if (this._isTerminalStatus(scheduled.status)) {
         this._scheduledTasks.delete(id);
       }
+      // A run just finished (success reschedules runAt, failure sets a
+      // retry runAt, or a capacity slot is now free either way) - rearm so
+      // the next due time is picked up without waiting on a fixed poll.
+      this._scheduleWake();
     }
   }
 
@@ -596,6 +665,16 @@ export class TaskScheduler {
     );
 
     if (scheduled.cronExpression || scheduled.intervalMs) {
+      if ((scheduled.catchUpRemaining ?? 0) > 0) {
+        scheduled.catchUpRemaining -= 1;
+        scheduled.status = "pending";
+        scheduled.runAt = now;
+        scheduled.attempts = 0;
+        scheduled.completedAt = undefined;
+        scheduled.notificationSentAt = undefined;
+        this._store?.upsertTask(scheduled);
+        return;
+      }
       const nextRun = this._nextRunAfter(scheduled, now);
       if (nextRun) {
         scheduled.status = "pending";
@@ -631,6 +710,7 @@ export class TaskScheduler {
       scheduled.runAt = now + this._retryDelayMs(scheduled.attempts);
       this._stats.retried++;
       this._store?.upsertTask(scheduled);
+      this._scheduleWake();
       return;
     }
 
@@ -671,7 +751,12 @@ export class TaskScheduler {
       completedAt,
     };
     try {
-      void this._completionNotifier(notification);
+      const result = this._completionNotifier(notification);
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        void (result as Promise<void>).catch((error: unknown) => {
+          console.warn("[Scheduler] completion notification failed:", error);
+        });
+      }
     } catch (error) {
       console.warn("[Scheduler] completion notification failed:", error);
     }
@@ -695,6 +780,32 @@ export class TaskScheduler {
       );
     }
     return from + 60_000;
+  }
+
+  private _countMissedRuns(task: ScheduledTask, now: number): number {
+    const maxCatchUp = 100;
+    if (task.intervalMs && task.runAt !== undefined) {
+      return Math.min(
+        maxCatchUp,
+        Math.max(1, Math.floor((now - task.runAt) / task.intervalMs) + 1),
+      );
+    }
+    if (task.cronExpression && task.runAt !== undefined) {
+      let count = 1;
+      let cursor = task.runAt;
+      while (count < maxCatchUp) {
+        const next = parseCronToNextRun(
+          task.cronExpression,
+          cursor,
+          task.timezone ?? this.config.timezone ?? "UTC",
+        );
+        if (!next || next > now) break;
+        count += 1;
+        cursor = next;
+      }
+      return count;
+    }
+    return 1;
   }
 
   private _isQuietHours(task: ScheduledTask, now: number): boolean {
@@ -802,7 +913,11 @@ export class TaskScheduler {
       healthy:
         this.isRunning() &&
         heartbeatAgeMs <=
-          Math.max(5_000, (this.config.schedulerIntervalMs ?? 100) * 10),
+          Math.max(
+            5_000,
+            (this.config.schedulerIntervalMs ?? TaskScheduler.MAX_WAKE_MS) *
+              10,
+          ),
       running: this.isRunning(),
       lastHeartbeatAt: this._lastHeartbeatAt,
       heartbeatAgeMs,

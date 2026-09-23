@@ -56,6 +56,14 @@ function checkRequiredFiles() {
   }
 }
 
+function isSourceCheckout() {
+  const repositoryRoot = path.resolve(packageRoot, "..", "..");
+  return (
+    fs.existsSync(path.join(repositoryRoot, "package.json")) &&
+    fs.existsSync(path.join(repositoryRoot, "packages", "cli"))
+  );
+}
+
 function nextFrame() {
   // A short frame lets a human see each stage without making npm install slow.
   // CI/non-TTY output remains immediate and deterministic.
@@ -65,6 +73,14 @@ function nextFrame() {
 async function main() {
   // Respect npm's quiet/loglevel flags and explicit opt-out for scripts.
   if (process.env.MIKI_INSTALL_TUI === "0" || process.env.npm_config_loglevel === "silent") return;
+
+  // npm runs workspace lifecycle scripts during a root source install before
+  // the release bundle exists. The bundled-runtime checks apply only to a
+  // packed/published CLI, not to the source checkout itself.
+  if (isSourceCheckout() && !fs.existsSync(path.join(packageRoot, "dist", "pack"))) {
+    process.stdout.write("Agent Miki source checkout detected; deferring bundled-runtime check until packaging.\n");
+    return;
+  }
 
   try {
     render("Preparing installation", 12, "package unpacked");

@@ -12,6 +12,7 @@
 import { TaskScheduler } from "./scheduler.js";
 import { TaskQueue } from "./task-queue.js";
 import { ConcurrentTaskManager } from "./concurrent-manager.js";
+import type { TaskCompletionNotification } from "./scheduler.js";
 
 function waitFor(
   check: () => boolean,
@@ -69,7 +70,7 @@ describe("TaskScheduler exec_timeout_minutes (#52)", () => {
     try {
       await waitFor(() => scheduled.status === "dead_letter");
       expect(scheduled.status).toBe("dead_letter");
-      expect(scheduled.lastError).toMatch(/timed out after 0\.001 minutes/i);
+      expect(scheduled.lastError).toMatch(/timed out after 60ms/i);
     } finally {
       scheduler.stop();
     }
@@ -135,6 +136,100 @@ describe("TaskScheduler exec_timeout_minutes (#52)", () => {
       expect(scheduled.status).toBe("completed");
     } finally {
       scheduler.stop();
+    }
+  });
+
+  it("uses the per-task timeoutMs override instead of execTimeoutMinutes", async () => {
+    // A workspace-level execTimeoutMinutes is configured, but this task
+    // explicitly overrides it with a shorter, per-task timeoutMs. The
+    // reported budget in the failure message must reflect the override
+    // that actually applied, not the workspace default.
+    async function* hangingExecutor(): AsyncGenerator<string, void, unknown> {
+      await new Promise<void>(() => {
+        // never resolves
+      });
+    }
+
+    const scheduler = new TaskScheduler(
+      {
+        maxConcurrentTasks: 3,
+        schedulerIntervalMs: 10,
+        execTimeoutMinutes: 5, // 300000ms — must NOT be the one reported
+      },
+      new TaskQueue({ maxSize: 10 }),
+      new ConcurrentTaskManager(3),
+      hangingExecutor,
+    );
+
+    const scheduled = scheduler.schedule(
+      "session-4",
+      "do something that hangs, with an explicit per-task timeout",
+      undefined,
+      Date.now(),
+      { maxAttempts: 1, timeoutMs: 50 },
+    );
+
+    scheduler.start();
+    try {
+      await waitFor(() => scheduled.status === "dead_letter");
+      expect(scheduled.status).toBe("dead_letter");
+      // Must report the explicit override (50ms), never the workspace
+      // execTimeoutMinutes default (300000ms).
+      expect(scheduled.lastError).toMatch(/timed out after 50ms/i);
+      expect(scheduled.lastError).not.toMatch(/300000ms/);
+    } finally {
+      scheduler.stop();
+    }
+  });
+
+  it("does not crash the scheduler when an async completion notifier rejects", async () => {
+    // Regression test: _emitCompletion must catch rejections from an async
+    // completionNotifier, not just synchronous throws. Before the fix, a
+    // rejecting async notifier produced an unhandled promise rejection,
+    // which the 24/7 supervisor treats as fatal.
+    async function* fastExecutor(): AsyncGenerator<string, void, unknown> {
+      yield "ok";
+    }
+
+    const rejectingNotifier = async (
+      _notification: TaskCompletionNotification,
+    ): Promise<void> => {
+      throw new Error("webhook delivery failed");
+    };
+
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    const scheduler = new TaskScheduler(
+      { maxConcurrentTasks: 3, schedulerIntervalMs: 10 },
+      new TaskQueue({ maxSize: 10 }),
+      new ConcurrentTaskManager(3),
+      fastExecutor,
+      undefined,
+      rejectingNotifier,
+    );
+
+    const scheduled = scheduler.schedule(
+      "session-5",
+      "quick task with a failing notifier",
+      undefined,
+      Date.now(),
+    );
+
+    scheduler.start();
+    try {
+      await waitFor(() => scheduled.status === "completed");
+      expect(scheduled.status).toBe("completed");
+      // Give the rejected notifier promise a turn to surface as an
+      // unhandled rejection if it were going to.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandledRejections).toHaveLength(0);
+    } finally {
+      scheduler.stop();
+      process.off("unhandledRejection", onUnhandledRejection);
     }
   });
 });

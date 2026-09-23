@@ -547,6 +547,41 @@ describe("Scheduler", () => {
     }
   });
 
+  it("should catch up missed interval runs after recovery", async () => {
+    const db = new Database(":memory:");
+    try {
+      const store = new SqliteScheduledTaskStore(db);
+      let runs = 0;
+      const scheduler = new TaskScheduler(
+        { maxConcurrentTasks: 1, taskQueueSize: 10, schedulerIntervalMs: 2 },
+        undefined,
+        undefined,
+        async function* () {
+          runs += 1;
+          yield "caught up";
+        },
+        store,
+      );
+      const scheduled = scheduler.schedule(
+        "session-catch-up",
+        "replay missed work",
+        undefined,
+        Date.now() - 3_500,
+        { intervalMs: 1_000, missedRunPolicy: "catch_up" },
+      );
+      scheduler.start();
+      try {
+        await waitFor(() => runs >= 4);
+      } finally {
+        scheduler.stop();
+      }
+      expect(runs).toBe(4);
+      expect(store.loadTask(scheduled.id)?.catchUpRemaining ?? 0).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("should dead-letter scheduled tasks after max attempts", async () => {
     const db = new Database(":memory:");
     try {

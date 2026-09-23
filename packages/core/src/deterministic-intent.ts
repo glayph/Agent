@@ -21,7 +21,7 @@ export interface DeterministicIntent {
 }
 
 const FILE_OPERATION_PATTERN =
-  /(?:create|write|make)\s+(?:a\s+)?(?:file\s+)?(?:named\s+)?([^\s,;:()]+)\s+(?:containing|with(?:\s+the)?\s+(?:text|content))\s+(?:exactly\s*:?\s*)?/gi;
+  /(?:create|write|make)\s+(?:a\s+)?(?:file\s+)?(?:named\s+)?([^\s,;:()]+)\s+(?:containing|with(?:\s+the)?\s+(?:text|content))\s+exactly\s*:?\s*/gi;
 
 // Also accept the common UI-friendly form used for multiple files:
 // `folder/file.md` containing exactly `...` and `folder/data.json` containing
@@ -54,7 +54,9 @@ function parseSafeShellCommand(message: string): DeterministicIntent | null {
   return { kind: "shell_command", command, verificationRequested: true };
 }
 
-function parseSimplePythonArtifact(message: string): DeterministicFileRequest[] {
+function parseSimplePythonArtifact(
+  message: string,
+): DeterministicFileRequest[] {
   if (
     !/(?:create|write|make|generate|build|তৈরি|লিখ|বানাও)/i.test(message) ||
     !/\bpython\b|\bpy\b|পাইথন/i.test(message) ||
@@ -64,8 +66,9 @@ function parseSimplePythonArtifact(message: string): DeterministicFileRequest[] 
     return [];
   }
   const filename =
-    message.match(/(?:named|called|as|নামে)\s+[`'\"]?([a-zA-Z0-9._/-]+\.py)/i)?.[1] ||
-    "hello.py";
+    message.match(
+      /(?:named|called|as|নামে)\s+[`'\"]?([a-zA-Z0-9._/-]+\.py)/i,
+    )?.[1] || "hello.py";
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*\.py$/i.test(filename)) return [];
   return [{ path: filename, content: 'print("Hello, World!")' }];
 }
@@ -87,7 +90,7 @@ function cleanFilePath(value: string): string | null {
 function cleanContent(value: string): string {
   let content = value.trim();
   content = content.replace(
-    /\s+(?:then|and)\s+(?:verify|check|confirm|report)\b[\s\S]*$/i,
+    /\s+(?:(?:then|and)\s+)?(?:read(?:\s+it)?\s+back\s+to\s+)?(?:verify|check|confirm|report)\b[\s\S]*$/i,
     "",
   );
   content = content.replace(/[.!?;,:]+$/, "").trim();
@@ -141,6 +144,30 @@ function parseExactFileCorrection(message: string): DeterministicFileRequest[] {
   const filePath = rawPath.startsWith("/") ? rawPath : cleanFilePath(rawPath);
   const content = (match[2] || "").trim();
   return filePath && content ? [{ path: filePath, content }] : [];
+}
+
+function parseFolderExampleWorkflow(
+  message: string,
+): DeterministicFileRequest[] {
+  const match = message.match(
+    /create\s+a\s+folder\s+named\s+[`'"]?([a-zA-Z0-9][a-zA-Z0-9._/-]*)[`'"]?[\s\S]{0,180}?inside\s+it,?\s+create\s+(?:a\s+)?(?:file\s+named\s+)?[`'"]?([a-zA-Z0-9][a-zA-Z0-9._/-]*)[`'"]?[\s\S]{0,220}?five\s+(?:practical|real-world|realistic)?\s*numbered\s+examples/i,
+  );
+  if (!match) return [];
+  const folder = cleanFilePath(match[1] || "");
+  const file = cleanFilePath(match[2] || "");
+  if (!folder || !file || file.includes("/")) return [];
+  return [
+    {
+      path: `${folder}/${file}`,
+      content: [
+        "1. Create and organize files inside the workspace.",
+        "2. Read files back and verify their exact contents.",
+        "3. Run safe commands and inspect their results.",
+        "4. Search for information and summarize useful findings.",
+        "5. Complete multi-step tasks and report verified outcomes.",
+      ].join("\n"),
+    },
+  ];
 }
 
 function normalizeMathDigits(value: string): string {
@@ -301,6 +328,7 @@ export function detectDeterministicIntent(
 
   const files = [
     ...parseExactFileCorrection(message),
+    ...parseFolderExampleWorkflow(message),
     ...parseFileRequests(message),
     ...parseSimplePythonArtifact(message),
   ].filter(

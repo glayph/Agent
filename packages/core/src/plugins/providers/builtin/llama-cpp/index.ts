@@ -1,5 +1,6 @@
 import {
   ensureLocalRuntime,
+  fallbackConfiguredLocalModel,
   firstConfiguredLocalModel,
   getLocalRuntimeHealth,
 } from "../../llama-cpp/runtime/local-runtime.js";
@@ -81,7 +82,15 @@ export const llamaCppProviderPlugin: MikiProviderPlugin = {
     };
   },
   async complete(request) {
-    const runtime = await ensureLocalRuntime(localModelId(request.model));
+    const selectedModel = localModelId(request.model);
+    let runtime;
+    try {
+      runtime = await ensureLocalRuntime(selectedModel);
+    } catch (primaryError) {
+      const fallbackModel = fallbackConfiguredLocalModel(selectedModel);
+      if (!fallbackModel) throw primaryError;
+      runtime = await ensureLocalRuntime(fallbackModel);
+    }
     return openAICompatibleAdapter.complete({
       provider: {
         id: "llama.cpp",

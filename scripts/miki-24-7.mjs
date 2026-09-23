@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import childProcess from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 import {
   computeRestartDelay,
   DEFAULT_MAX_BACKOFF_MS,
@@ -12,20 +12,20 @@ import {
   resolveMaxRestarts,
   resolvePositiveDuration,
   restartLimitReached,
-} from './miki-24-7-policy.mjs';
+} from "./miki-24-7-policy.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const root = path.resolve(__dirname, '..');
+const root = path.resolve(__dirname, "..");
 const sourceRoot = path.resolve(process.env.MIKI_SOURCE_ROOT || root);
 const workspaceDir = path.resolve(process.env.MIKI_WORKSPACE_DIR || root);
 const runtimeRoot = path.resolve(process.env.MIKI_RUNTIME_ROOT || workspaceDir);
-const dataDir = path.join(workspaceDir, 'data');
-const statePath = path.join(dataDir, '24-7-supervisor.json');
-const lockPath = path.join(dataDir, '24-7-supervisor.lock');
+const dataDir = path.join(workspaceDir, "data");
+const statePath = path.join(dataDir, "24-7-supervisor.json");
+const lockPath = path.join(dataDir, "24-7-supervisor.lock");
 const gatewayEntry = path.resolve(
   process.env.MIKI_GATEWAY_ENTRY ||
-    path.join(sourceRoot, 'packages', 'gateway', 'dist', 'index.js'),
+    path.join(sourceRoot, "packages", "gateway", "dist", "index.js"),
 );
 const maxRestarts = resolveMaxRestarts(process.env);
 const maxBackoffMs = resolvePositiveDuration(
@@ -51,6 +51,7 @@ let stopping = false;
 let restartCount = 0;
 let restartTimer = null;
 let restartResetTimer = null;
+let heartbeatTimer = null;
 
 function now() {
   return new Date().toISOString();
@@ -59,13 +60,13 @@ function now() {
 function writeJsonAtomic(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   fs.renameSync(temporary, filePath);
 }
 
 function readJson(filePath) {
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return null;
   }
@@ -74,8 +75,12 @@ function readJson(filePath) {
 function acquireLock() {
   fs.mkdirSync(dataDir, { recursive: true });
   try {
-    const fd = fs.openSync(lockPath, 'wx');
-    fs.writeFileSync(fd, `${JSON.stringify({ pid: process.pid, startedAt: now() })}\n`, 'utf8');
+    const fd = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(
+      fd,
+      `${JSON.stringify({ pid: process.pid, startedAt: now() })}\n`,
+      "utf8",
+    );
     fs.closeSync(fd);
     return;
   } catch (error) {
@@ -86,15 +91,25 @@ function acquireLock() {
         process.kill(Number(existing.pid), 0);
         isAlive = true;
       } catch (probeError) {
-        if (probeError?.code === 'EPERM') throw probeError;
+        if (probeError?.code === "EPERM") throw probeError;
       }
       if (isAlive) {
-        throw new Error(`another 24/7 supervisor is already running (pid ${existing.pid})`);
+        throw new Error(
+          `another 24/7 supervisor is already running (pid ${existing.pid})`,
+        );
       }
     }
-    try { fs.unlinkSync(lockPath); } catch { /* stale lock cleanup is best effort */ }
-    const fd = fs.openSync(lockPath, 'wx');
-    fs.writeFileSync(fd, `${JSON.stringify({ pid: process.pid, startedAt: now() })}\n`, 'utf8');
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      /* stale lock cleanup is best effort */
+    }
+    const fd = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(
+      fd,
+      `${JSON.stringify({ pid: process.pid, startedAt: now() })}\n`,
+      "utf8",
+    );
     fs.closeSync(fd);
   }
 }
@@ -102,8 +117,11 @@ function acquireLock() {
 function releaseLock() {
   try {
     const existing = readJson(lockPath);
-    if (!existing || Number(existing.pid) === process.pid) fs.unlinkSync(lockPath);
-  } catch { /* process shutdown should not fail on lock cleanup */ }
+    if (!existing || Number(existing.pid) === process.pid)
+      fs.unlinkSync(lockPath);
+  } catch {
+    /* process shutdown should not fail on lock cleanup */
+  }
 }
 
 function persist(status, extra = {}) {
@@ -121,11 +139,27 @@ function persist(status, extra = {}) {
 }
 
 function sleep(ms) {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     restartTimer = setTimeout(() => {
       restartTimer = null;
       resolve();
     }, ms);
+  });
+}
+
+function waitForExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null)
+    return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(exited);
+    };
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", () => finish(true));
   });
 }
 
@@ -150,21 +184,26 @@ async function notify(event, details = {}) {
 
 async function waitForGatewayReady(child) {
   const deadline = Date.now() + gatewayReadyTimeoutMs;
-  let lastError = 'not reachable';
+  let lastError = "not reachable";
   while (!stopping && gateway === child && Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${gatewayPort}/gateway/health`, {
-        signal: AbortSignal.timeout(2_000),
-      });
+      const response = await fetch(
+        `http://127.0.0.1:${gatewayPort}/gateway/health`,
+        {
+          signal: AbortSignal.timeout(2_000),
+        },
+      );
       if (response.ok) return true;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
   if (!stopping && gateway === child) {
-    console.error(`[miki-24-7] gateway readiness timeout after ${gatewayReadyTimeoutMs}ms (${lastError})`);
+    console.error(
+      `[miki-24-7] gateway readiness timeout after ${gatewayReadyTimeoutMs}ms (${lastError})`,
+    );
     void notify("gateway_readiness_failed", { reason: lastError });
   }
   return false;
@@ -173,9 +212,11 @@ async function waitForGatewayReady(child) {
 async function spawnGateway() {
   if (stopping) return;
   if (!fs.existsSync(gatewayEntry)) {
-    throw new Error(`gateway build not found: ${gatewayEntry}. Run npm run build:all first.`);
+    throw new Error(
+      `gateway build not found: ${gatewayEntry}. Run npm run build:all first.`,
+    );
   }
-  persist('starting');
+  persist("starting");
   const child = childProcess.spawn(process.execPath, [gatewayEntry], {
     cwd: sourceRoot,
     env: {
@@ -183,23 +224,23 @@ async function spawnGateway() {
       MIKI_SOURCE_ROOT: sourceRoot,
       MIKI_RUNTIME_ROOT: runtimeRoot,
       MIKI_WORKSPACE_DIR: workspaceDir,
-      MIKI_24_7_RUNTIME: '1',
+      MIKI_24_7_RUNTIME: "1",
     },
-    stdio: 'inherit',
+    stdio: "inherit",
   });
   gateway = child;
-  persist('starting', { gatewayStartedAt: now(), gatewayReadyAt: null });
-  child.once('error', error => {
+  persist("starting", { gatewayStartedAt: now(), gatewayReadyAt: null });
+  child.once("error", (error) => {
     console.error(`[miki-24-7] gateway spawn error: ${error.message}`);
   });
-  child.once('exit', (code, signal) => {
+  child.once("exit", (code, signal) => {
     if (gateway === child) gateway = null;
     if (stopping) {
-      persist('stopped', { exitCode: code, signal });
+      persist("stopped", { exitCode: code, signal });
       return;
     }
     restartCount += 1;
-    persist('restarting', {
+    persist("restarting", {
       exitCode: code,
       signal,
       lastFailureAt: now(),
@@ -213,35 +254,44 @@ async function spawnGateway() {
     if (restartLimitReached(maxRestarts, restartCount)) {
       const reason = `restart limit reached (${maxRestarts})`;
       console.error(`[miki-24-7] ${reason}; entering failed state.`);
-      void shutdown('restart limit reached').finally(() => {
-        persist('failed', { exitCode: code, signal, reason, failedAt: now() });
+      void shutdown("restart limit reached").finally(() => {
+        persist("failed", { exitCode: code, signal, reason, failedAt: now() });
         void notify("restart_exhausted", { reason, exitCode: code, signal });
         process.exit(1);
       });
       return;
     }
     const delay = computeRestartDelay(restartCount, maxBackoffMs);
-    console.warn(`[miki-24-7] gateway exited (code=${code}, signal=${signal}); restarting in ${delay}ms.`);
+    console.warn(
+      `[miki-24-7] gateway exited (code=${code}, signal=${signal}); restarting in ${delay}ms.`,
+    );
     sleep(delay).then(() => {
-      if (!stopping) void spawnGateway().catch(error => {
-        console.error(`[miki-24-7] restart failed: ${error instanceof Error ? error.message : String(error)}`);
-      });
+      if (!stopping)
+        void spawnGateway().catch((error) => {
+          console.error(
+            `[miki-24-7] restart failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
     });
   });
 
   const ready = await waitForGatewayReady(child);
   if (ready && gateway === child && !stopping) {
-    persist('running', { gatewayReadyAt: now() });
+    persist("running", { gatewayReadyAt: now() });
     if (restartCount > 0) {
       if (restartResetTimer) clearTimeout(restartResetTimer);
       restartResetTimer = setTimeout(() => {
         restartResetTimer = null;
         restartCount = 0;
-        persist('running', { gatewayReadyAt: now(), restartCountReset: true });
+        persist("running", { gatewayReadyAt: now(), restartCountReset: true });
       }, restartResetAfterMs);
     }
   } else if (!stopping && gateway === child) {
-    child.kill(process.platform === 'win32' ? undefined : 'SIGTERM');
+    child.kill(process.platform === "win32" ? undefined : "SIGTERM");
+    if (!(await waitForExit(child, 5_000)) && gateway === child) {
+      child.kill("SIGKILL");
+      await waitForExit(child, 5_000);
+    }
   }
 }
 
@@ -250,54 +300,69 @@ async function shutdown(signal) {
   stopping = true;
   if (restartTimer) clearTimeout(restartTimer);
   if (restartResetTimer) clearTimeout(restartResetTimer);
-  persist('stopping', { signal });
-  if (gateway && !gateway.killed) {
-    gateway.kill(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM');
-    await new Promise(resolve => {
-      const timeout = setTimeout(resolve, 15_000);
-      gateway?.once('exit', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-    });
-    if (gateway && !gateway.killed) gateway.kill('SIGKILL');
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  persist("stopping", { signal });
+  const child = gateway;
+  if (child && child.exitCode === null && child.signalCode === null) {
+    child.kill(signal === "SIGINT" ? "SIGINT" : "SIGTERM");
+    if (!(await waitForExit(child, 15_000))) {
+      child.kill("SIGKILL");
+      await waitForExit(child, 5_000);
+    }
   }
-  persist('stopped', { signal });
+  persist("stopped", { signal });
   releaseLock();
 }
 
 async function main() {
-  if (process.argv.includes('--check')) {
-    console.log(JSON.stringify({
-      ok: fs.existsSync(gatewayEntry),
-      gatewayEntry,
-      sourceRoot,
-      workspaceDir,
-      runtimeRoot,
-      maxRestarts,
-      maxBackoffMs,
-      restartResetAfterMs,
-      gatewayReadyTimeoutMs,
-    }, null, 2));
+  if (process.argv.includes("--check")) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: fs.existsSync(gatewayEntry),
+          gatewayEntry,
+          sourceRoot,
+          workspaceDir,
+          runtimeRoot,
+          maxRestarts,
+          maxBackoffMs,
+          restartResetAfterMs,
+          gatewayReadyTimeoutMs,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
   acquireLock();
-  persist('booting');
-  process.once('SIGINT', () => void shutdown('SIGINT').finally(() => process.exit(0)));
-  process.once('SIGTERM', () => void shutdown('SIGTERM').finally(() => process.exit(0)));
-  process.once('uncaughtException', error => {
-    console.error(`[miki-24-7] uncaught exception: ${error.stack || error.message}`);
-    void shutdown('uncaughtException').finally(() => process.exit(1));
+  persist("booting");
+  heartbeatTimer = setInterval(() => {
+    if (!stopping && gateway) persist("running", { heartbeatAt: now() });
+  }, 30_000);
+  process.once(
+    "SIGINT",
+    () => void shutdown("SIGINT").finally(() => process.exit(0)),
+  );
+  process.once(
+    "SIGTERM",
+    () => void shutdown("SIGTERM").finally(() => process.exit(0)),
+  );
+  process.once("uncaughtException", (error) => {
+    console.error(
+      `[miki-24-7] uncaught exception: ${error.stack || error.message}`,
+    );
+    void shutdown("uncaughtException").finally(() => process.exit(1));
   });
-  process.once('unhandledRejection', reason => {
-    console.error('[miki-24-7] unhandled rejection:', reason);
-    void shutdown('unhandledRejection').finally(() => process.exit(1));
+  process.once("unhandledRejection", (reason) => {
+    console.error("[miki-24-7] unhandled rejection:", reason);
+    void shutdown("unhandledRejection").finally(() => process.exit(1));
   });
   await spawnGateway();
   await new Promise(() => {});
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error(`[miki-24-7] fatal: ${error.stack || error.message}`);
   releaseLock();
   process.exit(1);

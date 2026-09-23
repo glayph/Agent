@@ -89,6 +89,37 @@ describe("deterministic intent safeguards", () => {
     });
   });
 
+  it("stops exact file content before a read-back verification clause", () => {
+    expect(
+      detectDeterministicIntent(
+        "Create diagnostic-single.txt containing exactly SINGLE_FILE_OK. Read it back to verify the exact content, then report the path.",
+      ),
+    ).toEqual({
+      kind: "file_workflow",
+      files: [{ path: "diagnostic-single.txt", content: "SINGLE_FILE_OK" }],
+      verificationRequested: true,
+    });
+  });
+
+  it("creates a bounded verified artifact for a natural five-example folder workflow", () => {
+    expect(
+      detectDeterministicIntent(
+        "Create a folder named agent-test in my workspace. Inside it, create a file named summary.md containing five practical numbered examples. Verify the result.",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        kind: "file_workflow",
+        verificationRequested: true,
+        files: [
+          expect.objectContaining({
+            path: "agent-test/summary.md",
+            content: expect.stringMatching(/1\..*\n2\..*\n3\..*\n4\..*\n5\./s),
+          }),
+        ],
+      }),
+    );
+  });
+
   it("answers standalone English and Bengali arithmetic deterministically", () => {
     expect(detectDeterministicIntent("What is 2 + 2?")).toEqual({
       kind: "math",
