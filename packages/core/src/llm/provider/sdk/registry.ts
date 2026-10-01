@@ -21,6 +21,8 @@ export interface ProviderPluginRegistryOptions {
   resolveCredentials?: (
     auth: MikiProviderPlugin["auth"],
     providerId: string,
+    /** Optional credential profile (secret name) chosen by the model router. */
+    profile?: string,
   ) => Promise<Record<string, string>> | Record<string, string>;
   logger?: (event: string, details?: Record<string, unknown>) => void;
   externalPluginDirectory?: string;
@@ -238,6 +240,7 @@ export class ProviderPluginRegistry {
       extra?: Record<string, unknown>;
       timeoutMs?: number;
       signal?: AbortSignal;
+      credentialProfile?: string;
     } = {},
   ): Promise<LLMResponse> {
     const plugin = this.resolve(model);
@@ -250,7 +253,11 @@ export class ProviderPluginRegistry {
         { providerId: plugin.manifest.id },
       );
     const credentials = this.options.resolveCredentials
-      ? await this.options.resolveCredentials(plugin.auth, plugin.manifest.id)
+      ? await this.options.resolveCredentials(
+          plugin.auth,
+          plugin.manifest.id,
+          options.credentialProfile,
+        )
       : {};
     const endpoint = endpointFromCatalog(plugin.manifest, plugin.auth, catalog);
     const request: MikiProviderCompletionRequest = {

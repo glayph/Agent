@@ -875,33 +875,43 @@ export class BrowserTool {
   }
 
   private async _launchPlaywright(): Promise<BrowserContext> {
-    const { chromium } = await import("playwright");
-    const executablePath =
-      this._chromePath ||
-      [
-        process.env.CHROME_PATH,
-        process.env.CHROMIUM_PATH,
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-      ].find((candidate) => candidate && fs.existsSync(candidate));
-    // Playwright recommends launchPersistentContext for using a specific user data directory
-    return await chromium.launchPersistentContext(this.profileDir, {
-      headless: this.headless,
-      executablePath: executablePath || undefined,
-      viewport: this.viewport,
-      userAgent: this.userAgent,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-infobars",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--autoplay-policy=no-user-gesture-required",
-        "--mute-audio",
-      ],
-    });
+    try {
+      const { chromium } = await import("playwright");
+      const executablePath =
+        this._chromePath ||
+        [
+          process.env.CHROME_PATH,
+          process.env.CHROMIUM_PATH,
+          "/usr/bin/google-chrome",
+          "/usr/bin/chromium",
+          "/usr/bin/chromium-browser",
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        ].find((candidate) => candidate && fs.existsSync(candidate));
+      // Playwright recommends launchPersistentContext for using a specific user data directory
+      return await chromium.launchPersistentContext(this.profileDir, {
+        headless: this.headless,
+        executablePath: executablePath || undefined,
+        viewport: this.viewport,
+        userAgent: this.userAgent,
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-sandbox",
+          "--disable-infobars",
+          "--disable-features=IsolateOrigins,site-per-process",
+          "--autoplay-policy=no-user-gesture-required",
+          "--mute-audio",
+        ],
+      });
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        "Chromium is not installed or could not be launched. " +
+          "Run `npx playwright install chromium` and retry. " +
+          `Original error: ${detail}`,
+        { cause: err },
+      );
+    }
   }
 
   public async playMedia(url?: string): Promise<string> {

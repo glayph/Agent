@@ -2,6 +2,7 @@ import type { LLMResponse } from "@miki/config";
 import { MODEL_COSTS } from "./cost-calibrator.js";
 import { providerRegistry } from "./llm/provider/registry.js";
 import { getDirectProviderById } from "./llm/provider/catalog.js";
+import { getDefaultModelRouter } from "./llm/model-router/index.js";
 import type { MikiProviderMessage } from "./llm/provider/sdk/index.js";
 
 /**
@@ -26,22 +27,30 @@ export {
 } from "./llm/provider/errors.js";
 
 /**
- * Single stable completion entrypoint for the agent runtime.
+ * Backward-compatible completion entrypoint. It is a thin wrapper over the
+ * process-wide {@link ModelRouter}: the router is the ONLY component that calls
+ * a provider, so lane profiles, failover, credential rotation and hop logging
+ * apply here exactly as they do for the agent loop.
  *
- * Provider selection, credential lookup, SDK calls, retries, and error
- * normalization are delegated to the isolated provider registry. Agent code
- * therefore does not change when a provider adapter is added or replaced.
+ * `modelOverride` is an explicit model choice and therefore strict (no silent
+ * fallback). Without it the `default` lane (or `route.lane`) decides.
  */
 export async function achatCompletion(
   messages: MikiProviderMessage[],
   extra?: Record<string, unknown>,
   modelOverride?: string,
   signal?: AbortSignal,
+  route: { lane?: string; role?: string } = {},
 ): Promise<LLMResponse> {
-  const model =
-    modelOverride?.trim() ||
-    (await import("@miki/config")).settings.defaultModel;
-  return providerRegistry.complete(model, messages, { extra, signal });
+  const result = await getDefaultModelRouter().complete({
+    lane: route.lane,
+    role: route.role,
+    explicitModel: modelOverride?.trim() || undefined,
+    messages,
+    extra,
+    signal,
+  });
+  return result.response;
 }
 
 export async function supportsAudioModel(

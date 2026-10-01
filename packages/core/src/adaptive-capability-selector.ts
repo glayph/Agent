@@ -91,6 +91,29 @@ function isScreenshotRequest(userMessage: string): boolean {
   );
 }
 
+function isWorkspaceInventoryRequest(userMessage: string): boolean {
+  const normalized = normalize(userMessage);
+  const source = userMessage.toLowerCase();
+  const asksForCount =
+    /how many|count|number|কয়টি|কয়টি|কতটি|কতোটি|গণনা/i.test(
+      `${normalized} ${source}`,
+    );
+  const namesFilesystemItems =
+    /files?|folders?|directories?|file|folder|directory|ফাইল|ফোল্ডার|ডিরেক্টরি/i.test(
+      `${normalized} ${source}`,
+    );
+  return asksForCount && namesFilesystemItems;
+}
+
+function isSkillManagementRequest(userMessage: string): boolean {
+  return (
+    /(?:\bskills?\b|\bskill\s+(?:pack|plugin)|স্কিল)/i.test(userMessage) &&
+    /(?:install|add|create|update|remove|delete|enable|disable|ইনস্টল|স্থাপন|যোগ|তৈরি|আপডেট)/i.test(
+      userMessage,
+    )
+  );
+}
+
 function maxToolsFor(profile: AgentTaskProfile): number {
   if (
     profile.verificationDepth === "release" ||
@@ -152,12 +175,20 @@ export function selectAdaptiveCapabilities(
   const requiredScreenshotTools = isScreenshotRequest(userMessage)
     ? ["browser_navigate", "browser_screenshot"]
     : [];
+  const requiredInventoryTools = isWorkspaceInventoryRequest(userMessage)
+    ? ["workspace_inventory"]
+    : [];
+  const requiredSkillTools = isSkillManagementRequest(userMessage)
+    ? ["skill_search", "skill_create", "skill_install"]
+    : [];
   const requiredTools = new Set([
     ...explicitTools,
     ...requiredArtifactTools,
     ...requiredMediaTools,
     ...requiredRepositoryTools,
     ...requiredScreenshotTools,
+    ...requiredInventoryTools,
+    ...requiredSkillTools,
   ]);
   const ambiguousTurn =
     profile.complexity === "simple" && profile.verificationDepth === "none";

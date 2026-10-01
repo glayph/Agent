@@ -40,7 +40,17 @@ A clean installation requires a supported Node.js runtime, npm, Git, a C/C++ bui
 | GGUF model                | Only for local-model use                                      | Only for local-model use                                       | Running a local model.                  |
 | Cloud API key             | Only for cloud-model use                                      | Only for cloud-model use                                       | Using a remote provider.                |
 | Whisper.cpp runtime/model | Optional for voice transcription; official native build/model | Optional for voice transcription; official native build/model  | Browser microphone/audio transcription. |
+| Playwright Chromium       | Installed by `npm install`; repair with `npx playwright install chromium` | Installed by `npm install`; repair with `npx playwright install chromium` | Browser navigation, extraction, and screenshots. |
 | FFmpeg                    | Optional; needed by whisper-server `--convert` for WebM/M4A   | Optional; needed by whisper-server `--convert` for WebM/M4A    | Browser-recorded formats beyond WAV.    |
+
+After installing dependencies, verify that the browser binary is available:
+
+```bash
+npm run setup:browser
+node bin/miki.js doctor
+```
+
+If the doctor report says **Playwright Chromium is missing**, run `npx playwright install chromium` and run the doctor again. Browser tools return the same actionable repair command instead of a raw Playwright executable-path error.
 
 Official installation references are listed at the end of this guide: Node.js [1], CMake [2], Go [3], Git [4], and llama.cpp [5].
 

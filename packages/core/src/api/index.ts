@@ -584,6 +584,7 @@ const launcherCompatRouter = createLauncherCompatRouter({
 const enhancementRouter = createEnhancementRouter({
   workspaceDir,
   runtimePaths,
+  memoryStatus: () => orchestrator.getMemoryStatus(),
   jobQueue: persistentJobQueue,
   jobRunner: persistentJobRunner,
   approvalInbox,
@@ -2972,12 +2973,13 @@ app.get("/status", (_req, res) => {
     project?: string;
   };
   res.json({
-    status: "idle",
+    status: orchestrator.getMemoryStatus().available ? "idle" : "degraded",
     agent: agentConfig.name || "Miki",
     project: agentConfig.project || "Miki",
     llm_provider: orchestrator.provider,
     llm_model: orchestrator.modelName,
     heartbeat: hb,
+    memory: orchestrator.getMemoryStatus(),
     requestId: (_req as AuthenticatedRequest).requestId,
   });
 });

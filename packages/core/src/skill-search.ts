@@ -8,6 +8,7 @@ import {
 } from "./paths.js";
 import type { RuntimeRequirement } from "./runtime-fetch/types.js";
 import { SkillRegistry, type InstalledSkill } from "@miki/installer";
+import { bundledSkillsRoot } from "@miki/skills";
 
 export interface SkillMetadata {
   id: string;
@@ -50,13 +51,18 @@ export class SkillSearchEngine {
 
   constructor(paths: RuntimePaths | string, additionalDirs: string[] = []) {
     const runtimePaths = normalizeRuntimePaths(paths);
-    const bundledSkillsDir = runtimePaths.sourceDir
+    const sourceBundledSkillsDir = runtimePaths.sourceDir
       ? path.resolve(runtimePaths.sourceDir, "packages", "skills", "src")
       : path.resolve(runtimePaths.skillsDir, "..", "skills");
+    const packagedBundledSkillsDir = bundledSkillsRoot();
     const userSkillsDir = path.resolve(runtimePaths.skillsDir);
     this.skillsDirs = Array.from(
       new Set([
-        bundledSkillsDir,
+        // The package export resolves to dist/catalog in a packaged install
+        // and falls back to the source tree in development. Keep the source
+        // checkout path as a compatibility fallback for legacy runtimes.
+        packagedBundledSkillsDir,
+        sourceBundledSkillsDir,
         userSkillsDir,
         ...additionalDirs.map((dir) => path.resolve(dir)),
       ]),

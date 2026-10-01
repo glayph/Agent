@@ -14,6 +14,8 @@ import {
   createWorkspaceSecretVault,
 } from "@miki/config";
 import { ToolRegistry } from "./tools/index.js";
+import { loadIdentityContext, formatMemorySection } from "./identity/loader.js";
+import { FileMemoryService } from "./memory-files/index.js";
 import { HeartbeatEngine, type IOrchestrator } from "./heartbeat.js";
 import {
   SelfImprovementEngine,
@@ -25,7 +27,6 @@ import type {
 } from "./self-improvement/engine.js";
 import { SkillGovernanceEngine } from "./skill-governance/engine.js";
 import {
-  achatCompletion,
   LiteLLMMissingCredentialError,
   LiteLLMRateLimitError,
   LLMMissingCredentialError,
@@ -41,6 +42,7 @@ import {
   TaskScheduler,
   type ScheduleOptions,
   type ScheduledTask,
+  type TaskExecutionControl,
   type TaskCompletionNotification,
 } from "./scheduler.js";
 import {
@@ -99,7 +101,10 @@ import {
   formatExecutionPipelineDecision,
   type ExecutionMode,
 } from "./execution-pipeline.js";
-import { selectAgentPromptHistory } from "./agent-history.js";
+import {
+  buildConversationRecallReply,
+  selectAgentPromptHistory,
+} from "./agent-history.js";
 import {
   detectDeterministicIntent,
   isExplicitProcessControlRequest,
@@ -143,9 +148,16 @@ import type { AgentControlService } from "./control/index.js";
 import type { MikiProviderAudio } from "./llm/provider/sdk/index.js";
 import { providerRegistry } from "./llm/provider/registry.js";
 import {
-  isLocalModel,
-  synchronizeLocalRuntimeForModel,
-} from "./plugins/providers/llama-cpp/runtime/local-runtime.js";
+  AllModelsFailedError,
+  ExplicitModelUnavailableError,
+  createModelRouter,
+  resolveModelRouterConfig,
+  setDefaultModelRouter,
+  unwrapRouterError,
+  type ModelRouter,
+  type ModelSelection,
+  type RouterCompletion,
+} from "./llm/model-router/index.js";
 
 const MAX_AGENT_TURNS = 50;
 const MAX_AGENT_TURNS_NO_OUTPUT = 4;
@@ -564,6 +576,9 @@ interface AgentRuntimeConfig {
   max_tokens_per_cycle?: number;
   browser?: AgentBrowserConfig;
   resource?: AgentResourceConfig;
+  /** Lane-based model profiles + failover (see docs/model-router.md). */
+  model_router?: Record<string, unknown>;
+  /** @deprecated Read only when `model_router` is absent; migrate to lanes. */
   model_routing?: {
     enabled?: boolean;
     local_model?: string;
@@ -573,6 +588,8 @@ interface AgentRuntimeConfig {
 
 interface AgentMemoryConfig {
   max_context_chars?: number;
+  /** OpenClaw-style file memory (MEMORY.md, memory/*.md, compaction). */
+  files?: Record<string, unknown>;
 }
 
 interface AgentConfigShape {
@@ -660,60 +677,6 @@ export class AgentOrchestrator {
   private _turnProfileGapWarned = false;
 
   // Helper to truncate messages if they exceed context limit (used in runAgentLoop)
-  private static _compactMessagesIfNeeded(
-    messages: ChatMessage[],
-    resource: ResolvedAgentResourceConfig,
-  ): ChatMessage[] {
-    const totalChars = messages.reduce(
-      (sum, message) => sum + (message.content?.length || 0),
-      0,
-    );
-    const thresholdChars = Math.floor(
-      resource.maxContextChars * (resource.summarizeTokenPercent / 100),
-    );
-    if (
-      messages.length < resource.summarizeMessageThreshold ||
-      totalChars <= thresholdChars
-    ) {
-      return messages;
-    }
-
-    const systemMessages = messages.filter(
-      (message) => message.role === "system",
-    );
-    const conversational = messages.filter(
-      (message) => message.role !== "system",
-    );
-    const keepCount = Math.max(
-      4,
-      Math.ceil(resource.summarizeMessageThreshold / 2),
-    );
-    if (conversational.length <= keepCount) return messages;
-
-    const older = conversational.slice(0, -keepCount);
-    const summaryLines = older
-      .map((message) => {
-        const content = String(message.content || "")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (!content) return "";
-        return `${message.role}: ${content.slice(0, 320)}`;
-      })
-      .filter(Boolean)
-      .slice(-40);
-    if (summaryLines.length === 0) return messages;
-
-    const summary: ChatMessage = {
-      role: "system",
-      content:
-        "Earlier conversation context was compacted to stay within the configured context window. " +
-        "Use these preserved facts when relevant:\n" +
-        summaryLines.join("\n"),
-    };
-    return [...systemMessages, summary, ...conversational.slice(-keepCount)];
-  }
-
-  // Helper to truncate messages if they exceed context limit (used in runAgentLoop)
   private static _truncateMessagesToFit(
     messages: ChatMessage[],
     maxContextChars = DEFAULT_MAX_TOTAL_CONTEXT_CHARS,
@@ -778,11 +741,17 @@ export class AgentOrchestrator {
     return this.control;
   }
 
-  get agentConfig(): { name?: string; project?: string; persona?: string } {
+  get agentConfig(): {
+    name?: string;
+    project?: string;
+    persona?: string;
+    identity?: { path?: string };
+  } {
     return (this.config.agent || {}) as {
       name?: string;
       project?: string;
       persona?: string;
+      identity?: { path?: string };
     };
   }
 
@@ -1044,6 +1013,10 @@ export class AgentOrchestrator {
     this.provider = settings.provider;
     this.modelName = settings.defaultModel;
     this.temperature = settings.defaultTemperature;
+    // Single entry point for every model call (upgrade step 03).
+    this.modelRouter = createModelRouter(this._routerInputs());
+    this._routerModelKey = this.modelName;
+    setDefaultModelRouter(this.modelRouter);
     this.toolLockManager = new ToolResourceLockManager(
       this._toolLockTimeoutMs(),
     );
@@ -1078,7 +1051,10 @@ export class AgentOrchestrator {
       path.join(runtimePaths.dataDir, "scheduled-tasks.db"),
     );
     const selfImprovementLlmCall: LLMCallFn = async (messages) => {
-      const response = await this._callLlmApi(messages as ChatMessage[]);
+      // Reflection / tuning / optimisation cycles are silent housekeeping.
+      const response = await this._callLlmApi(messages as ChatMessage[], undefined, {
+        lane: "background",
+      });
       return {
         choices:
           response.choices?.map((choice) => ({
@@ -1095,7 +1071,16 @@ export class AgentOrchestrator {
     let memoryIntegration = null;
     try {
       memoryIntegration = initMemory(dataDir);
+      this.memoryStatus = {
+        available: true,
+        dataDir,
+      };
     } catch (memErr) {
+      const error = memErr instanceof Error ? memErr.message : String(memErr);
+      this.memoryStatus = {
+        available: false,
+        error,
+      };
       // Memory init failure must never prevent the agent from starting.
       console.error(
         "[Agent] Memory bridge init failed (continuing without memory):",
@@ -1169,8 +1154,8 @@ export class AgentOrchestrator {
       },
       this.taskQueue,
       this.concurrentManager,
-      (sessionId, message, task) =>
-        this.runAgentLoopWithTask(sessionId, message, task),
+      (sessionId, message, task, control) =>
+        this.runAgentLoopWithTask(sessionId, message, task, control),
       new SqliteScheduledTaskStore(schedulerDb),
       (notification) => this._notifyTaskCompletion(notification),
     );
@@ -1199,8 +1184,10 @@ export class AgentOrchestrator {
             message,
             cronExpression,
             runAt,
-            options,
+            { ...options, lane: "autonomous" },
           ),
+        requestPause: (id) => this.taskScheduler.requestScheduledPause(id),
+        resumeTask: (id) => this.taskScheduler.resumeScheduledTask(id),
         getScheduledTask: (id) => this.taskScheduler.getScheduledTask(id),
         concurrentManager: this.concurrentManager,
         isProviderHealthy: () =>
@@ -1227,6 +1214,7 @@ export class AgentOrchestrator {
       paths: runtimePaths,
       services: () => ({
         providerRegistry,
+        modelRouter: this.modelRouter,
         toolRegistry: this.tools,
         browser: this.tools.browser,
         computer: this.tools.computer,
@@ -1268,11 +1256,142 @@ export class AgentOrchestrator {
     this.agentRegistry = globalAgentRegistry;
 
     this.skillLoader = initSkillLoader(paths);
+
+    this.fileMemory = this._createFileMemory();
+  }
+
+  /** OpenClaw-style file memory: MEMORY.md, memory/*.md, compaction. Systemwide. */
+  readonly fileMemory: FileMemoryService;
+
+  /**
+   * Lane-aware model router with failover. The ONLY path to a provider: the
+   * agent loop, background summaries and self-improvement all go through it.
+   */
+  readonly modelRouter: ModelRouter;
+  private _routerModelKey = "";
+
+  private _routerInputs(): {
+    modelRouter?: unknown;
+    legacyRouting?: unknown;
+    defaultModel: string;
+  } {
+    const agentBlock = asAgentConfig(this.config).agent;
+    return {
+      modelRouter: agentBlock?.model_router,
+      legacyRouting: agentBlock?.model_routing,
+      defaultModel: this.modelName,
+    };
+  }
+
+  /** Re-resolve router lanes (cheap) when the global model changed at runtime. */
+  private _syncModelRouter(): void {
+    if (this._routerModelKey === this.modelName) return;
+    this._routerModelKey = this.modelName;
+    this.modelRouter.updateConfig(resolveModelRouterConfig(this._routerInputs()));
+  }
+
+  /**
+   * Same directory the identity loader uses (agent.identity.path override, or
+   * the runtime identity dir).
+   */
+  private _identityDir(): string {
+    return this.agentConfig.identity?.path
+      ? path.resolve(this.agentConfig.identity.path)
+      : this.runtimePaths.identityDir;
+  }
+
+  private _createFileMemory(): FileMemoryService {
+    const identityDir = this._identityDir();
+    // Memory lives beside the identity files. If identity/ has not been
+    // adopted yet, creating it as a side effect would silently switch the
+    // loader away from the legacy persona, so use the data dir instead.
+    const root = fs.existsSync(identityDir)
+      ? identityDir
+      : path.join(this.runtimePaths.dataDir, "memory-files");
+    const resource = this._resourceConfig();
+    return new FileMemoryService({
+      identityDir: root,
+      agentMemoryConfig: asAgentConfig(this.config).memory,
+      seed: {
+        summarizeTokenPercent: resource.summarizeTokenPercent,
+        summarizeMessageThreshold: resource.summarizeMessageThreshold,
+      },
+      // Background-only LLM summaries; heuristics take over on any failure.
+      llm: async ({ system, user }, { signal }) => {
+        this._syncModelRouter();
+        const { response } = await this.modelRouter.complete({
+          lane: "background",
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ] as never,
+          extra: { temperature: 0.2, max_tokens: 700 },
+          signal,
+        });
+        return String(response.choices?.[0]?.message?.content ?? "");
+      },
+      // "auto": never spend a local model's compute on background summaries.
+      llmAllowed: () => !isLocalModelName(this.modelName),
+    });
+  }
+
+  private _startFileMemorySweeper(): void {
+    this.fileMemory.startSessionSweeper({
+      list: () =>
+        [...this._messageHistory.entries()].map(([sessionId, messages]) => ({
+          sessionId,
+          updatedAtMs: Date.parse(
+            this._sessionMetadata.get(sessionId)?.updated ||
+              messages[messages.length - 1]?.created_at ||
+              "",
+          ) || 0,
+          messages: () => messages,
+        })),
+    });
+  }
+
+  /** Context compaction (see memory-files/compaction.ts). Never throws. */
+  private async _compactContext(
+    sessionId: string,
+    messages: ChatMessage[],
+    resource: ResolvedAgentResourceConfig,
+  ): Promise<ChatMessage[]> {
+    const compaction = this.fileMemory.config().compaction;
+    const explicit = asAgentConfig(this.config).memory?.files?.compaction as
+      | Record<string, unknown>
+      | undefined;
+    const result = await this.fileMemory.compaction.compact(
+      sessionId,
+      messages,
+      {
+        budgetChars: resource.maxContextChars,
+        // Per-mode resource knobs stay authoritative unless the new
+        // agent.memory.files.compaction block sets its own.
+        triggerPercent:
+          explicit?.trigger_percent !== undefined
+            ? compaction.triggerPercent
+            : resource.summarizeTokenPercent,
+        minMessages:
+          explicit?.min_messages !== undefined
+            ? compaction.minMessages
+            : resource.summarizeMessageThreshold,
+      },
+    );
+    return result.messages;
   }
 
   /** Return the shared skill loader used by orchestration and the API. */
   getSkillLoader(): SkillLoader {
     return this.skillLoader;
+  }
+
+  /** Return the user-visible memory readiness state without exposing internals. */
+  getMemoryStatus(): {
+    available: boolean;
+    dataDir?: string;
+    error?: string;
+  } {
+    return { ...this.memoryStatus };
   }
 
   private _bgStarted = false;
@@ -1284,11 +1403,20 @@ export class AgentOrchestrator {
   >();
   private _taskDb: Database.Database;
   private skillLoader: SkillLoader;
+  private memoryStatus: {
+    available: boolean;
+    dataDir?: string;
+    error?: string;
+  } = {
+    available: false,
+    error: "Memory initialization has not completed.",
+  };
   private automationManager: AutomationManager;
 
   startBackgroundTasks(): Promise<void> {
     if (this._bgStarted) return Promise.resolve();
     this._bgStarted = true;
+    this._startFileMemorySweeper();
 
     const tasks: Promise<unknown>[] = [];
     if (this._isTurnProfileEnabled() || this.skillGovernance.enabled) {
@@ -1380,6 +1508,8 @@ export class AgentOrchestrator {
     this.provider = settings.provider;
     this.modelName = settings.defaultModel;
     this.temperature = settings.defaultTemperature;
+    this._routerModelKey = this.modelName;
+    this.modelRouter.updateConfig(resolveModelRouterConfig(this._routerInputs()));
     this.toolLockManager.setAcquireTimeoutMs(this._toolLockTimeoutMs());
 
     const governanceConfig = asAgentConfig(this.config).skill_governance;
@@ -1424,6 +1554,8 @@ export class AgentOrchestrator {
     this.taskScheduler.stop();
     tasks.push(this.capabilityPlugins.stop());
     this._bgStarted = false;
+    // Persist pending memory (summaries of live sessions, queued writes).
+    this.fileMemory.shutdown();
 
     return Promise.allSettled(tasks).then(() => {});
   }
@@ -1506,120 +1638,98 @@ export class AgentOrchestrator {
     }
   }
 
+  /**
+   * Which lane serves this turn. A caller-supplied lane (heartbeat, subagent…)
+   * wins when it is configured; otherwise complexity picks `complex`/`default`.
+   * An autonomous (heartbeat-driven) turn uses the `heartbeat` lane when one is
+   * configured, so proactive 24/7 work can run on a cheaper model.
+   */
+  private _laneForTurn(
+    complexity: AgentTaskComplexity,
+    route: { lane?: string; autonomous?: boolean } = {},
+  ): string {
+    const requestedLane = route.lane?.trim().toLowerCase();
+    if (requestedLane && this.modelRouter.hasLane(requestedLane)) {
+      return requestedLane;
+    }
+    if (route.autonomous && this.modelRouter.hasLane("heartbeat")) {
+      return "heartbeat";
+    }
+    return complexity === "complex" ? "complex" : "default";
+  }
+
+  /**
+   * Choose the model for a turn through the router (lane profile + failover
+   * chain). An explicit `requestedModel` (Web UI selector / API) is strict: it
+   * either serves the turn or raises `ExplicitModelUnavailableError` — it is
+   * never swapped for another model. The router's `prepare` hook starts the
+   * managed local runtime before a local model is probed.
+   */
   private async _resolveTurnModel(
     complexity: AgentTaskComplexity,
     requestedModel?: string,
-  ): Promise<string> {
-    const routing = asAgentConfig(this.config).agent?.model_routing;
+    route: { lane?: string; role?: string; autonomous?: boolean } = {},
+  ): Promise<ModelSelection> {
+    this._syncModelRouter();
     const requested = requestedModel?.trim() || "";
-    const localModel =
-      typeof routing?.local_model === "string"
-        ? routing.local_model.trim()
-        : "";
-    const complexModel =
-      typeof routing?.complex_model === "string"
-        ? routing.complex_model.trim()
-        : "";
-    let preferred =
-      requested ||
-      (routing && routing.enabled !== false
-        ? complexity === "complex" && complexModel
-          ? complexModel
-          : localModel
-        : "") ||
-      this.modelName;
-
-    // If the user explicitly requested a model (e.g. via Web UI selector),
-    // do not allow complexity-based routing to override it.
-    if (requested) {
-      preferred = requested;
-    }
+    let lane = this._laneForTurn(complexity, route);
+    const role = route.role?.trim() || undefined;
 
     // Learned routing is observe/draft by default. Only an explicit apply mode
-    // may select a persisted model action, and never overrides a user request.
+    // may reorder a configured chain, and never overrides a user request.
+    let prefer: string | undefined;
     if (!requested && this.selfImprovement) {
+      const laneChains = ["default", "complex"].map((name) => ({
+        name,
+        chain: this.modelRouter.select({ lane: name }).chain,
+      }));
       const candidates = [
-        ...new Set([localModel, complexModel, this.modelName].filter(Boolean)),
+        ...new Set(laneChains.flatMap((entry) => entry.chain)),
       ];
+      const baseline = this.modelRouter.select({ lane, role }).model;
       const decision = this.selfImprovement.chooseAction({
         context: complexity,
         candidates,
-        baselineAction: preferred,
+        baselineAction: baseline,
       });
       const mode = (
         this.selfImprovement.getStatus().behaviorLearning as
           { mode?: string } | undefined
       )?.mode;
       if (mode === "apply" && candidates.includes(decision.actionKey)) {
-        preferred = decision.actionKey;
+        prefer = decision.actionKey;
+        const current = this.modelRouter.select({ lane, role }).chain;
+        if (!current.includes(prefer)) {
+          lane =
+            laneChains.find((entry) => entry.chain.includes(prefer!))?.name ??
+            lane;
+        }
       }
     }
 
-    if (isLocalModel(preferred)) {
-      await synchronizeLocalRuntimeForModel(preferred);
-    }
-    const readiness = await providerRegistry.isModelReady(preferred);
-    if (readiness.available) return preferred;
+    return this.modelRouter.selectReady({
+      lane,
+      role,
+      explicitModel: requested || undefined,
+      preferModel: prefer,
+    });
+  }
 
-    // If the user explicitly requested this model, do not fall back to
-    // another model even if it is unavailable. This ensures that a local
-    // run stays local and provides a clear error if the runtime is down.
-    if (requested) {
-      throw new LLMMissingCredentialError(
-        `The requested model "${preferred}" is unavailable. ${readiness.reason || "Configure a compatible provider plugin."}`,
-      );
-    }
+  /** Per-attempt model deadline: a hung provider fails over instead of blocking the chain. */
+  private static _attemptTimeoutMs(model: string): number {
+    return isLocalModelName(model)
+      ? LOCAL_LLM_CALL_TIMEOUT_MS
+      : REMOTE_LLM_CALL_TIMEOUT_MS;
+  }
 
-    // BUG-04 FIX: When the preferred model is unavailable and was NOT
-    // explicitly requested by the user, try every available fallback before
-    // throwing. For remote (non-local) models this means we also try the local
-    // model, so a "complex"-classified task does not fail just because the
-    // configured Gemini/remote model is missing credentials.
-    const fallbacks = [
-      // For remote preferred, put local first so users with only a local
-      // runtime still get a working response.
-      isLocalModelName(preferred)
-        ? complexity === "complex"
-          ? complexModel
-          : ""
-        : localModel,
-      complexity === "complex" ? complexModel : "",
-      complexModel,
-      localModel,
-      this.modelName,
-    ].filter(
-      (candidate, index, values): candidate is string =>
-        Boolean(candidate) &&
-        candidate !== preferred &&
-        values.indexOf(candidate) === index,
-    );
-    for (const fallback of fallbacks) {
-      if (isLocalModel(fallback)) {
-        await synchronizeLocalRuntimeForModel(fallback);
-      }
-      const fallbackReadiness = await providerRegistry.isModelReady(fallback);
-      if (fallbackReadiness.available) {
-        console.warn(
-          "[Agent] Provider fallback: " +
-            preferred +
-            " unavailable (" +
-            (readiness.reason || "not ready") +
-            "); using " +
-            fallback +
-            ".",
-        );
-        return fallback;
-      }
-    }
-
-    throw new LLMMissingCredentialError(
-      'No available model could serve this turn. Preferred model "' +
-        preferred +
-        '" is unavailable: ' +
-        (readiness.reason || "provider runtime is not ready") +
-        ". Tried fallbacks: " +
-        (fallbacks.join(", ") || "none") +
-        ".",
+  /** Whole-chain deadline: each remaining candidate gets one attempt window (bounded). */
+  private static _chainTimeoutMs(selection: ModelSelection): number {
+    const total = selection.chain
+      .slice(selection.index)
+      .reduce((sum, model) => sum + AgentOrchestrator._attemptTimeoutMs(model), 0);
+    return Math.min(
+      Math.max(total, AgentOrchestrator._attemptTimeoutMs(selection.model)),
+      300_000,
     );
   }
 
@@ -1665,24 +1775,19 @@ export class AgentOrchestrator {
     return result.type ? result : { type: "object", properties: {} };
   }
 
-  private async _callLlmApi(
-    messages: ChatMessage[],
-    toolsSchema?: ToolDefinition[],
-    runtimeOptions: {
-      maxTokens?: number;
-      model?: string;
-      signal?: AbortSignal;
-      forceToolCall?: boolean;
-    } = {},
-  ): Promise<LLMResponse> {
-    const startedAt = Date.now();
-    const model = runtimeOptions.model?.trim() || this.modelName;
-    const localModel = isLocalModelName(model);
-    const metricTags = {
-      model,
-      tools: String(Boolean(toolsSchema?.length)),
-    };
+  /**
+   * Provider-facing request options for ONE candidate model. Local and remote
+   * models need different tool settings, so this is evaluated again for every
+   * model a failover lands on.
+   */
+  private _llmOptionsFor(
+    model: string,
+    startModel: string,
+    toolsSchema: ToolDefinition[] | undefined,
+    runtimeOptions: { maxTokens?: number; forceToolCall?: boolean },
+  ): Record<string, unknown> {
     const options: Record<string, unknown> = {};
+    const localModel = isLocalModelName(model);
     if (toolsSchema && toolsSchema.length > 0) {
       // ToolDefinition carries local-only metadata (for example `risk`) that
       // must not be sent to OpenAI-compatible providers. Google Gemini's
@@ -1731,7 +1836,7 @@ export class AgentOrchestrator {
       // allowing normal answers to complete.
       options.tool_choice = localModel
         ? "auto"
-        : runtimeOptions.forceToolCall
+        : runtimeOptions.forceToolCall && model === startModel
           ? "required"
           : "auto";
       if (localModel) options.parallel_tool_calls = false;
@@ -1748,29 +1853,71 @@ export class AgentOrchestrator {
     ) {
       options.max_tokens = Math.floor(runtimeOptions.maxTokens);
     }
+    return options;
+  }
+
+  /**
+   * One LLM call, routed. The router owns provider selection, credential
+   * rotation and failover; this method only shapes the request.
+   *
+   * - `selection` (from `_resolveTurnModel`) pins the chain and start model;
+   * - `model` pins a single model strictly (explicit override semantics);
+   * - otherwise `lane`/`role` pick the profile.
+   * `onServed` reports which model actually answered (after any failover).
+   */
+  private async _callLlmApi(
+    messages: ChatMessage[],
+    toolsSchema?: ToolDefinition[],
+    runtimeOptions: {
+      maxTokens?: number;
+      model?: string;
+      signal?: AbortSignal;
+      forceToolCall?: boolean;
+      selection?: ModelSelection;
+      lane?: string;
+      role?: string;
+      onServed?: (result: RouterCompletion) => void;
+    } = {},
+  ): Promise<LLMResponse> {
+    this._syncModelRouter();
+    const startedAt = Date.now();
+    const selection =
+      runtimeOptions.selection ??
+      this.modelRouter.select({
+        lane: runtimeOptions.lane,
+        role: runtimeOptions.role,
+        explicitModel: runtimeOptions.model,
+      });
+    const startModel = selection.model;
+    const metricTags = {
+      model: startModel,
+      tools: String(Boolean(toolsSchema?.length)),
+    };
     const processedMessages = messages.map(
       ({ id: _id, created_at: _createdAt, ...message }) => message,
     );
 
     try {
-      const response = await globalExecutionTracer.spanAsync(
+      const result = await globalExecutionTracer.spanAsync(
         "agent.llm_call",
         () =>
-          achatCompletion(
-            processedMessages as never,
-            options,
-            model,
-            runtimeOptions.signal,
-          ),
+          this.modelRouter.complete({
+            selection,
+            messages: processedMessages as never,
+            extra: (model) =>
+              this._llmOptionsFor(model, startModel, toolsSchema, runtimeOptions),
+            attemptTimeoutMs: (model) => AgentOrchestrator._attemptTimeoutMs(model),
+            signal: runtimeOptions.signal,
+          }),
         metricTags,
       );
+      runtimeOptions.onServed?.(result);
       globalMetricsCollector.recordLatency(
         "llm_call",
         Date.now() - startedAt,
-        metricTags,
+        { ...metricTags, model: result.model },
       );
-
-      return response;
+      return result.response;
     } catch (err) {
       globalMetricsCollector.recordError("llm_call", metricTags);
       throw err;
@@ -1959,6 +2106,12 @@ export class AgentOrchestrator {
     const hadSession =
       this._messageHistory.has(sessionId) ||
       this._sessionMetadata.has(sessionId);
+    // Session end: save a background summary before the history disappears.
+    this.fileMemory.onSessionClosed(
+      sessionId,
+      this._messageHistory.get(sessionId) ?? [],
+      "deleted",
+    );
     this._messageHistory.delete(sessionId);
     this._sessionMetadata.delete(sessionId);
     this._sessionHistoryStore.delete(sessionId);
@@ -1981,6 +2134,7 @@ export class AgentOrchestrator {
   }
 
   public close(): void {
+    this.fileMemory.shutdown();
     this._sessionHistoryStore.close();
   }
 
@@ -2047,6 +2201,8 @@ export class AgentOrchestrator {
     if (!agentResponse.trim()) return;
     const memory = getMemory();
     if (!memory) return;
+    // Step 02: the SQLite/TKG write never runs on the turn's critical path.
+    this.fileMemory.background("tkg-interaction", () => {
     try {
       memory.logInteraction(userMessage, agentResponse, { sessionId });
 
@@ -2084,6 +2240,7 @@ export class AgentOrchestrator {
     } catch (memErr) {
       console.error("[Agent] Memory write failed:", (memErr as Error).message);
     }
+    });
   }
 
   /**
@@ -2110,6 +2267,7 @@ export class AgentOrchestrator {
   ): void {
     const memory = getMemory();
     if (!memory || !this.selfImprovement) return;
+    this.fileMemory.background("learning-failure", () => {
     try {
       const modelId = options.modelId || this.modelName || "unknown";
       const errorMessage = (
@@ -2148,6 +2306,7 @@ export class AgentOrchestrator {
         (learningError as Error).message,
       );
     }
+    });
   }
 
   /**
@@ -2171,6 +2330,7 @@ export class AgentOrchestrator {
   ): void {
     const memory = getMemory();
     if (!memory) return;
+    this.fileMemory.background("capability-plan", () => {
     try {
       const compactRecord = {
         type: "capability_plan",
@@ -2199,6 +2359,7 @@ export class AgentOrchestrator {
         (memErr as Error).message,
       );
     }
+    });
   }
 
   private _logMemoryToolCall(
@@ -2210,6 +2371,7 @@ export class AgentOrchestrator {
   ): void {
     const memory = getMemory();
     if (!memory) return;
+    this.fileMemory.background("tkg-tool-call", () => {
     try {
       memory.logToolCall(toolName, toolArgs, result, { sessionId, ok });
     } catch (memErr) {
@@ -2218,6 +2380,7 @@ export class AgentOrchestrator {
         (memErr as Error).message,
       );
     }
+    });
   }
 
   async *runAgentLoop(
@@ -2231,8 +2394,12 @@ export class AgentOrchestrator {
       imageUrls?: string[];
       /** Stable ID of the user message supplied by the WebSocket client. */
       messageId?: string;
-      /** Optional model selected explicitly by the Web UI for this turn. */
+      /** Optional model selected explicitly by the Web UI for this turn (strict: never substituted). */
       requestedModel?: string;
+      /** Model lane for this turn (`heartbeat`, `subagent`, …) — see docs/model-router.md. */
+      lane?: string;
+      /** Specialist/role id, so a role-specific model profile can apply. */
+      role?: string;
       /** Safe voice transcription provenance; raw audio is never part of history. */
       voice?: VoiceMessageMetadata;
       /** Ephemeral audio for a cloud model that explicitly accepts audio input. */
@@ -2245,6 +2412,10 @@ export class AgentOrchestrator {
       executionMode?: ExecutionMode;
       /** Runtime ID shared with inspector/tool events for this turn. */
       runId?: string;
+      /** Cooperative autonomous pause requested by a real user turn. */
+      pauseRequested?: () => boolean;
+      /** Persist the autonomous checkpoint before yielding control. */
+      onPause?: () => void;
       completionGuard?: () => {
         ok: boolean;
         missing?: string[];
@@ -2253,8 +2424,9 @@ export class AgentOrchestrator {
       maxCompletionRepairs?: number;
     } = {},
   ): AsyncGenerator<string, void, unknown> {
-    if (this.heartbeat) this.heartbeat.markUserInteraction();
-    if (this.autonomy) this.autonomy.markUserInteraction();
+    const isAutonomousTurn = options.executionMode === "autonomous_task";
+    if (!isAutonomousTurn && this.heartbeat) this.heartbeat.markUserInteraction();
+    if (!isAutonomousTurn && this.autonomy) this.autonomy.markUserInteraction();
 
     {
       const history = this._messageHistory.get(sessionId) || [];
@@ -2312,6 +2484,31 @@ export class AgentOrchestrator {
       }
     }
 
+    const recallReply = buildConversationRecallReply(
+      this._messageHistory.get(sessionId) || [],
+      userMessage,
+    );
+    if (recallReply !== null) {
+      await this._saveAssistantHistoryMessage(
+        sessionId,
+        recallReply,
+        options.responseMessageId,
+      );
+      this._logMemoryInteraction(sessionId, userMessage, recallReply);
+      yield JSON.stringify({
+        type: "stream_chunk",
+        content: recallReply,
+        model_name: this.modelName,
+      });
+      yield JSON.stringify({
+        type: "stream_done",
+        usage: { tokens: 0 },
+        agent_loop_id: loopId,
+        model_name: this.modelName,
+      });
+      return;
+    }
+
     // BUG FIX: Track spent budget tokens for this loop
     let spentBudgetTokens = 0;
     const configuredMaxTokensPerCycle =
@@ -2351,10 +2548,20 @@ export class AgentOrchestrator {
       turnProfile.historyMode,
       resource.messageHistoryLimit,
     );
-    const turnModel = await this._resolveTurnModel(
+    const turnSelection = await this._resolveTurnModel(
       taskProfile.complexity,
       options.requestedModel,
+      {
+        lane: options.lane,
+        role: options.role,
+        autonomous: isAutonomousTurn,
+      },
     );
+    // `turnModel` is the model currently serving this turn. It starts as the
+    // router's choice and moves only if a failover lands elsewhere (sticky for
+    // the rest of the turn so a down primary is not retried on every step).
+    let turnModel = turnSelection.model;
+    let activeSelection: ModelSelection = turnSelection;
     const localModel = isLocalModelName(turnModel);
     const runDeadline =
       Date.now() +
@@ -2379,7 +2586,7 @@ export class AgentOrchestrator {
           );
     const systemContent =
       executionPipeline.mode === "simple_message"
-        ? this._buildSimpleSystemContent(turnModel)
+        ? await this._buildSimpleSystemContent(turnModel)
         : await this._buildSystemContent(
             userMessage,
             screenshotImagePath,
@@ -2703,16 +2910,14 @@ export class AgentOrchestrator {
         audio;
     }
 
-    llmMessages = AgentOrchestrator._compactMessagesIfNeeded(
-      llmMessages,
-      resource,
-    );
+    llmMessages = await this._compactContext(sessionId, llmMessages, resource);
     llmMessages = AgentOrchestrator._truncateMessagesToFit(
       llmMessages,
       resource.maxContextChars,
     );
 
     let consecutiveToolOnly = 0;
+    let toolOnlySynthesisAttempts = 0;
     // BUG-06 FIX: track fingerprints of (toolName, serialized-args) pairs seen
     // this session. If the model emits the exact same call more than once we
     // stop immediately rather than waiting for MAX_AGENT_TURNS_NO_OUTPUT turns.
@@ -2735,6 +2940,15 @@ export class AgentOrchestrator {
       });
 
     while (turn < maxAgentTurns) {
+      if (options.pauseRequested?.()) {
+        options.onPause?.();
+        yield JSON.stringify({
+          type: "task_status",
+          status: "paused",
+          reason: "user_interaction",
+        });
+        return;
+      }
       if (options.signal?.aborted) {
         yield JSON.stringify({
           type: "error",
@@ -2786,7 +3000,8 @@ export class AgentOrchestrator {
         }
       }
       try {
-        llmMessages = AgentOrchestrator._compactMessagesIfNeeded(
+        llmMessages = await this._compactContext(
+          sessionId,
           llmMessages,
           resource,
         );
@@ -2867,13 +3082,15 @@ export class AgentOrchestrator {
             once: true,
           });
         }
-        let effectiveRequestModel = turnModel;
         try {
+          // The router owns failover: credential rotation, then the lane's
+          // fallback chain (this replaces the old one-off BUG-04 local retry).
+          // The outer deadline covers the whole chain; each attempt has its own.
           response = await withTimeout(
             globalRequestDeduplicator.execute(requestKey, () =>
               this._callLlmApi(llmMessages, toolsSchema, {
                 maxTokens: requestMaxTokens,
-                model: turnModel,
+                selection: activeSelection,
                 signal: requestAbortController.signal,
                 forceToolCall:
                   localModel &&
@@ -2883,74 +3100,28 @@ export class AgentOrchestrator {
                     /\b(?:use|run|execute|call)\b.{0,50}\btools?\b/i.test(
                       userMessage,
                     )),
+                onServed: (served) => {
+                  if (!served.failedOver) return;
+                  const index = activeSelection.chain.indexOf(served.model);
+                  if (index >= 0) {
+                    activeSelection = {
+                      ...activeSelection,
+                      index,
+                      model: served.model,
+                      preflighted: true,
+                    };
+                  }
+                  turnModel = served.model;
+                },
               }),
             ),
-            localModel ? LOCAL_LLM_CALL_TIMEOUT_MS : REMOTE_LLM_CALL_TIMEOUT_MS,
+            AgentOrchestrator._chainTimeoutMs(activeSelection),
             localModel ? "Local llama.cpp request" : "Remote provider request",
             requestAbortController,
           );
-        } catch (callErr: unknown) {
-          // BUG-04 FIX: a "complex"-classified turn can route to a remote
-          // model (e.g. Gemini) that turns out to have no API key configured.
-          // Previously this surfaced immediately as a hard error even when a
-          // working local model was available, forcing the user to fail a
-          // turn that a local model could have answered. Retry exactly once
-          // against the local model, only for this specific failure mode —
-          // any other error (timeout, rate limit, generic mock errors used in
-          // tests, etc.) is rethrown unchanged and handled by the existing
-          // catch block below.
-          const isMissingCredential =
-            callErr instanceof LLMMissingCredentialError ||
-            callErr instanceof LiteLLMMissingCredentialError;
-          const localFallbackCandidate =
-            (asAgentConfig(this.config).agent?.model_routing?.local_model as
-              string | undefined) || "";
-          if (
-            isMissingCredential &&
-            !isLocalModelName(turnModel) &&
-            localFallbackCandidate &&
-            !options.requestedModel
-          ) {
-            await synchronizeLocalRuntimeForModel(localFallbackCandidate);
-            const fallbackReadiness = await providerRegistry.isModelReady(
-              localFallbackCandidate,
-            );
-            if (fallbackReadiness.available) {
-              console.warn(
-                "[Agent] BUG-04: " +
-                  turnModel +
-                  " call failed on missing credentials; " +
-                  "retrying this turn once against local model " +
-                  localFallbackCandidate +
-                  ".",
-              );
-              effectiveRequestModel = localFallbackCandidate;
-              const retryAbortController = new AbortController();
-              response = await withTimeout(
-                globalRequestDeduplicator.execute(
-                  { ...requestKey, model: localFallbackCandidate },
-                  () =>
-                    this._callLlmApi(llmMessages, toolsSchema, {
-                      maxTokens: requestMaxTokens,
-                      model: localFallbackCandidate,
-                      signal: retryAbortController.signal,
-                      forceToolCall: false,
-                    }),
-                ),
-                LOCAL_LLM_CALL_TIMEOUT_MS,
-                "Local llama.cpp request (BUG-04 fallback retry)",
-                retryAbortController,
-              );
-            } else {
-              throw callErr;
-            }
-          } else {
-            throw callErr;
-          }
         } finally {
           options.signal?.removeEventListener("abort", forwardAbort);
         }
-        void effectiveRequestModel; // reserved for future diagnostics/logging
 
         // BUG FIX: Track budget after each call
         spentBudgetTokens += this._checkBudget(response);
@@ -2974,7 +3145,17 @@ export class AgentOrchestrator {
             continue; // Retry if quality is low
           }
         }
-      } catch (err: unknown) {
+      } catch (thrown: unknown) {
+        // The router wraps the real provider error; classify on the root cause
+        // so user-facing messages stay accurate, and add what the router did.
+        const err = unwrapRouterError(thrown);
+        const routerNote =
+          thrown instanceof ExplicitModelUnavailableError
+            ? `\n\n(The model "${thrown.requestedModel}" was selected explicitly, so no other model was substituted.)`
+            : thrown instanceof AllModelsFailedError &&
+                thrown.attemptedModels.length > 0
+              ? `\n\n(Models tried: ${thrown.attemptedModels.join(", ")}.)`
+              : "";
         const rawMessage = err instanceof Error ? err.message : String(err);
         const isCredentialOrRateLimitError =
           err instanceof LiteLLMMissingCredentialError ||
@@ -2983,7 +3164,7 @@ export class AgentOrchestrator {
           err instanceof LLMRateLimitError;
         const providerError = err instanceof LLMProviderError ? err : null;
         const providerLabel = providerError?.providerId || "selected AI";
-        const errorMessage = providerError
+        const baseErrorMessage = providerError
           ? providerError.status === 429 ||
             providerError instanceof LLMRateLimitError ||
             providerError instanceof LiteLLMRateLimitError
@@ -3008,6 +3189,7 @@ export class AgentOrchestrator {
                   ? `[Local AI timeout] ${turnModel} did not finish within ${LOCAL_LLM_CALL_TIMEOUT_MS}ms. The request was cancelled; the usual cause is a CPU-bound local model or an oversized prompt/tool context. Reduce the task size or increase the local timeout, then retry.`
                   : `Error calling LLM: ${rawMessage}`
             }`;
+        const errorMessage = baseErrorMessage + routerNote;
         this._logMemoryFailure(sessionId, userMessage, err, {
           modelId: turnModel,
           taskClass: taskProfile.complexity,
@@ -3280,6 +3462,21 @@ export class AgentOrchestrator {
         }
 
         if (consecutiveToolOnly >= MAX_AGENT_TURNS_NO_OUTPUT) {
+          if (toolOnlySynthesisAttempts < 1) {
+            toolOnlySynthesisAttempts += 1;
+            consecutiveToolOnly = 0;
+            llmMessages.push({
+              role: "user",
+              content:
+                "The requested tools have completed. Now provide the final answer to the user's original request using the tool results already in this conversation. Do not call another tool; return a concise, user-facing summary with the requested details.",
+            });
+            yield JSON.stringify({
+              type: "synthesis_retry",
+              content: "Tool steps completed; requesting the final summary.",
+              attempt: toolOnlySynthesisAttempts,
+            });
+            continue;
+          }
           const builtFallback = buildToolOnlyFallbackResponse(llmMessages);
           const fallbackContent =
             builtFallback ||
@@ -3568,6 +3765,7 @@ export class AgentOrchestrator {
     sessionId: string,
     userMessage: string,
     taskOrPriority?: AgentTask | number,
+    control?: TaskExecutionControl,
   ): AsyncGenerator<string, void, unknown> {
     const automationMessage = parseAutomationMessage(userMessage);
     const automationExecutionId = automationMessage
@@ -3699,6 +3897,8 @@ export class AgentOrchestrator {
           {
             signal: task.abortController.signal,
             executionMode,
+            pauseRequested: control?.isPauseRequested,
+            onPause: control?.markPaused,
           },
         )) {
           const latestTask = this.taskQueue.getTask(task.id);
@@ -3925,13 +4125,34 @@ export class AgentOrchestrator {
     task.route = summarizeAgentRoute(this.routeAgentTask(userMessage));
   }
 
-  private _buildSimpleSystemContent(turnModel?: string): string {
+  private async _buildSkillInventoryBlock(): Promise<string> {
+    try {
+      const skills = await this.skillLoader.getAllSkillsMetadata();
+      const callable = this.skillLoader.getLoadedSkills().length;
+      return [
+        "[SKILL INVENTORY]",
+        `Available bundled and installed skills: ${skills.length}.`,
+        `Callable skill tool modules currently activated: ${callable}.`,
+        "Do not claim that no skills are installed. For simple questions, usually use 0 skills; for specialized tasks, select only the relevant skill or small subset rather than all skills.",
+        "For requests to find, install, create, add, update, enable, or disable a skill, use the skill_search, skill_install, or skill_create tools. Never claim that skills cannot be added merely because they are not bundled. If a tool returns approval_required, report that approval request clearly and wait for the authenticated owner instead of claiming the operation failed.",
+      ].join("\n");
+    } catch {
+      return "[SKILL INVENTORY]\nSkill inventory is temporarily unavailable; do not invent a count.";
+    }
+  }
+
+  private async _buildSimpleSystemContent(turnModel?: string): Promise<string> {
     const model = turnModel?.trim() || this.modelName;
+    const memoryBlock = await this.fileMemory.buildContextBlock({
+      compact: true,
+    });
     return [
       "You are Miki, a concise and helpful assistant.",
       "Answer the user's message directly in the user's language.",
       "This is a simple-message turn: do not call tools, browse, modify files, or invent actions.",
       `Active model: ${model}.`,
+      ...(memoryBlock ? [formatMemorySection(memoryBlock)] : []),
+      await this._buildSkillInventoryBlock(),
     ].join("\n");
   }
 
@@ -4000,6 +4221,7 @@ export class AgentOrchestrator {
       `${taskProfile.complexity}/${taskProfile.executionStyle}`,
     );
     const capabilityBlock = `\n${formatPlanCapabilityReport(capabilityReport)}\n`;
+    const skillInventoryBlock = `\n${await this._buildSkillInventoryBlock()}\n`;
     if (sessionId) {
       this._logMemoryCapabilityPlan(sessionId, capabilityReport);
     }
@@ -4021,7 +4243,27 @@ export class AgentOrchestrator {
       screenshotNote = "\n\nA screenshot image is attached for reference.";
     }
 
-    const systemPersona: string = this.agentConfig.persona || "";
+    // Step 01 (workspace-identity-files): SOUL.md/AGENTS.md/IDENTITY.md/
+    // USER.md/TOOLS.md under identity/ (see packages/core/src/identity/),
+    // loaded once per turn like the other blocks in this method. Falls back
+    // to the legacy agent.persona string when identity/ hasn't been adopted
+    // (directory absent) so existing deployments and tests are unaffected;
+    // once adopted, a file that's present-but-empty just yields an empty
+    // section rather than falling back.
+    const identityDir = this._identityDir();
+    // Step 02: MEMORY.md + an index of recent memory notes ride along with
+    // the identity prefix (session start / every turn; cached by mtime).
+    const fileMemoryBlock = await this.fileMemory.buildContextBlock();
+    const identityResult = loadIdentityContext(
+      identityDir,
+      routeDecision?.selected?.id,
+      fileMemoryBlock,
+    );
+    const systemPersona: string = identityResult.usedIdentityFiles
+      ? identityResult.assembled
+      : `${this.agentConfig.persona || ""}${
+          fileMemoryBlock ? `\n\n${formatMemorySection(fileMemoryBlock)}\n` : ""
+        }`;
     const explicitTurnProfile = turnProfile.enabled;
     let dynamicStateBlock = "";
     if (explicitTurnProfile) {
@@ -4071,7 +4313,10 @@ export class AgentOrchestrator {
     // and recent conversation history across sessions. This runs on every
     // turn and is invisible to the user (it's in the system role message).
     let memoryContextBlock = "";
-    const memory = taskProfile.complexity === "simple" ? null : getMemory();
+    // Memory is needed for simple continuity and preference questions too;
+    // skipping it for simple turns made the assistant appear to forget prior
+    // facts even though they were persisted successfully.
+    const memory = getMemory();
     if (memory) {
       try {
         const memCtx = memory.getEnhancedSystemPrompt(
@@ -4115,6 +4360,9 @@ export class AgentOrchestrator {
       `\nFILE READ/EDIT CONTRACT:\n` +
       `There is no file_edit tool. To edit an existing file: call file_read first to get its current exact content, then call file_write with the complete replacement content (the full file, not just the changed lines). Never claim an edit is done without a file_write call whose result you checked.\n` +
       `When a request asks you to read a file and report, quote, or return its contents (in whole or in part), you must place that content directly in your final visible reply after the file_read tool call returns — a tool call alone is not a response. Do not end the turn with only a status statement like "reading the file now"; the reply must contain the actual text the user asked for.\n`;
+    const filesystemAccuracyBlock =
+      `\nFILESYSTEM ACCURACY CONTRACT:\n` +
+      `For file/folder/directory counts, call workspace_inventory and report its exact JSON counts and scope. Never estimate from package.json or claim shell/file tools are unavailable when a selected read-only tool can answer. For an existing external website screenshot request, use browser_navigate and browser_screenshot only; do not create index.html or call it a landing-page task unless the user explicitly asks to create a page.\n`;
 
     if (localModel) {
       const selectedToolNames = adaptiveSelection?.selectedToolNames || [];
@@ -4128,8 +4376,10 @@ export class AgentOrchestrator {
         `${decisionPatternBlock}` +
         `${adaptiveBlock}` +
         `${capabilityBlock}` +
+        `${skillInventoryBlock}` +
         `${artifactWorkflowBlock}` +
         `${autonomousRecoveryBlock}` +
+        `${filesystemAccuracyBlock}` +
         `AVAILABLE TOOL CONTRACT:\n` +
         `The runtime has already inspected the registered tool catalog for this turn. Available selected tools: ${selectedToolNames.join(", ") || "none"}. Use a selected tool when it can complete the request; do not claim a capability is unavailable before checking this list and attempting the relevant tool. If the request needs multiple capabilities, execute them in sequence and verify each result.\n\n` +
         `LOCAL TOOL-CALL CONTRACT:\n` +
@@ -4154,9 +4404,11 @@ export class AgentOrchestrator {
       `${decisionPatternBlock}` +
       `${adaptiveBlock}` +
       `${capabilityBlock}` +
+      `${skillInventoryBlock}` +
       `${artifactWorkflowBlock}` +
       `${autonomousRecoveryBlock}` +
       `${fileToolContractBlock}` +
+      `${filesystemAccuracyBlock}` +
       `ACTION UPDATES:\n` +
       `When you need to use a tool, first write one short, natural sentence (maximum 12 words) telling the user what you will do immediately. Do not mention internal tool names, routing, tokens, or hidden reasoning. Then call the tool. If no tool is needed, answer directly without a progress announcement.\n\n` +
       `${systemIndexBlock}` +
@@ -4585,6 +4837,10 @@ export function createAgentFactory(paths: RuntimePaths | string): AgentFactory {
             const response = await orchestrator.runAgentLoop(
               instance.sessionId,
               prompt,
+              undefined,
+              // Specialist runs use the `subagent` lane and the role's own
+              // model profile when configured (docs/model-router.md).
+              { role: instance.specialistId, lane: "subagent" },
             );
 
             globalAgentMessageBus.send({

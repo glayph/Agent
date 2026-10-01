@@ -1,7 +1,7 @@
 import type { AutonomyMode } from "./types.js";
 
 export type AutonomyCommandAction =
-  "set_mode" | "enable" | "disable" | "pause" | "resume" | "status";
+  "set_mode" | "enable" | "disable" | "pause" | "resume";
 
 export interface AutonomyCommand {
   action: AutonomyCommandAction;
@@ -17,7 +17,6 @@ export interface AutonomyCommand {
  *   "switch to turbo mode"
  *   "turn off autonomy"
  *   "pause autonomous work"
- *   "what's your current objective?" → status
  *
  * Returns null for anything that isn't clearly an autonomy command, so
  * ordinary conversation is never misrouted.
@@ -48,13 +47,6 @@ export function parseAutonomyCommand(message: string): AutonomyCommand | null {
     if (/\b(enable|turn on|start)\b/.test(text)) return { action: "enable" };
     if (/\bpause\b/.test(text)) return { action: "pause" };
     if (/\bresume\b|\bcontinue\b/.test(text)) return { action: "resume" };
-    if (/\bstatus\b|\bwhat.*doing\b|\bcurrent objective\b/.test(text)) {
-      return { action: "status" };
-    }
-  }
-
-  if (/\bcurrent objective\b|\bwhat are you working on\b/.test(text)) {
-    return { action: "status" };
   }
 
   return null;

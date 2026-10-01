@@ -128,6 +128,20 @@ const ARTIFACT_OPERATION_TERMS = [
   "পাঠাও",
 ];
 
+const ARTIFACT_CREATION_TERMS = [
+  "create",
+  "build",
+  "generate",
+  "write",
+  "make",
+  "develop",
+  "বানাও",
+  "তৈরি",
+  "লিখ",
+  "গড়",
+  "গড়",
+];
+
 const RICH_ARTIFACT_TERMS = [
   "browser",
   "screenshot",
@@ -286,12 +300,19 @@ export function classifyAgentTask(message: string): AgentTaskProfile {
   }
 
   const hasRichArtifactSurface = hasAny(normalized, RICH_ARTIFACT_TERMS);
+  const hasArtifactCreationIntent =
+    hasAny(normalized, ARTIFACT_CREATION_TERMS) ||
+    /landing\s*page|index\.html|static\s+(?:site|page)/i.test(normalized) ||
+    /\b(?:download|clone|checkout)\b.*\b(?:repo|repository|source\s+code)\b/i.test(
+      normalized,
+    );
   const hasMultiStepArtifact =
     hasAny(normalized, MULTI_STEP_TERMS) &&
     hasAny(normalized, ARTIFACT_WORKFLOW_TERMS);
   if (
     hasAny(normalized, ARTIFACT_WORKFLOW_TERMS) &&
     hasAny(normalized, ARTIFACT_OPERATION_TERMS) &&
+    hasArtifactCreationIntent &&
     !hasAny(normalized, LANGUAGE_TASK_TERMS) &&
     (hasRichArtifactSurface || hasMultiStepArtifact)
   ) {

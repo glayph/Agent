@@ -42,6 +42,8 @@ export interface AutonomyControllerDeps {
     runAt?: number,
     options?: { maxAttempts?: number },
   ) => { id: string };
+  requestPause?: (id: string) => boolean;
+  resumeTask?: (id: string) => boolean;
   getScheduledTask: (id: string) => ScheduledTaskLike | undefined;
   concurrentManager: { activeCount: number; maxConcurrent: number };
   /** Cheap health signal reused from elsewhere (e.g. the self-improvement
@@ -110,10 +112,9 @@ export class AutonomyController {
   }
 
   // ── User interruption (spec section 9) ──────────────────────────────────
-  /** Call when a real user message arrives. Pure bookkeeping/logging — it
-   * does not kill an in-flight autonomous task, since that task already
-   * runs through the same concurrency-managed task scheduler as user work
-   * and will simply be joined by it rather than blocking it. */
+  /** Call when a real user message arrives. Requests a cooperative pause;
+   * the running task finishes its current model/tool boundary and requeues
+   * itself without aborting or cancelling the underlying execution. */
   markUserInteraction(): void {
     if (this.state.current === "USER_TASK") return;
     const inFlightStates: (typeof this.state.current)[] = [
@@ -123,6 +124,12 @@ export class AutonomyController {
       "IDLE_DECISION",
     ];
     if (inFlightStates.includes(this.state.current)) {
+      const objective = this.currentObjectiveId
+        ? this.store.get(this.currentObjectiveId)
+        : undefined;
+      if (objective?.activeTaskId) {
+        this.deps.requestPause?.(objective.activeTaskId);
+      }
       logAutonomyEvent("AUTONOMOUS_INTERRUPTED", {
         id: this.currentObjectiveId,
         state: this.state.current,
@@ -187,12 +194,6 @@ export class AutonomyController {
       case "resume":
         this.resume();
         return "Autonomous work resumed.";
-      case "status": {
-        const status = this.getStatus();
-        return status.currentObjective
-          ? `Current objective: ${status.currentObjective.title} (${status.state}).`
-          : `Idle — no active autonomous objective (${status.state}).`;
-      }
       default:
         return null;
     }
@@ -258,6 +259,12 @@ export class AutonomyController {
 
     if (this.state.current === "USER_TASK") {
       if (idleMins < profile.idleThresholdMins) return; // user still engaged
+      const objective = this.currentObjectiveId
+        ? this.store.get(this.currentObjectiveId)
+        : undefined;
+      if (objective?.activeTaskId) {
+        this.deps.resumeTask?.(objective.activeTaskId);
+      }
       this.state.transition("ACTIVE");
       if (this.currentObjectiveId) {
         logAutonomyEvent("AUTONOMOUS_RESUMED", { id: this.currentObjectiveId });

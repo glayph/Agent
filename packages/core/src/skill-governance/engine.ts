@@ -361,7 +361,7 @@ const DEFAULT_GOVERNANCE_RULES: GovernanceRule[] = [
     action: "warn",
     enabled: true,
     description:
-      "Shell execution requires review and must remain workspace-scoped.",
+      "Shell execution requires review; its effects must stay proportionate to the task.",
     priority: 90,
   },
   {

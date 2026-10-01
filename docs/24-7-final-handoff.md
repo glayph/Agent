@@ -64,7 +64,7 @@ This prevents a model crash, corrupted configuration, or repeated permission fai
 
 ## Safe autonomy boundary
 
-The agent may autonomously perform low-risk, workspace-scoped work such as reading files, creating reports, running tests, and verifying generated artifacts. It must not silently perform destructive deletion, credential changes, purchases, public posts, account-security changes, legal/medical/financial submissions, or external side effects. Those operations require an explicit approval gate.
+The agent may autonomously perform low-risk work such as reading files, creating reports, running tests, and verifying generated artifacts. It must not silently perform destructive deletion, credential changes, purchases, public posts, account-security changes, legal/medical/financial submissions, or external side effects. Those operations require an explicit approval gate.
 
 Every multi-step file workflow must verify path existence, file type, expected content, and the final invariant before reporting success. Model text alone is not accepted as proof of completion.
 

@@ -1,3 +1,5 @@
+import { memoryToolDefinitions } from "../../memory-files/tools.js";
+
 export interface ToolDefinition {
   type: "function";
   risk?: {
@@ -24,7 +26,7 @@ export class ToolRegistrySchemas {
         function: {
           name: "shell_execute",
           description:
-            "Execute a shell command subject to config/tools.yaml permissions. OPEN or TRUSTED_FULL_ACCESS permits arbitrary local commands; workspace_only controls whether working_dir may leave the workspace.",
+            "Execute a shell command subject to config/tools.yaml permissions. OPEN or TRUSTED_FULL_ACCESS permits arbitrary local commands; working_dir may be any directory unless system_access is set to workspace_only or isolated in agent.yaml.",
           parameters: {
             type: "object",
             properties: {
@@ -189,6 +191,39 @@ export class ToolRegistrySchemas {
               },
             },
             required: ["path"],
+          },
+        },
+      },
+    ];
+  }
+
+  static workspaceSchemas(): ToolDefinition[] {
+    return [
+      {
+        type: "function",
+        function: {
+          name: "workspace_inventory",
+          description:
+            "Count files and folders in the workspace or a workspace-relative subfolder. Read-only; excludes node_modules and .git by default and returns the exact scope used.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description:
+                  "Optional workspace-relative folder. Defaults to the workspace root.",
+              },
+              include_hidden: {
+                type: "boolean",
+                description: "Include dotfiles and dotfolders. Default false.",
+              },
+              include_dependencies: {
+                type: "boolean",
+                description:
+                  "Include node_modules and other dependency folders. Default false.",
+              },
+            },
+            required: [],
           },
         },
       },
@@ -1295,6 +1330,11 @@ export class ToolRegistrySchemas {
         },
       },
     ];
+  }
+
+  /** Step 02: OpenClaw-style file memory tools (search/get/note). */
+  static memorySchemas(): ToolDefinition[] {
+    return memoryToolDefinitions();
   }
 
   static adminSchemas(): ToolDefinition[] {

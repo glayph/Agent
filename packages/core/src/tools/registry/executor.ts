@@ -7,6 +7,10 @@ import {
   handleFileRead,
   handleFileWrite,
   handleFileDelete,
+  handleMemorySearch,
+  handleMemoryGet,
+  handleMemoryNote,
+  handleWorkspaceInventory,
   handleBrowserNavigate,
   handleBrowserPlayMedia,
   handleBrowserClick,
@@ -57,6 +61,7 @@ import {
   handleRuntimeEnsure,
   handleRuntimeEnsureStatus,
 } from "./handlers.js";
+import { loadSystemAccessMode } from "../executor/system-access.js";
 import { ShellExecutor } from "../executor/shell.js";
 import { FileSecurityExecutor } from "../executor/file-security.js";
 import { ProfileManager } from "../profile-manager.js";
@@ -194,6 +199,8 @@ export class ToolRegistry {
     );
     this.executor.setWorkspaceRoot(this.workspaceDir);
     this.fileOps.setWorkspaceRoot(this.workspaceDir);
+    this.applySystemAccessMode();
+    this.fileOps.setIdentityDir(runtimePaths.identityDir);
 
     this.browser = new BrowserTool(
       false,
@@ -251,7 +258,20 @@ export class ToolRegistry {
     this.workspaceDir = path.resolve(trimmed);
     this.executor.setWorkspaceRoot(this.workspaceDir);
     this.fileOps.setWorkspaceRoot(this.workspaceDir);
+    this.applySystemAccessMode();
     this.browser.setWorkspaceDir(this.workspaceDir);
+  }
+
+  /**
+   * Miki is a systemwide agent. `workspaceDir` is only the default base for
+   * relative paths / shell cwd; it confines file and shell tools only when
+   * agent.security.system_access is explicitly workspace_only or isolated.
+   * Re-read on every call so config reloads take effect.
+   */
+  applySystemAccessMode(): void {
+    const mode = loadSystemAccessMode(this.runtimePaths.configDir);
+    this.executor.setSystemAccessMode(mode);
+    this.fileOps.setSystemAccessMode(mode);
   }
 
   setPlatformConnectionStore(store: SqlitePlatformConnectionStore): void {
@@ -379,6 +399,13 @@ export class ToolRegistry {
     this.registerHandler("file_read", handleFileRead.bind(this));
     this.registerHandler("file_write", handleFileWrite.bind(this));
     this.registerHandler("file_delete", handleFileDelete.bind(this));
+    this.registerHandler("memory_search", handleMemorySearch.bind(this));
+    this.registerHandler("memory_get", handleMemoryGet.bind(this));
+    this.registerHandler("memory_note", handleMemoryNote.bind(this));
+    this.registerHandler(
+      "workspace_inventory",
+      handleWorkspaceInventory.bind(this),
+    );
     this.registerHandler("browser_navigate", handleBrowserNavigate.bind(this));
     this.registerHandler(
       "browser_play_media",
@@ -504,6 +531,7 @@ export class ToolRegistry {
     const builtins = [
       ...ToolRegistrySchemas.shellSchema(),
       ...ToolRegistrySchemas.fileSchemas(),
+      ...ToolRegistrySchemas.workspaceSchemas(),
       ...ToolRegistrySchemas.browserSchemas(),
       ...ToolRegistrySchemas.platformConnectionSchemas(),
       ...ToolRegistrySchemas.computerSchemas(),
@@ -515,6 +543,7 @@ export class ToolRegistry {
       ...ToolRegistrySchemas.runtimeSchema(),
       ...ToolRegistrySchemas.skillSchemas(),
       ...ToolRegistrySchemas.adminSchemas(),
+      ...ToolRegistrySchemas.memorySchemas(),
     ];
     const skillTools = Array.from(this.skillToolDefs.values());
     const pluginTools = Array.from(this.pluginToolDefs.values());

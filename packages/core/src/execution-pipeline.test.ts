@@ -24,6 +24,15 @@ import {
     expect(decision.iterative).toBe(false);
   });
 
+  it("routes skill installation requests to the tool-enabled task path", () => {
+    const decision = classifyExecutionPipeline(
+      "Can you install a demo skill for me?",
+    );
+
+    expect(decision.mode).toBe("task");
+    expect(decision.useTools).toBe(true);
+  });
+
   it("routes a tagged autonomous objective to the iterative path", () => {
     const decision = classifyExecutionPipeline(
       "[[miki-autonomy:objective-1]]\nInspect the failing tests and keep working until done",

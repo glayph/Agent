@@ -84,6 +84,7 @@ export interface AgentConfig {
     name: string;
     project: string;
     persona: string;
+    identity?: { path?: string };
     language: string;
     timezone: string;
     memory: {

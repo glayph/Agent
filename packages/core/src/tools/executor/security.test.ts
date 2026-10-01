@@ -242,7 +242,7 @@ describe("runtime.exec.allow_remote enforcement (#94)", () => {
   });
 });
 
-describe("active workspace boundary", () => {
+describe("opt-in workspace boundary (system_access: workspace_only)", () => {
   it("resolves relative file operations inside the active workspace and rejects outside paths", () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "Miki-workspace-"),
@@ -260,6 +260,7 @@ describe("active workspace boundary", () => {
     );
     const executor = new FileSecurityExecutor(configPath);
     executor.setWorkspaceRoot(workspaceDir);
+    executor.setSystemAccessMode("workspace_only");
 
     expect(executor.writeFile("generated/result.txt", "ok")).toContain(
       "Success:",
@@ -289,6 +290,7 @@ describe("active workspace boundary", () => {
     );
     const executor = new ShellExecutor(configPath);
     executor.setWorkspaceRoot(workspaceDir);
+    executor.setSystemAccessMode("workspace_only");
 
     const defaultCwd = await executor.runShell(
       process.platform === "win32" ? "cd" : "pwd",
@@ -310,7 +312,7 @@ describe("active workspace boundary", () => {
   });
 });
 
-describe("symlink-aware workspace boundary", () => {
+describe("symlink-aware opt-in workspace boundary", () => {
   it("rejects file operations through a workspace symlink to an outside directory", () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "Miki-symlink-workspace-"),
@@ -330,6 +332,7 @@ describe("symlink-aware workspace boundary", () => {
     }
     const executor = new FileSecurityExecutor(configPath);
     executor.setWorkspaceRoot(workspaceDir);
+    executor.setSystemAccessMode("workspace_only");
     expect(executor.writeFile("linked/escaped.txt", "outside")).toContain(
       "inside the active workspace",
     );
@@ -355,6 +358,7 @@ describe("symlink-aware workspace boundary", () => {
     }
     const executor = new ShellExecutor(configPath);
     executor.setWorkspaceRoot(workspaceDir);
+    executor.setSystemAccessMode("workspace_only");
     const result = await executor.runShell(
       process.platform === "win32" ? "cd" : "pwd",
       linkPath,
@@ -362,5 +366,64 @@ describe("symlink-aware workspace boundary", () => {
     );
     expect(result.exitCode).toBe(-1);
     expect(result.error).toContain("inside the active workspace");
+  });
+});
+
+describe("systemwide default (system_access: full)", () => {
+  it("file tools reach absolute paths outside the install root by default", () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-sw-ws-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-sw-out-"));
+    const configPath = writeConfig(
+      workspaceDir,
+      [
+        "permissions:",
+        "  file_read:",
+        "    level: TRUSTED_FULL_ACCESS",
+        "  file_write:",
+        "    level: TRUSTED_FULL_ACCESS",
+      ].join("\n"),
+    );
+    const executor = new FileSecurityExecutor(configPath);
+    executor.setWorkspaceRoot(workspaceDir);
+    const target = path.join(outsideDir, "systemwide.txt");
+
+    expect(executor.writeFile(target, "ok")).toContain("Success:");
+    expect(executor.readFile(target)).toBe("ok");
+    // relative paths still resolve against the install root
+    expect(executor.writeFile("rel.txt", "r")).toContain("Success:");
+    expect(fs.existsSync(path.join(workspaceDir, "rel.txt"))).toBe(true);
+  });
+
+  it("shell accepts a cwd outside the install root by default", async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-sw-sh-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-sw-sho-"));
+    const configPath = writeConfig(
+      workspaceDir,
+      ["permissions:", "  shell_execute:", "    level: TRUSTED_FULL_ACCESS"].join(
+        "\n",
+      ),
+    );
+    const executor = new ShellExecutor(configPath);
+    executor.setWorkspaceRoot(workspaceDir);
+    const result = await executor.runShell(
+      process.platform === "win32" ? "cd" : "pwd",
+      outsideDir,
+      5,
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("switching back to full lifts an earlier workspace_only confinement", () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-sw-tg-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-sw-tgo-"));
+    const executor = new FileSecurityExecutor(
+      path.join(workspaceDir, "tools.yaml"),
+    );
+    executor.setWorkspaceRoot(workspaceDir);
+    const target = path.join(outsideDir, "x.txt");
+    executor.setSystemAccessMode("workspace_only");
+    expect(executor.writeFile(target, "no")).toContain("inside the active workspace");
+    executor.setSystemAccessMode("full");
+    expect(executor.writeFile(target, "yes")).toContain("Success:");
   });
 });

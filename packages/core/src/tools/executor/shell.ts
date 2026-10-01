@@ -6,6 +6,7 @@ import * as yaml from "js-yaml";
 import { getErrorMessage } from "../../errors.js";
 import { getMemory } from "../../memory/runtime.js";
 import { getCallOrigin } from "./call-context.js";
+import { modeEnforcesBoundary, type SystemAccessMode } from "./system-access.js";
 
 const execAsync = util.promisify(exec);
 
@@ -70,6 +71,9 @@ export class ShellExecutor {
   public execConfig: RuntimeExecConfig;
   private workspaceRoot: string | null = null;
   private workspaceRealRoot: string | null = null;
+  // Systemwide by default: workspaceRoot is only the default cwd. It is a
+  // hard cwd boundary solely when system_access = workspace_only | isolated.
+  private enforceBoundary = false;
 
   constructor(configPath: string = "config/tools.yaml") {
     this.configPath = path.resolve(configPath);
@@ -127,6 +131,10 @@ export class ShellExecutor {
     }
   }
 
+  public setSystemAccessMode(mode: SystemAccessMode): void {
+    this.enforceBoundary = modeEnforcesBoundary(mode);
+  }
+
   public setWorkspaceRoot(root: string): void {
     const trimmed = root.trim();
     this.workspaceRoot = trimmed ? path.resolve(trimmed) : null;
@@ -144,7 +152,7 @@ export class ShellExecutor {
   }
 
   private isWithinWorkspace(candidate: string): boolean {
-    if (!this.workspaceRoot) return true;
+    if (!this.enforceBoundary || !this.workspaceRoot) return true;
     const realCandidate = this.realpathIfAvailable(candidate);
     const root = this.workspaceRealRoot || this.workspaceRoot;
     const relative = path.relative(root, realCandidate);

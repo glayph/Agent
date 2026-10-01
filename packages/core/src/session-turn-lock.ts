@@ -28,6 +28,7 @@
  */
 
 type Release = () => void;
+export type TurnLane = "user" | "autonomous";
 
 interface QueueEntry {
   resolve: (release: Release) => void;
@@ -42,16 +43,17 @@ class SessionTurnLock {
    * function that MUST be called (typically in a `finally`) once the turn
    * is done, so the next queued caller (if any) can proceed.
    */
-  acquire(sessionId: string): Promise<Release> {
-    if (!this._locked.has(sessionId)) {
-      this._locked.add(sessionId);
-      return Promise.resolve(() => this._release(sessionId));
+  acquire(sessionId: string, lane: TurnLane = "user"): Promise<Release> {
+    const key = `${sessionId}:${lane}`;
+    if (!this._locked.has(key)) {
+      this._locked.add(key);
+      return Promise.resolve(() => this._release(key));
     }
 
     return new Promise<Release>((resolve) => {
-      const queue = this._queues.get(sessionId) ?? [];
+      const queue = this._queues.get(key) ?? [];
       queue.push({ resolve });
-      this._queues.set(sessionId, queue);
+      this._queues.set(key, queue);
     });
   }
 
@@ -59,8 +61,12 @@ class SessionTurnLock {
    * Convenience wrapper: acquire the lock for `sessionId`, run `fn`, and
    * release afterwards even if `fn` throws.
    */
-  async withLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    const release = await this.acquire(sessionId);
+  async withLock<T>(
+    sessionId: string,
+    fn: () => Promise<T>,
+    lane: TurnLane = "user",
+  ): Promise<T> {
+    const release = await this.acquire(sessionId, lane);
     try {
       return await fn();
     } finally {
@@ -82,13 +88,13 @@ class SessionTurnLock {
   }
 
   /** Test/diagnostic helper: is any turn currently holding this session? */
-  isLocked(sessionId: string): boolean {
-    return this._locked.has(sessionId);
+  isLocked(sessionId: string, lane: TurnLane = "user"): boolean {
+    return this._locked.has(`${sessionId}:${lane}`);
   }
 
   /** Test/diagnostic helper: how many turns are waiting behind the current one? */
-  waitingCount(sessionId: string): number {
-    return this._queues.get(sessionId)?.length ?? 0;
+  waitingCount(sessionId: string, lane: TurnLane = "user"): number {
+    return this._queues.get(`${sessionId}:${lane}`)?.length ?? 0;
   }
 }
 

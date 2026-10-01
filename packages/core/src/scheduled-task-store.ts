@@ -12,6 +12,7 @@ interface ScheduledTaskRow {
   timeout_ms: number | null;
   quiet_hours: string | null;
   concurrency_limit: number | null;
+  lane: ScheduledTask["lane"] | null;
   execution_token: string | null;
   title: string | null;
   result_summary: string | null;
@@ -63,6 +64,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       ["timeout_ms", "INTEGER"],
       ["quiet_hours", "TEXT"],
       ["concurrency_limit", "INTEGER"],
+      ["lane", "TEXT"],
       ["execution_token", "TEXT"],
       ["title", "TEXT"],
       ["result_summary", "TEXT"],
@@ -114,11 +116,11 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       .prepare(
         `INSERT OR REPLACE INTO agent_scheduled_tasks
          (id, session_id, message, cron_expression, interval_ms, timezone,
-          missed_run_policy, timeout_ms, quiet_hours, concurrency_limit,
+          missed_run_policy, timeout_ms, quiet_hours, concurrency_limit, lane,
           execution_token, run_at, status, attempts, max_attempts, last_error,
           title, result_summary, artifact_refs, notification_sent_at,
           created_at, updated_at, last_run_at, completed_at, catch_up_remaining)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.id,
@@ -131,6 +133,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         task.timeoutMs ?? null,
         task.quietHours ? JSON.stringify(task.quietHours) : null,
         task.concurrencyLimit ?? null,
+        task.lane ?? "user",
         task.executionToken ?? null,
         task.runAt ?? null,
         task.status,
@@ -161,6 +164,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       timeoutMs: row.timeout_ms ?? undefined,
       quietHours: row.quiet_hours ? JSON.parse(row.quiet_hours) : undefined,
       concurrencyLimit: row.concurrency_limit ?? undefined,
+      lane: row.lane ?? "user",
       executionToken: row.execution_token ?? undefined,
       title: row.title ?? undefined,
       resultSummary: row.result_summary ?? undefined,

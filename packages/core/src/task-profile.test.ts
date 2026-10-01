@@ -53,6 +53,14 @@ describe("agent task profile", () => {
     expect(profile.verification).toContain("required");
   });
 
+  it("does not call an existing website screenshot a page artifact workflow", () => {
+    const profile = classifyAgentTask(
+      "Open the existing website and give me a screenshot",
+    );
+
+    expect(profile.signals).not.toContain("artifact_workflow");
+  });
+
   it("classifies repository download plus screenshot as an artifact workflow", () => {
     const profile = classifyAgentTask(
       "Download the source code from glayph/tajaos.git and give me a screenshot of this repo.",

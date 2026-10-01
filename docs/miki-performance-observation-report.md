@@ -101,7 +101,7 @@ Miki-তে task profile, execution pipeline, adaptive capability selection, age
 - `task-profile.ts` implementation intent-কে complexity score-এ যোগ করে;
 - `execution-pipeline.ts` marker দেখলেই task mode নির্বাচন করে;
 - `token-budget-manager.ts` আলাদা keyword-based complexity estimator ব্যবহার করে;
-- actual model selection `agent.ts`-এর `model_routing` config দিয়ে হয়;
+- actual model selection `agent.ts`-এ `ModelRouter`-এর `model_router.lanes` config দিয়ে হয় (ধাপ ০৩; আগে `model_routing`);
 - adaptive selector আবার tool candidates prune করে।
 
 ফলে “simple action” নামে একটি একক operational class নেই। একটি request profile-এ simple, pipeline-এ task, budget layer-এ standard এবং tool selector-এ ambiguous হতে পারে। এই semantic mismatch tool ভুল নির্বাচন এবং অপ্রয়োজনীয় full loop-এর ঝুঁকি বাড়ায়।

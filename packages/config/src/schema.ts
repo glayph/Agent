@@ -222,6 +222,45 @@ const AgentResourceSchema = z
   })
   .passthrough();
 
+// Step 02 — OpenClaw-style file memory (MEMORY.md, memory/*.md,
+// compaction). Every field is optional and independently bounded so a
+// partial or garbled config block still resolves to safe defaults.
+const AgentMemoryFilesCompactionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    trigger_percent: z.number().min(30).max(95).optional(),
+    min_messages: z.number().int().min(3).max(200).optional(),
+    keep_recent: z.number().int().min(2).max(100).optional(),
+    max_summary_chars: z.number().int().min(500).max(20000).optional(),
+    flush_enabled: z.boolean().optional(),
+    flush_margin_percent: z.number().int().min(1).max(40).optional(),
+  })
+  .passthrough();
+
+const AgentMemoryFilesWriterSchema = z
+  .object({
+    max_slow_queue: z.number().int().min(1).max(1000).optional(),
+  })
+  .passthrough();
+
+const AgentMemoryFilesSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    dir: z.string().optional(),
+    bootstrap_max_chars: z.number().int().min(500).max(50000).optional(),
+    memory_md_max_chars: z.number().int().min(200).max(40000).optional(),
+    recent_days: z.number().int().min(1).max(30).optional(),
+    index_max_entries: z.number().int().min(0).max(30).optional(),
+    summarizer: z.enum(["auto", "llm", "heuristic"]).optional(),
+    summary_timeout_ms: z.number().int().min(1000).max(300000).optional(),
+    summary_turns: z.number().int().min(2).max(200).optional(),
+    session_idle_minutes: z.number().int().min(0).max(10080).optional(),
+    min_turns_for_summary: z.number().int().min(1).max(50).optional(),
+    writer: AgentMemoryFilesWriterSchema.optional(),
+    compaction: AgentMemoryFilesCompactionSchema.optional(),
+  })
+  .passthrough();
+
 const AgentMemorySchema = z
   .object({
     short_term_limit: z.number().int().min(1).max(200).optional(),
@@ -248,14 +287,42 @@ const AgentMemorySchema = z
     prune_low_value_facts: z.boolean().optional(),
     fact_prune_threshold: z.number().min(0).max(1).optional(),
     fact_prune_min_age_days: z.number().int().min(1).max(3650).optional(),
+    files: AgentMemoryFilesSchema.optional(),
   })
   .passthrough();
+
+/**
+ * Step 03 model router (`agent.model_router`): lane profiles, per-role
+ * bindings, credential-rotation profiles and the failover switch.
+ *
+ * Validation here is deliberately shallow. The router's own resolver
+ * (`resolveModelRouterConfig` in packages/core/src/llm/model-router/) parses
+ * the nested values, drops anything malformed with a logged warning and falls
+ * back to safe defaults — so a typo in a lane must never make the whole agent
+ * config be rejected. Shape (all optional):
+ *
+ *   enabled: boolean            # false → single attempt, no fallback chain
+ *   max_attempts: 1..20         # cap on credential rotations + model hops per call
+ *   lanes:   { <lane>: "provider/model" | { primary, fallbacks: [..] } }
+ *   roles:   { <specialistId>: "<lane>" | { primary, fallbacks: [..] } }
+ *   credential_profiles: { <providerId>: [SECRET_NAME, ..] }   # names only
+ */
+const AgentModelRouterSchema = z.record(z.unknown());
 
 const AgentBlockSchema = z
   .object({
     name: z.string().min(1).optional(),
     project: z.string().optional(),
     persona: z.string().optional(),
+    // Step 01 workspace-identity-files: overrides where the SOUL/AGENTS/
+    // IDENTITY/USER/TOOLS files live (default: RuntimePaths.identityDir,
+    // i.e. <sourceDir>/identity in dev mode). See packages/core/src/identity/.
+    identity: z
+      .object({
+        path: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     language: z.string().optional(),
     timezone: z.string().optional(),
     max_tokens_per_cycle: z.number().int().min(100).max(100000).optional(),
@@ -269,15 +336,17 @@ const AgentBlockSchema = z
       .optional(),
     resource: AgentResourceSchema.optional(),
     memory: AgentMemorySchema.optional(),
+    model_router: AgentModelRouterSchema.optional().catch(undefined),
     security: z
       .object({
-        // Safe-by-default: omit security.* only when the runtime should
-        // remain workspace-scoped and sandboxed. Unrestricted access must be
-        // an explicit operator choice, never an implicit default.
+        // Miki is a systemwide agent: system_access defaults to "full".
+        // "workspace_only" / "isolated" are optional operator-chosen
+        // restrictions, never the default. Destructive/external actions are
+        // gated separately by approval (tools.require_confirm_*), not by scope.
         bypass_restrictions: z.boolean().default(false),
         system_access: z
           .enum(["full", "workspace_only", "isolated"])
-          .default("workspace_only"),
+          .default("full"),
         sandbox_mode: z.boolean().default(true),
         risk_acceptance: z.boolean().optional(),
         privileged_account_required: z.boolean().optional(),

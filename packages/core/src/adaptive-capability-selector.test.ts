@@ -107,6 +107,41 @@ describe("adaptive capability selector", () => {
     );
   });
 
+  it("selects workspace inventory for Bengali file/folder count questions", () => {
+    const message = "আমার system এর মধ্যে কয়টি file বা folder রয়েছে?";
+    const profile = classifyAgentTask(message);
+    const decision = routeAgentTask(message, {}, profile);
+    const selection = selectAdaptiveCapabilities(
+      message,
+      [tool("workspace_inventory", "Count workspace files and folders")],
+      decision,
+      profile,
+    );
+    expect(selection.selectedToolNames).toContain("workspace_inventory");
+  });
+
+  it("retains skill management tools for install/create requests", () => {
+    const message = "Install a demo skill and report the result";
+    const profile = classifyAgentTask(message);
+    const decision = routeAgentTask(message, {}, profile);
+    const selection = selectAdaptiveCapabilities(
+      message,
+      [
+        tool("skill_search", "Search the online skills registry"),
+        tool("skill_create", "Create and register an agent-authored skill"),
+        tool("skill_install", "Install a third-party skill"),
+        tool("file_read", "Read a local file"),
+      ],
+      decision,
+      profile,
+    );
+
+    expect(selection.selectedToolNames).toEqual(
+      expect.arrayContaining(["skill_search", "skill_create", "skill_install"]),
+    );
+    expect(selection.rationale.join(" ")).toContain("required_tools");
+  });
+
   it("retains the explicit media playback tool for verified video requests", () => {
     const message =
       "Use browser_play_media to play this public video with muted playback and report verified=true only after readyState >= 2 and paused=false";

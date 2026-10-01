@@ -38,6 +38,41 @@ describe("ToolRegistry", () => {
     }
   });
 
+  it("counts workspace files and folders without including dependencies by default", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "tool-registry-inventory-"),
+    );
+    try {
+      fs.mkdirSync(path.join(workspaceDir, "src"));
+      fs.mkdirSync(path.join(workspaceDir, "node_modules"));
+      fs.writeFileSync(path.join(workspaceDir, "README.md"), "readme");
+      fs.writeFileSync(path.join(workspaceDir, "src", "main.ts"), "main");
+      fs.writeFileSync(
+        path.join(workspaceDir, "node_modules", "ignored.js"),
+        "ignored",
+      );
+      const result = await createRegistry(workspaceDir).executeToolStructured(
+        "workspace_inventory",
+        {},
+      );
+      expect(result.success).toBe(true);
+      expect(JSON.parse(result.output)).toMatchObject({
+        root: workspaceDir,
+        files: expect.any(Number),
+        directories: expect.any(Number),
+        include_dependencies: false,
+      });
+      const inventory = JSON.parse(result.output) as {
+        files: number;
+        directories: number;
+      };
+      expect(inventory.files).toBeGreaterThanOrEqual(2);
+      expect(inventory.directories).toBeGreaterThanOrEqual(1);
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("reports file-operation errors as failed structured results", async () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "tool-registry-file-error-"),

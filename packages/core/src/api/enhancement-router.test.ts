@@ -57,6 +57,7 @@ interface TestJsonResponse {
 
 async function withServer<T>(
   handler: (baseUrl: string) => Promise<T>,
+  options: { memoryStatus?: () => { available: boolean; error?: string } } = {},
 ): Promise<T> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-enh-"));
   fs.mkdirSync(path.join(tempDir, "config"), { recursive: true });
@@ -69,7 +70,10 @@ async function withServer<T>(
   app.use(express.json());
   app.use(
     "/enhancements",
-    createEnhancementRouter({ runtimePaths: normalizeRuntimePaths(tempDir) }),
+    createEnhancementRouter({
+      runtimePaths: normalizeRuntimePaths(tempDir),
+      memoryStatus: options.memoryStatus,
+    }),
   );
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -468,6 +472,11 @@ describe("enhancement router", () => {
       expect(health.response.status).toBe(200);
       expect(health.body.status).toEqual(expect.any(String));
       expect(Array.isArray(health.body.components)).toBe(true);
+      expect(health.body.components).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "Memory" }),
+        ]),
+      );
 
       const doctor = await jsonFetch(baseUrl, "/enhancements/doctor/run", {
         method: "POST",
@@ -538,6 +547,23 @@ describe("enhancement router", () => {
       expect(rollbackValidation.response.status).toBe(400);
     });
   }, 20_000);
+
+  it("surfaces unavailable memory as a degraded health component", async () => {
+    await withServer(
+      async (baseUrl) => {
+        const health = await jsonFetch(baseUrl, "/enhancements/health/full");
+        const memory = health.body.components?.find(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            (item as { name?: string }).name === "Memory",
+        ) as { status?: string; message?: string } | undefined;
+        expect(memory?.status).toBe("degraded");
+        expect(memory?.message).toContain("SQLite unavailable");
+      },
+      { memoryStatus: () => ({ available: false, error: "SQLite unavailable" }) },
+    );
+  });
 });
 
 describe("safe mode clear (#85)", () => {

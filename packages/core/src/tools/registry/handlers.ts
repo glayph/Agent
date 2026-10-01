@@ -1,4 +1,6 @@
 import { settings } from "@miki/config";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   createProjectWorkflow,
   type ProjectTargetType,
@@ -14,6 +16,10 @@ import type { RuntimePaths } from "../../paths.js";
 import type { ApprovalInbox } from "../../security/approval-inbox.js";
 import type { LauncherAdminController } from "../../api/launcher-compat.js";
 import { loadWebSearchConfig, searchWeb } from "../../web-search-service.js";
+import {
+  runMemoryTool,
+  MEMORY_TOOL_NAMES,
+} from "../../memory-files/tools.js";
 import {
   destructiveApprovalGate,
   consumeDestructiveApproval,
@@ -106,6 +112,41 @@ export async function handleFileRead(
   return requireFileOperationSuccess("file_read", this.fileOps.readFile(path));
 }
 
+// Step 02 — file-memory tools. this.orchestrator is present whenever a real
+// agent session is running the tool loop (the only path that calls these).
+export async function handleMemorySearch(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return runMemoryTool(
+    this.orchestrator?.fileMemory,
+    MEMORY_TOOL_NAMES[0],
+    args,
+  );
+}
+
+export async function handleMemoryGet(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return runMemoryTool(
+    this.orchestrator?.fileMemory,
+    MEMORY_TOOL_NAMES[1],
+    args,
+  );
+}
+
+export async function handleMemoryNote(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return runMemoryTool(
+    this.orchestrator?.fileMemory,
+    MEMORY_TOOL_NAMES[2],
+    args,
+  );
+}
+
 export async function handleFileWrite(
   this: ToolHandlerContext,
   args: Record<string, unknown>,
@@ -170,6 +211,55 @@ export async function handleFileDelete(
     consumeDestructiveApproval(this.approvalInbox, approvalHandle);
   }
   return requireFileOperationSuccess("file_delete", output);
+}
+
+export function handleWorkspaceInventory(
+  this: ToolHandlerContext,
+  args: Record<string, unknown>,
+): string {
+  const requested = typeof args["path"] === "string" ? args["path"].trim() : "";
+  const includeHidden = args["include_hidden"] === true;
+  const includeDependencies = args["include_dependencies"] === true;
+  if (path.isAbsolute(requested) || requested.split(/[\\/]/).includes("..")) {
+    throw new Error("workspace_inventory only accepts workspace-relative paths");
+  }
+  const root = path.resolve(this.workspaceDir, requested || ".");
+  const workspaceRoot = path.resolve(this.workspaceDir);
+  if (root !== workspaceRoot && !root.startsWith(`${workspaceRoot}${path.sep}`)) {
+    throw new Error("workspace_inventory path escapes the workspace");
+  }
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    throw new Error(`workspace directory does not exist: ${requested || "."}`);
+  }
+
+  let files = 0;
+  let directories = 0;
+  const excluded = new Set([".git"]);
+  if (!includeDependencies) excluded.add("node_modules");
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!includeHidden && entry.name.startsWith(".")) continue;
+      if (entry.isDirectory()) {
+        if (excluded.has(entry.name)) continue;
+        directories += 1;
+        visit(path.join(directory, entry.name));
+      } else if (entry.isFile()) {
+        files += 1;
+      }
+    }
+  };
+  visit(root);
+  return JSON.stringify(
+    {
+      root,
+      files,
+      directories,
+      include_hidden: includeHidden,
+      include_dependencies: includeDependencies,
+    },
+    null,
+    2,
+  );
 }
 
 // Browser Handlers

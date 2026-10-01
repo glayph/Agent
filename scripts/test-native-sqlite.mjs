@@ -2,7 +2,28 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+
+const require = createRequire(import.meta.url);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const workspaceRoots = [
+  root,
+  path.join(root, "packages", "core"),
+  path.join(root, "packages", "memory"),
+];
+const resolvedPackageFiles = workspaceRoots.map((workspaceRoot) =>
+  require.resolve("better-sqlite3/package.json", { paths: [workspaceRoot] }),
+);
+const resolvedVersions = resolvedPackageFiles.map(
+  (packageFile) => JSON.parse(fs.readFileSync(packageFile, "utf8")).version,
+);
+if (new Set(resolvedVersions).size !== 1) {
+  throw new Error(
+    `better-sqlite3 version mismatch across workspaces: ${resolvedVersions.join(", ")}`,
+  );
+}
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "miki-sqlite-native-"));
 const databasePath = path.join(directory, "native-test.sqlite");
@@ -18,7 +39,8 @@ try {
   }
   db.close();
   console.log(
-    `PASS better-sqlite3 native binding (${process.platform}-${process.arch})`,
+    `PASS better-sqlite3 native binding v${resolvedVersions[0]} (${process.platform}-${process.arch}); ` +
+      `workspace resolutions: ${resolvedVersions.join(", ")}`,
   );
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });

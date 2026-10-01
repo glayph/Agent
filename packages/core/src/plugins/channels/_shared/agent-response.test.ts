@@ -20,7 +20,10 @@ import {
   splitOutboundMessage,
   splitOutboundMessageForOrchestrator,
 } from "./agent-response.js";
-import { sessionTurnLock } from "../../../session-turn-lock.js";
+import {
+  SessionTurnLock,
+  sessionTurnLock,
+} from "../../../session-turn-lock.js";
 
 /**
  * A minimal orchestrator stand-in whose `runAgentLoop` records concurrency
@@ -53,6 +56,22 @@ function makeTrackingOrchestrator(
 }
 
 describe("collectAgentResponse session concurrency", () => {
+  it("allows the user lane to proceed while the autonomous lane is busy", async () => {
+    const lock = new SessionTurnLock();
+    const sessionId = `test-lanes-${Date.now()}`;
+    const autonomousRelease = await lock.acquire(sessionId, "autonomous");
+    let userRan = false;
+    await lock.withLock(
+      sessionId,
+      async () => {
+        userRan = true;
+      },
+      "user",
+    );
+    expect(userRan).toBe(true);
+    autonomousRelease();
+  });
+
   it("serializes two turns for the same sessionId instead of interleaving", async () => {
     const events: string[] = [];
     const concurrency = { current: 0, max: 0 };

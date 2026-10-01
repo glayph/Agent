@@ -43,7 +43,20 @@ const localModel = {
   },
 };
 state.models = [...cloudModels, localModel];
+const localRef = `llama.cpp/${localModel.model}`;
+const isLocalRef = (ref) => /^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i.test(String(ref || ""));
+if (state.settings?.model_router?.lanes) {
+  // Step 03 lanes: repoint every local model reference at the installed one.
+  for (const profile of Object.values(state.settings.model_router.lanes)) {
+    if (!profile || typeof profile !== "object") continue;
+    if (isLocalRef(profile.primary)) profile.primary = localRef;
+    if (Array.isArray(profile.fallbacks)) {
+      profile.fallbacks = profile.fallbacks.map((ref) => (isLocalRef(ref) ? localRef : ref));
+    }
+  }
+}
 if (state.settings?.model_routing) {
+  // Legacy (pre-router) block — still honoured by the agent when model_router is absent.
   state.settings.model_routing.local_model = localModel.model_name;
   state.settings.model_routing.simple_model = localModel.model_name;
 }

@@ -4,6 +4,11 @@ import * as yaml from "js-yaml";
 import { getErrorMessage } from "../../errors.js";
 import { getMemory } from "../../memory/runtime.js";
 import { getCallOrigin } from "./call-context.js";
+import {
+  isSoulProtectedPath,
+  SOUL_PROTECTED_MESSAGE,
+} from "../../identity/guard.js";
+import { modeEnforcesBoundary, type SystemAccessMode } from "./system-access.js";
 
 // Log a file tool event to long-term memory — fully defensive, never throws.
 function logFileEvent(
@@ -45,10 +50,26 @@ export class FileSecurityExecutor {
   public systemRoots: string[];
   private workspaceRoot: string | null = null;
   private workspaceRealRoot: string | null = null;
+  private identityDir: string | null = null;
+  // Miki is systemwide: the workspace root is only a default base for
+  // relative paths. It becomes a hard boundary solely when an operator opts
+  // in via system_access = workspace_only | isolated.
+  private enforceBoundary = false;
 
   constructor(configPath: string = "config/tools.yaml") {
     this.configPath = path.resolve(configPath);
     this.systemRoots = this.detectSystemRoots();
+  }
+
+  /**
+   * Point this executor at the identity/ directory (SOUL.md/AGENTS.md/...,
+   * see packages/core/src/identity/) so writeFile/deleteFile can refuse to
+   * touch SOUL.md. Safe to call with an empty/undefined value — that just
+   * disables the check, matching setWorkspaceRoot's own tolerance of "".
+   */
+  public setIdentityDir(dir: string): void {
+    const trimmed = dir?.trim();
+    this.identityDir = trimmed ? path.resolve(trimmed) : null;
   }
 
   private detectSystemRoots(): string[] {
@@ -62,6 +83,10 @@ export class FileSecurityExecutor {
       roots.push("/");
     }
     return roots;
+  }
+
+  public setSystemAccessMode(mode: SystemAccessMode): void {
+    this.enforceBoundary = modeEnforcesBoundary(mode);
   }
 
   public setWorkspaceRoot(root: string): void {
@@ -97,7 +122,7 @@ export class FileSecurityExecutor {
     const resolved = path.isAbsolute(pathStr)
       ? path.resolve(pathStr)
       : path.resolve(base, pathStr);
-    if (this.workspaceRoot) {
+    if (this.enforceBoundary && this.workspaceRoot) {
       const boundaryTarget = this.nearestExistingRealPath(resolved);
       const root = this.workspaceRealRoot || this.workspaceRoot;
       const relative = path.relative(root, boundaryTarget);
@@ -200,8 +225,8 @@ export class FileSecurityExecutor {
    * workspace-boundary resolution as readFile/writeFile. Used by callers
    * (e.g. the destructive-action approval gate) to distinguish "create a new
    * file" from "overwrite an existing file" without duplicating path
-   * resolution logic. Returns false (not true) if the path would resolve
-   * outside the workspace, matching the fail-safe default elsewhere here.
+   * resolution logic. Returns false if the path cannot be resolved (or, only
+   * when a workspace boundary is opted into, falls outside it).
    */
   public fileExists(pathStr: string): boolean {
     try {
@@ -220,6 +245,10 @@ export class FileSecurityExecutor {
     }
     try {
       const p = this._resolvePath(pathStr);
+      if (isSoulProtectedPath(p, this.identityDir)) {
+        logFileEvent("file_write", pathStr, "denied", SOUL_PROTECTED_MESSAGE);
+        return `Error: ${SOUL_PROTECTED_MESSAGE}`;
+      }
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, content, { encoding: "utf-8" });
       logFileEvent("file_write", pathStr, "success");
@@ -239,6 +268,10 @@ export class FileSecurityExecutor {
     }
     try {
       const p = this._resolvePath(pathStr);
+      if (isSoulProtectedPath(p, this.identityDir)) {
+        logFileEvent("file_delete", pathStr, "denied", SOUL_PROTECTED_MESSAGE);
+        return `Error: ${SOUL_PROTECTED_MESSAGE}`;
+      }
       if (!fs.existsSync(p)) {
         logFileEvent("file_delete", pathStr, "failed", "file does not exist");
         return `Error: File '${pathStr}' does not exist.`;

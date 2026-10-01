@@ -35,6 +35,16 @@ describe("artifact contract", () => {
     });
   });
 
+  it("does not classify an existing website screenshot as a landing page", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-artifact-"));
+    expect(
+      detectArtifactContract(
+        "Open the existing website and give me a screenshot.",
+        workspace,
+      ),
+    ).toBeNull();
+  });
+
   it("detects and verifies generic exact file workflows", () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-files-"));
     const content =

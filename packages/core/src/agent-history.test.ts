@@ -1,5 +1,8 @@
 import type { ChatMessage } from "@miki/config";
-import { selectAgentPromptHistory } from "./agent-history.js";
+import {
+  buildConversationRecallReply,
+  selectAgentPromptHistory,
+} from "./agent-history.js";
 
 describe("selectAgentPromptHistory", () => {
   const history: ChatMessage[] = [
@@ -17,6 +20,40 @@ describe("selectAgentPromptHistory", () => {
     expect(selected.some((message) => message.role === "tool")).toBe(false);
     expect(selected.map((message) => message.content).join(" ")).not.toContain(
       "stale",
+    );
+  });
+
+  it("retains recent conversation for continuity questions", () => {
+    const selected = selectAgentPromptHistory(
+      [
+        ...history,
+        { role: "assistant", content: "I opened OpenHuman." },
+        { role: "user", content: "কিছুক্ষণ আগে তুমাকে কি বলেছিলাম?" },
+      ],
+      "simple",
+      "bounded",
+      20,
+    );
+
+    expect(selected.map((message) => message.content)).toEqual([
+      "old research task",
+      "old task claim",
+      "stale browser failure",
+      "শুধু লিখো: ঢাকা",
+      "I opened OpenHuman.",
+      "কিছুক্ষণ আগে তুমাকে কি বলেছিলাম?",
+    ]);
+    expect(selected.some((message) => message.role === "tool")).toBe(false);
+  });
+
+  it("answers explicit recall questions from persisted messages", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "তুমি কি file folder তৈরি করতে পারো?" },
+      { role: "assistant", content: "হ্যাঁ, পারি।" },
+      { role: "user", content: "কিছুক্ষণ আগে তুমাকে কি বলেছিলাম?" },
+    ];
+    expect(buildConversationRecallReply(messages, messages.at(-1)!.content)).toBe(
+      "আপনি আগে বলেছিলেন:\n- তুমি কি file folder তৈরি করতে পারো?",
     );
   });
 

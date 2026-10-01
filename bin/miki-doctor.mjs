@@ -248,6 +248,40 @@ async function secretVaultCheck() {
   }
 }
 
+async function playwrightChromiumCheck() {
+  try {
+    const { chromium } = await import("playwright");
+    const configured = [
+      process.env.MIKI_BROWSER_CHROME_PATH,
+      process.env.CHROME_PATH,
+      process.env.CHROMIUM_PATH,
+      "/usr/bin/google-chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    ].find((candidate) => candidate && fs.existsSync(candidate));
+    const executablePath = configured || chromium.executablePath();
+    const available = Boolean(executablePath && fs.existsSync(executablePath));
+    return check(
+      "playwright_chromium",
+      "Playwright Chromium",
+      available ? "pass" : "warn",
+      available
+        ? `Chromium executable is available at ${executablePath}.`
+        : "Chromium executable is missing; run `npx playwright install chromium`.",
+      { executablePath, configured: Boolean(configured) },
+    );
+  } catch (err) {
+    return check(
+      "playwright_chromium",
+      "Playwright Chromium",
+      "warn",
+      `Could not resolve Chromium; run \`npx playwright install chromium\`. ${err.message}`,
+    );
+  }
+}
+
 async function runDoctor() {
   const checks = [];
   checks.push(
@@ -338,6 +372,7 @@ async function runDoctor() {
   }
 
   checks.push(await secretVaultCheck());
+  checks.push(await playwrightChromiumCheck());
 
   // The direct-provider policy is intentionally limited to Gemini and
   // llama.cpp. llama.cpp is local and does not require an API key.

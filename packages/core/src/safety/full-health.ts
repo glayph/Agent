@@ -17,6 +17,12 @@ export interface HealthComponent {
   message: string;
 }
 
+export interface MemoryHealthStatus {
+  available: boolean;
+  dataDir?: string;
+  error?: string;
+}
+
 export interface FullHealthReport {
   status: "healthy" | "degraded" | "failed";
   checkedAt: string;
@@ -47,7 +53,7 @@ export function buildHealthComponents(
   report: Pick<
     FullHealthReport,
     "doctor" | "safeMode" | "jobs" | "secretScan" | "watchdog"
-  >,
+  > & { memory?: MemoryHealthStatus },
 ): HealthComponent[] {
   const stalledJobs = report.jobs.items.filter(
     (job) => job.status === "running" || job.status === "dead_letter",
@@ -81,6 +87,14 @@ export function buildHealthComponents(
             ? "degraded"
             : "failed",
       message: `Doctor status: ${report.doctor.status}.`,
+    },
+    {
+      name: "Memory",
+      status: report.memory?.available === false ? "degraded" : "healthy",
+      message:
+        report.memory?.available === false
+          ? `Memory is unavailable${report.memory.error ? `: ${report.memory.error}` : "."}`
+          : "Memory bridge is available.",
     },
     {
       name: "Job queue",

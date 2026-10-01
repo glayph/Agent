@@ -115,6 +115,11 @@ export interface FullHealthReport {
   status: "healthy" | "degraded" | "failed"
   checkedAt: string
   doctor: DoctorReport
+  memory?: {
+    available: boolean
+    dataDir?: string
+    error?: string
+  }
   safeMode: SafeModeState
   backups: BackupManifest[]
   migrations: Array<{

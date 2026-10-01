@@ -419,4 +419,32 @@ describe("runtime config schema", () => {
       ]),
     );
   });
+
+  it("accepts agent.model_router without validating nested lanes (router parses them)", () => {
+    const result = validateRuntimeConfig({
+      agent: {
+        model_router: {
+          enabled: true,
+          max_attempts: "not-a-number",
+          lanes: {
+            default: { primary: "a/one", fallbacks: ["b/two"] },
+            broken: 42,
+          },
+          roles: { forge: "subagent" },
+          credential_profiles: { gemini: ["GEMINI_API_KEY_2"] },
+        },
+      },
+    });
+    expect(result.valid).toBe(true);
+    expect(result.config.agent?.model_router).toMatchObject({
+      lanes: { default: { primary: "a/one" } },
+      roles: { forge: "subagent" },
+    });
+  });
+
+  it("a non-mapping model_router is ignored instead of rejecting the config", () => {
+    const result = validateRuntimeConfig({ agent: { name: "Owl", model_router: "oops" } });
+    expect(result.valid).toBe(true);
+    expect(result.config.agent?.model_router).toBeUndefined();
+  });
 });

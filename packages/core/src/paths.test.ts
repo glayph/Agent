@@ -1,7 +1,11 @@
 import * as os from "os";
 import * as path from "path";
 
-import { normalizeRuntimePaths, resolveRuntimePaths } from "./paths.js";
+import {
+  normalizeRuntimePaths,
+  resolveRuntimePaths,
+  type RuntimePaths,
+} from "./paths.js";
 
 function withEnv<T>(
   values: Record<string, string | undefined>,
@@ -39,6 +43,7 @@ describe("runtime path isolation", () => {
         expect(paths.dataDir).toBe(path.join(runtimeRoot, "data"));
         expect(paths.skillsDir).toBe(path.join(runtimeRoot, "skills"));
         expect(paths.cacheDir).toBe(path.join(runtimeRoot, "cache"));
+        expect(paths.identityDir).toBe(path.join(runtimeRoot, "identity"));
         expect(paths.sourceDir).toBe(path.resolve(workspaceRoot));
       },
     );
@@ -49,7 +54,29 @@ describe("runtime path isolation", () => {
     const paths = normalizeRuntimePaths(workspaceRoot);
     expect(paths.configDir).toBe(path.join(workspaceRoot, "config"));
     expect(paths.dataDir).toBe(path.join(workspaceRoot, "data"));
+    expect(paths.identityDir).toBe(path.join(workspaceRoot, "identity"));
     expect(paths.sourceDir).toBe(path.resolve(workspaceRoot));
+  });
+
+  it("defaults identityDir under sourceDir but allows an explicit override", () => {
+    const workspaceRoot = path.join(os.tmpdir(), "miki-paths-identity");
+    // normalizeRuntimePaths's object branch fills in any field left out of
+    // a partial input, same as its other dir fields already do — cast past
+    // RuntimePathsInput's stricter compile-time shape to exercise that.
+    const defaulted = normalizeRuntimePaths({
+      sourceDir: workspaceRoot,
+    } as RuntimePaths);
+    expect(defaulted.identityDir).toBe(path.join(workspaceRoot, "identity"));
+
+    const customIdentityDir = path.join(
+      os.tmpdir(),
+      "miki-paths-identity-custom",
+    );
+    const overridden = normalizeRuntimePaths({
+      sourceDir: workspaceRoot,
+      identityDir: customIdentityDir,
+    } as RuntimePaths);
+    expect(overridden.identityDir).toBe(path.resolve(customIdentityDir));
   });
 });
 

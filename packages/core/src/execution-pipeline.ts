@@ -37,6 +37,11 @@ const TASK_MARKERS = [
   "চালাও",
 ];
 
+const SKILL_MANAGEMENT_MARKER =
+  /(?:\bskills?\b|\bskill\s+(?:pack|plugin)|স্কিল)/i;
+const SKILL_ACTION_MARKER =
+  /(?:install|add|create|update|remove|delete|enable|disable|ইনস্টল|স্থাপন|যোগ|তৈরি|আপডেট)/i;
+
 const AUTONOMOUS_MARKER = /(?:\[\[miki-autonomy:[^\]]+\]\]|\bautonomous(?: task| work)?\b|\bbackground task\b|\bkeep working\b|\bwork until (?:done|complete)\b|\bনিজে নিজে\b|\bস্বয়ংক্রিয়(?:ভাবে)? কাজ\b)/i;
 
 function hasMarker(text: string): boolean {
@@ -75,7 +80,12 @@ export function classifyExecutionPipeline(
     };
   }
 
-  const explicitAction = hasMarker(message);
+  // Skill discovery and installation are actions even when phrased as a
+  // conversational question. Otherwise they enter simple_message, whose
+  // contract explicitly forbids tools and the model can only narrate.
+  const skillManagementAction =
+    SKILL_MANAGEMENT_MARKER.test(message) && SKILL_ACTION_MARKER.test(message);
+  const explicitAction = hasMarker(message) || skillManagementAction;
   const task =
     explicitAction ||
     (!isInformationalQuestion(message) &&

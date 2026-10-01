@@ -9,11 +9,12 @@
     "packages/ui/frontend"
   ],
   "scripts": {
+    "postinstall": "node scripts/install-playwright-browser.mjs",
     "build": "npm run build:all",
     "build:llama": "node scripts/build-llama.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "build:go-backend": "node scripts/build-go-backend.mjs",
-    "build:all": "npm run clean --workspaces --if-present && npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend && npm run build:cli",
+    "build:all": "npm run test:native && npm run clean --workspaces --if-present && npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend && npm run build:cli && npm run test:skills",
     "build:frontend": "npm --prefix packages/ui/frontend run build",
     "build:release:offline": "node scripts/build-offline-release.mjs",
     "build:release:linux": "node scripts/build-offline-release.mjs",
@@ -26,6 +27,8 @@
     "model:remove": "node scripts/miki-model.mjs remove",
     "model:smoke": "node scripts/model-smoke.mjs",
     "test:native": "node scripts/test-native-sqlite.mjs",
+    "test:skills": "node scripts/test-bundled-skills.mjs",
+    "setup:browser": "node scripts/install-playwright-browser.mjs",
     "test:cli-readonly": "node scripts/test-cli-readonly.mjs",
     "test:cookie": "node --test scripts/cookie-jar.test.mjs",
     "test:model-manager": "node --test scripts/miki-model.test.mjs",

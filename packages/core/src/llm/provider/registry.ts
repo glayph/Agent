@@ -25,6 +25,28 @@ function workspaceDir(): string {
   );
 }
 
+/** Resolve a named secret (env var / vault key) the same way for every caller. */
+function lookupSecret(name: string): string {
+  const fromRoots = [workspaceDir(), path.join(workspaceDir(), "config")]
+    .map((root) => resolveConfiguredSecret(name, root))
+    .find((value): value is string => Boolean(value?.trim()));
+  return fromRoots || resolveConfiguredSecret(name) || "";
+}
+
+/**
+ * A credential profile is a secret *name* belonging to the same provider: the
+ * provider's primary variable (`GEMINI_API_KEY`) or a suffixed sibling
+ * (`GEMINI_API_KEY_2`, `GEMINI_API_KEY_BACKUP`). Anything else is rejected so a
+ * config typo can never send one vendor's key to another vendor.
+ */
+export function isProviderCredentialProfile(
+  primaryEnvVar: string | undefined,
+  name: string,
+): boolean {
+  if (!primaryEnvVar) return false;
+  return name === primaryEnvVar || name.startsWith(`${primaryEnvVar}_`);
+}
+
 /**
  * Runtime registry for provider adapters. The registry is deliberately small:
  * it owns routing and lifecycle, while each adapter owns vendor SDK details.
@@ -38,15 +60,15 @@ export class ProviderRegistry {
     this.pluginRegistry = new ProviderPluginRegistry({
       workspaceDir: workspaceDir(),
       configDir: workspaceDir(),
-      resolveCredentials: (auth) => {
+      resolveCredentials: (auth, _providerId, profile) => {
         if (auth.mode === "local" || auth.mode === "none") return {};
-        const envVar = auth.envVars?.[0];
-        const apiKey = envVar
-          ? [workspaceDir(), path.join(workspaceDir(), "config")]
-              .map((root) => resolveConfiguredSecret(envVar, root))
-              .find((value): value is string => Boolean(value?.trim())) ||
-            resolveConfiguredSecret(envVar)
-          : "";
+        const primary = auth.envVars?.[0];
+        // A rotation profile is honoured only when it belongs to this provider.
+        const envVar =
+          profile && isProviderCredentialProfile(primary, profile)
+            ? profile
+            : primary;
+        const apiKey = envVar ? lookupSecret(envVar) : "";
         return apiKey ? { apiKey } : {};
       },
       logger: (event, details) =>
@@ -117,6 +139,31 @@ export class ProviderRegistry {
         };
   }
 
+  /** Provider id that serves `model`, if any plugin matches. */
+  providerIdFor(model: string): string | undefined {
+    return this.pluginRegistry.resolve(model)?.manifest.id;
+  }
+
+  /**
+   * Names (never values) of the credential profiles that currently hold a
+   * secret for the provider serving `model`, in rotation order: the provider's
+   * primary variable first, then `configured` siblings. Local/no-auth
+   * providers have none.
+   */
+  credentialProfiles(model: string, configured: string[] = []): string[] {
+    const plugin = this.pluginRegistry.resolve(model);
+    if (!plugin) return [];
+    if (plugin.auth.mode === "local" || plugin.auth.mode === "none") return [];
+    const primary = plugin.auth.envVars?.[0];
+    if (!primary) return [];
+    const names = [primary, ...configured].filter(
+      (name, index, all) =>
+        isProviderCredentialProfile(primary, name) &&
+        all.indexOf(name) === index,
+    );
+    return names.filter((name) => lookupSecret(name).length > 0);
+  }
+
   async supportsAudio(model: string): Promise<boolean | undefined> {
     const plugin = this.pluginRegistry.resolve(model);
     if (!plugin) return false;
@@ -139,6 +186,8 @@ export class ProviderRegistry {
       extra?: Record<string, unknown>;
       timeoutMs?: number;
       signal?: AbortSignal;
+      /** Secret name to authenticate with instead of the provider default. */
+      credentialProfile?: string;
     } = {},
   ): Promise<LLMResponse> {
     const plugin = this.pluginRegistry.resolve(model);
@@ -166,6 +215,7 @@ export class ProviderRegistry {
       extra: options.extra,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
+      credentialProfile: options.credentialProfile,
     });
   }
 

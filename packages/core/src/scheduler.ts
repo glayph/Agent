@@ -5,7 +5,13 @@
 
 import { TaskQueue, AgentTask } from "./task-queue.js";
 import { ConcurrentTaskManager } from "./concurrent-manager.js";
-import { sessionTurnLock } from "./session-turn-lock.js";
+import { sessionTurnLock, type TurnLane } from "./session-turn-lock.js";
+
+export interface TaskExecutionControl {
+  readonly lane: TurnLane;
+  isPauseRequested(): boolean;
+  markPaused(): void;
+}
 
 export interface ScheduledTask {
   id: string;
@@ -18,6 +24,7 @@ export interface ScheduledTask {
   timeoutMs?: number;
   quietHours?: { start: string; end: string; timezone?: string };
   concurrencyLimit?: number;
+  lane?: TurnLane;
   executionToken?: string;
   title?: string;
   resultSummary?: string;
@@ -69,6 +76,7 @@ export interface ScheduleOptions {
   concurrencyLimit?: number;
   title?: string;
   artifactRefs?: string[];
+  lane?: TurnLane;
 }
 
 export interface TaskCompletionNotification {
@@ -232,12 +240,14 @@ export class TaskScheduler {
     sessionId: string,
     message: string,
     task?: AgentTask,
+    control?: TaskExecutionControl,
   ) => AsyncGenerator<string, void, unknown>;
   private _scheduledTasks: Map<string, ScheduledTask> = new Map();
   private _recoveredPersistedTasks = false;
   private _lastHeartbeatAt = 0;
   private _missedRuns = 0;
   private _activeScheduledRuns = new Map<string, number>();
+  private readonly _pauseRequests = new Set<string>();
   private _completionNotifier?: (
     notification: TaskCompletionNotification,
   ) => void | Promise<void>;
@@ -258,6 +268,7 @@ export class TaskScheduler {
       sessionId: string,
       message: string,
       task?: AgentTask,
+      control?: TaskExecutionControl,
     ) => AsyncGenerator<string, void, unknown>,
     private _store?: ScheduledTaskStore,
     completionNotifier?: (
@@ -278,6 +289,7 @@ export class TaskScheduler {
       sessionId: string,
       message: string,
       task?: AgentTask,
+      control?: TaskExecutionControl,
     ) => AsyncGenerator<string, void, unknown>,
   ): void {
     this._executeTask = executor;
@@ -398,7 +410,7 @@ export class TaskScheduler {
         options.missedRunPolicy ?? this.config.missedRunPolicy ?? "run_once",
       timeoutMs:
         options.timeoutMs !== undefined
-          ? Math.max(1_000, Math.floor(options.timeoutMs))
+          ? Math.max(1, Math.floor(options.timeoutMs))
           : this.config.execTimeoutMinutes && this.config.execTimeoutMinutes > 0
             ? this.config.execTimeoutMinutes * 60_000
             : undefined,
@@ -407,6 +419,7 @@ export class TaskScheduler {
         1,
         options.concurrencyLimit ?? this.config.perTaskConcurrencyLimit ?? 1,
       ),
+      lane: options.lane ?? "user",
       executionToken: `run_${now}_${Math.random().toString(36).slice(2, 10)}`,
       title: options.title ?? message.split("\n", 1)[0].trim().slice(0, 120),
       artifactRefs: [...(options.artifactRefs ?? [])],
@@ -434,6 +447,27 @@ export class TaskScheduler {
     task.updatedAt = task.completedAt;
     this._store?.upsertTask(task);
     this._scheduledTasks.delete(id);
+    return true;
+  }
+
+  requestScheduledPause(id: string): boolean {
+    const task = this._scheduledTasks.get(id) ?? this._store?.loadTask(id);
+    if (!task || task.status !== "running") return false;
+    this._pauseRequests.add(id);
+    return true;
+  }
+
+  resumeScheduledTask(id: string): boolean {
+    const task = this._scheduledTasks.get(id) ?? this._store?.loadTask(id);
+    if (!task) return false;
+    this._pauseRequests.delete(id);
+    if (task.status === "pending") {
+      task.runAt = Date.now();
+      task.lastError = null;
+      task.updatedAt = Date.now();
+      this._store?.upsertTask(task);
+      this._scheduleWake(0);
+    }
     return true;
   }
 
@@ -501,6 +535,7 @@ export class TaskScheduler {
     for (const [id, scheduled] of this._scheduledTasks.entries()) {
       if (this._concurrentManager.isAtCapacity()) break;
       if (scheduled.status !== "pending") continue;
+      if (this._pauseRequests.has(id)) continue;
       if (!scheduled.runAt || scheduled.runAt > now) continue;
       if (
         (this._activeScheduledRuns.get(id) ?? 0) >=
@@ -554,9 +589,22 @@ export class TaskScheduler {
     // settles - including the case where we've already moved on due to a
     // timeout but the abandoned executor is still running in the
     // background (see the comment on `consume` for why that can happen).
-    const release = await sessionTurnLock.acquire(scheduled.sessionId);
-
-    const iterator = this._executeTask(scheduled.sessionId, scheduled.message);
+    const lane = scheduled.lane ?? "user";
+    const release = await sessionTurnLock.acquire(scheduled.sessionId, lane);
+    let paused = false;
+    const control: TaskExecutionControl = {
+      lane,
+      isPauseRequested: () => this._pauseRequests.has(id),
+      markPaused: () => {
+        paused = true;
+      },
+    };
+    const iterator = this._executeTask(
+      scheduled.sessionId,
+      scheduled.message,
+      undefined,
+      control,
+    );
     let timedOut = false;
     let resultSummary = "";
 
@@ -623,6 +671,14 @@ export class TaskScheduler {
         return;
       }
 
+      if (paused) {
+        scheduled.status = "pending";
+        scheduled.runAt = Date.now() + 250;
+        scheduled.lastError = "Paused cooperatively for user interaction";
+        scheduled.updatedAt = Date.now();
+        this._store?.upsertTask(scheduled);
+        return;
+      }
       this._markScheduledSuccess(id, scheduled, resultSummary);
       this._stats.processed++;
     } catch (err: unknown) {
@@ -637,6 +693,7 @@ export class TaskScheduler {
       if (!this._scheduledTasks.has(id)) return;
 
       if (this._isTerminalStatus(scheduled.status)) {
+        this._pauseRequests.delete(id);
         this._scheduledTasks.delete(id);
       }
       // A run just finished (success reschedules runAt, failure sets a

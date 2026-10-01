@@ -1,0 +1,12 @@
+{
+  "name": "demo-capability",
+  "description": "A safe demo skill that explains how to list current workspace files and report their count.",
+  "category": "agent-created",
+  "tags": [
+    "demo",
+    "workspace",
+    "utility"
+  ],
+  "version": "0.1.0",
+  "created_by": "agent"
+}

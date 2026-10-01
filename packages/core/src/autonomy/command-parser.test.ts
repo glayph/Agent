@@ -42,13 +42,10 @@ describe("parseAutonomyCommand", () => {
     });
   });
 
-  it("recognizes status queries", () => {
-    expect(parseAutonomyCommand("what's your current objective?")).toEqual({
-      action: "status",
-    });
-    expect(parseAutonomyCommand("autonomy status")).toEqual({
-      action: "status",
-    });
+  it("does not intercept status queries", () => {
+    expect(parseAutonomyCommand("what's your current objective?")).toBeNull();
+    expect(parseAutonomyCommand("what are you doing?")).toBeNull();
+    expect(parseAutonomyCommand("autonomy status")).toBeNull();
   });
 
   it("returns null for ordinary conversation", () => {

@@ -31,6 +31,7 @@ import { runDoctor } from "../safety/doctor.js";
 import {
   buildHealthComponents,
   summarizeFullHealth,
+  type MemoryHealthStatus,
 } from "../safety/full-health.js";
 import { createMigrationManager } from "../safety/migrations.js";
 import { createSafeModeManager } from "../safety/safe-mode.js";
@@ -70,6 +71,8 @@ interface EnhancementRouterOptions {
   approvalInbox?: ApprovalInbox;
   /** @deprecated */
   workspaceDir?: string;
+  /** Current memory bridge readiness for the user-facing health report. */
+  memoryStatus?: () => MemoryHealthStatus;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -239,6 +242,7 @@ export function createEnhancementRouter({
   jobRunner,
   executeAgentRun,
   approvalInbox,
+  memoryStatus,
 }: EnhancementRouterOptions): Router {
   const router = Router();
   const audit = new SqliteAuditLog(path.join(runtimePaths.dataDir, "audit.db"));
@@ -1123,6 +1127,7 @@ export function createEnhancementRouter({
       const secretScan = scanSecrets(runtimePaths);
       const partialReport = {
         doctor,
+        memory: memoryStatus?.(),
         safeMode: safeMode.getState(),
         jobs: { items: jobs.list(), stats: jobs.stats() },
         secretScan,
@@ -1133,6 +1138,7 @@ export function createEnhancementRouter({
         status: summarizeFullHealth(components),
         checkedAt: new Date().toISOString(),
         doctor,
+        memory: partialReport.memory,
         safeMode: partialReport.safeMode,
         backups: backups.listBackups(),
         migrations: migrations.run({ dryRun: true }),

@@ -182,6 +182,49 @@ describe("TaskScheduler exec_timeout_minutes (#52)", () => {
     }
   });
 
+  it("requeues a cooperatively paused task and resumes it without cancellation", async () => {
+    let runs = 0;
+    async function* pausingExecutor(
+      _sessionId: string,
+      _message: string,
+      _task: unknown,
+      control?: { markPaused(): void },
+    ): AsyncGenerator<string, void, unknown> {
+      runs++;
+      if (runs === 1) {
+        control?.markPaused();
+        yield "paused";
+        return;
+      }
+      yield "completed";
+    }
+
+    const scheduler = new TaskScheduler(
+      { maxConcurrentTasks: 1, schedulerIntervalMs: 10 },
+      new TaskQueue({ maxSize: 10 }),
+      new ConcurrentTaskManager(1),
+      pausingExecutor,
+    );
+    const scheduled = scheduler.schedule(
+      "autonomy-session",
+      "continue objective",
+      undefined,
+      Date.now(),
+      { maxAttempts: 1, lane: "autonomous" },
+    );
+    scheduler.start();
+    try {
+      await waitFor(() => scheduled.status === "pending" && runs === 1);
+      expect(scheduled.lastError).toMatch(/paused cooperatively/i);
+      expect(scheduled.status).not.toBe("cancelled");
+      scheduler.resumeScheduledTask(scheduled.id);
+      await waitFor(() => scheduled.status === "completed");
+      expect(runs).toBe(2);
+    } finally {
+      scheduler.stop();
+    }
+  });
+
   it("does not crash the scheduler when an async completion notifier rejects", async () => {
     // Regression test: _emitCompletion must catch rejections from an async
     // completionNotifier, not just synchronous throws. Before the fix, a

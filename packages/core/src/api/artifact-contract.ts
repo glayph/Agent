@@ -114,10 +114,17 @@ export function detectArtifactContract(
   }
 
   const hasLandingIntent =
-    /landing\s*page|static\s+(site|page)|index\.html|styles?\.css|website|ল্যান্ডিং\s*পেজ|ওয়েবসাইট|ওয়েবসাইট|পেজ\s+তৈরি/i.test(
+    /landing\s*page|static\s+(site|page)|index\.html|styles?\.css|ল্যান্ডিং\s*পেজ|পেজ\s+তৈরি/i.test(
       content,
     );
-  if (!hasLandingIntent) return null;
+  const hasCreationIntent =
+    /\b(create|build|generate|write|make|develop)\b|তৈরি|বানাও|লিখ|গড়|গড়/i.test(
+      content,
+    );
+  // Opening an existing website and taking a screenshot is a browser task,
+  // not a landing-page artifact workflow. Do not invent an index.html
+  // requirement for it or overwrite the model's successful browser reply.
+  if (!hasLandingIntent || !hasCreationIntent) return null;
 
   const absolutePath = content.match(
     /\/(?:home|tmp|workspace|var)\/[^\s`'\"]+/,

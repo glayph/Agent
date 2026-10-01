@@ -1,0 +1,11 @@
+{
+  "name": "workspace-demo-skill",
+  "description": "A safe demo skill to show custom skill installation capability in the workspace.",
+  "category": "agent-created",
+  "tags": [
+    "demo",
+    "workspace"
+  ],
+  "version": "0.1.0",
+  "created_by": "agent"
+}

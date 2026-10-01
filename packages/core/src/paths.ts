@@ -11,6 +11,15 @@ export interface RuntimePaths {
   binDir: string;
   docsDir: string;
   outputDir: string;
+  /**
+   * Human-editable SOUL/AGENTS/IDENTITY/USER/TOOLS workspace-identity files
+   * (step 01 of the autonomy upgrade). Deliberately not named "workspace" —
+   * that word is already taken in this codebase by workspaceDir/
+   * MIKI_WORKSPACE_DIR (the install root) and by the separate
+   * workspace-folders feature (user-managed project folders). See
+   * packages/core/src/identity/ and identity/README.md.
+   */
+  identityDir: string;
   sourceDir?: string;
 }
 
@@ -78,6 +87,7 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
       binDir: path.join(sourceDir, "bin"),
       docsDir: path.join(sourceDir, "docs"),
       outputDir: path.join(sourceDir, "output"),
+      identityDir: path.join(sourceDir, "identity"),
       sourceDir,
     };
   }
@@ -92,6 +102,7 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
   const binDir = paths.binDir ?? path.join(sourceDir, "bin");
   const docsDir = paths.docsDir ?? path.join(sourceDir, "docs");
   const outputDir = paths.outputDir ?? path.join(sourceDir, "output");
+  const identityDir = paths.identityDir ?? path.join(sourceDir, "identity");
 
   return {
     configDir,
@@ -101,6 +112,7 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
     binDir,
     docsDir,
     outputDir,
+    identityDir,
     sourceDir: paths.sourceDir ? path.resolve(paths.sourceDir) : sourceDir,
   };
 }
@@ -164,6 +176,12 @@ export function resolveRuntimePaths(): RuntimePaths {
   const outputDir = runtimeRoot
     ? path.join(runtimeRoot, "output")
     : path.join(osDataRoot(), Miki_NS, "output");
+  // identity/ (SOUL.md/AGENTS.md/IDENTITY.md/USER.md/TOOLS.md) is
+  // human-authored and edited the same way config/agent.yaml is, so it
+  // follows the config root, not the data root, in an OS-installed release.
+  const identityDir = runtimeRoot
+    ? path.join(runtimeRoot, "identity")
+    : path.join(osConfigRoot(), Miki_NS, "identity");
   const sourceDir = legacyDir ?? process.cwd();
 
   const paths: RuntimePaths = {
@@ -174,6 +192,7 @@ export function resolveRuntimePaths(): RuntimePaths {
     binDir,
     docsDir,
     outputDir,
+    identityDir,
     sourceDir,
   };
 
@@ -183,6 +202,7 @@ export function resolveRuntimePaths(): RuntimePaths {
     migrateDirectory(path.join(legacyDir, "docs"), docsDir);
     migrateDirectory(path.join(legacyDir, "output"), outputDir);
     migrateDirectory(path.join(legacyDir, "src", "skills"), skillsDir);
+    migrateDirectory(path.join(legacyDir, "identity"), identityDir);
   }
 
   for (const dir of Object.values(paths)) {

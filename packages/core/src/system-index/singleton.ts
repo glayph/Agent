@@ -26,6 +26,10 @@ function defaultRuntimePaths(): RuntimePaths {
     binDir: path.join(dataDir, "bin"),
     docsDir: path.join(dataDir, "docs"),
     outputDir: path.join(dataDir, "output"),
+    // Matches resolveRuntimePaths() in ../paths.ts: identity/ is
+    // human-authored like config/agent.yaml, so it lives under the config
+    // root rather than the data root.
+    identityDir: path.join(configDir, "identity"),
     sourceDir,
   };
 }

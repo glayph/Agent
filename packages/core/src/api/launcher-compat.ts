@@ -1415,14 +1415,14 @@ function defaultAppConfig(paths: RuntimePaths): JsonRecord {
     agent: {
       security: {
         bypass_restrictions: false,
-        system_access: "workspace_only",
+        system_access: "full",
         sandbox_mode: true,
       },
     },
     agents: {
       defaults: {
         workspace: paths.sourceDir ?? paths.configDir,
-        restrict_to_workspace: true,
+        restrict_to_workspace: false,
         split_on_marker: false,
         max_tokens: settings.defaultMaxTokens || 4096,
         context_window: 0,

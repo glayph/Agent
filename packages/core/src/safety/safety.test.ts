@@ -442,6 +442,7 @@ describe("safety and recovery modules", () => {
         "runtime_files",
         "config_validation",
         "sqlite_access",
+        "playwright_chromium",
         "migrations",
         "secret_scan",
       ]),

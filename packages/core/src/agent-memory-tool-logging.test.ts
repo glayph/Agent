@@ -122,6 +122,11 @@ describe("Agent tool calls are logged to memory", () => {
       },
     });
 
+    // Step 02: memory writes (including the SQLite/TKG log) run on a
+    // background queue so they never delay the tool result — drain it
+    // before asserting.
+    await agent.fileMemory.writer.drain();
+
     expect(logToolCall).toHaveBeenCalledTimes(1);
     expect(logToolCall).toHaveBeenCalledWith(
       "file_read",
@@ -175,6 +180,8 @@ describe("Agent tool calls are logged to memory", () => {
       },
     });
 
+    await agent.fileMemory.writer.drain();
+
     expect(logToolCall).toHaveBeenCalledTimes(1);
     const [toolName, toolArgs, output, metadata] = logToolCall.mock.calls[0];
     expect(toolName).toBe("shell_execute");
@@ -223,6 +230,8 @@ describe("Agent tool calls are logged to memory", () => {
         retry: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10 },
       },
     });
+
+    await agent.fileMemory.writer.drain();
 
     expect(logToolCall).toHaveBeenCalledTimes(1);
     const [toolName, , output, metadata] = logToolCall.mock.calls[0];
@@ -307,6 +316,8 @@ describe("Agent tool calls are logged to memory", () => {
     )) {
       expect(rawEvent).toEqual(expect.any(String));
     }
+
+    await agent.fileMemory.writer.drain();
 
     expect(recordExperience).toHaveBeenCalledWith(
       expect.objectContaining({

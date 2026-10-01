@@ -119,6 +119,49 @@ function packagePresent(name: string): boolean {
   }
 }
 
+async function playwrightChromiumCheck(): Promise<DoctorCheckResult> {
+  if (!packagePresent("playwright")) {
+    return check(
+      "playwright_chromium",
+      "Playwright Chromium",
+      "warn",
+      "Playwright is not resolvable; run npm install before using browser tools.",
+    );
+  }
+
+  try {
+    const { chromium } = await import("playwright");
+    const configured = [
+      process.env.MIKI_BROWSER_CHROME_PATH,
+      process.env.CHROME_PATH,
+      process.env.CHROMIUM_PATH,
+      "/usr/bin/google-chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    ].find((candidate) => candidate && fs.existsSync(candidate));
+    const executablePath = configured || chromium.executablePath();
+    const available = Boolean(executablePath && fs.existsSync(executablePath));
+    return check(
+      "playwright_chromium",
+      "Playwright Chromium",
+      available ? "pass" : "warn",
+      available
+        ? `Chromium executable is available at ${executablePath}.`
+        : "Chromium executable is missing; run `npx playwright install chromium`.",
+      { executablePath, configured: Boolean(configured) },
+    );
+  } catch (err: unknown) {
+    return check(
+      "playwright_chromium",
+      "Playwright Chromium",
+      "warn",
+      `Could not resolve the Chromium executable; run \`npx playwright install chromium\`. ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 function summarize(checks: DoctorCheckResult[]): DoctorStatus {
   if (checks.some((item) => item.status === "fail")) return "fail";
   if (checks.some((item) => item.status === "warn")) return "warn";
@@ -296,16 +339,18 @@ export async function runDoctor(
     );
   }
 
+  const playwrightAvailable = packagePresent("playwright");
   checks.push(
     check(
       "playwright",
       "Playwright",
-      packagePresent("playwright") ? "pass" : "warn",
-      packagePresent("playwright")
+      playwrightAvailable ? "pass" : "warn",
+      playwrightAvailable
         ? "Playwright package is available."
         : "Playwright package is not resolvable.",
     ),
   );
+  checks.push(await playwrightChromiumCheck());
 
   if (options.includeMigrations) {
     const migrations = createMigrationManager(paths).run({ dryRun: true });
