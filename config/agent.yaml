@@ -145,7 +145,14 @@ concurrency:
   recoveryStaleAfterMs: 300000
 heartbeat:
   enabled: true
-  interval_seconds: 60
+  interval_seconds: 1800
+  # Step 08: OpenClaw-style proactive checklist (identity/HEARTBEAT.md)
+  checklist_path: identity/HEARTBEAT.md
+  skip_when_main_busy: true
+  # quiet_hours:
+  #   start: "23:00"
+  #   end: "07:00"
+  #   timezone: "Asia/Dhaka"
   auto_actions:
     enabled: false
     max_actions_per_cycle: 0

@@ -23,6 +23,21 @@ import {
   createDefaultChannelRegistry,
   type ChannelName,
 } from "../event-envelope.js";
+import {
+  createDefaultSurfaceRegistry,
+  ingest,
+} from "../input-surface/index.js";
+import { CommandQueue, isQueueMode } from "../command-queue/index.js";
+import {
+  HeartbeatRunner,
+  HeartbeatScheduler,
+  runHeartbeatNow,
+} from "../heartbeat-system/index.js";
+import { getLifecycleBus } from "../hooks/index.js";
+import {
+  CronScheduler,
+  setDefaultCronScheduler,
+} from "../cron/index.js";
 import { WatcherRegistry } from "../watcher-registry.js";
 import { PersistentTimerScheduler } from "../timer-scheduler.js";
 import { globalStartupTimer } from "../performance-budgets.js";
@@ -255,6 +270,45 @@ export function createEnhancementRouter({
       path.join(runtimePaths.dataDir, "runtime-jobs.json"),
     );
   const channels = createDefaultChannelRegistry();
+  const surfaces = createDefaultSurfaceRegistry();
+  const commandQueue = new CommandQueue({
+    defaultMode: "steer",
+    steerFallback: "followup",
+  });
+  const heartbeatRunner = new HeartbeatRunner({
+    workspaceRoot: path.resolve(runtimePaths.dataDir, ".."),
+    commandQueue,
+    config: {
+      enabled: true,
+      intervalSeconds: 1800,
+      checklistPath: "identity/HEARTBEAT.md",
+      skipWhenMainBusy: true,
+    },
+    hooks: {
+      log: (msg, meta) => {
+        console.log(msg, meta ?? "");
+      },
+      isMainLaneBusy: () => commandQueue.laneActiveCount("main") > 0,
+    },
+  });
+  const heartbeatScheduler = new HeartbeatScheduler(heartbeatRunner, {
+    log: (msg) => console.log(msg),
+  });
+  // Auto-start scheduler (interval from config; does not fire immediately)
+  heartbeatScheduler.start();
+  const lifecycleBus = getLifecycleBus();
+  lifecycleBus.emit("gateway:startup", { pid: process.pid });
+  lifecycleBus.emit("workspace:bootstrap", {
+    dataDir: runtimePaths.dataDir,
+  });
+  const cronScheduler = new CronScheduler({
+    stateDir: path.join(runtimePaths.dataDir, "state"),
+    commandQueue,
+    tickIntervalMs: 15_000,
+    log: (msg, meta) => console.log(msg, meta ?? ""),
+  });
+  setDefaultCronScheduler(cronScheduler);
+  cronScheduler.start();
   const deliveries = new DeliveryQueue(
     path.join(runtimePaths.dataDir, "delivery-receipts.json"),
   );
@@ -590,9 +644,118 @@ export function createEnhancementRouter({
     res.json({ channels: channels.list() });
   });
 
-  router.post("/events/inbound", (req: Request, res: Response) => {
-    if (!isRecord(req.body) || typeof req.body.channel !== "string") {
-      res.status(400).json({ error: "channel is required" });
+  router.get("/runtime/surfaces", (_req: Request, res: Response) => {
+    res.json({ surfaces: surfaces.list() });
+  });
+
+  router.get("/runtime/command-queue", (_req: Request, res: Response) => {
+    res.json({
+      pendingGlobal: commandQueue.pendingCount(),
+      config: commandQueue.getConfig(),
+      recentEvents: commandQueue.events().slice(-50),
+    });
+  });
+
+  router.get("/runtime/heartbeat", (_req: Request, res: Response) => {
+    res.json({ status: heartbeatScheduler.status() });
+  });
+
+  router.post("/runtime/heartbeat/run", async (req: Request, res: Response) => {
+    try {
+      const dryRun =
+        req.body &&
+        typeof req.body === "object" &&
+        (req.body.dry_run === true || req.body.dryRun === true);
+      const result = await runHeartbeatNow(heartbeatRunner, Boolean(dryRun));
+      res.json({ result });
+    } catch (error: unknown) {
+      res.status(500).json({ error: errorMessage(error) });
+    }
+  });
+
+
+  router.get("/runtime/cron", (_req: Request, res: Response) => {
+    res.json({ jobs: cronScheduler.list(), store: cronScheduler.storePath });
+  });
+
+  router.post("/runtime/cron", (req: Request, res: Response) => {
+    try {
+      if (!isRecord(req.body)) {
+        res.status(400).json({ error: "JSON object expected" });
+        return;
+      }
+      const body = req.body;
+      if (typeof body.name !== "string" || typeof body.payload !== "string") {
+        res.status(400).json({ error: "name and payload are required" });
+        return;
+      }
+      const schedule =
+        body.schedule && typeof body.schedule === "object"
+          ? (body.schedule as { kind: "once" | "cron"; expr: string; timezone?: string })
+          : null;
+      if (!schedule || typeof schedule.expr !== "string") {
+        res.status(400).json({ error: "schedule.kind and schedule.expr required" });
+        return;
+      }
+      const job = cronScheduler.add({
+        name: body.name,
+        payload: body.payload,
+        schedule: {
+          kind: schedule.kind === "once" ? "once" : "cron",
+          expr: schedule.expr,
+          timezone: schedule.timezone,
+        },
+        executionStyle:
+          body.executionStyle === "main" ? "main" : "isolated",
+        deliveryTarget:
+          typeof body.deliveryTarget === "string"
+            ? body.deliveryTarget
+            : undefined,
+        deleteAfterRun:
+          typeof body.deleteAfterRun === "boolean"
+            ? body.deleteAfterRun
+            : undefined,
+        wakeNow: typeof body.wakeNow === "boolean" ? body.wakeNow : true,
+      });
+      res.status(201).json({ job });
+    } catch (error: unknown) {
+      res.status(400).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.post("/runtime/cron/:id/run", async (req: Request, res: Response) => {
+    try {
+      const result = await cronScheduler.run(String(req.params.id));
+      if (!result.accepted && result.error === "job not found") {
+        res.status(404).json(result);
+        return;
+      }
+      res.json(result);
+    } catch (error: unknown) {
+      res.status(500).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.delete("/runtime/cron/:id", (req: Request, res: Response) => {
+    const ok = cronScheduler.remove(String(req.params.id));
+    if (!ok) {
+      res.status(404).json({ error: "job not found" });
+      return;
+    }
+    res.json({ removed: true });
+  });
+
+  router.post("/events/inbound", async (req: Request, res: Response) => {
+    if (!isRecord(req.body)) {
+      res.status(400).json({ error: "JSON object expected" });
+      return;
+    }
+    const surfaceId =
+      (typeof req.body.surface === "string" && req.body.surface) ||
+      (typeof req.body.channel === "string" && req.body.channel) ||
+      "";
+    if (!surfaceId) {
+      res.status(400).json({ error: "surface or channel is required" });
       return;
     }
     try {
@@ -603,24 +766,63 @@ export function createEnhancementRouter({
       const normalizedInput = idempotencyKey
         ? { ...req.body, idempotencyKey }
         : req.body;
-      const event = channels.normalize(req.body.channel, normalizedInput, {
+
+      // Single ingest entry: normalize via surface adapter, then enqueue.
+      // Adapters never call the agent core; only the job queue does.
+      let job: ReturnType<PersistentJobQueue["enqueue"]> | undefined;
+      const { event } = await ingest(normalizedInput, surfaceId, {
+        registry: surfaces,
         senderId:
           typeof req.body.senderId === "string" ? req.body.senderId : undefined,
+        sink: async (normalized) => {
+          const payload = normalized.payload;
+          const message =
+            (typeof payload.message === "string" && payload.message) ||
+            (typeof payload.text === "string" && payload.text) ||
+            JSON.stringify(payload);
+          const inlineMode =
+            typeof req.body.queue_mode === "string" &&
+            isQueueMode(req.body.queue_mode)
+              ? req.body.queue_mode
+              : undefined;
+          // Step 07: per-session_key serialization + mode handling, then job enqueue.
+          await commandQueue.enqueue({
+            session_key: normalized.session_key,
+            message,
+            surface: normalized.surface,
+            mode: inlineMode,
+            payload: {
+              eventId: normalized.eventId,
+              idempotencyKey: normalized.idempotencyKey,
+            },
+            execute: async ({ signal }) => {
+              if (signal.aborted) return;
+              lifecycleBus.emit("message:received", {
+                session_key: normalized.session_key,
+                surface: normalized.surface,
+                eventId: normalized.eventId,
+                text: message,
+              });
+              job = jobs.enqueue(
+                "agent.message",
+                {
+                  message,
+                  sessionId: normalized.session_key,
+                  event: normalized,
+                },
+                { idempotencyKey: normalized.idempotencyKey },
+              );
+            },
+          });
+        },
       });
-      const payload = event.payload;
-      const message =
-        (typeof payload.message === "string" && payload.message) ||
-        (typeof payload.text === "string" && payload.text) ||
-        JSON.stringify(payload);
-      const job = jobs.enqueue(
-        "agent.message",
-        { message, sessionId: event.sessionId, event },
-        { idempotencyKey: event.idempotencyKey },
-      );
+
       recordJobLifecycle(audit, "event.inbound", {
         eventId: event.eventId,
-        channel: event.channel,
-        jobId: job.id,
+        channel: event.surface,
+        surface: event.surface,
+        session_key: event.session_key,
+        jobId: job?.id,
         idempotencyKey: event.idempotencyKey,
       });
       res.status(202).json({ event, job });

@@ -1,3 +1,4 @@
+import { getLifecycleBus } from "../hooks/index.js";
 import type { ChatMessage } from "@miki/config";
 import type { MemoryFilesConfig, SummaryDoc, TurnLike } from "./types.js";
 import { emptyDoc, extractDoc, mergeDocs, renderDoc } from "./summarizer.js";
@@ -136,6 +137,7 @@ export class CompactionManager {
 
       const older = conversational.slice(0, start);
       const recent = conversational.slice(start);
+      getLifecycleBus().emit("session:compact:before", { phase: "before" });
       this.hooks.emit("before_compaction", {
         sessionId,
         messageCount: messages.length,
@@ -169,6 +171,7 @@ export class CompactionManager {
         summary: rendered,
         archivedCount: older.length,
       });
+      getLifecycleBus().emit("session:compact:after", { phase: "after" });
       this.hooks.emit("after_compaction", {
         sessionId,
         archivedCount: older.length,

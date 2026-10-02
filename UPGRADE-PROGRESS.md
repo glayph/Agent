@@ -147,3 +147,170 @@ Behaviour notes / open questions (non-blocking, defaults chosen):
 
 ## Next: Step 04 — tool execution & permission layer (`04-tool-exec-permissions.md`)
 
+
+## Step 06 — Gateway / Input-Surface Layer: DONE
+
+OpenClaw-style input normalization: any origin (CLI, IDE, task API, webhook, chat apps)
+becomes one `InboundEvent` before queue/agent handling.
+
+### What was built
+- New module `packages/core/src/input-surface/`:
+  - `types.ts` — `SurfaceId`, `InboundEvent` (`surface`, `session_key`, `payload`, `timestamp`, `sender_meta`)
+  - `session-key.ts` — deterministic `resolveSessionKey(surface + conversation/thread + agentRole)`
+  - `normalize.ts` — shared normalizer
+  - `adapters.ts` — CLI + webhook + JSON adapters for all surfaces; new surface = new adapter only
+  - `registry.ts` — `SurfaceAdapterRegistry` / `createDefaultSurfaceRegistry()`
+  - `ingest.ts` — **single entry** `ingest(raw, surfaceId, { sink? })` — adapters never call agent core
+  - `input-surface.test.ts` — acceptance tests (two dummy surfaces, deterministic session_key)
+- `enhancement-router.ts`:
+  - `/events/inbound` accepts `surface` or legacy `channel`, routes through `ingest()` then job queue
+  - `/runtime/surfaces` lists registered surfaces
+- Existing `event-envelope.ts` (channel adapters / delivery) left intact for outbound/delivery paths.
+
+### Behavior contract
+1. New surface = register adapter only; no agent-core file changes required.
+2. Same `session_key` rules on every surface.
+3. Raw events never reach the agent core; only normalized `InboundEvent` is sunk to the queue.
+
+### Acceptance
+- [x] CLI + webhook adapters emit the same `InboundEvent` shape
+- [x] `session_key` unit-tested deterministic (`cli:conv-1:miki`)
+- [x] New surface (`task_api`) added via adapter registration only
+
+### Verify
+Manual/runtime check via `tsx` (ALL_CHECKS_PASSED): session keys, dual-surface shape, ingest sink isolation.
+
+## Next: Step 07 — command queue (depends on this layer's `session_key` + `InboundEvent`)
+
+### Step 06 — verify + optimize (re-pass)
+Fixes:
+- `session_key`: bare legacy `sessionId` promoted via formula; full `surface:thread:role` keys kept
+- adapters: `sessionId` → conversationId (not raw session_key); envelope keys stripped from payload
+- `channelToSurface`: allocation-free mapping
+- CLI/webhook JSON adapters cached (no per-call allocation)
+- CLI/webhook default sender for ergonomics; generic adapters still require sender
+
+Runtime verify: **14/14 ALL_CHECKS_PASSED** (deterministic key, dual-surface shape, legacy map, ingest sink isolation, extensibility).
+
+## Step 07 — Command Queue & Concurrency: DONE
+
+Lane-aware command queue with per-`session_key` serialization and four modes
+(followup / collect / interrupt / steer). Rebuild (not a patch on ad-hoc lock logic).
+
+### Built
+- `packages/core/src/command-queue/`
+  - `types.ts` — modes, lanes, config, drop policy, events
+  - `resolve-mode.ts` — priority: inline → session → surface → global → `steer`
+  - `command-queue.ts` — `CommandQueue` class
+  - `command-queue.test.ts` — concurrency + mode + drop acceptance tests
+  - `index.ts` — public exports
+- Lanes: `main` (cap 32), `subagent` (8), `heartbeat` (2)
+- Modes:
+  - **followup** — queue behind active run
+  - **collect** — debounce + coalesce messages into one turn
+  - **interrupt** — AbortController cancels active run, then starts new
+  - **steer** — mid-turn inject when hook registered; else `steerFallback` (followup)
+- Drop policy: `reject_new` (default) or `drop_oldest`; always logged via events
+- Wired: `POST /events/inbound` sink → `commandQueue.enqueue` → job queue
+- `GET /runtime/command-queue` diagnostics
+
+### Behavior contract
+1. Same `session_key` → never two concurrent active runs
+2. Different `session_key` → parallel up to lane cap
+3. Modes follow documented behavior
+4. Non-interrupt modes never cancel the active run
+
+### Existing code
+- `sessionTurnLock` remains for channel/scheduler paths (compatible FIFO)
+- `TaskQueue` (persistent agent tasks) unchanged — orthogonal persistence layer
+
+## Step 08 — Heartbeat System: DONE
+
+OpenClaw-style proactive 24/7 loop. Separate from legacy `HeartbeatEngine`
+(maintenance pulse). New module uses Step 07 `heartbeat` lane so user main-lane
+sessions are never interrupted.
+
+### Built
+- `packages/core/src/heartbeat-system/`
+  - `types.ts` — config, response types, cycle results
+  - `quiet-hours.ts` — quiet window (overnight supported)
+  - `checklist.ts` — HEARTBEAT.md parser + `[notify]|[tool]|[memory]|[noop]` prefixes
+  - `runner.ts` — `HeartbeatRunner` / `runHeartbeatNow(dryRun)`
+  - `scheduler.ts` — interval scheduler
+  - `heartbeat-system.test.ts`
+- `identity/HEARTBEAT.md` — default checklist
+- `config/agent.yaml` — interval 1800s, checklist_path, skip_when_main_busy
+- API: `GET /runtime/heartbeat`, `POST /runtime/heartbeat/run` `{ dry_run?: bool }`
+
+### Behavior contract
+1. Interval scheduler fires without user input
+2. quiet_hours suppresses cycles
+3. Heartbeat uses `heartbeat` lane / skipWhenMainBusy — never corrupts main run
+4. dry_run reports without side effects
+
+### Response types
+no_op · proactive_notify · silent_tool_run · memory_update
+
+### Step 08 — verify + optimize (re-pass)
+Fixes / optimizations:
+- `dry_run` bypasses quiet_hours and enabled (testing always works)
+- concurrent `runNow` serialized (no overlapping cycles)
+- scheduler uses setTimeout chain (no stacked intervals; config interval applies next cycle)
+- intervalSeconds clamped to ≥ 1
+- checklist file read errors → empty list
+- hook errors isolated per item (cycle continues)
+- role-aware checklist path helper (`identity/agents/<role>/HEARTBEAT.md`)
+
+Runtime verify: **25/25 ALL_CHECKS_PASSED**.
+
+## Step 11 — Hooks / Lifecycle Events: DONE
+
+Lightweight `EventBus` for lifecycle extension seams. Additive emits only —
+no existing function signatures broken.
+
+### Built
+- `packages/core/src/hooks/`
+  - `events.ts` — canonical event names + payload types
+  - `event-bus.ts` — `on` / `emit` / `emitAsync`, priority order, timeout, isolation
+  - `hooks.test.ts` — exception isolation, order, block, full catalog fire
+  - `index.ts` — exports + `getLifecycleBus()` singleton
+
+### Events
+session:start|end|reset · session:compact:before|after · workspace:bootstrap ·
+gateway:startup|shutdown · message:received|sent · tool:before_call|after_call ·
+subagent:spawned|ended · command:new|reset|stop
+
+### Wire points (additive)
+- enhancement-router: gateway:startup, workspace:bootstrap, message:received
+- command-queue: session:start / session:end
+- tool registry executeToolStructured: tool:before_call (blockable) / tool:after_call
+- memory compaction: session:compact:before|after (bridged)
+
+### Behavior contract
+1. Handler throw/timeout → logged, core continues
+2. Handlers must stay request-scoped (no long-lived sockets in hook body)
+3. Order: priority DESC, then registration order ASC
+
+## Step 09 — Cron Scheduler: DONE
+
+OpenClaw-style persisted cron jobs (JSON store). Coexists with existing
+`TaskScheduler` (SQLite); this module is the Step 09 surface:
+`cron_add` / `cron_list` / `cron_run` / `cron_remove`.
+
+### Built
+- `packages/core/src/cron/`
+  - `types.ts` — job shape, main|isolated, miss policy
+  - `store.ts` — `state/cron/jobs.json` atomic persist
+  - `schedule.ts` — once + cron next-run (5-field, @hourly, every N)
+  - `service.ts` — CronScheduler + convenience API
+  - `cron.test.ts`
+- API: `GET/POST /runtime/cron`, `POST /runtime/cron/:id/run`, `DELETE /runtime/cron/:id`
+- Wired into enhancement-router with CommandQueue
+
+### Behavior
+1. Jobs survive restart (reload from jobs.json)
+2. delete_after_run removes one-shot after success
+3. isolated → session_key `cron:isolated:<id>` on subagent lane (main untouched)
+4. missed runs: default skip + log; optional run_on_load
+
+### Verify: 12/12 PASS

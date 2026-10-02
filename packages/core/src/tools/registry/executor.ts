@@ -81,6 +81,7 @@ import {
   handleSkillInstall,
 } from "./admin-skill-handlers.js";
 import {
+import { getLifecycleBus } from "../../hooks/index.js";
   handleAdminConfigGet,
   handleAdminConfigValidate,
   handleAdminConfigPatch,
@@ -686,6 +687,19 @@ export class ToolRegistry {
     try {
       const disabled = this.disabledReason(name);
       if (disabled) throw new Error(disabled);
+      // Step 11: tool:before_call — handlers may block
+      const before = await getLifecycleBus().emitAsync("tool:before_call", {
+        toolName: name,
+        args,
+      });
+      if (before.blocked) {
+        return {
+          success: false,
+          output: "",
+          error: before.blockReason ?? "blocked by hook",
+          executionTimeMs: Date.now() - startMs,
+        };
+      }
       const timeout =
         options.timeoutMs ?? TOOL_TIMEOUTS[name] ?? DEFAULT_TOOL_TIMEOUT;
       const output = await executeWithTimeout(
@@ -693,13 +707,28 @@ export class ToolRegistry {
         timeout,
         options.signal,
       );
-      return { success: true, output, executionTimeMs: Date.now() - startMs };
+      const durationMs = Date.now() - startMs;
+      getLifecycleBus().emit("tool:after_call", {
+        toolName: name,
+        args,
+        result: output,
+        durationMs,
+      });
+      return { success: true, output, executionTimeMs: durationMs };
     } catch (e: unknown) {
+      const durationMs = Date.now() - startMs;
+      const error = getErrorMessage(e);
+      getLifecycleBus().emit("tool:after_call", {
+        toolName: name,
+        args,
+        error,
+        durationMs,
+      });
       return {
         success: false,
         output: "",
-        error: getErrorMessage(e),
-        executionTimeMs: Date.now() - startMs,
+        error,
+        executionTimeMs: durationMs,
       };
     }
   }
