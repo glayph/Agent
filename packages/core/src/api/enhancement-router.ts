@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import * as path from "path";
+import * as fs from "fs";
 import {
   validateRuntimeConfig,
   type ConfigValidationResult,
@@ -34,6 +35,7 @@ import {
   runHeartbeatNow,
 } from "../heartbeat-system/index.js";
 import { getLifecycleBus } from "../hooks/index.js";
+import { waitForJob } from "../job-wait.js";
 import {
   CronScheduler,
   setDefaultCronScheduler,
@@ -275,8 +277,17 @@ export function createEnhancementRouter({
     defaultMode: "steer",
     steerFallback: "followup",
   });
+  const lifecycleBus = getLifecycleBus();
+  const heartbeatWorkspaceRoot =
+    runtimePaths.sourceDir ||
+    path.resolve(runtimePaths.identityDir, "..") ||
+    path.resolve(runtimePaths.dataDir, "..");
+  const heartbeatMemoryPath = path.join(
+    runtimePaths.dataDir,
+    "heartbeat-memory.log",
+  );
   const heartbeatRunner = new HeartbeatRunner({
-    workspaceRoot: path.resolve(runtimePaths.dataDir, ".."),
+    workspaceRoot: heartbeatWorkspaceRoot,
     commandQueue,
     config: {
       enabled: true,
@@ -289,6 +300,32 @@ export function createEnhancementRouter({
         console.log(msg, meta ?? "");
       },
       isMainLaneBusy: () => commandQueue.laneActiveCount("main") > 0,
+      notify: (message) => {
+        console.log(`[heartbeat:notify] ${message}`);
+        lifecycleBus.emit("message:sent", {
+          surface: "heartbeat",
+          text: message,
+        });
+      },
+      memoryUpdate: (note) => {
+        try {
+          fs.appendFileSync(
+            heartbeatMemoryPath,
+            `${new Date().toISOString()} ${note}\n`,
+            "utf8",
+          );
+        } catch (err) {
+          console.warn("[heartbeat:memory]", err);
+        }
+      },
+      runSilentTools: async (item) => {
+        // Lightweight health probe — no user session touch.
+        const mainBusy = commandQueue.laneActiveCount("main");
+        const pending = commandQueue.pendingCount();
+        return {
+          summary: `health ok; mainActive=${mainBusy} pending=${pending} item=${item.text.slice(0, 80)}`,
+        };
+      },
     },
   });
   const heartbeatScheduler = new HeartbeatScheduler(heartbeatRunner, {
@@ -296,7 +333,6 @@ export function createEnhancementRouter({
   });
   // Auto-start scheduler (interval from config; does not fire immediately)
   heartbeatScheduler.start();
-  const lifecycleBus = getLifecycleBus();
   lifecycleBus.emit("gateway:startup", { pid: process.pid });
   lifecycleBus.emit("workspace:bootstrap", {
     dataDir: runtimePaths.dataDir,
@@ -304,6 +340,7 @@ export function createEnhancementRouter({
   const cronScheduler = new CronScheduler({
     stateDir: path.join(runtimePaths.dataDir, "state"),
     commandQueue,
+    jobQueue: jobs,
     tickIntervalMs: 15_000,
     log: (msg, meta) => console.log(msg, meta ?? ""),
   });
@@ -656,7 +693,30 @@ export function createEnhancementRouter({
     });
   });
 
-  router.get("/runtime/heartbeat", (_req: Request, res: Response) => {
+  
+  router.post("/runtime/session/reset", (req: Request, res: Response) => {
+    const session_key =
+      (req.body && typeof req.body.session_key === "string" && req.body.session_key) ||
+      (typeof req.query.session_key === "string" && req.query.session_key) ||
+      "";
+    if (!session_key) {
+      res.status(400).json({ error: "session_key required" });
+      return;
+    }
+    lifecycleBus.emit("session:reset", { session_key, reason: "api" });
+    lifecycleBus.emit("command:reset", { session_key, source: "api" });
+    res.json({ ok: true, session_key });
+  });
+
+  router.post("/runtime/command/stop", (req: Request, res: Response) => {
+    const session_key =
+      (req.body && typeof req.body.session_key === "string" && req.body.session_key) ||
+      "";
+    lifecycleBus.emit("command:stop", { session_key, source: "api" });
+    res.json({ ok: true, session_key: session_key || null });
+  });
+
+router.get("/runtime/heartbeat", (_req: Request, res: Response) => {
     res.json({ status: heartbeatScheduler.status() });
   });
 
@@ -795,13 +855,21 @@ export function createEnhancementRouter({
               eventId: normalized.eventId,
               idempotencyKey: normalized.idempotencyKey,
             },
-            execute: async ({ signal }) => {
+            execute: async ({ signal, onSteerInject }) => {
               if (signal.aborted) return;
               lifecycleBus.emit("message:received", {
                 session_key: normalized.session_key,
                 surface: normalized.surface,
                 eventId: normalized.eventId,
                 text: message,
+              });
+              // Steer: collect mid-turn injects; if agent loop does not
+              // consume them live, enqueue as follow-up after current job.
+              const steered: string[] = [];
+              onSteerInject?.((msgs) => {
+                for (const m of msgs) {
+                  if (m && m.trim()) steered.push(m.trim());
+                }
               });
               job = jobs.enqueue(
                 "agent.message",
@@ -812,6 +880,28 @@ export function createEnhancementRouter({
                 },
                 { idempotencyKey: normalized.idempotencyKey },
               );
+              // Hold session slot until job finishes or interrupt cancels it.
+              await waitForJob(jobs, job.id, { signal, timeoutMs: 600_000 });
+              if (signal.aborted) {
+                jobs.cancel(job.id);
+                return;
+              }
+              if (steered.length > 0) {
+                const follow = jobs.enqueue("agent.message", {
+                  message: steered.join("\n"),
+                  sessionId: normalized.session_key,
+                  steered: true,
+                });
+                await waitForJob(jobs, follow.id, {
+                  signal,
+                  timeoutMs: 600_000,
+                });
+              }
+              lifecycleBus.emit("message:sent", {
+                session_key: normalized.session_key,
+                surface: normalized.surface,
+                eventId: normalized.eventId,
+              });
             },
           });
         },

@@ -314,3 +314,21 @@ OpenClaw-style persisted cron jobs (JSON store). Coexists with existing
 4. missed runs: default skip + log; optional run_on_load
 
 ### Verify: 12/12 PASS
+
+## Issue remediation (post Steps 06–11)
+
+Fixed remaining gaps from the audit:
+
+1. **CommandQueue holds session until job done** — inbound `execute` uses `waitForJob`; interrupt cancels the persistent job.
+2. **Steer inject** — `onSteerInject` buffers mid-turn messages; after current job, steered text is enqueued as follow-up `agent.message` (until full agent-loop inject exists).
+3. **Cron → real agent jobs** — `CronScheduler` accepts `jobQueue` and enqueues `agent.message`; waits for completion.
+4. **Past one-shot + run_on_load** — sets `nextRunAt = now` on add.
+5. **Heartbeat hooks wired** — notify (log + message:sent), memoryUpdate (dataDir log), runSilentTools (queue health).
+6. **workspaceRoot** — prefers `sourceDir` / identity parent over `dataDir/..`.
+7. **Lifecycle emits** — `message:sent`, `gateway:shutdown` (SIGINT/SIGTERM), `session:reset` / `command:stop` API routes.
+8. **job-wait.ts** — shared wait/cancel helper.
+
+Still deferred (needs Step 10 / deeper agent work):
+- True mid-turn steer inside LLM token stream
+- Full subagent spawn for isolated cron
+- Merging legacy HeartbeatEngine into heartbeat-system

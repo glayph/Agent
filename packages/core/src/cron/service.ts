@@ -4,6 +4,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { CommandQueue } from "../command-queue/index.js";
+import type { PersistentJobQueue } from "../persistent-job-queue.js";
+import { waitForJob } from "../job-wait.js";
 import { getLifecycleBus } from "../hooks/index.js";
 import { computeNextRunAt, toIso } from "./schedule.js";
 import { CronJobStore } from "./store.js";
@@ -17,6 +19,8 @@ import type {
 export interface CronSchedulerOptions {
   stateDir: string;
   commandQueue?: CommandQueue;
+  /** When set, cron fires enqueue real agent.message jobs. */
+  jobQueue?: PersistentJobQueue;
   /**
    * Poll interval for due jobs (ms). Default 15_000.
    * Jobs still fire accurately relative to nextRunAt checks.
@@ -33,6 +37,7 @@ export interface CronSchedulerOptions {
 export class CronScheduler {
   private readonly store: CronJobStore;
   private readonly commandQueue?: CommandQueue;
+  private readonly jobQueue?: PersistentJobQueue;
   private readonly tickIntervalMs: number;
   private readonly log: (msg: string, meta?: Record<string, unknown>) => void;
   private readonly shouldWake: () => boolean;
@@ -43,6 +48,7 @@ export class CronScheduler {
   constructor(options: CronSchedulerOptions) {
     this.store = new CronJobStore(options.stateDir);
     this.commandQueue = options.commandQueue;
+    this.jobQueue = options.jobQueue;
     this.tickIntervalMs = options.tickIntervalMs ?? 15_000;
     this.log = options.log ?? ((m) => console.log(m));
     this.shouldWake = options.shouldWake ?? (() => true);
@@ -56,7 +62,15 @@ export class CronScheduler {
   add(input: CronJobInput): CronJob {
     const now = new Date().toISOString();
     const id = randomUUID();
-    const nextMs = computeNextRunAt(input.schedule);
+    let nextMs = computeNextRunAt(input.schedule);
+    // Past one-shot + run_on_load → fire on next tick
+    if (
+      nextMs === null &&
+      input.schedule.kind === "once" &&
+      (input.missedRunPolicy ?? "skip") === "run_on_load"
+    ) {
+      nextMs = Date.now();
+    }
     const job: CronJob = {
       id,
       name: input.name.trim() || id.slice(0, 8),
@@ -221,14 +235,41 @@ export class CronScheduler {
           },
           execute: async ({ signal }) => {
             if (signal.aborted) return;
-            // Payload is available to agent runners via queue; default is no-op
-            // so tests can verify isolation without a full agent loop.
             getLifecycleBus().emit("command:new", {
               source: "cron",
               jobId: job.id,
               session_key,
             });
+            // Enqueue a real agent job when job queue is available.
+            if (this.jobQueue) {
+              const pj = this.jobQueue.enqueue("agent.message", {
+                message: job.payload,
+                sessionId: session_key,
+                cronJobId: job.id,
+                cronName: job.name,
+                executionStyle: job.executionStyle,
+              });
+              await waitForJob(this.jobQueue, pj.id, {
+                signal,
+                timeoutMs: 600_000,
+              });
+              if (signal.aborted) {
+                this.jobQueue.cancel(pj.id);
+              }
+            }
           },
+        });
+      } else if (this.jobQueue) {
+        const pj = this.jobQueue.enqueue("agent.message", {
+          message: job.payload,
+          sessionId: session_key,
+          cronJobId: job.id,
+        });
+        await waitForJob(this.jobQueue, pj.id, { timeoutMs: 600_000 });
+        getLifecycleBus().emit("command:new", {
+          source: "cron",
+          jobId: job.id,
+          session_key,
         });
       } else {
         getLifecycleBus().emit("command:new", {
