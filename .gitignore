@@ -86,3 +86,11 @@ test-results/
 /automation-center-multiview-redesign.png
 
 .trash/
+
+# Runtime / user skills (never commit; bundled catalog is packages/skills/)
+/skills/
+/src/skills/
+/.agents/
+skills-lock.json
+**/.agents/
+**/downloaded-skills/

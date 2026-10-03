@@ -1,7 +1,6 @@
 /**
- * Skill Loader and Registry Integration
- * Dynamically loads skills from src/skills/* and registers them with the ToolRegistry
- * Skills are loaded on-demand based on agent needs
+ * Skill Loader and Registry Integration.
+ * Discovers bundled skills (packages/skills) and user skills under dataDir/skills.
  */
 
 import * as path from "path";

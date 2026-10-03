@@ -79,11 +79,14 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
   if (!paths) return resolveRuntimePaths();
   if (typeof paths === "string") {
     const sourceDir = path.resolve(paths);
+    const dataDir = path.join(sourceDir, "data");
     return {
       configDir: path.join(sourceDir, "config"),
-      dataDir: path.join(sourceDir, "data"),
-      skillsDir: path.join(sourceDir, "src", "skills"),
-      cacheDir: path.join(sourceDir, "data", "cache"),
+      dataDir,
+      // User/agent-created skills stay under data/, never under source src/skills
+      // or a repo-root skills/ tree. Bundled catalog is packages/skills/src only.
+      skillsDir: path.join(dataDir, "skills"),
+      cacheDir: path.join(dataDir, "cache"),
       binDir: path.join(sourceDir, "bin"),
       docsDir: path.join(sourceDir, "docs"),
       outputDir: path.join(sourceDir, "output"),
@@ -97,7 +100,7 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
   );
   const configDir = paths.configDir ?? path.join(sourceDir, "config");
   const dataDir = paths.dataDir ?? path.join(sourceDir, "data");
-  const skillsDir = paths.skillsDir ?? path.join(sourceDir, "src", "skills");
+  const skillsDir = paths.skillsDir ?? path.join(dataDir, "skills");
   const cacheDir = paths.cacheDir ?? path.join(dataDir, "cache");
   const binDir = paths.binDir ?? path.join(sourceDir, "bin");
   const docsDir = paths.docsDir ?? path.join(sourceDir, "docs");
@@ -124,8 +127,8 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
  * always <dataDir>/downloaded-skills — a location fully isolated from the
  * agent's own source/workspace tree and from the bundled skill catalog
  * (packages/skills/src), even when RuntimePaths was constructed from a raw
- * workspace path (dev mode), where skillsDir would otherwise resolve
- * *inside* the source tree at <sourceDir>/src/skills.
+ * workspace path (dev mode). User skillsDir is always under dataDir/skills
+ * (or MIKI_RUNTIME_ROOT/skills), never under the source tree.
  *
  * This exists specifically so that cleaning up or resetting the workspace
  * can never accidentally delete a skill fetched from the internet that the
@@ -202,6 +205,7 @@ export function resolveRuntimePaths(): RuntimePaths {
     migrateDirectory(path.join(legacyDir, "docs"), docsDir);
     migrateDirectory(path.join(legacyDir, "output"), outputDir);
     migrateDirectory(path.join(legacyDir, "src", "skills"), skillsDir);
+    migrateDirectory(path.join(legacyDir, "skills"), skillsDir);
     migrateDirectory(path.join(legacyDir, "identity"), identityDir);
   }
 

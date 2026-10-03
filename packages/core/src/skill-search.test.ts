@@ -8,7 +8,7 @@ function makeRuntimePaths(workspaceDir: string): RuntimePaths {
   return {
     configDir: path.join(workspaceDir, "config"),
     dataDir: path.join(workspaceDir, "data"),
-    skillsDir: path.join(workspaceDir, "src", "skills"),
+    skillsDir: path.join(workspaceDir, "data", "skills"),
     cacheDir: path.join(workspaceDir, "data", "cache"),
     binDir: path.join(workspaceDir, "bin"),
     docsDir: path.join(workspaceDir, "docs"),

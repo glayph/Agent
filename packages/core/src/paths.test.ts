@@ -54,6 +54,7 @@ describe("runtime path isolation", () => {
     const paths = normalizeRuntimePaths(workspaceRoot);
     expect(paths.configDir).toBe(path.join(workspaceRoot, "config"));
     expect(paths.dataDir).toBe(path.join(workspaceRoot, "data"));
+    expect(paths.skillsDir).toBe(path.join(workspaceRoot, "data", "skills"));
     expect(paths.identityDir).toBe(path.join(workspaceRoot, "identity"));
     expect(paths.sourceDir).toBe(path.resolve(workspaceRoot));
   });
