@@ -117,10 +117,17 @@ class AgentMemoryIntegration {
       metadata: { ...metadata, role: 'assistant' }
     });
 
-    const graphEvents = this.graphMemory ? [
-      this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof userMessage === 'string' ? userMessage : (userMessage?.content || ''), category: metadata.category || 'conversation', memoryType: 'user_message', sourceType: 'user', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'user' } }),
-      this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof agentResponse === 'string' ? agentResponse : (agentResponse?.content || ''), category: metadata.category || 'conversation', memoryType: 'assistant_response', sourceType: 'agent', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'assistant' } }),
-    ] : [];
+    let graphEvents = [];
+    if (this.graphMemory) {
+      try {
+        graphEvents = [
+          this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof userMessage === 'string' ? userMessage : (userMessage?.content || ''), category: metadata.category || 'conversation', memoryType: 'user_message', sourceType: 'user', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'user' } }),
+          this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof agentResponse === 'string' ? agentResponse : (agentResponse?.content || ''), category: metadata.category || 'conversation', memoryType: 'assistant_response', sourceType: 'agent', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'assistant' } }),
+        ];
+      } catch (err) {
+        console.warn('[memory] graph ingest failed (TKG events kept):', err && err.message ? err.message : err);
+      }
+    }
     return { userEvent, agentEvent, graphEvents };
   }
 
@@ -131,17 +138,24 @@ class AgentMemoryIntegration {
       event_type: 'tool_call',
       metadata: { toolName, ...metadata }
     });
-    const graphMemory = this.graphMemory ? this.graphMemory.ingest({
-      scope: this._scope(metadata),
-      content: `Tool ${toolName} completed. Result: ${String(result).substring(0, 1000)}`,
-      category: 'procedural',
-      memoryType: 'tool_outcome',
-      sourceType: 'tool',
-      sourceReference: metadata.toolCallId || toolName,
-      taskReference: metadata.taskId || metadata.runId || null,
-      metadata: { toolName },
-      explicit: true,
-    }) : null;
+    let graphMemory = null;
+    if (this.graphMemory) {
+      try {
+        graphMemory = this.graphMemory.ingest({
+          scope: this._scope(metadata),
+          content: `Tool ${toolName} completed. Result: ${String(result).substring(0, 1000)}`,
+          category: 'procedural',
+          memoryType: 'tool_outcome',
+          sourceType: 'tool',
+          sourceReference: metadata.toolCallId || toolName,
+          taskReference: metadata.taskId || metadata.runId || null,
+          metadata: { toolName },
+          explicit: true,
+        });
+      } catch (err) {
+        console.warn('[memory] graph tool ingest failed (TKG event kept):', err && err.message ? err.message : err);
+      }
+    }
     return { ...legacy, graphMemory };
   }
 
@@ -174,8 +188,9 @@ class AgentMemoryIntegration {
       parts.push('');
     }
 
-    const contextLines = hook.contextWindow
-      .split('\\n')
+    const rawContext = typeof hook.contextWindow === 'string' ? hook.contextWindow : '';
+    const contextLines = rawContext
+      .split('\n')
       .filter(l => l.trim())
       .slice(0, hook.selectiveContext ? 8 : 16);
     if (contextLines.length > 0) {

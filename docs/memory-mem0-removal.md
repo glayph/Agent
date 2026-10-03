@@ -32,3 +32,14 @@
 - First start creates `dataDir/memory/tkg.db` (SQLite, better-sqlite3).
 - File memory under identity / scopes is unchanged.
 - No Gemini / Mem0 cloud API required for core memory.
+
+## Post-removal verification fixes (2026-10-03)
+
+| Issue | Fix |
+|-------|-----|
+| `getEnhancedSystemPrompt` used `.split('\\n')` (literal backslash-n) | Split on real newlines; guard non-string `contextWindow` |
+| `closeMemory` closed the same TKG twice | Close `_tkg` once only |
+| `getSelectiveMemoryStats` called missing `getStats` | Call `selectiveMemory.stats()` |
+| Agent shutdown left TKG SQLite open | `closeMemory()` from `stopBackgroundTasks` and `close()` |
+| Graph ingest failure could break interaction logging | try/catch around graph ingest; TKG events retained |
+| Types lagged constructors | `TemporalKnowledgeGraph` / `AgentMemoryIntegration` options in `types.d.ts` |

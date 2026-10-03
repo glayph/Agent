@@ -334,9 +334,13 @@ export interface MemoryConsolidationDaemon {
 }
 
 export interface MikiMemoryModule {
-  TemporalKnowledgeGraph: new (dbPath: string) => TemporalKnowledgeGraph;
+  TemporalKnowledgeGraph: new (
+    dbPath: string,
+    options?: { scope?: Record<string, string> },
+  ) => TemporalKnowledgeGraph;
   AgentMemoryIntegration: new (
     tkg: TemporalKnowledgeGraph,
+    options?: { scope?: Record<string, string>; graphMemory?: unknown },
   ) => AgentMemoryIntegration;
   LearningStore: new (
     db: import("better-sqlite3").Database,
@@ -351,4 +355,7 @@ export interface MikiMemoryModule {
       maxEmptyChunkLookbackHours?: number;
     },
   ) => MemoryConsolidationDaemon;
+  MultiHopRetriever?: new (tkg: TemporalKnowledgeGraph) => {
+    retrieve(opts?: Record<string, unknown>): unknown;
+  };
 }

@@ -132,7 +132,7 @@ import {
   type SessionMetadata,
   type SessionSummary,
 } from "./session-history-store.js";
-import { initMemory, getMemory } from "./memory/runtime.js";
+import { initMemory, getMemory, closeMemory } from "./memory/runtime.js";
 import {
   AgentRegistry,
   globalAgentRegistry,
@@ -1559,6 +1559,7 @@ export class AgentOrchestrator {
     this._bgStarted = false;
     // Persist pending memory (summaries of live sessions, queued writes).
     this.fileMemory.shutdown();
+    closeMemory();
 
     return Promise.allSettled(tasks).then(() => {});
   }
@@ -2138,6 +2139,7 @@ export class AgentOrchestrator {
 
   public close(): void {
     this.fileMemory.shutdown();
+    closeMemory();
     this._sessionHistoryStore.close();
   }
 

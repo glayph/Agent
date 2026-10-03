@@ -148,10 +148,10 @@ export function getSelectiveContext(
 
 export function getSelectiveMemoryStats(scope?: Record<string, string>): unknown {
   const tkg = _tkg as TemporalKnowledgeGraph & {
-    selectiveMemory?: { getStats?: (s?: Record<string, string>) => unknown };
+    selectiveMemory?: { stats?: (s?: Record<string, string>) => unknown };
   } | null;
-  if (tkg?.selectiveMemory?.getStats) {
-    return { provider: "local-tkg", primary: true, localPersistence: true, ...((tkg.selectiveMemory.getStats(scope) as object) || {}) };
+  if (tkg?.selectiveMemory?.stats) {
+    return { provider: "local-tkg", primary: true, localPersistence: true, ...((tkg.selectiveMemory.stats(scope) as object) || {}) };
   }
   return { provider: "local-tkg", primary: true, localPersistence: true };
 }
@@ -218,15 +218,11 @@ export function getTemporaryMemory(): unknown | null {
 }
 
 export function closeMemory(): void {
+  // AMI holds the same TKG instance as _tkg; close exactly once.
   try {
     _tkg?.close?.();
   } catch {
     // Shutdown must remain best-effort.
-  }
-  try {
-    (_integration as AgentMemoryIntegration & { tkg?: { close?: () => void } } | null)?.tkg?.close?.();
-  } catch {
-    // ignore
   }
   _integration = null;
   _tkg = null;
