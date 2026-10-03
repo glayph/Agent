@@ -1,12 +1,9 @@
 'use strict';
 
-const Mem0Adapter = require('./mem0-adapter');
-
 class AgentMemoryIntegration {
   constructor(tkg, options = {}) {
     this.tkg = tkg;
     this.graphMemory = options.graphMemory || tkg?.graphMemory || null;
-    this.mem0 = options.mem0Adapter || new Mem0Adapter(options.mem0 || {});
     this.defaultScope = options.scope || {
       agentId: process.env.MIKI_AGENT_ID || 'miki',
       ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
@@ -124,9 +121,6 @@ class AgentMemoryIntegration {
       this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof userMessage === 'string' ? userMessage : (userMessage?.content || ''), category: metadata.category || 'conversation', memoryType: 'user_message', sourceType: 'user', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'user' } }),
       this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof agentResponse === 'string' ? agentResponse : (agentResponse?.content || ''), category: metadata.category || 'conversation', memoryType: 'assistant_response', sourceType: 'agent', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'assistant' } }),
     ] : [];
-    // Mem0 is an optional long-term augmentation. Never block or fail the
-    // local turn because a remote/provider-backed memory write is unavailable.
-    void this.mem0?.addInteraction(userMessage, agentResponse, metadata);
     return { userEvent, agentEvent, graphEvents };
   }
 
@@ -195,26 +189,10 @@ class AgentMemoryIntegration {
   }
 
   /**
-   * Async prompt variant. When mem0 is active in `primary` mode, its scoped
-   * semantic results are the first durable-memory source in the prompt. The
-   * local SQLite/TKG block remains available as secondary operational and
-   * recovery context, and current-session history is never delegated to mem0.
+   * Async prompt variant — local TKG only.
    */
   async getEnhancedSystemPromptAsync(userMessage, systemState = {}) {
-    const localPrompt = this.getEnhancedSystemPrompt(userMessage);
-    if (!this.mem0?.isEnabled?.()) return localPrompt;
-    if (this.mem0.mode === 'fallback') return localPrompt;
-    const results = await this.mem0.search(userMessage, this._scope(systemState));
-    if (!results.length) return localPrompt;
-
-    const lines = results.map((item) => {
-      const score = typeof item.score === 'number' ? `; relevance=${item.score.toFixed(2)}` : '';
-      return `- ${item.text}${score}`;
-    });
-    const mem0Block = `=== MEM0 PRIMARY LONG-TERM MEMORY ===\n${lines.join('\n')}\nMem0 is the primary durable semantic-memory source for this turn. Treat retrieved facts as scoped and fallible; current conversation history and verified tool results take precedence.`;
-    return this.mem0.mode === 'primary'
-      ? `${mem0Block}\n\n=== LOCAL MEMORY SECONDARY / RECOVERY CONTEXT ===\n${localPrompt}`
-      : `${localPrompt}\n\n=== MEM0 LONG-TERM MEMORY (augmentation) ===\n${lines.join('\n')}\nUse this as scoped durable recall; current conversation history and verified local memory take precedence.`;
+    return this.getEnhancedSystemPrompt(userMessage);
   }
 
   _normalizeMemoryText(text) {

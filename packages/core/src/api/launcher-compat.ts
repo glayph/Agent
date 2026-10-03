@@ -3563,11 +3563,10 @@ export function createLauncherCompatRouter({
     const workspaceSkills = skills.filter(
       (skill) => skillSourceForPath(paths, skill.path) === "workspace",
     );
-    const localMem0Files = [
-      path.join(paths.dataDir, "memory", "vectors.db"),
-      path.join(paths.dataDir, "memory", "history.db"),
+    const localTkgFiles = [
+      path.join(paths.dataDir, "memory", "tkg.db"),
     ];
-    const memoryDbExists = localMem0Files.every((candidate) =>
+    const memoryDbExists = localTkgFiles.some((candidate) =>
       fs.existsSync(candidate),
     );
     const runtimeApplyStatus = state.runtime_apply_status || "applied";
@@ -3698,11 +3697,11 @@ export function createLauncherCompatRouter({
             const agentRunsDbPath = path.join(paths.dataDir, "agent-runs.db");
             const agentRunsExists = fs.existsSync(agentRunsDbPath);
             const missing = [];
-            if (!memoryExists) missing.push("memory/vectors.db + memory/history.db");
+            if (!memoryExists) missing.push("memory/tkg.db");
             if (!agentRunsExists) missing.push("agent-runs.db");
             if (missing.length > 0)
-              return `Local Mem0 files missing: ${missing.join(", ")}. Mem0 may still be initializing.`;
-            return "Local Mem0 stores durable semantic memory, memory history, tool outcomes, and scoped facts.";
+              return `Local TKG database missing: ${missing.join(", ")}. Memory may still be initializing.`;
+            return "Local TKG stores durable semantic memory, events, graph facts, and scoped selective memory.";
           } catch {
             return "Memory probe failed.";
           }
@@ -3710,8 +3709,8 @@ export function createLauncherCompatRouter({
         evidence: [
           "/memory/search",
           "/sessions",
-          "memory/vectors.db",
-          "memory/history.db",
+          "memory/tkg.db",
+          "FileMemoryService (MEMORY.md)",
         ],
         metrics: {
           active_sessions: sessions.length,

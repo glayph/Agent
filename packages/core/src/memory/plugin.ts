@@ -23,9 +23,9 @@ class MemoryRuntime implements MemoryPluginRuntime {
       status: this.closed ? "disabled" : "functional",
       details: {
         persistent: true,
-        backend: "mem0",
+        backend: "local-tkg",
         primary: true,
-        localPersistence: false,
+        localPersistence: true,
       },
     };
   }
@@ -42,13 +42,13 @@ export const memoryPlugin: PluginDescriptor<
   MemoryPluginRuntime
 > = {
   manifest: pluginManifest({
-    id: "memory.mem0",
-    displayName: "Mem0 Primary Memory",
+    id: "memory.local-tkg",
+    displayName: "Local TKG Memory",
     version: "1.0.0",
     capabilities: ["memory"],
     runtimeStatus: "functional",
     description:
-      "Strict Mem0 primary memory. Conversation history remains session-scoped; no local SQLite/TKG memory is used.",
+      "Fully local Temporal Knowledge Graph + graph cognitive memory. File notes and compaction remain in memory-files.",
     configKey: "memory",
     requiredConfig: [],
     secretFields: [],

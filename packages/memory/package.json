@@ -1,7 +1,7 @@
 {
   "name": "@miki/memory",
   "version": "2.0.0",
-  "description": "Miki Temporal Knowledge Graph & Event-Driven Stream Architecture — persistent memory for 24/7 autonomous agents",
+  "description": "Miki Temporal Knowledge Graph & Event-Driven Stream Architecture \u2014 fully local persistent memory",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
@@ -13,13 +13,11 @@
     "./regions": "./src/regions.js",
     "./temporary-memory": "./src/temporary-memory.js",
     "./multi-hop-retriever": "./src/multi-hop-retriever.js",
-    "./graph-cognitive-memory": "./src/graph-cognitive-memory.js",
-    "./mem0-adapter": "./src/mem0-adapter.js",
-    "./mem0-only-integration": "./src/mem0-only-integration.js"
+    "./graph-cognitive-memory": "./src/graph-cognitive-memory.js"
   },
   "scripts": {
     "build": "echo 'No build step needed'",
-    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js && node src/test/selective-memory-engine.test.js && node src/test/learning-store.test.js && node --test src/test/memory-prompt-budget.test.js src/test/mem0-adapter.test.js"
+    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js && node src/test/selective-memory-engine.test.js && node src/test/learning-store.test.js && node --test src/test/memory-prompt-budget.test.js"
   },
   "keywords": [
     "miki",
@@ -34,8 +32,7 @@
   "license": "MIT",
   "dependencies": {
     "@google/genai": "^1.52.0",
-    "better-sqlite3": "^12.11.1",
-    "mem0ai": "^3.3.1"
+    "better-sqlite3": "^12.11.1"
   },
   "turbo": {
     "outputs": []
