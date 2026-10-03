@@ -23,7 +23,7 @@ import { rewriteMcpProxyPath } from "./runtime-utils.js";
 import {
   createRelayWebSocketServer,
   rejectWsUpgrade,
-  hasWsAuthMaterial,
+  firstHeaderValue,
   relayWs,
   closeWebSocketServer,
 } from "./websocket-relay.js";
@@ -500,6 +500,54 @@ async function isValidDashboardSession(
   }
 }
 
+/** Validate credentials before accepting a WebSocket handshake. */
+async function isValidWebSocketUpgrade(
+  request: http.IncomingMessage,
+  pathname: string,
+): Promise<boolean> {
+  const apiKeyHeader = firstHeaderValue(request.headers["x-api-key"]).trim();
+  const authorizationHeader = firstHeaderValue(
+    request.headers.authorization,
+  ).trim();
+  const credentialHeader = apiKeyHeader || authorizationHeader;
+
+  if (credentialHeader) {
+    const apiKey = apiKeyHeader
+      ? apiKeyHeader
+      : authorizationHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
+    if (!apiKey) return false;
+
+    try {
+      if (
+        getApiKeyAuthenticationSecrets().some((candidate) =>
+          timingSafeStringEqual(apiKey, candidate),
+        )
+      ) {
+        return true;
+      }
+    } catch {
+      // The channel-token check below may still authorize /miki/ws when API
+      // key auth is not configured.
+    }
+
+    // /miki/ws also supports a channel token. Only accept it when the same
+    // configured value is available to the gateway; otherwise fail closed.
+    const configuredMikiToken = process.env.MIKI_TOKEN?.trim();
+    if (
+      pathname === "/miki/ws" &&
+      configuredMikiToken &&
+      authorizationHeader &&
+      !apiKeyHeader
+    ) {
+      return timingSafeStringEqual(apiKey, configuredMikiToken);
+    }
+    return false;
+  }
+
+  // Cookie presence alone is not authentication: validate it against core.
+  return await isValidDashboardSession(request.headers.cookie);
+}
+
 // Protects non-health gateway routes.
 // Accepts X-API-Key header, Authorization: Bearer, or a verified dashboard
 // session cookie (checked against core, see isValidDashboardSession above).
@@ -508,7 +556,7 @@ async function gatewayAuthMiddleware(
   res: express.Response,
   next: express.NextFunction,
 ): Promise<void> {
-  if (req.path === "/health") {
+  if (req.path === "/health" || req.path === "/live") {
     next();
     return;
   }
@@ -668,20 +716,66 @@ function sendDashboardHtml(res: express.Response): void {
   res.type("html").send(html);
 }
 
-app.use(express.static(webDir));
-app.use("/web", express.static(webDir));
+function setFrontendAssetCacheHeaders(
+  res: express.Response,
+  filePath: string,
+): void {
+  const filename = path.basename(filePath);
+  if (
+    /[-_][a-z0-9_-]{6,}\.(?:js|css|woff2?|png|jpe?g|webp|svg|ico)$/i.test(
+      filename,
+    )
+  ) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  }
+}
+
+const frontendStaticOptions = {
+  setHeaders: setFrontendAssetCacheHeaders,
+};
+
+app.use(express.static(webDir, frontendStaticOptions));
+app.use("/web", express.static(webDir, frontendStaticOptions));
 app.get(["/", "/web"], (_req, res) => {
   sendDashboardHtml(res);
 });
 
-// Protect all /gateway/* routes except /gateway/health
+// TanStack Router owns client-side page navigation. Return the dashboard shell
+// for browser document requests so refreshing a nested route (for example,
+// /plugins/channels) does not fall through to the gateway's 404 handler.
+app.get("*", (req, res, next) => {
+  if (
+    req.path.startsWith("/api") ||
+    req.path.startsWith("/gateway") ||
+    req.path.startsWith("/miki") ||
+    req.path.startsWith("/web") ||
+    path.extname(req.path) ||
+    !req.accepts("html")
+  ) {
+    return next();
+  }
+  return sendDashboardHtml(res);
+});
+
+// Protect all /gateway/* routes except the health and liveness probes.
 app.use("/gateway", gatewayAuthMiddleware);
 
 // Health endpoint for the gateway itself
 app.get("/gateway/health", (_req, res) => {
-  res.json({
+  const healthy = coreHealthy;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? "ok" : "degraded",
+    coreHealthy: healthy,
+    uptime: process.uptime(),
+    pid: process.pid,
+  });
+});
+
+// Liveness remains independent of core readiness so an external supervisor
+// can repair the core without losing the gateway process itself.
+app.get("/gateway/live", (_req, res) => {
+  res.status(200).json({
     status: "ok",
-    coreHealthy,
     uptime: process.uptime(),
     pid: process.pid,
   });
@@ -800,7 +894,7 @@ const WS_PATHS = ["/miki/ws", "/ws/chat", "/ws", "/chat/ws"];
 const wss = createRelayWebSocketServer();
 const activeWsConnections = new Set<WSWebSocket>();
 
-server.on("upgrade", (request, socket, head) => {
+server.on("upgrade", async (request, socket, head) => {
   const origin = Array.isArray(request.headers.origin)
     ? request.headers.origin[0]
     : request.headers.origin;
@@ -819,10 +913,11 @@ server.on("upgrade", (request, socket, head) => {
       rejectWsUpgrade(socket, 403, "Rate limit exceeded");
       return;
     }
-    if (!hasWsAuthMaterial(request)) {
+    if (!(await isValidWebSocketUpgrade(request, matched))) {
       rejectWsUpgrade(socket, 401, "Unauthorized");
       return;
     }
+    if (socket.destroyed) return;
     wss.handleUpgrade(request, socket, head, (clientWs) => {
       relayWs(
         clientWs,

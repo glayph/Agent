@@ -1,6 +1,9 @@
 import type { ReactNode } from "react"
 
-import { ProviderStatusLine, type CredentialStatus } from "./provider-status-line"
+import {
+  type CredentialStatus,
+  ProviderStatusLine,
+} from "./provider-status-line"
 
 interface CredentialCardProps {
   title: ReactNode

@@ -75,6 +75,8 @@ export interface WorkflowState {
 export interface WorkflowStateStore {
   get(id: string): WorkflowState | null;
   save(state: WorkflowState): void;
+  /** Persist only when the caller still owns the active lease. */
+  saveOwned?(state: WorkflowState, owner: string): boolean;
   listActive(): WorkflowState[];
   claim?(state: WorkflowState, owner: string, leaseMs: number): boolean;
   release?(id: string, owner: string): void;
@@ -89,7 +91,35 @@ export class InMemoryWorkflowStateStore implements WorkflowStateStore {
     return clone(this.states.get(id));
   }
   save(state: WorkflowState): void {
-    this.states.set(state.id, clone(state)!);
+    const current = this.states.get(state.id);
+    this.states.set(state.id, clone({
+      ...state,
+      leaseOwner: state.leaseOwner ?? current?.leaseOwner,
+      leaseUntil: state.leaseUntil ?? current?.leaseUntil,
+    })!);
+  }
+  saveOwned(state: WorkflowState, owner: string): boolean {
+    const current = this.states.get(state.id);
+    if (!current || current.leaseOwner !== owner || (current.leaseUntil ?? 0) <= Date.now()) return false;
+    this.states.set(state.id, clone({ ...state, leaseOwner: owner, leaseUntil: current.leaseUntil })!);
+    return true;
+  }
+  claim(state: WorkflowState, owner: string, leaseMs: number): boolean {
+    const current = this.states.get(state.id);
+    const nowMs = Date.now();
+    if (current?.leaseOwner && (current.leaseUntil ?? 0) > nowMs && current.leaseOwner !== owner) return false;
+    this.states.set(state.id, clone({ ...state, leaseOwner: owner, leaseUntil: nowMs + Math.max(1_000, leaseMs) })!);
+    return true;
+  }
+  release(id: string, owner: string): void {
+    const state = this.states.get(id);
+    if (state?.leaseOwner === owner) this.states.set(id, clone({ ...state, leaseOwner: undefined, leaseUntil: undefined })!);
+  }
+  renewLease(id: string, owner: string, leaseMs: number): boolean {
+    const state = this.states.get(id);
+    if (!state || state.leaseOwner !== owner || (state.leaseUntil ?? 0) <= Date.now()) return false;
+    this.states.set(id, clone({ ...state, leaseUntil: Date.now() + Math.max(1_000, leaseMs) })!);
+    return true;
   }
   listActive(): WorkflowState[] {
     return [...this.states.values()]
@@ -112,6 +142,29 @@ export class JsonWorkflowStateStore implements WorkflowStateStore {
     const temporary = `${this.filePath}.${process.pid}.tmp`;
     fs.writeFileSync(temporary, `${JSON.stringify(states, null, 2)}\n`, "utf8");
     fs.renameSync(temporary, this.filePath);
+  }
+  saveOwned(state: WorkflowState, owner: string): boolean {
+    const current = this.get(state.id);
+    if (!current || current.leaseOwner !== owner || (current.leaseUntil ?? 0) <= Date.now()) return false;
+    this.save({ ...state, leaseOwner: owner, leaseUntil: current.leaseUntil });
+    return true;
+  }
+  claim(state: WorkflowState, owner: string, leaseMs: number): boolean {
+    const current = this.get(state.id);
+    const nowMs = Date.now();
+    if (current?.leaseOwner && (current.leaseUntil ?? 0) > nowMs && current.leaseOwner !== owner) return false;
+    this.save({ ...state, leaseOwner: owner, leaseUntil: nowMs + Math.max(1_000, leaseMs) });
+    return true;
+  }
+  release(id: string, owner: string): void {
+    const state = this.get(id);
+    if (state?.leaseOwner === owner) this.save({ ...state, leaseOwner: undefined, leaseUntil: undefined });
+  }
+  renewLease(id: string, owner: string, leaseMs: number): boolean {
+    const state = this.get(id);
+    if (!state || state.leaseOwner !== owner || (state.leaseUntil ?? 0) <= Date.now()) return false;
+    this.save({ ...state, leaseUntil: Date.now() + Math.max(1_000, leaseMs) });
+    return true;
   }
   listActive(): WorkflowState[] {
     return this.load().filter(
@@ -177,6 +230,29 @@ export class SqliteWorkflowStateStore implements WorkflowStateStore {
         leaseOwner,
         leaseUntil,
       );
+  }
+
+  saveOwned(state: WorkflowState, owner: string): boolean {
+    const current = this.db
+      .prepare("SELECT lease_until FROM workflow_states WHERE id = ? AND lease_owner = ?")
+      .get(state.id, owner) as { lease_until?: number } | undefined;
+    if (!current || (current.lease_until ?? 0) <= Date.now()) return false;
+    const leaseUntil = state.leaseUntil ?? current.lease_until;
+    const result = this.db
+      .prepare(
+        `UPDATE workflow_states
+         SET state_json = ?, lease_owner = ?, lease_until = ?
+         WHERE id = ? AND lease_owner = ? AND lease_until > ?`,
+      )
+      .run(
+        JSON.stringify(clone({ ...state, leaseOwner: owner, leaseUntil })),
+        owner,
+        leaseUntil,
+        state.id,
+        owner,
+        Date.now(),
+      );
+    return result.changes > 0;
   }
 
   claim(state: WorkflowState, owner: string, leaseMs: number): boolean {
@@ -357,6 +433,7 @@ export class WorkflowEngine {
     if (state.steps.length === 0) {
       state = await this.initialize(input, taskId, signal);
     }
+    state.leaseOwner = owner;
     const run = this.recorder.create(
       input.objective,
       state.steps.map((step) => step.title),
@@ -374,6 +451,7 @@ export class WorkflowEngine {
     }
     state.status = "running";
     this.checkpoint(state, input);
+    let leaseLost = false;
     const heartbeatTimer = setInterval(
       () => {
         state.heartbeatAt = now();
@@ -382,7 +460,16 @@ export class WorkflowEngine {
         // do a lease-only renewal, or when real progress happened since the
         // last checkpoint and needs to be persisted anyway.
         const leaseRenewed = this.store.renewLease?.(state.id, owner, 60_000);
-        if (leaseRenewed === undefined) this.store.claim?.(state, owner, 60_000);
+        if (leaseRenewed === false) {
+          leaseLost = true;
+          clearInterval(heartbeatTimer);
+          return;
+        }
+        if (leaseRenewed === undefined && !this.store.claim?.(state, owner, 60_000)) {
+          leaseLost = true;
+          clearInterval(heartbeatTimer);
+          return;
+        }
         this.checkpoint(state, input);
       },
       Math.max(250, input.heartbeatIntervalMs ?? 30_000),
@@ -390,6 +477,7 @@ export class WorkflowEngine {
     try {
       while (state.cursor < state.steps.length) {
         this.throwIfStopped(signal);
+        if (leaseLost) throw new Error("Workflow lease lost");
         const step = state.steps[state.cursor];
         if (!step) break;
         step.status = "running";
@@ -415,6 +503,7 @@ export class WorkflowEngine {
         const retries = Math.max(0, input.maxRetries ?? 2);
         for (let attempt = 0; attempt <= retries; attempt += 1) {
           this.throwIfStopped(signal);
+          if (leaseLost) throw new Error("Workflow lease lost");
           try {
             result = await input.executor.execute(step, {
               ...context,
@@ -454,6 +543,7 @@ export class WorkflowEngine {
           return this.recorder.get(recorderId) ?? run;
         }
         this.throwIfStopped(signal);
+        if (leaseLost) throw new Error("Workflow lease lost");
         const evidence = await input.verifier.verify(step, result, context);
         this.recorder.completeStep(recorderId, recorded, evidence);
         step.output = result.output;
@@ -479,6 +569,7 @@ export class WorkflowEngine {
         this.checkpoint(state, input);
         throw error;
       }
+      if (leaseLost || errorMessage(error) === "Workflow lease lost") throw error;
       state.status = "failed";
       state.errors.push(errorMessage(error));
       this.checkpoint(state, input);
@@ -587,7 +678,13 @@ export class WorkflowEngine {
       return;
     }
     this.lastCheckpointSignature = signature;
-    this.store.save(state);
+    if (state.leaseOwner && this.store.saveOwned) {
+      if (!this.store.saveOwned(state, state.leaseOwner)) {
+        throw new Error("Workflow lease lost");
+      }
+    } else {
+      this.store.save(state);
+    }
     input.onProgress?.(clone(state)!);
   }
   private throwIfStopped(signal: AbortSignal): void {

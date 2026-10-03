@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 export type ToolLockMode = "shared" | "exclusive";
 
 export interface ToolInvocationLike {
@@ -55,12 +58,21 @@ export interface ToolConcurrencyStats {
   lockTimeouts: number;
 }
 
+export interface ToolConcurrencyContext {
+  workspaceDir?: string;
+  browserResourceId?: string;
+  desktopResourceId?: string;
+}
+
 interface ToolPolicyTemplate {
   readOnly: boolean;
   stateless: boolean;
   timeoutMs: number;
   retry?: Partial<ToolRetryPolicy>;
-  locks: (args: Record<string, unknown>) => ToolResourceLock[];
+  locks: (
+    args: Record<string, unknown>,
+    context?: ToolConcurrencyContext,
+  ) => ToolResourceLock[];
 }
 
 interface LockWaiter {
@@ -122,11 +134,42 @@ function normalizedKeyPart(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\/+/g, "/") || "default";
 }
 
+function nearestExistingRealPath(target: string): string {
+  let probe = path.resolve(target);
+  const suffix: string[] = [];
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    suffix.unshift(path.basename(probe));
+    probe = parent;
+  }
+  try {
+    probe = fs.realpathSync.native(probe);
+  } catch {
+    probe = path.resolve(probe);
+  }
+  return path.resolve(probe, ...suffix);
+}
+
+export function canonicalizeFileLockPath(
+  filePath: string,
+  baseDir = process.cwd(),
+): string {
+  const resolved = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(baseDir, filePath);
+  return nearestExistingRealPath(resolved);
+}
+
 function fileLocks(
   args: Record<string, unknown>,
   mode: ToolLockMode,
+  context?: ToolConcurrencyContext,
 ): ToolResourceLock[] {
-  const pathKey = normalizedKeyPart(stringArg(args, "path", "unknown"));
+  const pathKey = canonicalizeFileLockPath(
+    stringArg(args, "path", "unknown"),
+    context?.workspaceDir || process.cwd(),
+  );
   return [
     { key: "workspace", mode: "shared" },
     { key: `file:${pathKey}`, mode },
@@ -165,7 +208,7 @@ const TOOL_POLICY_TEMPLATES = new Map<string, ToolPolicyTemplate>([
       readOnly: true,
       stateless: false,
       timeoutMs: 30_000,
-      locks: (args) => fileLocks(args, "shared"),
+      locks: (args, context) => fileLocks(args, "shared", context),
     },
   ],
   [
@@ -174,7 +217,7 @@ const TOOL_POLICY_TEMPLATES = new Map<string, ToolPolicyTemplate>([
       readOnly: false,
       stateless: false,
       timeoutMs: 60_000,
-      locks: (args) => fileLocks(args, "exclusive"),
+      locks: (args, context) => fileLocks(args, "exclusive", context),
     },
   ],
   [
@@ -183,7 +226,7 @@ const TOOL_POLICY_TEMPLATES = new Map<string, ToolPolicyTemplate>([
       readOnly: false,
       stateless: false,
       timeoutMs: 60_000,
-      locks: (args) => fileLocks(args, "exclusive"),
+      locks: (args, context) => fileLocks(args, "exclusive", context),
     },
   ],
   [
@@ -282,8 +325,12 @@ const TOOL_POLICY_TEMPLATES = new Map<string, ToolPolicyTemplate>([
 
 const BROWSER_TOOLS = new Set([
   "browser_navigate",
+  "browser_play_media",
   "browser_click",
   "browser_type",
+  "browser_invoke",
+  "browser_fill",
+  "browser_press",
   "browser_extract",
   "browser_screenshot",
   "browser_scroll",
@@ -299,6 +346,7 @@ const BROWSER_TOOLS = new Set([
 export function getToolConcurrencyPolicy(
   toolName: string,
   args: Record<string, unknown>,
+  context?: ToolConcurrencyContext,
 ): ToolConcurrencyPolicy {
   const browserPolicy = BROWSER_TOOLS.has(toolName)
     ? {
@@ -306,12 +354,32 @@ export function getToolConcurrencyPolicy(
         stateless: false,
         timeoutMs: toolName.startsWith("scrape") ? 120_000 : 90_000,
         retry: { maxAttempts: 2 },
-        locks: () => exclusiveResource("browser:default"),
+        locks: () =>
+          exclusiveResource(
+            `browser:${context?.browserResourceId || "default"}`,
+          ),
+      }
+    : undefined;
+  const computerPolicy = toolName.startsWith("computer_")
+    ? {
+        readOnly:
+          toolName === "computer_observe" ||
+          toolName === "computer_verify" ||
+          toolName === "computer_get_system_info" ||
+          toolName.startsWith("computer_list_"),
+        stateless: false,
+        timeoutMs: 60_000,
+        retry: { maxAttempts: 1 },
+        locks: () =>
+          exclusiveResource(
+            `desktop:${context?.desktopResourceId || "default"}`,
+          ),
       }
     : undefined;
 
   const template = TOOL_POLICY_TEMPLATES.get(toolName) ??
-    browserPolicy ?? {
+    browserPolicy ??
+    computerPolicy ?? {
       readOnly: false,
       stateless: false,
       timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -325,7 +393,7 @@ export function getToolConcurrencyPolicy(
     stateless: template.stateless,
     timeoutMs: template.timeoutMs,
     retry: mergeRetryPolicy(template.retry),
-    locks: normalizeLocks(template.locks(args)),
+    locks: normalizeLocks(template.locks(args, context)),
   };
 }
 
@@ -364,11 +432,16 @@ export function locksConflict(
 
 export function createToolExecutionPlan<T extends ToolInvocationLike>(
   invocations: T[],
+  context?: ToolConcurrencyContext,
 ): ToolExecutionPlan<T> {
   const planned = invocations.map((invocation, index) => ({
     invocation,
     index,
-    policy: getToolConcurrencyPolicy(invocation.toolName, invocation.toolArgs),
+    policy: getToolConcurrencyPolicy(
+      invocation.toolName,
+      invocation.toolArgs,
+      context,
+    ),
   }));
 
   const dependents = new Map<number, Set<number>>();

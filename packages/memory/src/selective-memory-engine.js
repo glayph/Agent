@@ -138,7 +138,13 @@ class SelectiveMemoryEngine {
     const agentId = String(input.agentId || input.agent_id || '').trim() || 'miki';
     const ownerId = String(input.ownerId || input.owner_id || '').trim() || 'default-owner';
     const workspaceId = String(input.workspaceId || input.workspace_id || '').trim() || 'default-workspace';
-    return { agentId, ownerId, workspaceId, scopeKey: `${agentId}:${ownerId}:${workspaceId}` };
+    return { agentId, ownerId, workspaceId, scopeKey: [agentId, ownerId, workspaceId].map(encodeURIComponent).join(':'), legacyScopeKey: `${agentId}:${ownerId}:${workspaceId}` };
+  }
+
+  _scopeKeys(scope) {
+    return scope.legacyScopeKey && scope.legacyScopeKey !== scope.scopeKey
+      ? [scope.scopeKey, scope.legacyScopeKey]
+      : [scope.scopeKey];
   }
 
   estimatePromptTokens(text) {
@@ -285,25 +291,77 @@ class SelectiveMemoryEngine {
     return edgeId;
   }
 
+  /**
+   * Fix #8: retention/consolidation for the selective store.
+   * - archives expired chunks
+   * - removes orphan postings
+   * - trims retrieval events older than 30 days (and caps per-scope rows)
+   * - merges exact normalized duplicates (keeps the highest importance row)
+   * Idempotent and transactional; safe to run from the daemon.
+   */
+  maintenance(options = {}) {
+    if (!this.initialized) this.initializeSync();
+    const now = nowIso();
+    const eventCutoff = new Date(Date.now() - Number(options.eventRetentionDays || 30) * 86400000).toISOString();
+    const report = { expired: 0, orphanPostings: 0, eventsDeleted: 0, duplicatesMerged: 0 };
+    const tx = this.db.transaction(() => {
+      report.expired = this.db.prepare("UPDATE memory_chunk_index SET status = 'archived', updated_at = ? WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?").run(now, now).changes;
+      report.orphanPostings = this.db.prepare('DELETE FROM memory_chunk_postings WHERE chunk_id NOT IN (SELECT id FROM memory_chunk_index)').run().changes;
+      report.eventsDeleted = this.db.prepare('DELETE FROM memory_retrieval_events WHERE created_at < ?').run(eventCutoff).changes;
+      const dupes = this.db.prepare(`SELECT scope_key, region, lower(trim(content)) AS norm, COUNT(*) AS n
+        FROM memory_chunk_index WHERE status = 'active' GROUP BY scope_key, region, norm HAVING n > 1 LIMIT 500`).all();
+      for (const d of dupes) {
+        const rows = this.db.prepare(`SELECT id FROM memory_chunk_index WHERE scope_key = ? AND region = ? AND status = 'active' AND lower(trim(content)) = ? ORDER BY importance DESC, confidence DESC, updated_at DESC`).all(d.scope_key, d.region, d.norm);
+        for (const r of rows.slice(1)) {
+          this.db.prepare("UPDATE memory_chunk_index SET status = 'merged', updated_at = ? WHERE id = ?").run(now, r.id);
+          report.duplicatesMerged++;
+        }
+      }
+    });
+    tx();
+    return report;
+  }
+
   _candidateRows(scope, tokens, regions) {
+    // Fix #3: Hybrid retrieval — lexical and semantic candidates are always
+    // merged. The previous early-return meant that when lexical hits existed,
+    // semantic-only matches (high importance/confidence but different phrasing)
+    // were silently dropped. Now both pools contribute to the candidate set.
     const regionList = [...regions];
     const regionPlaceholders = regionList.map(() => '?').join(',');
+    const scopeKeys = this._scopeKeys(scope);
+    const scopePlaceholders = scopeKeys.map(() => '?').join(',');
+
+    const seen = new Set();
+    const allRows = [];
+
     if (tokens.length > 0) {
       const tokenPlaceholders = tokens.map(() => '?').join(',');
-      const rows = this.db.prepare(`SELECT c.*, SUM(p.frequency) AS lexical_hits
+      const lexicalRows = this.db.prepare(`SELECT c.*, SUM(p.frequency) AS lexical_hits
         FROM memory_chunk_postings p JOIN memory_chunk_index c ON c.id = p.chunk_id
-        WHERE p.scope_key = ? AND p.token IN (${tokenPlaceholders})
-          AND c.scope_key = ? AND c.status = 'active' AND c.region IN (${regionPlaceholders})
+        WHERE p.scope_key IN (${scopePlaceholders}) AND p.token IN (${tokenPlaceholders})
+          AND c.scope_key IN (${scopePlaceholders}) AND c.status = 'active' AND c.region IN (${regionPlaceholders})
           AND (c.expires_at IS NULL OR c.expires_at > ?)
         GROUP BY c.id ORDER BY lexical_hits DESC, c.updated_at DESC LIMIT ?`)
-        .all(scope.scopeKey, ...tokens, scope.scopeKey, ...regionList, nowIso(), this.options.candidateLimit);
-      if (rows.length > 0) return rows;
+        .all(...scopeKeys, ...tokens, ...scopeKeys, ...regionList, nowIso(), this.options.candidateLimit);
+      for (const row of lexicalRows) {
+        if (!seen.has(row.id)) { seen.add(row.id); allRows.push(row); }
+      }
     }
-    return this.db.prepare(`SELECT * FROM memory_chunk_index
-      WHERE scope_key = ? AND status = 'active' AND region IN (${regionPlaceholders})
+
+    // Semantic/importance-ranked candidates always supplement lexical results
+    // so high-confidence facts with different phrasing are never silently lost.
+    const semanticLimit = Math.max(16, Math.floor(this.options.candidateLimit / 2));
+    const semanticRows = this.db.prepare(`SELECT * FROM memory_chunk_index
+      WHERE scope_key IN (${scopePlaceholders}) AND status = 'active' AND region IN (${regionPlaceholders})
         AND (expires_at IS NULL OR expires_at > ?)
       ORDER BY importance DESC, confidence DESC, updated_at DESC LIMIT ?`)
-      .all(scope.scopeKey, ...regionList, nowIso(), Math.min(this.options.candidateLimit, 24));
+      .all(...scopeKeys, ...regionList, nowIso(), semanticLimit);
+    for (const row of semanticRows) {
+      if (!seen.has(row.id)) { seen.add(row.id); allRows.push(row); }
+    }
+
+    return allRows;
   }
 
   _queryEmbedding(query, options) {

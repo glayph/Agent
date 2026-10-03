@@ -71,7 +71,6 @@ import { SqliteAuditLog } from "../audit-log.js";
 import { ApprovalInbox } from "../security/approval-inbox.js";
 import { createApprovalRouter } from "./approval-router.js";
 import { PersistentJobQueue } from "../persistent-job-queue.js";
-import { getLifecycleBus } from "../hooks/index.js";
 import { PersistentJobRunner } from "../persistent-job-runner.js";
 import { resolveRuntimePaths } from "../paths.js";
 import crypto from "crypto";
@@ -2985,7 +2984,7 @@ app.get("/status", (_req, res) => {
   });
 });
 
-app.post("/agent/route-preview", async (req, res) => {
+app.post("/agent/route-preview", requireHttpAuth, async (req, res) => {
   try {
     const body = (req.body || {}) as { message?: unknown };
     const message = typeof body.message === "string" ? body.message.trim() : "";
@@ -3785,14 +3784,6 @@ let shutdownInProgress = false;
 async function shutdown() {
   if (shutdownInProgress) return;
   shutdownInProgress = true;
-  try {
-    getLifecycleBus().emit("gateway:shutdown", {
-      pid: process.pid,
-      reason: "signal",
-    });
-  } catch {
-    /* ignore */
-  }
   console.log("Shutting down...");
   resourceMonitor.stop();
   _clearWSPing();

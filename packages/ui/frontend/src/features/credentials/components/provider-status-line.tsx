@@ -1,10 +1,7 @@
 import { useTranslation } from "react-i18next"
 
 export type CredentialStatus =
-  | "connected"
-  | "needs_refresh"
-  | "expired"
-  | "not_logged_in"
+  "connected" | "needs_refresh" | "expired" | "not_logged_in"
 
 interface ProviderStatusLineProps {
   status: CredentialStatus

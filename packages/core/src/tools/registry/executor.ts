@@ -80,8 +80,8 @@ import {
   handleSkillCreate,
   handleSkillInstall,
 } from "./admin-skill-handlers.js";
-import {
 import { getLifecycleBus } from "../../hooks/index.js";
+import {
   handleAdminConfigGet,
   handleAdminConfigValidate,
   handleAdminConfigPatch,
@@ -125,8 +125,113 @@ export interface ToolExecutionOptions {
   signal?: AbortSignal;
 }
 
+type JsonSchemaLike = Record<string, unknown>;
+
+function describeValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+/** Validate the small JSON Schema subset used by registered tool definitions. */
+function validateSchemaValue(
+  value: unknown,
+  schema: JsonSchemaLike,
+  pathName: string,
+): string | null {
+  const enumValues = schema.enum;
+  if (
+    Array.isArray(enumValues) &&
+    !enumValues.some((entry) => Object.is(entry, value))
+  ) {
+    return `${pathName} must be one of ${enumValues
+      .map((entry) => JSON.stringify(entry))
+      .join(", ")}`;
+  }
+
+  const schemaType = schema.type;
+  if (Array.isArray(schemaType)) {
+    if (
+      !schemaType.some(
+        (type) =>
+          typeof type === "string" &&
+          validateSchemaValue(value, { type }, pathName) === null,
+      )
+    ) {
+      return `${pathName} has an invalid type (received ${describeValue(value)})`;
+    }
+  } else if (typeof schemaType === "string") {
+    const valid =
+      (schemaType === "string" && typeof value === "string") ||
+      (schemaType === "number" &&
+        typeof value === "number" &&
+        Number.isFinite(value)) ||
+      (schemaType === "integer" &&
+        typeof value === "number" &&
+        Number.isInteger(value)) ||
+      (schemaType === "boolean" && typeof value === "boolean") ||
+      (schemaType === "null" && value === null) ||
+      (schemaType === "array" && Array.isArray(value)) ||
+      (schemaType === "object" &&
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value));
+    if (!valid) {
+      return `${pathName} must be ${schemaType} (received ${describeValue(value)})`;
+    }
+  }
+
+  if (Array.isArray(value) && schema.items && typeof schema.items === "object") {
+    for (let index = 0; index < value.length; index += 1) {
+      const error = validateSchemaValue(
+        value[index],
+        schema.items as JsonSchemaLike,
+        `${pathName}[${index}]`,
+      );
+      if (error) return error;
+    }
+  }
+
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const properties = schema.properties;
+    const propertySchemas =
+      properties && typeof properties === "object" && !Array.isArray(properties)
+        ? (properties as Record<string, unknown>)
+        : {};
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const key of required) {
+      if (
+        typeof key === "string" &&
+        !(key in (value as Record<string, unknown>))
+      ) {
+        return `${pathName}.${key} is required`;
+      }
+    }
+    for (const [key, propertySchema] of Object.entries(propertySchemas)) {
+      if (
+        key in (value as Record<string, unknown>) &&
+        propertySchema &&
+        typeof propertySchema === "object"
+      ) {
+        const error = validateSchemaValue(
+          (value as Record<string, unknown>)[key],
+          propertySchema as JsonSchemaLike,
+          `${pathName}.${key}`,
+        );
+        if (error) return error;
+      }
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value as Record<string, unknown>)) {
+        if (!(key in propertySchemas)) return `${pathName}.${key} is not allowed`;
+      }
+    }
+  }
+  return null;
+}
+
 function executeWithTimeout<T>(
-  fn: () => Promise<T>,
+  fn: (signal: AbortSignal) => Promise<T>,
   timeout: number,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -135,6 +240,7 @@ function executeWithTimeout<T>(
   }
 
   return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
     let settled = false;
     let timeoutId: NodeJS.Timeout | undefined;
 
@@ -142,21 +248,24 @@ function executeWithTimeout<T>(
       if (settled) return;
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
-      signal?.removeEventListener("abort", onAbort);
+      signal?.removeEventListener("abort", onParentAbort);
       callback();
     };
 
-    const onAbort = () => {
+    const onParentAbort = () => {
+      controller.abort(signal?.reason);
       settle(() => reject(new Error("Tool execution cancelled")));
     };
 
     timeoutId = setTimeout(() => {
+      controller.abort("timeout");
       settle(() => reject(new Error(`Tool timed out after ${timeout}ms`)));
     }, timeout);
 
-    signal?.addEventListener("abort", onAbort, { once: true });
+    signal?.addEventListener("abort", onParentAbort, { once: true });
 
-    fn()
+    Promise.resolve()
+      .then(() => fn(controller.signal))
       .then((value) => settle(() => resolve(value)))
       .catch((error) => settle(() => reject(error)));
   });
@@ -597,39 +706,16 @@ export class ToolRegistry {
     const all = this.getToolDefinitions();
     const def = all.find((d) => d.function.name === name);
     if (!def) return null; // unknown tool — handled separately
-    const params = def.function.parameters as
-      { required?: string[]; properties?: Record<string, unknown> } | undefined;
+    const params = def.function.parameters as JsonSchemaLike | undefined;
     if (!params) return null;
-    const required: string[] = Array.isArray(params.required)
-      ? (params.required as string[])
-      : [];
-    const missing = required.filter(
-      (k) => args[k] === undefined || args[k] === null || args[k] === "",
-    );
-    if (missing.length === 0) return null;
-    const presentKeys = Object.keys(args);
-    const presentHint =
-      presentKeys.length > 0
-        ? " (received keys: " +
-          presentKeys.map((k) => "'" + k + "'").join(", ") +
-          ")"
-        : " (no arguments provided)";
-    return (
-      "Tool '" +
-      name +
-      "' called with missing required parameter(s): " +
-      missing.map((k) => "'" + k + "'").join(", ") +
-      presentHint +
-      ". " +
-      "Required parameters are: " +
-      required.map((k) => "'" + k + "'").join(", ") +
-      "."
-    );
+    const error = validateSchemaValue(args, params, "args");
+    return error ? `Tool '${name}' has invalid arguments: ${error}.` : null;
   }
 
   private async runHandler(
     name: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<string> {
     const handler = this.handlers.get(name);
     if (!handler) {
@@ -652,7 +738,7 @@ export class ToolRegistry {
     if (validationError) {
       throw new Error(validationError);
     }
-    const result = handler(args);
+    const result = handler(args, signal);
     if (result instanceof Promise) return await result;
     return result;
   }
@@ -668,7 +754,7 @@ export class ToolRegistry {
       const timeout =
         options.timeoutMs ?? TOOL_TIMEOUTS[name] ?? DEFAULT_TOOL_TIMEOUT;
       const output = await executeWithTimeout(
-        () => this.runHandler(name, args),
+        (signal) => this.runHandler(name, args, signal),
         timeout,
         options.signal,
       );
@@ -703,7 +789,7 @@ export class ToolRegistry {
       const timeout =
         options.timeoutMs ?? TOOL_TIMEOUTS[name] ?? DEFAULT_TOOL_TIMEOUT;
       const output = await executeWithTimeout(
-        () => this.runHandler(name, args),
+        (signal) => this.runHandler(name, args, signal),
         timeout,
         options.signal,
       );

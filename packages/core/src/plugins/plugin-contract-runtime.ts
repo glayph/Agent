@@ -76,6 +76,8 @@ export interface RuntimePluginContractsConfig {
   allow_shell?: boolean;
   /** Explicit opt-in for high-risk host execution when no OS sandbox exists. */
   allow_unsafe_host_execution?: boolean;
+  /** Require namespace isolation for executable plugin contracts. */
+  require_os_sandbox?: boolean;
   require_entrypoint_for?: PluginContractKind[];
 }
 
@@ -135,6 +137,10 @@ const SUPPORTED_RUNTIME_EXTENSIONS: Record<
   ".mjs": "node",
   ".py": "python",
 };
+
+function osSandboxAvailable(): boolean {
+  return process.platform === "linux" && fs.existsSync("/usr/bin/unshare");
+}
 
 const ENTRYPOINT_CAPABILITY_RULES: Array<{
   permission: string;
@@ -514,7 +520,23 @@ function evaluateContract(
       sandbox.secrets ||
       sandbox.shell ||
       sandbox.filesystem === "write");
-  if (requiresHostSandbox && policy.allow_unsafe_host_execution !== true) {
+  const requiresOsSandbox = policy.require_os_sandbox === true;
+  if (
+    entry.contract.entrypoint &&
+    requiresOsSandbox &&
+    !osSandboxAvailable() &&
+    policy.allow_unsafe_host_execution !== true
+  ) {
+    requiresPolicy.push("enforced.os_sandbox");
+    reasons.push(
+      "Plugin execution requires an OS namespace sandbox; unshare is unavailable on this host.",
+    );
+  }
+  if (
+    requiresHostSandbox &&
+    (!requiresOsSandbox || !osSandboxAvailable()) &&
+    policy.allow_unsafe_host_execution !== true
+  ) {
     requiresPolicy.push("enforced.host_sandbox");
     reasons.push(
       "High-risk plugin execution requires an enforced host sandbox; set allow_unsafe_host_execution=true only for trusted local plugins.",
@@ -700,9 +722,11 @@ function buildPluginEnvironment(
     secrets: boolean;
     shell: boolean;
   },
+  enforcedSandbox = false,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    Miki_PLUGIN_SANDBOX: "1",
+    Miki_PLUGIN_SANDBOX: enforcedSandbox ? "namespace" : "policy-only",
+    Miki_PLUGIN_SANDBOX_ENFORCED: enforcedSandbox ? "1" : "0",
     Miki_WORKSPACE_DIR: paths.sourceDir || paths.configDir,
     Miki_SANDBOX_FILESYSTEM: sandbox.filesystem,
     Miki_SANDBOX_NETWORK: sandbox.network.toString(),
@@ -769,12 +793,40 @@ async function runPluginProcess(options: {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const enforcedSandbox = osSandboxAvailable();
+    const launcher = enforcedSandbox
+      ? {
+          command: "/usr/bin/unshare",
+          args: [
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "--pid",
+            "--fork",
+            "--mount-proc",
+            "--propagation",
+            "private",
+            ...(options.sandbox.network ? [] : ["--net"]),
+            "--",
+            command.command,
+            ...command.args,
+            options.entrypointPath,
+          ],
+        }
+      : {
+          command: command.command,
+          args: [...command.args, options.entrypointPath],
+        };
     const child = spawn(
-      command.command,
-      [...command.args, options.entrypointPath],
+      launcher.command,
+      launcher.args,
       {
         cwd: path.dirname(options.entrypointPath),
-        env: buildPluginEnvironment(options.runtimePaths, options.sandbox),
+        env: buildPluginEnvironment(
+          options.runtimePaths,
+          options.sandbox,
+          enforcedSandbox,
+        ),
         windowsHide: true,
       },
     );
@@ -987,8 +1039,8 @@ export async function executeRuntimePluginContract(
         permissions: contract.permissions,
         workspaceDir,
         runtime: {
-          // Policy-only sandbox metadata — not process-enforced.
-          // The plugin runs in a child process with limited env but no OS-level sandbox.
+          // Policy-only metadata — not process-enforced. The plugin runs in a
+          // child process with a least-privilege environment but no OS sandbox.
           policy_sandbox: true,
           enforced_sandbox: false,
           workspaceDir,

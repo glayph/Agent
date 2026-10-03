@@ -1,4 +1,8 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
+  canonicalizeFileLockPath,
   ToolConcurrencyMetrics,
   ToolResourceLockManager,
   createToolExecutionPlan,
@@ -60,6 +64,36 @@ describe("tool call parallelism", () => {
 
     expect(locksConflict(write.locks, readSame.locks)).toBe(true);
     expect(locksConflict(write.locks, readOther.locks)).toBe(false);
+  });
+
+  it("canonicalizes relative, dot-segment, and symlink file lock paths", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "miki-locks-"));
+    try {
+      fs.writeFileSync(path.join(root, "target.txt"), "x");
+      fs.symlinkSync("target.txt", path.join(root, "alias.txt"));
+      const canonical = canonicalizeFileLockPath("target.txt", root);
+      expect(canonicalizeFileLockPath("./dir/../target.txt", root)).toBe(
+        canonical,
+      );
+      expect(canonicalizeFileLockPath("alias.txt", root)).toBe(canonical);
+      expect(
+        getToolConcurrencyPolicy(
+          "file_write",
+          { path: "alias.txt" },
+          { workspaceDir: root },
+        ).locks,
+      ).toContainEqual({ key: `file:${canonical}`, mode: "exclusive" });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes computer-use tools on one desktop resource", () => {
+    const plan = createToolExecutionPlan([
+      { toolName: "computer_observe", toolArgs: {} },
+      { toolName: "computer_click_at", toolArgs: { x: 1, y: 2 } },
+    ]);
+    expect(plan.levels).toHaveLength(2);
   });
 
   it("limits concurrent work while preserving result order", async () => {

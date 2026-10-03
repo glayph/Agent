@@ -28,6 +28,17 @@ function AuthGateFallback() {
   )
 }
 
+function AuthGateError({ message }: { message: string }) {
+  return (
+    <div
+      className="bg-background text-destructive flex h-dvh items-center justify-center px-6 text-center text-sm"
+      role="alert"
+    >
+      Auth service unavailable: {message}
+    </div>
+  )
+}
+
 const RootLayout = () => {
   // Prefer the actual address bar path. Stale embedded bundles may not
   // register /launcher-login or /launcher-setup in the route tree.
@@ -122,10 +133,7 @@ const RootLayout = () => {
   }, [sessionExpiresAt])
 
   useEffect(() => {
-    if (
-      isAuthPage ||
-      (authGateState !== "authenticated" && authGateState !== "degraded")
-    ) {
+    if (isAuthPage || authGateState !== "authenticated") {
       return
     }
     initializeChatStore()
@@ -137,6 +145,17 @@ const RootLayout = () => {
 
   if (authGateState === "checking" || authGateState === "redirecting") {
     return <AuthGateFallback />
+  }
+
+  if (authGateState === "degraded") {
+    return (
+      <AuthGateError
+        message={
+          authError ||
+          "Reset dashboard password storage and restart the application."
+        }
+      />
+    )
   }
 
   const showSessionCountdown =

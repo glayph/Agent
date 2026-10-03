@@ -12,6 +12,8 @@ import { MemorySearchIndex, readMemoryRange, type GetResult, type SearchHit } fr
 
 export interface FileMemoryServiceOptions {
   identityDir: string;
+  /** Fix #11: owner/agent/workspace scope; memory files live under scopes/<scope>/. */
+  scope?: string;
   /** The raw `agent.memory` config block (files sub-block is read from it). */
   agentMemoryConfig?: unknown;
   seed?: Partial<{ summarizeTokenPercent: number; summarizeMessageThreshold: number }>;
@@ -71,7 +73,11 @@ export class FileMemoryService {
 
   constructor(private readonly opts: FileMemoryServiceOptions) {
     this.cfg = resolveMemoryFilesConfig(opts.agentMemoryConfig, opts.seed);
-    this.paths = resolveMemoryPaths(opts.identityDir, this.cfg.dir);
+    this.paths = resolveMemoryPaths(
+      opts.identityDir,
+      this.cfg.dir,
+      opts.scope ?? this.cfg.scope,
+    );
     this.store = new MemoryFileStore(this.paths);
     this.summarizer = new Summarizer({
       getMode: () => this.cfg.summarizer,

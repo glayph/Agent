@@ -3,8 +3,6 @@
  */
 
 import * as crypto from "node:crypto";
-import * as fs from "fs";
-import * as path from "path";
 import { isIP } from "node:net";
 import { resolveAllowedCidrsFromEnv } from "./index.js";
 import { readMikiEnv as readMikiEnvValue } from "./env-compat.js";
@@ -172,23 +170,10 @@ export function normalizeCorsOrigin(origin: string): string {
   return origin.trim().replace(/\/$/, "").toLowerCase();
 }
 
-function hasWorkspaceBypass(workspaceDir?: string): boolean {
-  if (!workspaceDir) return false;
-  const configPath = path.join(workspaceDir, "config", "agent.yaml");
-  try {
-    const content = fs.readFileSync(configPath, "utf-8");
-    return /^\s*bypass_restrictions:\s*true\s*$/m.test(content);
-  } catch {
-    return false;
-  }
-}
-
 export function allowedCorsOriginsFromEnv(
   optionsValue?: SecurityOptions | NodeJS.ProcessEnv,
 ): string[] {
-  const options = securityOptions(optionsValue);
   const env = environmentFor(optionsValue);
-  if (hasWorkspaceBypass(options.workspaceDir)) return ["*"];
 
   const raw =
     [
@@ -252,7 +237,7 @@ export function isAllowedCorsOrigin(
   if (allowed.some((value) => value === "*")) return true;
   if (allowed.some((value) => value === normalizedOrigin)) return true;
   if (!explicitlyConfigured && isLoopbackOrigin(origin)) return true;
-  return !explicitlyConfigured && allowed.length === 0;
+  return false;
 }
 
 export function isLoopbackAddress(addr: string | undefined): boolean {

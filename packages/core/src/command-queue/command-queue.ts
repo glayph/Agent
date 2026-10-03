@@ -205,10 +205,9 @@ export class CommandQueue {
     while (state.active && Date.now() - start < 2000) {
       await new Promise((r) => setTimeout(r, 5));
     }
-    if (state.active?.runId === run.runId) {
-      // Force clear if executor ignored abort
-      this.finishRun(session_key, run, "cancelled");
-    }
+    // Do not force-clear an unsettled executor: its work may still be using
+    // the session. The interrupted command remains active until runCommand's
+    // finally block observes the actual settlement, then pumps the queue.
     return run.runId;
   }
 
@@ -509,8 +508,8 @@ export class CommandQueue {
       } else {
         command.status = "cancelled";
       }
-    } catch {
-      command.status = run.abort.signal.aborted ? "cancelled" : "completed";
+    } catch (error) {
+      command.status = run.abort.signal.aborted ? "cancelled" : "failed";
       if (command.status === "cancelled") {
         this.emit({
           type: "cancelled",
@@ -518,6 +517,16 @@ export class CommandQueue {
           commandId: command.id,
           runId: run.runId,
           mode: command.mode,
+          at: Date.now(),
+        });
+      } else {
+        this.emit({
+          type: "failed",
+          session_key: command.session_key,
+          commandId: command.id,
+          runId: run.runId,
+          mode: command.mode,
+          detail: error instanceof Error ? error.message : String(error),
           at: Date.now(),
         });
       }

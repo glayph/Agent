@@ -7,14 +7,7 @@ import {
   IconKey,
   IconTool,
 } from "@tabler/icons-react"
-import {
-  type FocusEvent,
-  Suspense,
-  lazy,
-  memo,
-  useMemo,
-  useState,
-} from "react"
+import { type FocusEvent, Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
@@ -93,7 +86,8 @@ function isBudgetError(content: string): boolean {
   )
 }
 
-type ErrorCategory = "rate-limit" | "credential" | "timeout" | "budget" | "generic"
+type ErrorCategory =
+  "rate-limit" | "credential" | "timeout" | "budget" | "generic"
 
 function classifyErrorContent(content: string): ErrorCategory {
   if (isRateLimitConnectionError(content)) return "rate-limit"
@@ -164,7 +158,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           data-chat-bubble="assistant"
           data-chat-kind={isError ? "error" : undefined}
           className={cn(
-            "group group/message-bubble relative flex w-fit max-w-[var(--chat-user-message-max)] flex-col rounded-xl rounded-bl-sm border px-3 py-2 [border-color:var(--chat-user-border)] [box-shadow:var(--chat-user-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)]",
+            "group group/message-bubble relative flex w-fit max-w-[var(--chat-user-message-max)] flex-col rounded-xl rounded-bl-sm border [border-color:var(--chat-user-border)] px-3 py-2 [box-shadow:var(--chat-user-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)]",
             isThought &&
               "w-full rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
             isToolCalls && hasToolCalls && "cursor-pointer",
@@ -172,7 +166,8 @@ export const AssistantMessage = memo(function AssistantMessage({
               "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)]",
           )}
           onClick={() => {
-            if (isToolCalls && hasToolCalls) setIsExpanded((expanded) => !expanded)
+            if (isToolCalls && hasToolCalls)
+              setIsExpanded((expanded) => !expanded)
           }}
           onKeyDown={(event) => {
             if (
@@ -195,8 +190,8 @@ export const AssistantMessage = memo(function AssistantMessage({
           onFocusCapture={() => setActionsVisible(true)}
           onBlurCapture={hideActionsIfFocusLeaves}
         >
-            <div
-              className={cn(
+          <div
+            className={cn(
               "relative [color:var(--chat-user-text)]",
               isCollapsedBlock && "text-muted-foreground",
               isError && "[color:var(--chat-error-text)]",

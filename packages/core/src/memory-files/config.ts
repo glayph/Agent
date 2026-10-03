@@ -69,6 +69,9 @@ export function resolveMemoryFilesConfig(
   return {
     enabled: bool(raw?.["enabled"], d.enabled),
     ...(typeof dir === "string" && dir.trim() ? { dir: dir.trim() } : {}),
+    ...(typeof raw?.["scope"] === "string" && (raw["scope"] as string).trim()
+      ? { scope: (raw["scope"] as string).trim() }
+      : {}),
     bootstrapMaxChars: bounded(
       raw?.["bootstrap_max_chars"],
       d.bootstrapMaxChars,

@@ -1,0 +1,41 @@
+{
+  "routes": [
+    { "path": "/", "title": "Chat" },
+    { "path": "/drive", "title": "Files" },
+    { "path": "/agent/hub", "title": "Agent Hub" },
+    { "path": "/agent/monitor", "title": "Monitor" },
+    { "path": "/agent/run", "title": "Run Agent" },
+    { "path": "/agent/runs", "title": "Agent Runs" },
+    { "path": "/agent/skills", "title": "Skills" },
+    { "path": "/agent/tools", "title": "Tools" },
+    { "path": "/agent/automations", "title": "Automations" },
+    { "path": "/agent/automations/list", "title": "Automation List" },
+    { "path": "/agent/automations/create", "title": "Create Automation" },
+    { "path": "/agent/automations/history", "title": "Automation History" },
+    {
+      "path": "/agent/automations/connections",
+      "title": "Automation Connections"
+    },
+    { "path": "/agents", "title": "Agents" },
+    { "path": "/agents/swarm", "title": "Agent Swarm" },
+    { "path": "/agents/:id", "title": "Agent Details" },
+    { "path": "/channels", "title": "Channels" },
+    { "path": "/channels/:name", "title": "Channel Details" },
+    { "path": "/config", "title": "Configuration" },
+    { "path": "/config/raw", "title": "Raw Configuration" },
+    { "path": "/control", "title": "Control" },
+    { "path": "/credentials", "title": "Credentials" },
+    { "path": "/health", "title": "Health" },
+    { "path": "/logs", "title": "Logs" },
+    { "path": "/memory", "title": "Memory" },
+    { "path": "/models", "title": "Models" },
+    { "path": "/plugins", "title": "Plugins" },
+    { "path": "/plugins/providers", "title": "Plugin Providers" },
+    { "path": "/plugins/channels", "title": "Plugin Channels" },
+    { "path": "/plugins/capabilities", "title": "Plugin Capabilities" },
+    { "path": "/plugins/core", "title": "Plugin Core Services" },
+    { "path": "/about", "title": "About" },
+    { "path": "/launcher-login", "title": "Sign In" },
+    { "path": "/launcher-setup", "title": "Setup" }
+  ]
+}

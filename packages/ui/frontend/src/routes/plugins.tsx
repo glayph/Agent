@@ -1,11 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { PluginsPage } from "@/features/plugins/plugins-page"
+import { Outlet, createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/plugins")({
-  component: PluginsRoute,
+  component: PluginsLayoutRoute,
 })
 
-function PluginsRoute() {
-  return <PluginsPage />
+function PluginsLayoutRoute() {
+  return <Outlet />
 }

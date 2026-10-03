@@ -1,5 +1,5 @@
-import path from "path"
 import { fileURLToPath } from "node:url"
+import path from "path"
 
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
@@ -53,6 +53,8 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       chunkSizeWarningLimit: 2048,
+      cssCodeSplit: true,
+      reportCompressedSize: false,
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -102,7 +104,9 @@ export default defineConfig(({ mode }) => {
         resolveDependencies(_filename, deps) {
           return deps.filter(
             (dep) =>
-              !/assistant-message|message-code-block|vendor-markdown/.test(dep),
+              !/assistant-message|message-code-block|vendor-markdown|vendor-highlight/.test(
+                dep,
+              ),
           )
         },
       },

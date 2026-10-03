@@ -19,6 +19,8 @@ export interface MemoryFilesConfig {
   enabled: boolean;
   /** Absolute override for the memory root (default: identityDir). */
   dir?: string;
+  /** Owner/agent/workspace scope; isolates all memory files under scopes/<scope>/. */
+  scope?: string;
   /** Total character budget for the memory block injected into the prompt. */
   bootstrapMaxChars: number;
   /** Share of the budget MEMORY.md may use (injected copy only — the file on disk is never truncated). */

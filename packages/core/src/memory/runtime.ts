@@ -1,343 +1,138 @@
 /**
- * memory-bridge.ts
+ * Core memory bridge.
  *
- * Bridges the CommonJS `@miki/memory` package into the ESM TypeScript
- * @miki/core package. Uses createRequire so that the CJS module is loaded
- * correctly at runtime without needing it to be compiled to ESM first.
- *
- * Exposes a lazily-initialized singleton AgentMemoryIntegration instance
- * that agent.ts uses to read/write memory on every conversation turn
- * (entirely in the backend — nothing from this module is shown in the UI).
+ * Miki's only durable memory provider is the local Mem0 OSS implementation
+ * living in @miki/memory. No hosted Mem0 client, provider switch, SQLite/TKG
+ * agent-memory database, or consolidation daemon is initialized here.
  */
-
 import { createRequire } from "module";
-import * as path from "path";
 import * as fs from "fs";
+import * as path from "path";
+import { resolveConfiguredSecret } from "@miki/config";
 import type {
   AgentMemoryIntegration,
-  TemporalKnowledgeGraph,
   MikiMemoryModule,
-  MemoryConsolidationDaemon as MemoryConsolidationDaemonType,
+  TemporalKnowledgeGraph,
 } from "./types.js";
 
 const require = createRequire(import.meta.url);
 
 let _integration: AgentMemoryIntegration | null = null;
-let _tkg: TemporalKnowledgeGraph | null = null;
-let _dbPath: string | null = null;
-let _daemon: MemoryConsolidationDaemonType | null = null;
+let _dataDir: string | null = null;
 
-/**
- * Initialize (or return the already-initialized) AgentMemoryIntegration
- * for the given data directory. Calling this multiple times with the same
- * path is safe and cheap — the singleton is returned immediately after the
- * first call.
- *
- * The DB file is placed at `<dataDir>/agent-memory.db` so it sits alongside
- * other agent runtime data (core_backend.log, etc.).
- *
- * @param dataDir - absolute path to the agent's data directory
- */
+type Mem0MemoryModule = MikiMemoryModule & {
+  Mem0OnlyIntegration?: new (options?: Record<string, unknown>) => AgentMemoryIntegration;
+};
+
 export function initMemory(dataDir: string): AgentMemoryIntegration {
-  const dbPath = path.join(dataDir, "agent-memory.db");
+  if (_integration && _dataDir === dataDir) return _integration;
+  closeMemory();
 
-  if (_integration && _dbPath === dbPath) {
-    return _integration;
+  const memoryModule = require("@miki/memory") as Mem0MemoryModule;
+  if (typeof memoryModule.Mem0OnlyIntegration !== "function") {
+    throw new Error("@miki/memory does not provide the local Mem0 memory core");
   }
 
-  // If the data dir doesn't exist yet, create it so SQLite can open the file.
-  fs.mkdirSync(dataDir, { recursive: true });
-
-  const mikiMemory = require("@miki/memory") as MikiMemoryModule;
-  const {
-    TemporalKnowledgeGraph,
-    AgentMemoryIntegration,
-    MemoryConsolidationDaemon,
-  } = mikiMemory;
-
-  const tkg = new TemporalKnowledgeGraph(dbPath);
-  // Use initializeSync so schema + FTS tables exist before any caller can
-  // write/query. Previously initialize() was fire-and-forget async, which
-  // raced the first turn against CREATE TABLE.
-  try {
-    if (
-      typeof (tkg as { initializeSync?: () => unknown }).initializeSync ===
-      "function"
-    ) {
-      (tkg as { initializeSync: () => unknown }).initializeSync();
-    } else {
-      // Fallback for older package shapes: block on the async path.
-
-      void tkg.initialize();
-    }
-  } catch (err) {
-    console.error(
-      "[MemoryBridge] TKG initialization error:",
-      err instanceof Error ? err.message : err,
-    );
-    throw err;
-  }
-
-  _tkg = tkg;
-  _dbPath = dbPath;
-  _integration = new AgentMemoryIntegration(tkg);
-
-  // Daemon starts only after schema is confirmed ready (sync path above).
-  try {
-    _daemon = new MemoryConsolidationDaemon(tkg);
-    _daemon.start();
-  } catch (err) {
-    console.error(
-      "[MemoryBridge] Consolidation daemon start error:",
-      err instanceof Error ? err.message : err,
-    );
-  }
-
-  console.log(`[MemoryBridge] Memory initialized → ${dbPath}`);
+  _integration = new memoryModule.Mem0OnlyIntegration({
+    dataDir,
+    geminiApiKey: resolveConfiguredSecret("GEMINI_API_KEY"),
+  });
+  _dataDir = dataDir;
+  console.log(`[MemoryBridge] Local Mem0 main memory initialized → ${path.join(dataDir, "memory")}`);
   return _integration;
 }
 
-/**
- * Return the currently-active AgentMemoryIntegration, or null if
- * initMemory() has not yet been called.
- */
 export function getMemory(): AgentMemoryIntegration | null {
   return _integration;
 }
 
-/**
- * Return the underlying TemporalKnowledgeGraph instance (or null).
- * Used by higher layers that need multi-hop retrieval or temporary sessions.
- */
+/** Local Mem0 owns its own vector/history SQLite files; TKG is intentionally absent. */
 export function getTKG(): TemporalKnowledgeGraph | null {
-  return _tkg;
+  return null;
 }
 
-/** Create a WAL-consistent backup of durable memory. */
 export async function backupMemory(destinationPath: string): Promise<void> {
-  if (!_tkg) throw new Error("memory is not initialized");
-  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-  const db = _tkg as unknown as {
-    db?: { backup?: (target: string) => Promise<void> };
-  };
-  if (typeof db.db?.backup === "function") {
-    await db.db.backup(destinationPath);
-    return;
-  }
-  throw new Error("memory database backup is unavailable");
+  if (!_dataDir) throw new Error("local Mem0 memory is not initialized");
+  const source = path.join(_dataDir, "memory");
+  if (!fs.existsSync(source)) throw new Error("local Mem0 memory directory not found");
+  await fs.promises.rm(destinationPath, { recursive: true, force: true });
+  await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
+  await fs.promises.cp(source, destinationPath, { recursive: true });
 }
 
-/** Restore a previously verified SQLite backup and reinitialize the bridge. */
 export function restoreMemory(
   backupPath: string,
   dataDir: string,
 ): AgentMemoryIntegration {
-  if (!fs.existsSync(backupPath))
-    throw new Error(`memory backup not found: ${backupPath}`);
-  _daemon?.stop?.();
-  _tkg?.close?.();
-  _daemon = null;
-  _tkg = null;
-  _integration = null;
-  _dbPath = null;
+  if (!fs.existsSync(backupPath)) throw new Error(`local Mem0 backup not found: ${backupPath}`);
+  const target = path.join(dataDir, "memory");
+  fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
-  fs.copyFileSync(backupPath, path.join(dataDir, "agent-memory.db"));
+  fs.cpSync(backupPath, target, { recursive: true });
   return initMemory(dataDir);
 }
 
-/**
- * Multi-hop retrieval (call → analysis → call loop).
- * Thin wrapper over TKG.multiHopRetrieve when available.
- */
-export function multiHopRetrieve(opts: Record<string, unknown> = {}): unknown {
-  if (!_tkg)
-    return {
-      hops: [],
-      nodes: [],
-      edges: [],
-      analysis: "memory not initialized",
-    };
-  const fn = (_tkg as { multiHopRetrieve?: (o: unknown) => unknown })
-    .multiHopRetrieve;
-  if (typeof fn === "function") return fn.call(_tkg, opts);
+export function multiHopRetrieve(_opts: Record<string, unknown> = {}): unknown {
+  return { provider: "mem0-oss-local", hops: [], nodes: [], edges: [], analysis: "Mem0 semantic retrieval is the primary memory path." };
+}
+
+export function getSelectiveContext(
+  _query = "",
+  _options: Record<string, unknown> = {},
+): unknown {
   return {
-    hops: [],
-    nodes: [],
-    edges: [],
-    analysis: "multiHopRetrieve unavailable",
+    provider: "mem0-oss-local",
+    items: [],
+    text: "",
+    trace: { provider: "mem0-oss-local" },
+    stats: { candidateCount: 0, selectedCount: 0, provider: "mem0-oss-local" },
   };
 }
 
-/**
- * Temporary memory helper (project-scoped scratch). Returns null if not ready.
- */
-export function getSelectiveContext(
-  query: string,
-  options: Record<string, unknown> = {},
-): unknown {
-  if (!_tkg) {
-    return {
-      items: [],
-      text: "",
-      trace: {},
-      stats: {
-        candidateCount: 0,
-        selectedCount: 0,
-        tokensUsed: 0,
-        maxTokens: 0,
-        latencyMs: 0,
-        fallbackReason: "memory_not_initialized",
-      },
-    };
-  }
-  const fn = (
-    _tkg as {
-      getSelectiveContext?: (q: string, o?: Record<string, unknown>) => unknown;
-    }
-  ).getSelectiveContext;
-  return typeof fn === "function"
-    ? fn.call(_tkg, query, options)
-    : {
-        items: [],
-        text: "",
-        trace: {},
-        stats: { fallbackReason: "selective_retrieval_unavailable" },
-      };
-}
-
-export function getSelectiveMemoryStats(
-  scope?: Record<string, string>,
-): unknown {
-  if (!_tkg)
-    return { chunks: 0, edges: 0, postings: 0, retrievals: 0, byRegion: [] };
-  const fn = (
-    _tkg as {
-      getSelectiveMemoryStats?: (s?: Record<string, string>) => unknown;
-    }
-  ).getSelectiveMemoryStats;
-  return typeof fn === "function"
-    ? fn.call(_tkg, scope)
-    : { chunks: 0, edges: 0, postings: 0, retrievals: 0, byRegion: [] };
+export function getSelectiveMemoryStats(_scope?: Record<string, string>): unknown {
+  return { provider: "mem0-oss-local", primary: true, localPersistence: true };
 }
 
 export function listSelectiveMemory(
-  scope?: Record<string, string>,
-  options: Record<string, unknown> = {},
+  _scope?: Record<string, string>,
+  _options: Record<string, unknown> = {},
 ): unknown[] {
-  if (!_tkg) return [];
-  const fn = (
-    _tkg as {
-      listSelectiveMemory?: (
-        s?: Record<string, string>,
-        o?: Record<string, unknown>,
-      ) => unknown[];
-    }
-  ).listSelectiveMemory;
-  return typeof fn === "function" ? fn.call(_tkg, scope, options) : [];
+  return [];
 }
 
 export function inspectSelectiveMemory(
-  scope: Record<string, string>,
-  chunkId: string,
+  _scope?: Record<string, string>,
+  _chunkId?: string,
 ): unknown {
-  if (!_tkg) return null;
-  const fn = (
-    _tkg as {
-      inspectSelectiveMemory?: (
-        s: Record<string, string>,
-        id: string,
-      ) => unknown;
-    }
-  ).inspectSelectiveMemory;
-  return typeof fn === "function" ? fn.call(_tkg, scope, chunkId) : null;
-}
-
-export function forgetSelectiveMemory(
-  scope: Record<string, string>,
-  chunkId: string,
-): unknown {
-  if (!_tkg) return { forgotten: false, chunkId };
-  const fn = (
-    _tkg as {
-      forgetSelectiveMemory?: (
-        s: Record<string, string>,
-        id: string,
-      ) => unknown;
-    }
-  ).forgetSelectiveMemory;
-  return typeof fn === "function"
-    ? fn.call(_tkg, scope, chunkId)
-    : { forgotten: false, chunkId };
-}
-
-export function reindexSelectiveMemory(
-  scope?: Record<string, string>,
-): unknown {
-  if (!_tkg) return { reindexed: 0 };
-  const fn = (
-    _tkg as { reindexSelectiveMemory?: (s?: Record<string, string>) => unknown }
-  ).reindexSelectiveMemory;
-  return typeof fn === "function" ? fn.call(_tkg, scope) : { reindexed: 0 };
-}
-
-export function getNodeGraphContext(query: string, limit = 8): unknown[] {
-  if (!_tkg) return [];
-  const fn = (
-    _tkg as { getNodeGraphContext?: (q: string, n?: number) => unknown[] }
-  ).getNodeGraphContext;
-  return typeof fn === "function" ? fn.call(_tkg, query, limit) : [];
-}
-
-export function getNodeGraphSnapshot(limit = 100): unknown {
-  if (!_tkg) return { nodes: [], edges: [] };
-  const fn = (_tkg as { getNodeGraphSnapshot?: (n?: number) => unknown })
-    .getNodeGraphSnapshot;
-  return typeof fn === "function"
-    ? fn.call(_tkg, limit)
-    : { nodes: [], edges: [] };
-}
-
-export function getTemporaryMemory(): unknown | null {
-  if (!_tkg) return null;
-  const fn = (_tkg as { getTemporaryMemory?: () => unknown })
-    .getTemporaryMemory;
-  if (typeof fn === "function") return fn.call(_tkg);
   return null;
 }
 
-/**
- * Close the underlying SQLite connection. Called on graceful shutdown.
- */
+export function forgetSelectiveMemory(_scope: Record<string, string>, chunkId: string): unknown {
+  return { provider: "mem0-oss-local", forgotten: false, chunkId, message: "Use the Mem0 memory administration API for memory deletion." };
+}
+
+export function reindexSelectiveMemory(_scope?: Record<string, string>): unknown {
+  return { provider: "mem0-oss-local", reindexed: 0 };
+}
+
+export function getNodeGraphContext(_query = "", _limit = 8): unknown[] {
+  return [];
+}
+
+export function getNodeGraphSnapshot(_limit = 100): unknown {
+  return { provider: "mem0-oss-local", nodes: [], edges: [] };
+}
+
+export function getTemporaryMemory(): unknown | null {
+  return null;
+}
+
 export function closeMemory(): void {
-  if (_daemon) {
-    try {
-      _daemon.stop();
-    } catch {
-      // Ignore stop errors during shutdown.
-    }
-    _daemon = null;
+  try {
+    (_integration as AgentMemoryIntegration & { tkg?: { close?: () => void } } | null)?.tkg?.close?.();
+  } catch {
+    // Shutdown must remain best-effort.
   }
-  if (_tkg) {
-    // Best-effort: close any stale temporary sessions before shutting down.
-    try {
-      const tm = (
-        _tkg as {
-          getTemporaryMemory?: () => {
-            closeStaleSessions?: (ms?: number) => number;
-          };
-        }
-      ).getTemporaryMemory?.();
-      tm?.closeStaleSessions?.(60 * 60 * 1000);
-    } catch {
-      // ignore
-    }
-    try {
-      _tkg.close();
-    } catch {
-      // Ignore close errors during shutdown.
-    }
-    _tkg = null;
-    _integration = null;
-    _dbPath = null;
-  }
+  _integration = null;
+  _dataDir = null;
 }

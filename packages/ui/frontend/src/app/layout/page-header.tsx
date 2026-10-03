@@ -41,8 +41,9 @@ export function PageHeader({
   return (
     <div
       data-miki-topbar="true"
+      data-page-header="true"
       className={cn(
-        "page-header-surface miki-topbar z-20 flex h-14 min-h-14 shrink-0 items-center justify-between gap-3 border-b px-3 sm:px-5",
+        "page-header-surface miki-topbar z-20 flex h-[var(--app-topbar-height)] min-h-[var(--app-topbar-height)] shrink-0 items-center justify-between gap-3 border-b px-[var(--app-content-gutter)]",
         className,
       )}
     >
@@ -58,6 +59,7 @@ export function PageHeader({
           title={t("navigation.toggle_sidebar")}
         />
         <TitleTag
+          data-page-title="true"
           className={cn("page-header-title min-w-0 truncate", titleClassName)}
         >
           {title}
@@ -65,6 +67,7 @@ export function PageHeader({
         {titleExtra}
       </div>
       <div
+        data-page-actions="true"
         className={cn(
           "flex min-w-0 items-center justify-end gap-1.5 overflow-x-auto whitespace-nowrap",
           rightClassName,

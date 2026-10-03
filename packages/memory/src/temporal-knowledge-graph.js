@@ -12,8 +12,14 @@ const SelectiveMemoryEngine = require('./selective-memory-engine');
 const LearningStore = require('./learning-store');
 
 class TemporalKnowledgeGraph {
-  constructor(dbPath) {
+  constructor(dbPath, options = {}) {
     this.dbPath = dbPath;
+    this.legacyDefaultScope = !options.scope;
+    this.defaultScope = this.normalizeScope(options.scope || {
+      agentId: process.env.MIKI_AGENT_ID || 'miki',
+      ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
+      workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
+    });
     this.db = null;
     this.nodeGraph = null;
     this.selectiveMemory = null;
@@ -75,6 +81,43 @@ class TemporalKnowledgeGraph {
     if (this.initialized) return this;
     // Prefer the sync path so awaiters and non-awaiters both see a ready DB.
     return this.initializeSync();
+  }
+
+  normalizeScope(scope = {}) {
+    const input = { ...(this.defaultScope || {}), ...(scope || {}) };
+    const agentId = String(input.agentId || input.agent_id || '').trim() || 'miki';
+    const ownerId = String(input.ownerId || input.owner_id || '').trim() || 'default-owner';
+    const workspaceId = String(input.workspaceId || input.workspace_id || '').trim() || 'default-workspace';
+    return {
+      agentId,
+      ownerId,
+      workspaceId,
+      scopeKey: [agentId, ownerId, workspaceId].map(encodeURIComponent).join(':'),
+    };
+  }
+
+  _scope(input) { return this.normalizeScope(input); }
+
+  _migrateLegacyScopeColumns() {
+    const tables = [
+      'hourly_chunks', 'events', 'entities', 'entity_edges', 'working_anchor',
+      'daily_summaries', 'daily_summary_edges', 'special_events_index',
+    ];
+    const scope = this.defaultScope;
+    const quote = value => String(value).replace(/'/g, "''");
+    for (const table of tables) {
+      const columns = new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
+      const additions = [
+        ['scope_key', `TEXT NOT NULL DEFAULT '${quote(scope.scopeKey)}'`],
+        ['agent_id', `TEXT NOT NULL DEFAULT '${quote(scope.agentId)}'`],
+        ['owner_id', `TEXT NOT NULL DEFAULT '${quote(scope.ownerId)}'`],
+        ['workspace_id', `TEXT NOT NULL DEFAULT '${quote(scope.workspaceId)}'`],
+      ];
+      for (const [name, definition] of additions) {
+        if (!columns.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+      }
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_scope ON ${table}(scope_key)`);
+    }
   }
 
   _createSchema() {
@@ -198,6 +241,7 @@ class TemporalKnowledgeGraph {
     `);
 
     this._migrateMemoryCategoryColumns();
+    this._migrateLegacyScopeColumns();
     this._migrateEntityEdgesUpdatedAt();
     this._migrateUsageAndDynamicColumns();
     this._ensureFtsTables();
@@ -207,7 +251,7 @@ class TemporalKnowledgeGraph {
 
     // NodeGraph shares this connection so event history and usage-ranked
     // context stay transactionally consistent in the same durable database.
-    this.nodeGraph = new NodeGraph(this.db);
+    this.nodeGraph = new NodeGraph(this.db, { scope: this.defaultScope });
     this.nodeGraph.initializeSync();
 
     // The scoped cognitive graph shares this connection so the new memory
@@ -426,17 +470,18 @@ class TemporalKnowledgeGraph {
     return `${year}-${month}-${day}`;
   }
 
-  getOrCreateCurrentChunk() {
+  getOrCreateCurrentChunk(scopeInput) {
+    const scope = this._scope(scopeInput);
     const hourKey = this._getHourKey();
-    let chunk = this.db.prepare('SELECT * FROM hourly_chunks WHERE hour_key = ?').get(hourKey);
+    let chunk = this.db.prepare('SELECT * FROM hourly_chunks WHERE hour_key = ? AND scope_key = ?').get(hourKey, scope.scopeKey);
     if (!chunk) {
       const id = this._uuid();
       const now = this._now();
       this.db.prepare(`
-        INSERT INTO hourly_chunks (id, hour_key, hour_start, hour_end, status, event_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'ACTIVE', 0, ?, ?)
-      `).run(id, hourKey, this._getHourStart(hourKey), this._getHourEnd(hourKey), now, now);
-      chunk = this.db.prepare('SELECT * FROM hourly_chunks WHERE id = ?').get(id);
+        INSERT INTO hourly_chunks (id, scope_key, agent_id, owner_id, workspace_id, hour_key, hour_start, hour_end, status, event_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, ?, ?)
+      `).run(id, scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId, hourKey, this._getHourStart(hourKey), this._getHourEnd(hourKey), now, now);
+      chunk = this.db.prepare('SELECT * FROM hourly_chunks WHERE id = ? AND scope_key = ?').get(id, scope.scopeKey);
     }
     return chunk;
   }
@@ -476,6 +521,7 @@ class TemporalKnowledgeGraph {
       return { filtered: true };
     }
 
+    const scope = this._scope(eventData.scope);
     const redactedContent = this._redactSecrets(eventData.content || '');
     // Downstream helpers (this._highlighter.classify(), _classifyMemoryCategory,
     // _extractEntities, _updateWorkingAnchor) all read eventData.content,
@@ -483,7 +529,7 @@ class TemporalKnowledgeGraph {
     // in rather than threading a second parameter through every call site.
     eventData = { ...eventData, content: redactedContent };
 
-    const chunk = this.getOrCreateCurrentChunk();
+    const chunk = this.getOrCreateCurrentChunk(scope);
     const eventId = this._uuid();
     const now = this._now();
 
@@ -500,28 +546,28 @@ class TemporalKnowledgeGraph {
     const memoryCategory = this._classifyMemoryCategory(eventData);
 
     this.db.prepare(`
-      INSERT INTO events (id, chunk_id, event_type, content, source, importance, is_special, special_event_name, metadata, memory_category, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(eventId, chunk.id, eventData.event_type || 'general', eventData.content || '', eventData.source || 'system', importance, isSpecial, specialEventName, JSON.stringify(eventData.metadata || {}), memoryCategory, now);
+      INSERT INTO events (id, scope_key, agent_id, owner_id, workspace_id, chunk_id, event_type, content, source, importance, is_special, special_event_name, metadata, memory_category, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(eventId, scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId, chunk.id, eventData.event_type || 'general', eventData.content || '', eventData.source || 'system', importance, isSpecial, specialEventName, JSON.stringify(eventData.metadata || {}), memoryCategory, now);
 
     // Keep FTS index in sync with the base table (unicode61 tokenizer).
     this.db.prepare(`
       INSERT INTO events_fts(event_id, content) VALUES (?, ?)
     `).run(eventId, eventData.content || '');
 
-    this.db.prepare('UPDATE hourly_chunks SET event_count = event_count + 1, updated_at = ? WHERE id = ?').run(now, chunk.id);
+    this.db.prepare('UPDATE hourly_chunks SET event_count = event_count + 1, updated_at = ? WHERE id = ? AND scope_key = ?').run(now, chunk.id, scope.scopeKey);
 
     if (isSpecial && specialEventName) {
       this.db.prepare(`
-        INSERT INTO special_events_index (id, event_name, chunk_id, importance, summary, entities_involved, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(this._uuid(), specialEventName, chunk.id, importance, eventData.content ? eventData.content.substring(0, 500) : '', JSON.stringify(eventData.entities || []), now);
+        INSERT INTO special_events_index (id, scope_key, agent_id, owner_id, workspace_id, event_name, chunk_id, importance, summary, entities_involved, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(this._uuid(), scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId, specialEventName, chunk.id, importance, eventData.content ? eventData.content.substring(0, 500) : '', JSON.stringify(eventData.entities || []), now);
     }
 
     const entities = this._extractEntities(eventData);
     const graphEntityIds = [];
     for (const entity of entities) {
-      const entityId = this._ensureEntity(entity, memoryCategory);
+      const entityId = this._ensureEntity(entity, memoryCategory, scope);
       graphEntityIds.push({ id: entityId, entity });
     }
 
@@ -544,6 +590,7 @@ class TemporalKnowledgeGraph {
             importance,
             createdAt: now,
           },
+          scope,
         });
         for (const { id, entity } of graphEntityIds) {
           const entityNodeId = `entity:${id}`;
@@ -558,8 +605,9 @@ class TemporalKnowledgeGraph {
               memoryCategory,
               attributes: entity.attributes || {},
             },
+            scope,
           });
-          this.nodeGraph.connect(eventNodeId, entityNodeId, 'mentions', { eventId, memoryCategory }, 0.35);
+          this.nodeGraph.connect(eventNodeId, entityNodeId, 'mentions', { eventId, memoryCategory }, 0.35, scope);
         }
         for (let index = 0; index < graphEntityIds.length; index += 1) {
           for (let next = index + 1; next < graphEntityIds.length; next += 1) {
@@ -569,6 +617,7 @@ class TemporalKnowledgeGraph {
               'co_occurs',
               { eventId },
               0.18,
+              scope,
             );
           }
         }
@@ -824,7 +873,8 @@ class TemporalKnowledgeGraph {
    * name would otherwise be empty.
    * @private
    */
-  _entityIdFromName(name) {
+  _entityIdFromName(name, scopeInput) {
+    const scope = this._scope(scopeInput);
     const raw = String(name || '').trim();
     let id = raw
       .toLowerCase()
@@ -836,19 +886,25 @@ class TemporalKnowledgeGraph {
       id = 'ent-' + crypto.createHash('sha1').update(raw).digest('hex').slice(0, 12);
     }
     if (id.length > 120) id = id.slice(0, 120);
-    return id;
+    return this.legacyDefaultScope && scope.scopeKey === this.defaultScope.scopeKey
+      ? id
+      : `${scope.scopeKey}:${id}`.slice(0, 120);
   }
 
-  _ensureEntity(entityData, memoryCategory) {
+  _ensureEntity(entityData, memoryCategory, scopeInput) {
+    const scope = this._scope(scopeInput);
     const now = this._now();
-    const id = this._entityIdFromName(entityData.name);
-    const existing = this.db.prepare('SELECT * FROM entities WHERE id = ?').get(id);
+    const id = this._entityIdFromName(
+      entityData.name,
+      this.legacyDefaultScope && scope.scopeKey === this.defaultScope.scopeKey ? undefined : scope,
+    );
+    const existing = this.db.prepare('SELECT * FROM entities WHERE id = ? AND scope_key = ?').get(id, scope.scopeKey);
     if (existing) {
-      this.db.prepare('UPDATE entities SET last_seen_at = ?, access_count = access_count + 1, is_active = 1 WHERE id = ?').run(now, id);
+      this.db.prepare('UPDATE entities SET last_seen_at = ?, access_count = access_count + 1, is_active = 1 WHERE id = ? AND scope_key = ?').run(now, id, scope.scopeKey);
       // Promote dynamic_category if caller supplies one and row still empty.
       if (entityData.dynamic_category && !existing.dynamic_category) {
-        this.db.prepare('UPDATE entities SET dynamic_category = ? WHERE id = ?')
-          .run(String(entityData.dynamic_category).slice(0, 120), id);
+        this.db.prepare('UPDATE entities SET dynamic_category = ? WHERE id = ? AND scope_key = ?')
+          .run(String(entityData.dynamic_category).slice(0, 120), id, scope.scopeKey);
       }
       return id;
     }
@@ -861,10 +917,10 @@ class TemporalKnowledgeGraph {
       || null;
     const attributesJson = JSON.stringify(entityData.attributes || {});
     this.db.prepare(`
-      INSERT INTO entities (id, name, type, attributes, first_seen_at, last_seen_at, access_count, is_active, memory_category, dynamic_category)
-      VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+      INSERT INTO entities (id, scope_key, agent_id, owner_id, workspace_id, name, type, attributes, first_seen_at, last_seen_at, access_count, is_active, memory_category, dynamic_category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
     `).run(
-      id,
+      id, scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId,
       entityData.name,
       entityData.type || 'entity',
       attributesJson,
@@ -906,15 +962,16 @@ class TemporalKnowledgeGraph {
    * @param {number} [metadata.weight]
    * @returns {{id: string, contradicted: string|null, reinforced: boolean}}
    */
-  addEntityRelation(sourceId, targetId, relationType, metadata = {}) {
+  addEntityRelation(sourceId, targetId, relationType, metadata = {}, scopeInput) {
+    const scope = this._scope(scopeInput);
     const now = this._now();
     const factText = metadata.factText || relationType;
 
     const existingActive = this.db.prepare(`
       SELECT * FROM entity_edges
-      WHERE source_id = ? AND target_id = ? AND relation_type = ? AND valid_until IS NULL
+      WHERE scope_key = ? AND source_id = ? AND target_id = ? AND relation_type = ? AND valid_until IS NULL
       ORDER BY created_at DESC
-    `).all(sourceId, targetId, relationType);
+    `).all(scope.scopeKey, sourceId, targetId, relationType);
 
     let contradicted = null;
     let reinforced = false;
@@ -930,7 +987,7 @@ class TemporalKnowledgeGraph {
         // confirmation) treats this edge as freshly re-confirmed, not as
         // 30-days-old-and-untouched just because created_at is old.
         const newWeight = Math.min(1.0, (oldEdge.weight || 1.0) + this.REINFORCE_STEP);
-        this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ?').run(newWeight, now, oldEdge.id);
+        this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ? AND scope_key = ?').run(newWeight, now, oldEdge.id, scope.scopeKey);
         reinforced = true;
         return { id: oldEdge.id, contradicted: null, reinforced: true };
       }
@@ -944,7 +1001,7 @@ class TemporalKnowledgeGraph {
         // is actively talking about this topic), so it shouldn't silently
         // archive on the old created_at timestamp either.
         const decayedWeight = Math.max(0, (oldEdge.weight || 1.0) * this.CONTRADICTION_DECAY_FACTOR);
-        this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ?').run(decayedWeight, now, oldEdge.id);
+        this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ? AND scope_key = ?').run(decayedWeight, now, oldEdge.id, scope.scopeKey);
         contradicted = oldEdge.id;
       }
     }
@@ -952,9 +1009,9 @@ class TemporalKnowledgeGraph {
     const id = this._uuid();
     const weight = typeof metadata.weight === 'number' ? metadata.weight : 1.0;
     this.db.prepare(`
-      INSERT INTO entity_edges (id, source_id, target_id, relation_type, weight, valid_from, valid_until, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, sourceId, targetId, relationType, weight, metadata.validFrom || now, metadata.validUntil || null, JSON.stringify(metadata), now, now);
+      INSERT INTO entity_edges (id, scope_key, agent_id, owner_id, workspace_id, source_id, target_id, relation_type, weight, valid_from, valid_until, metadata, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId, sourceId, targetId, relationType, weight, metadata.validFrom || now, metadata.validUntil || null, JSON.stringify(metadata), now, now);
 
     return { id, contradicted, reinforced };
   }
@@ -998,9 +1055,10 @@ class TemporalKnowledgeGraph {
    * superseded by a newer version.
    * @param {string} edgeId
    */
-  deprecateEntityRelation(edgeId) {
+  deprecateEntityRelation(edgeId, scopeInput) {
+    const scope = this._scope(scopeInput);
     const now = this._now();
-    this.db.prepare('UPDATE entity_edges SET valid_until = ?, updated_at = ? WHERE id = ?').run(now, now, edgeId);
+    this.db.prepare('UPDATE entity_edges SET valid_until = ?, updated_at = ? WHERE id = ? AND scope_key = ?').run(now, now, edgeId, scope.scopeKey);
   }
 
   getOrSetWorkingAnchor(contextData) {
@@ -1054,31 +1112,35 @@ class TemporalKnowledgeGraph {
     return anchor;
   }
 
-  getHourlyChunk(hourKey) {
+  getHourlyChunk(hourKey, scopeInput) {
+    const scope = this._scope(scopeInput);
     if (hourKey) {
-      return this.db.prepare('SELECT * FROM hourly_chunks WHERE hour_key = ?').get(hourKey);
+      return this.db.prepare('SELECT * FROM hourly_chunks WHERE hour_key = ? AND scope_key = ?').get(hourKey, scope.scopeKey);
     }
     return this.getOrCreateCurrentChunk();
   }
 
-  getHoursInRange(startHourKey, endHourKey) {
+  getHoursInRange(startHourKey, endHourKey, scopeInput) {
+    const scope = this._scope(scopeInput);
     return this.db.prepare(`
-      SELECT * FROM hourly_chunks WHERE hour_key >= ? AND hour_key <= ? ORDER BY hour_key ASC
-    `).all(startHourKey, endHourKey);
+      SELECT * FROM hourly_chunks WHERE scope_key = ? AND hour_key >= ? AND hour_key <= ? ORDER BY hour_key ASC
+    `).all(scope.scopeKey, startHourKey, endHourKey);
   }
 
-  getRecentEvents(hoursBack = 24) {
+  getRecentEvents(hoursBack = 24, scopeInput) {
+    const scope = this._scope(scopeInput);
     const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
     return this.db.prepare(`
       SELECT e.*, h.hour_key FROM events e
       JOIN hourly_chunks h ON e.chunk_id = h.id
-      WHERE e.created_at >= ?
+      WHERE e.scope_key = ? AND h.scope_key = ? AND e.created_at >= ?
       ORDER BY e.created_at DESC
-    `).all(since);
+    `).all(scope.scopeKey, scope.scopeKey, since);
   }
 
-  getEventsInChunk(chunkId) {
-    return this.db.prepare('SELECT * FROM events WHERE chunk_id = ? ORDER BY created_at ASC').all(chunkId);
+  getEventsInChunk(chunkId, scopeInput) {
+    const scope = this._scope(scopeInput);
+    return this.db.prepare('SELECT * FROM events WHERE chunk_id = ? AND scope_key = ? ORDER BY created_at ASC').all(chunkId, scope.scopeKey);
   }
 
   /**
@@ -1089,21 +1151,23 @@ class TemporalKnowledgeGraph {
    * @param {number} limit
    * @returns {Array<Object>}
    */
-  getEventsByCategory(category, limit = 20) {
+  getEventsByCategory(category, limit = 20, scopeInput) {
+    const scope = this._scope(scopeInput);
     if (!this.MEMORY_CATEGORIES.includes(category)) return [];
     return this.db.prepare(`
       SELECT e.*, h.hour_key FROM events e
       JOIN hourly_chunks h ON e.chunk_id = h.id
-      WHERE e.memory_category = ?
+      WHERE e.scope_key = ? AND h.scope_key = ? AND e.memory_category = ?
       ORDER BY e.created_at DESC LIMIT ?
-    `).all(category, limit);
+    `).all(scope.scopeKey, scope.scopeKey, category, limit);
   }
 
-  getSpecialEvents(limit = 20, unresolvedOnly = false) {
-    let query = 'SELECT * FROM special_events_index';
-    const params = [];
+  getSpecialEvents(limit = 20, unresolvedOnly = false, scopeInput) {
+    const scope = this._scope(scopeInput);
+    let query = 'SELECT * FROM special_events_index WHERE scope_key = ?';
+    const params = [scope.scopeKey];
     if (unresolvedOnly) {
-      query += ' WHERE resolved = 0';
+      query += ' AND resolved = 0';
     }
     query += ' ORDER BY importance DESC, created_at DESC LIMIT ?';
     params.push(limit);
@@ -1114,7 +1178,8 @@ class TemporalKnowledgeGraph {
     return this.db.prepare('UPDATE special_events_index SET resolved = 1 WHERE id = ?').run(eventId);
   }
 
-  queryTemporalGraph(queryStr, timeRange) {
+  queryTemporalGraph(queryStr, timeRange, scopeInput) {
+    const scope = this._scope(scopeInput);
     const results = { entities: [], edges: [], events: [], chunks: [] };
     const ftsQuery = this._buildFtsQuery(queryStr);
     const searchTerm = `%${queryStr || ''}%`;
@@ -1199,19 +1264,21 @@ class TemporalKnowledgeGraph {
       }
     }
 
+    results.entities = results.entities.filter(row => row.scope_key === scope.scopeKey);
+    results.events = results.events.filter(row => row.scope_key === scope.scopeKey);
     if (results.entities.length > 0) {
       const entityIds = results.entities.map(e => e.id);
       const placeholders = entityIds.map(() => '?').join(',');
       results.edges = this.db.prepare(`
-        SELECT * FROM entity_edges WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})
+        SELECT * FROM entity_edges WHERE scope_key = ? AND (source_id IN (${placeholders}) OR target_id IN (${placeholders}))
         ORDER BY weight DESC LIMIT 100
-      `).all(...entityIds, ...entityIds);
+      `).all(scope.scopeKey, ...entityIds, ...entityIds);
     }
 
     results.chunks = this.db.prepare(`
-      SELECT * FROM hourly_chunks WHERE hour_key >= COALESCE(?, '1970-01-01T00') AND hour_key <= COALESCE(?, '2099-12-31T23')
+      SELECT * FROM hourly_chunks WHERE scope_key = ? AND hour_key >= COALESCE(?, '1970-01-01T00') AND hour_key <= COALESCE(?, '2099-12-31T23')
       ORDER BY hour_key DESC LIMIT 48
-    `).all(timeRange ? timeRange.start : null, timeRange ? timeRange.end : null);
+    `).all(scope.scopeKey, timeRange ? timeRange.start : null, timeRange ? timeRange.end : null);
 
     return results;
   }

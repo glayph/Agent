@@ -211,10 +211,20 @@ describe("handleMonitorMessage: node.update", () => {
 describe("handleMonitorMessage: node.complete", () => {
   it("marks a successful node completed and stops incoming edge animation", () => {
     handleMonitorMessage(
-      msg("node.spawn", { run_id: "r", node_id: "a", label: "tool_a", level: 0 }),
+      msg("node.spawn", {
+        run_id: "r",
+        node_id: "a",
+        label: "tool_a",
+        level: 0,
+      }),
     )
     handleMonitorMessage(
-      msg("node.spawn", { run_id: "r", node_id: "b", label: "tool_b", level: 1 }),
+      msg("node.spawn", {
+        run_id: "r",
+        node_id: "b",
+        label: "tool_b",
+        level: 1,
+      }),
     )
     handleMonitorMessage(
       msg("node.complete", {
@@ -236,13 +246,28 @@ describe("handleMonitorMessage: node.complete", () => {
 
   it("marks a failed node failed, records an error, and stops its outgoing edges too", () => {
     handleMonitorMessage(
-      msg("node.spawn", { run_id: "r", node_id: "a", label: "tool_a", level: 0 }),
+      msg("node.spawn", {
+        run_id: "r",
+        node_id: "a",
+        label: "tool_a",
+        level: 0,
+      }),
     )
     handleMonitorMessage(
-      msg("node.spawn", { run_id: "r", node_id: "b", label: "tool_b", level: 1 }),
+      msg("node.spawn", {
+        run_id: "r",
+        node_id: "b",
+        label: "tool_b",
+        level: 1,
+      }),
     )
     handleMonitorMessage(
-      msg("node.spawn", { run_id: "r", node_id: "c", label: "tool_c", level: 2 }),
+      msg("node.spawn", {
+        run_id: "r",
+        node_id: "c",
+        label: "tool_c",
+        level: 2,
+      }),
     )
     handleMonitorMessage(
       msg("node.complete", {
@@ -269,7 +294,9 @@ describe("handleMonitorMessage: node.complete", () => {
 describe("handleMonitorMessage: node.run_end", () => {
   it("marks the run completed or failed and preserves it for history", () => {
     handleMonitorMessage(msg("node.run_start", { run_id: "run-1" }))
-    handleMonitorMessage(msg("node.run_end", { run_id: "run-1", status: "failed" }))
+    handleMonitorMessage(
+      msg("node.run_end", { run_id: "run-1", status: "failed" }),
+    )
     const run = getMonitorState().runs["run-1"]
     expect(run.status).toBe("failed")
     expect(typeof run.endedAt).toBe("number")

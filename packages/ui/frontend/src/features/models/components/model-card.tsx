@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next"
 
 import type { ModelInfo } from "@/api/models"
 import { Button } from "@/shared/ui/button"
+import { IconButton } from "@/shared/ui/icon-button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 
 interface ModelCardProps {
@@ -147,9 +148,14 @@ export function ModelCard({
             </Tooltip>
           )}
 
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-sm"
+            label={
+              editDisabled
+                ? t("models.action.setDefaultDisabled.isVirtual")
+                : editLabel
+            }
             onClick={() => {
               if (!editDisabled) onEdit(model)
             }}
@@ -163,9 +169,8 @@ export function ModelCard({
             className={
               editDisabled ? "cursor-not-allowed opacity-50" : undefined
             }
-          >
-            <IconEdit className="size-3.5" aria-hidden="true" />
-          </Button>
+            icon={<IconEdit className="size-3.5" aria-hidden="true" />}
+          />
 
           <Tooltip delayDuration={deleteDisabled ? 0 : 700}>
             <TooltipTrigger asChild>

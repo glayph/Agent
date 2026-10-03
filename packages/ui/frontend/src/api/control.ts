@@ -1,7 +1,13 @@
 import { launcherFetch } from "./http"
 
-export type ControlRisk = "read" | "config_write" | "install" | "service" | "destructive"
-export type ControlRequestContext = { origin?: "local" | "dashboard" | "telegram" | "mcp" | "api" | "system"; actor?: string; requestId?: string; sessionId?: string }
+export type ControlRisk =
+  "read" | "config_write" | "install" | "service" | "destructive"
+export type ControlRequestContext = {
+  origin?: "local" | "dashboard" | "telegram" | "mcp" | "api" | "system"
+  actor?: string
+  requestId?: string
+  sessionId?: string
+}
 
 export interface ControlCapability {
   id: string
@@ -67,16 +73,24 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return body
 }
 
-export async function getApprovalRequests(): Promise<{ requests: ApprovalRequest[] }> {
+export async function getApprovalRequests(): Promise<{
+  requests: ApprovalRequest[]
+}> {
   return requestJson("/api/control/approvals")
 }
 
-export async function approveApprovalRequest(id: string, decidedBy = "dashboard-operator"): Promise<{ request: ApprovalRequest }> {
-  return requestJson(`/api/control/approvals/${encodeURIComponent(id)}/approve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ decidedBy }),
-  })
+export async function approveApprovalRequest(
+  id: string,
+  decidedBy = "dashboard-operator",
+): Promise<{ request: ApprovalRequest }> {
+  return requestJson(
+    `/api/control/approvals/${encodeURIComponent(id)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decidedBy }),
+    },
+  )
 }
 
 export async function getControlCapabilities(): Promise<{
@@ -104,7 +118,10 @@ export async function planControlOperation(input: {
   return requestJson("/api/control/plan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, context: input.context || { origin: "dashboard" } }),
+    body: JSON.stringify({
+      ...input,
+      context: input.context || { origin: "dashboard" },
+    }),
   })
 }
 
@@ -119,6 +136,9 @@ export async function executeControlOperation(input: {
   return requestJson("/api/control/execute", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, context: input.context || { origin: "dashboard" } }),
+    body: JSON.stringify({
+      ...input,
+      context: input.context || { origin: "dashboard" },
+    }),
   })
 }

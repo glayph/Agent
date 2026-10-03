@@ -80,7 +80,7 @@
   --color-sidebar-ring: var(--md-sys-color-primary);
 
   /* Status colors (custom - keeping existing for now) */
-  --color-success: #FFB45C;
+  --color-success: #ffb45c;
   --color-warning: #b8b8b8;
 }
 
@@ -128,8 +128,8 @@
   --ring: var(--md-sys-color-primary);
 
   /* Status */
-  --success: #4CAF50;
-  --warning: #FFC107;
+  --success: #4caf50;
+  --warning: #ffc107;
 
   /* Charts */
   --chart-1: var(--md-sys-color-primary);
@@ -207,8 +207,8 @@
   --border: var(--md-sys-color-outline);
   --input: var(--md-sys-color-outline);
   --ring: var(--md-sys-color-primary);
-  --success: #4CAF50;
-  --warning: #FFC107;
+  --success: #4caf50;
+  --warning: #ffc107;
   --chart-1: var(--md-sys-color-primary);
   --chart-2: var(--md-sys-color-secondary);
   --chart-3: var(--md-sys-color-tertiary);
@@ -766,7 +766,11 @@ select:focus-visible {
 }
 [class*="ring-green-"],
 [class*="ring-emerald-"] {
-  --tw-ring-color: color-mix(in srgb, var(--success) 30%, transparent) !important;
+  --tw-ring-color: color-mix(
+    in srgb,
+    var(--success) 30%,
+    transparent
+  ) !important;
 }
 
 [class*="text-amber-"],
@@ -1203,6 +1207,61 @@ body,
   line-height: 1.55;
 }
 
+[data-plugin-surface="true"] .plugin-page__section-kicker {
+  color: var(--muted-foreground);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+[data-plugin-surface="true"] .plugin-page__navigation-wrap {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.25rem;
+}
+
+[data-plugin-surface="true"] .plugin-page__nav-card {
+  background: color-mix(in srgb, var(--card) 70%, var(--background));
+  border-color: var(--border);
+}
+
+[data-plugin-surface="true"] .plugin-page__nav-card:hover,
+[data-plugin-surface="true"] .plugin-page__nav-card--active {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+
+[data-plugin-surface="true"] .plugin-page__nav-card--active {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+[data-plugin-surface="true"] .plugin-page__nav-icon {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+[data-plugin-surface="true"]
+  .plugin-page__nav-card--active
+  .plugin-page__nav-icon {
+  background: var(--foreground);
+  color: var(--primary);
+}
+
+[data-plugin-surface="true"] .plugin-overview-card {
+  background: color-mix(in srgb, var(--card) 80%, var(--background));
+  border-color: var(--border);
+}
+
+[data-plugin-surface="true"] .plugin-overview-card__link {
+  background: color-mix(in srgb, var(--background) 65%, var(--card));
+  border-color: var(--border);
+}
+
+[data-plugin-surface="true"] .plugin-overview-card__link:hover {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+
 [data-plugin-surface="true"] .plugin-stat {
   border-left: 1px solid var(--border);
   padding-left: 0.75rem;
@@ -1437,9 +1496,9 @@ body,
   align-items: center;
   background: transparent !important;
   border-color: var(--border) !important;
-  height: 3.5rem;
-  min-height: 3.5rem;
-  padding: 0 1.5rem;
+  height: var(--app-topbar-height);
+  min-height: var(--app-topbar-height);
+  padding-inline: var(--app-content-gutter);
 }
 
 .page-header-title {
@@ -1509,69 +1568,6 @@ body,
 .miki-sidebar__nav-item.active {
   background: var(--leftbar-item-active-bg);
   color: var(--leftbar-item-active-text);
-}
-
-.plugin-sidebar__scrim {
-  background: color-mix(in srgb, var(--foreground) 12%, transparent);
-  backdrop-filter: blur(2px);
-}
-
-.plugin-sidebar__position {
-  filter: drop-shadow(16px 0 28px rgb(17 24 11 / 0.08));
-}
-
-.plugin-sidebar {
-  background: var(--sidebar);
-  border-color: var(--sidebar-border);
-  color: var(--sidebar-foreground);
-}
-
-.plugin-sidebar__header,
-.plugin-sidebar__footer {
-  border-color: var(--sidebar-border);
-}
-
-.plugin-sidebar__mark {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.plugin-sidebar__eyebrow,
-.plugin-sidebar__label {
-  color: var(--muted-foreground);
-}
-
-.plugin-sidebar__close {
-  color: var(--muted-foreground);
-  transition:
-    background-color 140ms ease-out,
-    color 140ms ease-out;
-}
-
-.plugin-sidebar__close:hover {
-  background: var(--sidebar-accent);
-  color: var(--foreground);
-}
-
-.plugin-sidebar__item {
-  color: var(--muted-foreground);
-  transition:
-    background-color 140ms ease-out,
-    color 140ms ease-out;
-}
-
-.plugin-sidebar__item:hover,
-.plugin-sidebar__item.active {
-  background: var(--foreground);
-  color: var(--background);
-}
-
-.plugin-sidebar__active-dot {
-  margin-left: auto;
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 999px;
-  background: var(--primary);
 }
 
 @media (min-width: 640px) {
@@ -1704,4 +1700,126 @@ body,
 /* Inspector is still available from dedicated workspace controls, not message hover. */
 [data-chat-message] [data-chat-message-actions] {
   min-height: 0;
+}
+
+/* =============================================================================
+   STEP 1 — SHARED UI OPTIMIZATION
+   Stable shell geometry and a small spacing scale keep every route aligned.
+   Components can opt into these tokens without introducing page-specific magic
+   numbers or changing the existing visual theme.
+   ============================================================================= */
+:root {
+  --app-rail-width: 64px;
+  --app-topbar-height: 56px;
+  --app-content-gutter: clamp(0.75rem, 2vw, 2rem);
+  --app-section-gap: clamp(1rem, 2vw, 1.5rem);
+  --app-control-height: 2.25rem;
+}
+
+[data-layout="app-content"] {
+  min-width: 0;
+  isolation: isolate;
+}
+
+[data-layout="route-content"] {
+  min-width: 0;
+  min-height: 0;
+  contain: layout style;
+}
+
+[data-miki-topbar="true"] {
+  min-height: var(--app-topbar-height);
+  padding-inline: var(--app-content-gutter);
+}
+
+[data-layout="route-content"] :is(input, textarea, select, button) {
+  min-height: var(--app-control-height);
+}
+
+/* Keep keyboard focus visible even when a component uses a quiet ghost style. */
+:where(a, button, input, textarea, select, [role="button"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --app-content-gutter: 0.75rem;
+    --app-section-gap: 1rem;
+  }
+
+  [data-layout="route-content"] {
+    overflow-x: hidden;
+  }
+
+  [data-miki-topbar="true"] {
+    min-height: 3.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Secondary copy supports scanning on wide layouts but should not compete with
+   titles and actions on compact screens. The marker keeps this opt-in. */
+[data-text-role="supporting"] {
+  max-width: 62ch;
+}
+
+@media (max-width: 639px) {
+  [data-text-role="supporting"] {
+    display: none;
+  }
+}
+
+/* =============================================================================
+   STEP 4 — PAGE UI POLISH
+   Quiet elevation and predictable interaction states make route surfaces feel
+   like one workspace rather than a collection of unrelated screens.
+   ============================================================================= */
+[data-page-header="true"] {
+  position: relative;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+[data-page-title="true"] {
+  text-wrap: balance;
+}
+
+[data-page-actions="true"] {
+  scrollbar-width: none;
+}
+
+[data-page-actions="true"]::-webkit-scrollbar {
+  display: none;
+}
+
+[data-page-section="true"] {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+[data-page-row="true"] {
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  content-visibility: auto;
+  contain-intrinsic-size: 0 4.5rem;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-standard),
+    border-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+[data-page-row="true"]:hover,
+[data-page-row="true"]:focus-within {
+  background: color-mix(in srgb, var(--muted) 28%, transparent);
+}
+
+[data-page-row="true"]:focus-within {
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
 }

@@ -84,6 +84,26 @@ async function run() {
         assert.deepStrictEqual(zeroHop.nodes.map((node) => node.id), [alphaId]);
       });
     }],
+    ['Legacy TKG and NodeGraph retrieval is isolated by owner/workspace scope', async () => {
+      const { root, dbPath } = freshDbPath();
+      const scopeA = { agentId: 'agent-a', ownerId: 'owner-a', workspaceId: 'workspace-a' };
+      const scopeB = { agentId: 'agent-b', ownerId: 'owner-b', workspaceId: 'workspace-b' };
+      const first = new TemporalKnowledgeGraph(dbPath, { scope: scopeA });
+      await first.initialize();
+      first.writeEvent({ content: 'Scope A private memory', event_type: 'fact', skipNoiseFilter: true, scope: scopeA });
+      const graphA = first.getNodeGraph().snapshot(50);
+      first.close();
+
+      const second = new TemporalKnowledgeGraph(dbPath, { scope: scopeB });
+      await second.initialize();
+      second.writeEvent({ content: 'Scope B private memory', event_type: 'fact', skipNoiseFilter: true, scope: scopeB });
+      assert.strictEqual(second.getRecentEvents(24).some(event => event.content.includes('Scope A')), false);
+      assert.strictEqual(second.queryTemporalGraph('Scope A private').events.some(event => event.content.includes('Scope A')), false);
+      assert.strictEqual(second.getNodeGraph().snapshot(50).nodes.some(node => node.context?.text?.includes('Scope A')), false);
+      assert.ok(graphA.nodes.some(node => node.context?.text?.includes('Scope A')));
+      second.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }],
   ];
 
   let failures = 0;
@@ -107,4 +127,3 @@ run().catch((error) => {
   console.error(error.stack || error);
   process.exitCode = 1;
 });
-

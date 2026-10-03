@@ -48,20 +48,13 @@ agent:
     prune_low_value_facts: true
     fact_prune_threshold: 0.15
     fact_prune_min_age_days: 30
-    personality_enabled: true
-    procedural_enabled: true
-    max_context_procedures: 3
-    # Step 02 — OpenClaw-style file memory: MEMORY.md, memory/YYYY-MM-DD.md,
-    # session summaries and compaction archives, alongside identity/. This is
-    # systemwide (one memory for the whole agent), independent of the SQLite
-    # TKG memory above, which keeps running unchanged in the background.
     files:
       enabled: true
       bootstrap_max_chars: 6000
       memory_md_max_chars: 3500
       recent_days: 2
       index_max_entries: 6
-      summarizer: auto # auto | llm | heuristic — auto skips the LLM call for local models
+      summarizer: auto
       summary_timeout_ms: 25000
       summary_turns: 20
       session_idle_minutes: 30
@@ -76,6 +69,31 @@ agent:
         max_summary_chars: 3000
         flush_enabled: true
         flush_margin_percent: 10
+    personality_enabled: true
+    procedural_enabled: true
+    max_context_procedures: 3
+  model_router:
+    enabled: true
+    max_attempts: 8
+    lanes:
+      default:
+        primary: llama.cpp/lfm2.5-1.2b-instruct-q4_0
+        fallbacks:
+          - gemini/gemini-3.5-flash-lite
+      complex:
+        primary: gemini/gemini-3.5-flash-lite
+        fallbacks:
+          - llama.cpp/lfm2.5-1.2b-instruct-q4_0
+      heartbeat:
+        primary: gemini/gemini-3.5-flash-lite
+        fallbacks:
+          - llama.cpp/lfm2.5-1.2b-instruct-q4_0
+      subagent:
+        primary: gemini/gemini-3.5-flash-lite
+        fallbacks:
+          - llama.cpp/lfm2.5-1.2b-instruct-q4_0
+    roles: {}
+    credential_profiles: {}
   security:
     bypass_restrictions: false
     system_access: full
@@ -84,39 +102,15 @@ agent:
     privileged_account_required: false
     audit_logging: true
     approval_note: >-
-      Systemwide access is enabled by default. The agent must obtain explicit
-      approval before destructive or external side effects.
-  # Step 03 — model router. Replaces the old `model_routing` block (still read
-  # as a fallback when this block is absent). Lane = a named model profile;
-  # `primary` is tried first, then `fallbacks` in order (after rotating the
-  # provider's credential profiles). A model chosen explicitly in the UI/API is
-  # STRICT: it is never replaced by a fallback. See docs/model-router.md.
-  model_router:
-    enabled: true            # false → single attempt on the primary, no fallbacks
-    max_attempts: 8          # cap on credential rotations + model hops per call
-    lanes:
-      default:               # simple main-lane turns
-        primary: llama.cpp/lfm2.5-1.2b-instruct-q4_0
-        fallbacks: [gemini/gemini-3.5-flash-lite]
-      complex:               # complex main-lane turns
-        primary: gemini/gemini-3.5-flash-lite
-        fallbacks: [llama.cpp/lfm2.5-1.2b-instruct-q4_0]
-      heartbeat:             # proactive 24/7 loop + autonomous goals — keep cheap
-        primary: gemini/gemini-3.5-flash-lite
-        fallbacks: [llama.cpp/lfm2.5-1.2b-instruct-q4_0]
-      subagent:              # specialist / background sub-agent runs
-        primary: gemini/gemini-3.5-flash-lite
-        fallbacks: [llama.cpp/lfm2.5-1.2b-instruct-q4_0]
-      # background (memory summaries, self-improvement) follows the globally
-      # selected model unless you define a `background` lane here.
-    roles: {}                # e.g. forge: subagent   |   scout: { primary: ..., fallbacks: [...] }
-    credential_profiles: {}  # e.g. gemini: [GEMINI_API_KEY_2]  (secret NAMES only, same provider)
+      Systemwide access is enabled for autonomous operation. Miki decides and
+      executes actions without asking the user for interactive approval; every
+      action remains validated, bounded, and audit-logged.
   visual:
     screen_cooldown_seconds: 10
   tools:
     auto_approve_safe: true
-    require_confirm_destructive: true
-    require_confirm_computer_use: true
+    require_confirm_destructive: false
+    require_confirm_computer_use: false
 self_improvement:
   enabled: true
   reflection_interval_minutes: 60
@@ -146,13 +140,8 @@ concurrency:
 heartbeat:
   enabled: true
   interval_seconds: 1800
-  # Step 08: OpenClaw-style proactive checklist (identity/HEARTBEAT.md)
   checklist_path: identity/HEARTBEAT.md
   skip_when_main_busy: true
-  # quiet_hours:
-  #   start: "23:00"
-  #   end: "07:00"
-  #   timezone: "Asia/Dhaka"
   auto_actions:
     enabled: false
     max_actions_per_cycle: 0
@@ -191,8 +180,9 @@ skill_governance:
     test_execution: true
 agents:
   defaults:
+    workspace: /home/ubuntu/miki
     restrict_to_workspace: false
-    split_on_marker: true
+    split_on_marker: false
     max_tokens: 16384
     context_window: 0
     max_tool_iterations: 12
@@ -209,9 +199,6 @@ agents:
       system_prompt:
         mode: default
       skills:
-        # An empty custom allow-list hid every skill from normal turns.
-        # Default mode exposes bundled and installed skill metadata; the
-        # high-risk create/install tools remain approval-gated.
         mode: default
       tools:
         mode: default

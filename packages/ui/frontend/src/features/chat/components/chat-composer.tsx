@@ -13,8 +13,8 @@ import { type KeyboardEvent as ReactKeyboardEvent, useId, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
 
-import { ContextUsageRing } from "@/features/chat/components/context-usage-ring"
 import { AttachmentCard } from "@/features/chat/components/attachment-card"
+import { ContextUsageRing } from "@/features/chat/components/context-usage-ring"
 import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import {

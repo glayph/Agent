@@ -15,7 +15,7 @@ export interface ToolDefinition {
 }
 
 export interface ToolHandler {
-  (args: Record<string, unknown>): string | Promise<string>;
+  (args: Record<string, unknown>, signal?: AbortSignal): string | Promise<string>;
 }
 
 export class ToolRegistrySchemas {

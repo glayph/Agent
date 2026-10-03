@@ -368,16 +368,19 @@ describe("loadRuntimePluginContracts", () => {
         "  plugin_contracts:",
         "    allow_execution: true",
         "    max_output_bytes: 2048",
+        "    allow_secrets: true",
+        "    require_os_sandbox: true",
       ].join("\n"),
     );
     await registerPlugin(workspaceDir, {
       createToolEntrypoint: true,
+      permissions: ["secrets.env"],
       toolEntrypointContent: [
         "let input = '';",
         "process.stdin.on('data', (chunk) => { input += chunk; });",
         "process.stdin.on('end', () => {",
         "  const payload = JSON.parse(input);",
-        "  process.stdout.write(JSON.stringify({ output: `hello ${payload.args.name}:${payload.runtime.policy_sandbox}` }));",
+        "  process.stdout.write(JSON.stringify({ output: `hello ${payload.args.name}:${payload.runtime.policy_sandbox}:sandbox=${process.env.Miki_PLUGIN_SANDBOX_ENFORCED}` }));",
         "});",
       ].join("\n"),
       contracts: {
@@ -390,7 +393,7 @@ describe("loadRuntimePluginContracts", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.output).toBe("hello Miki:true");
+    expect(result.output).toBe("hello Miki:true:sandbox=1");
     expect(result.plugin?.name).toBe("plugin");
     expect(result.contract?.name).toBe("local_echo");
 
@@ -406,7 +409,7 @@ describe("loadRuntimePluginContracts", () => {
             kind: "tools",
             pluginName: "plugin",
             contractName: "local_echo",
-            permissions: [],
+            permissions: ["secrets.env"],
             payloadKeys: ["args"],
           }),
         }),

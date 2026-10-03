@@ -175,6 +175,22 @@ describe("persistent job queue", () => {
     );
   });
 
+  it("rejects leased-job mutations without the exact worker owner", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-jobs-owner-"));
+    const queue = new PersistentJobQueue(path.join(tempDir, "queue.json"));
+    const job = queue.enqueue("agent.run", {});
+    expect(queue.dequeue(Date.now(), "worker-a", 60_000)?.id).toBe(job.id);
+    expect(queue.updateProgress(job.id, 50)).toBeNull();
+    expect(queue.checkpoint(job.id, {
+      id: "cp-owner",
+      step: "run",
+      status: "started",
+    })).toBeNull();
+    expect(queue.complete(job.id, { ok: true })).toBeNull();
+    expect(queue.get(job.id)?.status).toBe("running");
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("preserves checkpoints and idempotency across a worker restart", () => {
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "Miki-jobs-restart-"),

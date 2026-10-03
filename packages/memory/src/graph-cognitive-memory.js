@@ -221,7 +221,13 @@ class GraphCognitiveMemory {
     if (!agentId || !ownerId || !workspaceId) throw new Error('Memory scope requires agentId, ownerId and workspaceId');
     const projectId = source.projectId || source.project_id ? String(source.projectId || source.project_id) : null;
     const sessionId = source.sessionId || source.session_id ? String(source.sessionId || source.session_id) : null;
-    return { agentId, ownerId, workspaceId, projectId, sessionId, scopeKey: [agentId, ownerId, workspaceId].join(':') };
+    return { agentId, ownerId, workspaceId, projectId, sessionId, scopeKey: [agentId, ownerId, workspaceId].map(encodeURIComponent).join(':'), legacyScopeKey: [agentId, ownerId, workspaceId].join(':') };
+  }
+
+  _scopeKeys(scope) {
+    return scope.legacyScopeKey && scope.legacyScopeKey !== scope.scopeKey
+      ? [scope.scopeKey, scope.legacyScopeKey]
+      : [scope.scopeKey];
   }
 
   _categoryId(scopeKey, slug) { return `cat-${hash(`${scopeKey}:${slug}`).slice(0, 24)}`; }
@@ -235,9 +241,17 @@ class GraphCognitiveMemory {
   }
 
   _isTransient(content, explicit) {
+    // Fix #5: Content length alone must not determine durability. A short
+    // statement like "Use Vim", "I am 7", or a name/preference/code word is
+    // durable if the caller marked it explicit. Length-based rejection is only
+    // applied when no explicit durable intent was signalled.
     if (explicit) return false;
     const normalized = String(content || '').trim().toLowerCase();
-    if (!normalized || normalized.length < 8) return true;
+    if (!normalized) return true;
+    // Very short content without explicit flag: reject only true noise.
+    // Threshold reduced from 8 to 4 to preserve short facts like "vim" or
+    // "i=3" while still dropping empty pings.
+    if (normalized.length < 4) return true;
     return /^(hi|hello|hey|thanks|thank you|ok|okay|হ্যালো|ধন্যবাদ|ঠিক আছে|আচ্ছা)[!.\s]*$/iu.test(normalized);
   }
 
@@ -265,7 +279,7 @@ class GraphCognitiveMemory {
     const fingerprint = hash(`${categorySlug}|${memoryType}|${canonical.toLowerCase()}`);
     const existing = this.db.prepare('SELECT * FROM memory_nodes WHERE scope_key = ? AND fingerprint = ?').get(scope.scopeKey, fingerprint);
     const now = input.createdAt ? new Date(input.createdAt).toISOString() : nowIso();
-    const metadata = input.metadata && typeof input.metadata === 'object' ? input.metadata : {};
+    const metadata = { ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}), ...((input.factKey || input.fact_key) ? { factKey: String(input.factKey || input.fact_key) } : {}) };
     const projectId = input.projectId || scope.projectId || null;
     if (existing) {
       this.db.prepare(`UPDATE memory_nodes SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ?, confidence = MAX(confidence, ?), explicit_importance = MAX(explicit_importance, ?) WHERE id = ?`)
@@ -274,6 +288,16 @@ class GraphCognitiveMemory {
       return { stored: false, duplicate: true, nodeId: existing.id, category: categorySlug };
     }
     const nodeId = this._nodeId(scope.scopeKey, fingerprint);
+    // Fix #7: a new fact carrying the same factKey (entity/attribute) as an
+    // existing active node supersedes it. The old node is kept for history
+    // (status 'superseded', never retrieved) instead of competing in prompts.
+    const factKey = input.factKey || input.fact_key || (input.metadata && input.metadata.factKey) || null;
+    if (factKey) {
+      const stale = this.db.prepare(`SELECT id FROM memory_nodes WHERE scope_key = ? AND status = 'active' AND is_pinned = 0 AND json_extract(metadata, '$.factKey') = ?`).all(scope.scopeKey, String(factKey));
+      for (const old of stale) {
+        this.db.prepare(`UPDATE memory_nodes SET status = 'superseded', is_archived = 1, updated_at = ?, metadata = json_set(COALESCE(metadata, '{}'), '$.supersededBy', ?) WHERE id = ?`).run(nowIso(), nodeId, old.id);
+      }
+    }
     this.db.prepare(`
       INSERT INTO memory_nodes
       (id, scope_key, agent_id, owner_id, workspace_id, project_id, category_id, memory_type, content, structured_value, source_type, source_reference, fingerprint, created_at, updated_at, last_accessed_at, access_count, explicit_importance, confidence, semantic_relevance, graph_relevance, recency_score, frequency_score, relationship_strength, activation_score, status, review_at, expires_at, is_pinned, is_archived, metadata, embedding)
@@ -355,7 +379,11 @@ class GraphCognitiveMemory {
     const scope = this.normalizeScope(options.scope);
     const limit = Math.max(1, Math.min(this.options.maxInjectedMemories, Number(options.limit) || this.options.maxInjectedMemories));
     const tokens = this._tokens(query);
-    const rows = this.db.prepare(`SELECT n.*, c.slug AS category_slug FROM memory_nodes n JOIN memory_categories c ON c.id = n.category_id WHERE n.scope_key = ? AND n.status = 'active' AND n.is_archived = 0 ORDER BY n.activation_score DESC, n.updated_at DESC LIMIT ?`).all(scope.scopeKey, this.options.maxCandidates);
+    const scopeKeys = this._scopeKeys(scope);
+    const scopePlaceholders = scopeKeys.map(() => '?').join(',');
+    // Fix #2: expiry predicate is mandatory — expired nodes must not enter
+    // retrieval even if maintenance() has not yet archived them.
+    const rows = this.db.prepare(`SELECT n.*, c.slug AS category_slug FROM memory_nodes n JOIN memory_categories c ON c.id = n.category_id WHERE n.scope_key IN (${scopePlaceholders}) AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY n.activation_score DESC, n.updated_at DESC LIMIT ?`).all(...scopeKeys, this.options.maxCandidates);
     const scored = rows.map((node) => {
       const haystack = `${node.content} ${node.memory_type} ${node.category_slug} ${node.source_reference || ''}`.toLowerCase();
       const lexical = tokens.length ? tokens.filter((token) => haystack.includes(token)).length / tokens.length : 0.1;
@@ -376,7 +404,9 @@ class GraphCognitiveMemory {
       add(item);
       if (selected.length >= limit) break;
       if ((options.maxGraphDepth == null ? this.options.maxGraphDepth : options.maxGraphDepth) >= 1) {
-        const neighbors = this.db.prepare(`SELECT n.*, c.slug AS category_slug, e.weight AS edge_weight, e.relation_type FROM memory_edges e JOIN memory_nodes n ON n.id = CASE WHEN e.source_node_id = ? THEN e.target_node_id ELSE e.source_node_id END JOIN memory_categories c ON c.id = n.category_id WHERE e.scope_key = ? AND (e.source_node_id = ? OR e.target_node_id = ?) AND n.status = 'active' AND n.is_archived = 0 ORDER BY e.weight DESC LIMIT 6`).all(item.node.id, scope.scopeKey, item.node.id, item.node.id);
+        // Fix #2: neighbor traversal also checks expiry — expired nodes must
+        // not be pulled in as graph neighbors.
+        const neighbors = this.db.prepare(`SELECT n.*, c.slug AS category_slug, e.weight AS edge_weight, e.relation_type FROM memory_edges e JOIN memory_nodes n ON n.id = CASE WHEN e.source_node_id = ? THEN e.target_node_id ELSE e.source_node_id END JOIN memory_categories c ON c.id = n.category_id WHERE e.scope_key = ? AND (e.source_node_id = ? OR e.target_node_id = ?) AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY e.weight DESC LIMIT 6`).all(item.node.id, scope.scopeKey, item.node.id, item.node.id);
         for (const neighbor of neighbors) {
           const neighborScore = clamp(item.score * 0.82 + Number(neighbor.edge_weight || 0) * 0.18);
           add({ node: neighbor, score: neighborScore, lexical: 0, projectBoost: neighbor.project_id ? this._projectBoost(scope, neighbor.project_id) : 0 }, item.node.id);
@@ -455,6 +485,8 @@ class GraphCognitiveMemory {
       for (const project of stale) this.db.prepare('UPDATE project_contexts SET status = \'dormant\', relevance_boost = 0, closed_at = COALESCE(closed_at, ?) WHERE scope_key = ? AND project_id = ?').run(nowIso(), project.scope_key, project.project_id);
       this.db.prepare('UPDATE memory_nodes SET is_archived = 1, status = \'archived\', updated_at = ? WHERE expires_at IS NOT NULL AND expires_at < ? AND is_pinned = 0').run(nowIso(), nowIso());
       this.db.prepare('DELETE FROM memory_access_events WHERE created_at < datetime(\'now\', \'-180 days\')').run();
+      // Fix #8: bounded retention for superseded history (kept 365 days).
+      this.db.prepare('DELETE FROM memory_nodes WHERE status = \'superseded\' AND updated_at < ?').run(new Date(Date.now() - 365 * 86400000).toISOString());
     });
     tx();
     return { dormantProjects: stale.length };

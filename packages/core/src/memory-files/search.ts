@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { MemoryPaths } from "./types.js";
-import { isMemoryFile, relFromRoot } from "./paths.js";
+import { isMemoryFile, relFromRoot, resolveMemoryFile } from "./paths.js";
 import type { MemoryFileStore } from "./store.js";
 
 interface Chunk {
@@ -183,10 +183,17 @@ export async function readMemoryRange(
       text: "",
       error: "memory_get only reads MEMORY.md and files under memory/ (*.md).",
     };
+  const safeAbs = await resolveMemoryFile(paths, abs);
+  if (!safeAbs)
+    return {
+      path: raw,
+      text: "",
+      error: "memory_get only reads MEMORY.md and files under memory/ (*.md).",
+    };
   const rel = relFromRoot(paths, abs);
   let content: string;
   try {
-    content = await fs.promises.readFile(abs, "utf-8");
+    content = await fs.promises.readFile(safeAbs, "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { path: rel, text: "" };
     return { path: rel, text: "", error: (err as Error).message };

@@ -24,6 +24,52 @@ type versionResponse struct {
 	Mode    string `json:"mode"`
 }
 
+const compatibilityAuthCookie = "miki_compat_auth"
+
+func compatibilityPassword() string {
+	if password := strings.TrimSpace(os.Getenv("MIKI_UI_PASSWORD")); password != "" {
+		return password
+	}
+	return "123456789"
+}
+
+func compatibilityAuthHandler(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/auth/status", func(w http.ResponseWriter, r *http.Request) {
+		_, err := r.Cookie(compatibilityAuthCookie)
+		authenticated := err == nil
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": authenticated, "initialized": true, "session_timeout_minutes": 0})
+	})
+	mux.HandleFunc("POST /api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Password != compatibilityPassword() {
+			http.Error(w, `{"error":"Invalid password"}`, http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: compatibilityAuthCookie, Value: "1", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"default_model_configured":false}`))
+	})
+	mux.HandleFunc("POST /api/auth/setup", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Password string `json:"password"`
+			Confirm  string `json:"confirm"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Password == "" || body.Password != body.Confirm {
+			http.Error(w, `{"error":"Passwords do not match"}`, http.StatusBadRequest)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: compatibilityAuthCookie, Value: "1", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/auth/logout", func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: compatibilityAuthCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
 func compatibilityStubDefaultPort() string {
 	if port := strings.TrimSpace(os.Getenv("GATEWAY_PORT")); port != "" {
 		return port
@@ -64,6 +110,7 @@ func resolveDistDir(executablePath, cwd string) string {
 
 func newCompatibilityStubHandler(distDir string) http.Handler {
 	mux := http.NewServeMux()
+	compatibilityAuthHandler(mux)
 	mux.HandleFunc("/api/version", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(versionResponse{
@@ -78,7 +125,25 @@ func newCompatibilityStubHandler(distDir string) http.Handler {
 	})
 
 	if _, err := os.Stat(filepath.Join(distDir, "index.html")); err == nil {
-		mux.Handle("/", http.FileServer(http.Dir(distDir)))
+		fileServer := http.FileServer(http.Dir(distDir))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				http.NotFound(w, r)
+				return
+			}
+			requested := filepath.Join(distDir, filepath.Clean(r.URL.Path))
+			if r.URL.Path != "/" {
+				if info, statErr := os.Stat(requested); statErr == nil && !info.IsDir() {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+				if filepath.Ext(r.URL.Path) != "" {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+			}
+			http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+		})
 	} else {
 		mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "miki WebUI assets are not built. Run npm run build.", http.StatusServiceUnavailable)

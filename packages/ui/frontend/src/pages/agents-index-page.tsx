@@ -24,7 +24,10 @@ export function AgentsIndexPage() {
     <div className="bg-background flex h-full min-h-0 flex-col">
       <PageHeader title="Active Specialists" titleLevel={1} />
       <div className="animate-fade-in mx-auto w-full max-w-6xl flex-1 overflow-y-auto p-6">
-        <p className="text-muted-foreground mb-6 text-sm">
+        <p
+          data-text-role="supporting"
+          className="text-muted-foreground mb-6 text-sm"
+        >
           Swarm agents currently registered and routing parallel subtasks.
         </p>
 
@@ -34,6 +37,7 @@ export function AgentsIndexPage() {
               key={agent.id}
               to="/agents/$id"
               params={{ id: agent.id }}
+              data-page-row="true"
               className="agent-card group relative flex h-36 flex-col justify-between"
             >
               <div className="flex items-start justify-between">

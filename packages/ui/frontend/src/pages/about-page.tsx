@@ -62,9 +62,7 @@ export function AboutPage() {
                 <span className="text-muted-foreground">
                   {t("pages.about.version_label")}
                 </span>
-                <span className="font-mono">
-                  {versionInfo?.version ?? "—"}
-                </span>
+                <span className="font-mono">{versionInfo?.version ?? "—"}</span>
               </div>
               <Separator />
               <div className="flex items-center justify-between gap-3">

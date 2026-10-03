@@ -93,7 +93,10 @@ export function ModelsPage() {
 
   const defaultModel = models.find((model) => model.is_default)
   useEffect(() => {
-    if (new URLSearchParams(globalThis.location.search).get("setup") === "required") {
+    if (
+      new URLSearchParams(globalThis.location.search).get("setup") ===
+      "required"
+    ) {
       toast.info(
         t(
           "models.setupRequiredToast",
@@ -163,11 +166,17 @@ export function ModelsPage() {
               </span>
             </div>
           )}
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p
+            data-text-role="supporting"
+            className="text-muted-foreground mt-1 text-sm"
+          >
             {t("models.description")}
           </p>
           {!loading && providerOptions.length === 0 && (
-            <p className="text-muted-foreground mt-1 text-sm">
+            <p
+              data-text-role="supporting"
+              className="text-muted-foreground mt-1 text-sm"
+            >
               {t("models.providerCatalogUnavailable")}
             </p>
           )}

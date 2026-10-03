@@ -268,9 +268,11 @@ async function spawnGateway() {
     sleep(delay).then(() => {
       if (!stopping)
         void spawnGateway().catch((error) => {
-          console.error(
-            `[miki-24-7] restart failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          const reason = `restart_spawn_failed:${error instanceof Error ? error.message : String(error)}`;
+          console.error(`[miki-24-7] ${reason}`);
+          persist("failed", { reason, failedAt: now(), restartCount });
+          void notify("gateway_restart_failed", { reason, restartCount });
+          void shutdown(reason).finally(() => process.exit(1));
         });
     });
   });

@@ -54,7 +54,6 @@ function unwrapSkillApiResponse<T>(response: T | SkillApiEnvelope<T>): T {
   return response as T
 }
 
-
 export interface SkillSearchResponse {
   results: SkillRegistrySearchResult[]
   limit: number
@@ -242,8 +241,7 @@ export async function importSkill(file: File): Promise<SkillActionResponse> {
     throw new Error(await extractErrorMessage(res))
   }
   const response = (await res.json()) as
-    | SkillActionResponse
-    | SkillApiEnvelope<SkillActionResponse>
+    SkillActionResponse | SkillApiEnvelope<SkillActionResponse>
   return unwrapSkillApiResponse(response)
 }
 

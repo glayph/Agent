@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
+  type MonitorNode,
   clearMonitorRun,
   getMonitorState,
   resetMonitorStore,
@@ -9,7 +10,6 @@ import {
   setNodePosition,
   toggleNodeUIState,
   updateMonitorStore,
-  type MonitorNode,
 } from "./store"
 
 function baseNode(overrides: Partial<MonitorNode> = {}): MonitorNode {
@@ -147,8 +147,20 @@ describe("clearMonitorRun", () => {
         b: baseNode({ id: "b", runId: "run-2" }),
       },
       edges: {
-        "a->b": { id: "a->b", source: "a", target: "b", runId: "run-1", animated: false },
-        "b->c": { id: "b->c", source: "b", target: "c", runId: "run-2", animated: true },
+        "a->b": {
+          id: "a->b",
+          source: "a",
+          target: "b",
+          runId: "run-1",
+          animated: false,
+        },
+        "b->c": {
+          id: "b->c",
+          source: "b",
+          target: "c",
+          runId: "run-2",
+          animated: true,
+        },
       },
       nodeOrder: ["a", "b"],
     })

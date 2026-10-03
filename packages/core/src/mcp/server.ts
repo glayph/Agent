@@ -26,10 +26,18 @@ const TOOL_REFRESH_MS_MAX = parseInt(
   process.env["MCP_TOOL_REFRESH_MAX"] || "120000",
   10,
 );
-const MAX_CONCURRENT_TOOLS = parseInt(
+const parsedMaxConcurrentTools = Number.parseInt(
   process.env["MCP_MAX_CONCURRENT_TOOLS"] || "8",
   10,
 );
+const MAX_CONCURRENT_TOOLS = Number.isFinite(parsedMaxConcurrentTools)
+  ? Math.min(100, Math.max(1, parsedMaxConcurrentTools))
+  : 8;
+if (MAX_CONCURRENT_TOOLS !== parsedMaxConcurrentTools) {
+  console.warn(
+    `[mcp] invalid MCP_MAX_CONCURRENT_TOOLS=${process.env["MCP_MAX_CONCURRENT_TOOLS"] ?? "unset"}; using ${MAX_CONCURRENT_TOOLS}`,
+  );
+}
 
 interface CreateMcpServerOptions {
   paths?: RuntimePaths | string;

@@ -183,9 +183,30 @@ export function deriveTitle(doc: SummaryDoc, fallback = "session"): string {
   return first ? clip(first, 60) : fallback;
 }
 
-/** Durable-looking facts only — what a pre-compaction flush writes down. */
+/**
+ * Durable-looking facts only — what a pre-compaction flush writes down.
+ *
+ * Fix #6: Facts derived from assistant turns are marked [TENTATIVE] so they
+ * are not stored as authoritative memory. A fact is only untagged when it
+ * comes exclusively from a user turn (user confirmed/stated it). Assistant
+ * text can contain speculative statements, incorrect summaries, or
+ * hallucinations that should not persist as ground truth.
+ */
 export function extractDurableFacts(turns: readonly TurnLike[]): string[] {
-  return extractDoc(turns).decisions.slice(0, 10);
+  const doc = extractDoc(turns);
+
+  // Build a set of text snippets that the USER explicitly stated.
+  const userContent = turns
+    .filter((t) => t.role === "user")
+    .map((t) => String(t.content ?? "").toLowerCase())
+    .join("\n");
+
+  return doc.decisions.slice(0, 10).map((fact) => {
+    // Check whether the first 40 chars of this fact appear in user turns.
+    const probe = fact.slice(0, 40).toLowerCase();
+    const userConfirmed = probe.length > 5 && userContent.includes(probe);
+    return userConfirmed ? fact : `[TENTATIVE] ${fact}`;
+  });
 }
 
 /* ------------------------------------------------------------------ */

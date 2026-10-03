@@ -3563,14 +3563,13 @@ export function createLauncherCompatRouter({
     const workspaceSkills = skills.filter(
       (skill) => skillSourceForPath(paths, skill.path) === "workspace",
     );
-    const memoryDbCandidates = [
-      path.join(paths.dataDir, "agent-memory.db"),
-      path.join(paths.dataDir, "miki_memory.db"),
+    const localMem0Files = [
+      path.join(paths.dataDir, "memory", "vectors.db"),
+      path.join(paths.dataDir, "memory", "history.db"),
     ];
-    const memoryDbPath = memoryDbCandidates.find((candidate) =>
+    const memoryDbExists = localMem0Files.every((candidate) =>
       fs.existsSync(candidate),
     );
-    const memoryDbExists = Boolean(memoryDbPath);
     const runtimeApplyStatus = state.runtime_apply_status || "applied";
     const gatewayStatus: FlowComponentStatus =
       runtimeApplyStatus === "failed"
@@ -3699,11 +3698,11 @@ export function createLauncherCompatRouter({
             const agentRunsDbPath = path.join(paths.dataDir, "agent-runs.db");
             const agentRunsExists = fs.existsSync(agentRunsDbPath);
             const missing = [];
-            if (!memoryExists) missing.push("agent-memory.db");
+            if (!memoryExists) missing.push("memory/vectors.db + memory/history.db");
             if (!agentRunsExists) missing.push("agent-runs.db");
             if (missing.length > 0)
-              return `Memory DB files missing: ${missing.join(", ")}. Schema may not be initialized yet.`;
-            return "Relational memory stores sessions, messages, tool logs, facts, procedures, goals, and model metadata.";
+              return `Local Mem0 files missing: ${missing.join(", ")}. Mem0 may still be initializing.`;
+            return "Local Mem0 stores durable semantic memory, memory history, tool outcomes, and scoped facts.";
           } catch {
             return "Memory probe failed.";
           }
@@ -3711,7 +3710,8 @@ export function createLauncherCompatRouter({
         evidence: [
           "/memory/search",
           "/sessions",
-          memoryDbPath || "agent-memory.db",
+          "memory/vectors.db",
+          "memory/history.db",
         ],
         metrics: {
           active_sessions: sessions.length,

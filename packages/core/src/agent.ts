@@ -88,6 +88,7 @@ import {
   resolveParallelToolCallLimit,
   type PlannedToolInvocation,
   type ToolConcurrencyPolicy,
+  type ToolConcurrencyContext,
   type ToolInvocationLike,
 } from "./tool-call-parallelism.js";
 import { getErrorMessage } from "./errors.js";
@@ -1065,9 +1066,11 @@ export class AgentOrchestrator {
 
     // Initialize the temporal memory system. The DB lives alongside other
     // agent runtime files. initMemory() is idempotent - safe across restarts.
-    const dataDir = path.resolve(
-      path.join(runtimePaths.configDir, "..", "data"),
-    );
+    // Fix #10: Use the canonical runtimePaths.dataDir instead of deriving
+    // configDir/../data — these diverge on custom deployments and after
+    // restarts, causing agent-memory.db to land in a different directory than
+    // every other runtime store (task-queue.db, scheduled-tasks.db, etc.).
+    const dataDir = runtimePaths.dataDir;
     let memoryIntegration = null;
     try {
       memoryIntegration = initMemory(dataDir);
@@ -3633,7 +3636,10 @@ export class AgentOrchestrator {
     allowedToolNames: Set<string> | null = null,
   ): AsyncGenerator<string, void, unknown> {
     const invocations = toolCalls.map((tc) => this._parseToolInvocation(tc));
-    const plan = createToolExecutionPlan(invocations);
+    const lockContext: ToolConcurrencyContext = {
+      workspaceDir: this.workspaceDir,
+    };
+    const plan = createToolExecutionPlan(invocations, lockContext);
     const taskProfile = classifyAgentTask(userMessage);
     const routeDecision = routeAgentTask(userMessage, this.config, taskProfile);
     const accelerationPlan = buildWorkflowAccelerationPlan(
@@ -4308,10 +4314,13 @@ export class AgentOrchestrator {
     }
 
     // --- Temporal Memory Context (backend only, not shown in UI) ---
-    // Retrieve the agent's long-term memory context and prepend it to the
-    // system prompt so the LLM has access to past events, active entities,
-    // and recent conversation history across sessions. This runs on every
-    // turn and is invisible to the user (it's in the system role message).
+    // Fix #4: A shared global budget governs the combined size of file-memory
+    // and TKG blocks. Each previously had its own independent character cap,
+    // allowing combined memory to overflow the model's context window.
+    // Allocation: 55% file-memory (curated, structured) / 45% TKG (dynamic).
+    const GLOBAL_MEMORY_BUDGET = this._memoryContextMaxChars() * 2;
+    const TKG_SHARE = Math.floor(GLOBAL_MEMORY_BUDGET * 0.45);
+
     let memoryContextBlock = "";
     // Memory is needed for simple continuity and preference questions too;
     // skipping it for simple turns made the assistant appear to forget prior
@@ -4324,12 +4333,24 @@ export class AgentOrchestrator {
         );
         if (memCtx && memCtx.trim()) {
           const memoryText = memCtx.trim();
-          const memoryLimit = this._memoryContextMaxChars();
+          // Fix #1 (partial): Deduplicate TKG content already present in the
+          // file-memory block. Skip TKG lines that already appear verbatim in
+          // fileMemoryBlock so the same fact never reaches the model twice.
+          const fileMemCtx = fileMemoryBlock ?? "";
+          const deduped = memoryText
+            .split("\n")
+            .filter((line) => {
+              const stripped = line.trim();
+              if (stripped.length < 20) return true;
+              return !fileMemCtx.includes(stripped);
+            })
+            .join("\n")
+            .trim();
           const boundedMemory =
-            memoryText.length > memoryLimit
-              ? `${memoryText.slice(0, memoryLimit)}\n[Memory context truncated for token efficiency.]`
-              : memoryText;
-          memoryContextBlock = `${boundedMemory}\n\n`;
+            deduped.length > TKG_SHARE
+              ? `${deduped.slice(0, TKG_SHARE)}\n[TKG memory truncated: global budget.]`
+              : deduped;
+          if (boundedMemory) memoryContextBlock = `${boundedMemory}\n\n`;
         }
       } catch (memErr) {
         // Never let a memory read error break the agent turn.

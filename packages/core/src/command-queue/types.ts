@@ -59,6 +59,7 @@ export type CommandStatus =
   | "queued"
   | "active"
   | "completed"
+  | "failed"
   | "cancelled"
   | "dropped"
   | "coalesced";
@@ -130,6 +131,7 @@ export type QueueEventType =
   | "enqueued"
   | "started"
   | "completed"
+  | "failed"
   | "cancelled"
   | "dropped"
   | "coalesced"

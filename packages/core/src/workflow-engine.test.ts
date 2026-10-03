@@ -195,4 +195,25 @@ describe("durable autonomous WorkflowEngine", () => {
     await running;
     db.close();
   });
+
+  it("rejects stale-owner workflow state writes", () => {
+    const db = new Database(":memory:");
+    const store = new SqliteWorkflowStateStore(db);
+    const state = {
+      id: "fenced-write",
+      objective: "fence stale writes",
+      status: "running" as const,
+      steps: [],
+      cursor: 0,
+      attempts: 0,
+      errors: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    expect(store.claim(state, "worker-a", 60_000)).toBe(true);
+    expect(store.saveOwned({ ...state, cursor: 1 }, "worker-b")).toBe(false);
+    expect(store.saveOwned({ ...state, cursor: 1 }, "worker-a")).toBe(true);
+    expect(store.get(state.id)?.cursor).toBe(1);
+    db.close();
+  });
 });

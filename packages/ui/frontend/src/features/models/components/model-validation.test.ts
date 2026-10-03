@@ -30,11 +30,13 @@ describe("model validation", () => {
       level: "success",
       messageKey: "",
     })
-    expect(validateModelField("gemini-3.5-flash-lite", "google")).toMatchObject({
-      level: "success",
-      messageKey: "models.validation.parsed",
-      messageParams: { provider: "google", model: "gemini-3.5-flash-lite" },
-    })
+    expect(validateModelField("gemini-3.5-flash-lite", "google")).toMatchObject(
+      {
+        level: "success",
+        messageKey: "models.validation.parsed",
+        messageParams: { provider: "google", model: "gemini-3.5-flash-lite" },
+      },
+    )
   })
 
   it("returns actionable fixes for invalid separators", () => {

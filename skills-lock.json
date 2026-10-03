@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "lark-contact": {
+      "source": "larksuite/cli",
+      "sourceType": "github",
+      "skillPath": "skills/lark-contact/SKILL.md",
+      "computedHash": "ad4a1f30943ef2ef5882181ae3563d0d5b11f1bfd5a32fb1bc56ed7529a539dc"
+    },
+    "open-knowledge-discovery": {
+      "source": "inkeep/open-knowledge-skills",
+      "sourceType": "github",
+      "skillPath": "skills/core/open-knowledge-discovery/SKILL.md",
+      "computedHash": "6f032c9e03e8dd13e6b4d8a18382ce337499857690de695f884c640353cfbe1e"
+    },
+    "opencli-browser": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-browser/SKILL.md",
+      "computedHash": "724ab3705862a95bd6f8171a395792c1d01641bfa45d0bcbaeb0e3db7a37bd58"
+    }
+  }
+}

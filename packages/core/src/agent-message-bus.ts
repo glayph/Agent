@@ -154,9 +154,14 @@ export class AgentMessageBus extends EventEmitter {
       });
 
       let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off("message", replyHandler);
+      };
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
+        cleanup();
         this._deadLetter(requestMsg, "timeout");
         reject(
           new Error(
@@ -174,8 +179,7 @@ export class AgentMessageBus extends EventEmitter {
         ) {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
-          this.off("message", replyHandler);
+          cleanup();
           resolve(msg);
         }
       };

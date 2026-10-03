@@ -7,6 +7,7 @@ import {
   formatTime,
   sessionFileName,
   slugify,
+  resolveMemoryFile,
 } from "./paths.js";
 import { redactSecrets } from "./redact.js";
 
@@ -35,8 +36,27 @@ function uniqueCandidate(target: string, attempt: number): string {
   return `${target.slice(0, target.length - ext.length)}-${attempt + 1}${ext}`;
 }
 
+/** Normalize text for deduplication: collapse whitespace, lowercase. */
+function normDedup(s: string): string {
+  return s.replace(/\s+/g, " ").toLowerCase().trim();
+}
+
+/**
+ * Fix #7: Improved deduplication. In addition to exact substring matching,
+ * a normalized (whitespace-collapsed, lowercase) comparison catches the same
+ * fact written with minor formatting differences (extra spaces, mixed case,
+ * slightly different date prefixes stripped). This is a lightweight guard —
+ * true semantic deduplication (same meaning, different words) requires an
+ * LLM pass and is handled separately at summarization time.
+ */
 function shouldSkip(existing: string, op: FileOp): boolean {
-  return !!op.skipIfContains && existing.includes(op.skipIfContains);
+  if (!op.skipIfContains) return false;
+  if (existing.includes(op.skipIfContains)) return true;
+  // Normalized comparison: strip whitespace and compare case-insensitively.
+  const needle = normDedup(op.skipIfContains);
+  if (needle.length < 10) return false; // too short to deduplicate safely
+  const haystack = normDedup(existing);
+  return haystack.includes(needle);
 }
 
 /** Async executor. Returns the final path, or null when the op was a no-op. */
@@ -186,8 +206,10 @@ export class MemoryFileStore {
   // ---- reading -----------------------------------------------------------
 
   async readMemoryMd(): Promise<string> {
+    const safePath = await resolveMemoryFile(this.paths, this.paths.memoryMd);
+    if (!safePath) throw new Error("MEMORY.md resolves outside the memory root");
     try {
-      return await fs.promises.readFile(this.paths.memoryMd, "utf-8");
+      return await fs.promises.readFile(safePath, "utf-8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
       throw err;
@@ -199,10 +221,12 @@ export class MemoryFileStore {
     const out: MemoryFileInfo[] = [];
     const push = async (abs: string) => {
       try {
-        const st = await fs.promises.stat(abs);
+        const safeAbs = await resolveMemoryFile(this.paths, abs);
+        if (!safeAbs) return;
+        const st = await fs.promises.stat(safeAbs);
         if (st.isFile()) {
           out.push({
-            abs,
+            abs: safeAbs,
             rel: path.relative(this.paths.root, abs).split(path.sep).join("/"),
             mtimeMs: st.mtimeMs,
             size: st.size,

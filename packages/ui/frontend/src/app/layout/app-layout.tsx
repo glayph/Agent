@@ -87,6 +87,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div
           data-app-shell="content"
           data-plugin-surface={isPluginSurface ? "true" : undefined}
+          data-layout="app-content"
           className="bg-background relative flex min-w-0 flex-1 flex-col overflow-hidden"
         >
           <AppBackground />
@@ -94,6 +95,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             id="app-main"
             key={pathname}
             data-motion-surface="route"
+            data-layout="route-content"
             className="relative z-10 flex min-h-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent"
           >
             <RouteErrorBoundary>{children}</RouteErrorBoundary>

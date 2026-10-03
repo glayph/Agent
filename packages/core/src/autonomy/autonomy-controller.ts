@@ -97,16 +97,31 @@ export class AutonomyController {
     const unfinished = this.store.listUnfinished();
     for (const objective of unfinished) {
       // If the process restarted mid-flight, whatever task id it was
-      // waiting on no longer corresponds to anything the (new) scheduler
-      // knows about. Clear it so the objective is picked up fresh rather
-      // than waiting forever on a task that will never report back.
+      // waiting on may no longer belong to the new scheduler. Clear it so
+      // the objective can be picked up fresh rather than waiting forever.
       if (objective.status === "in_progress" && objective.activeTaskId) {
         const task = this.deps.getScheduledTask(objective.activeTaskId);
         if (!task) {
           objective.status = "pending";
           objective.activeTaskId = undefined;
           this.store.update(objective);
+          continue;
         }
+        // A scheduler that still knows the task is the best available
+        // continuation point; restore it as the current objective.
+        if (!this.currentObjectiveId) {
+          this.currentObjectiveId = objective.id;
+          this.currentObjectiveStartedAt = objective.updatedAt;
+        }
+      }
+    }
+    // Pending objectives have no live task to restore, but retaining the most
+    // recently active one avoids booting into an apparently empty controller.
+    if (!this.currentObjectiveId) {
+      const candidate = unfinished.find((o) => o.status === "in_progress");
+      if (candidate) {
+        this.currentObjectiveId = candidate.id;
+        this.currentObjectiveStartedAt = candidate.updatedAt;
       }
     }
   }
@@ -141,6 +156,7 @@ export class AutonomyController {
   // ── Controls (spec sections 16/17) ───────────────────────────────────────
   setEnabled(enabled: boolean): void {
     if (enabled === this.enabled) return;
+    if (!enabled) this._requestCurrentObjectiveCancellation();
     this.enabled = enabled;
     logAutonomyEvent(enabled ? "AUTONOMY_ENABLED" : "AUTONOMY_DISABLED", {
       mode: this.mode,
@@ -156,7 +172,17 @@ export class AutonomyController {
   }
 
   pause(): void {
+    this._requestCurrentObjectiveCancellation();
     this.paused = true;
+  }
+
+  private _requestCurrentObjectiveCancellation(): void {
+    if (!this.currentObjectiveId) return;
+    const objective = this.store.get(this.currentObjectiveId);
+    if (!objective?.activeTaskId) return;
+    // Cancellation is cooperative: the scheduler owns the task lifecycle and
+    // retains the durable objective for a later resume/replan.
+    this.deps.requestPause?.(objective.activeTaskId);
   }
 
   resume(): void {

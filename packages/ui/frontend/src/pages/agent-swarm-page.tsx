@@ -43,7 +43,10 @@ export function AgentSwarmPage() {
         }
       />
       <div className="animate-fade-in mx-auto w-full max-w-6xl flex-1 overflow-y-auto p-6">
-        <p className="text-muted-foreground mb-8 text-sm">
+        <p
+          data-text-role="supporting"
+          className="text-muted-foreground mb-8 text-sm"
+        >
           Real-time status and telemetry from the active specialist swarm.
         </p>
 

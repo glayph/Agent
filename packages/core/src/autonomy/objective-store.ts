@@ -71,12 +71,12 @@ export class SqliteObjectiveStore {
     return row ? this._fromRow(row) : undefined;
   }
 
-  /** Objectives that are not yet finished — the first thing resumed on restart. */
+  /** Objectives eligible for resumption; blocked objectives are terminal until explicitly reopened. */
   listUnfinished(): Objective[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM autonomy_objectives
-         WHERE status IN ('pending', 'in_progress', 'blocked')
+         WHERE status IN ('pending', 'in_progress')
          ORDER BY priority DESC, updated_at ASC`,
       )
       .all() as ObjectiveRow[];

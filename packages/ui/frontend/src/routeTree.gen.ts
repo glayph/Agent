@@ -38,6 +38,13 @@ import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as AgentsSwarmRouteImport } from './routes/agents.swarm'
 import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
 import { Route as ConfigRawRouteImport } from './routes/config.raw'
+import { Route as PluginsIndexRouteImport } from './routes/plugins.index'
+import { Route as PluginsCapabilitiesRouteImport } from './routes/plugins.capabilities'
+import { Route as PluginsCatalogRouteImport } from './routes/plugins.catalog'
+import { Route as PluginsChannelsRouteImport } from './routes/plugins.channels'
+import { Route as PluginsCoreRouteImport } from './routes/plugins.core'
+import { Route as PluginsHealthRouteImport } from './routes/plugins.health'
+import { Route as PluginsProvidersRouteImport } from './routes/plugins.providers'
 import { Route as AgentAutomationsIndexRouteImport } from './routes/agent/automations.index'
 import { Route as AgentAutomationsConnectionsRouteImport } from './routes/agent/automations.connections'
 import { Route as AgentAutomationsCreateRouteImport } from './routes/agent/automations.create'
@@ -189,6 +196,41 @@ const ConfigRawRoute = ConfigRawRouteImport.update({
   path: '/raw',
   getParentRoute: () => ConfigRoute,
 } as any)
+const PluginsIndexRoute = PluginsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PluginsRoute,
+} as any)
+const PluginsCapabilitiesRoute = PluginsCapabilitiesRouteImport.update({
+  id: '/capabilities',
+  path: '/capabilities',
+  getParentRoute: () => PluginsRoute,
+} as any)
+const PluginsCatalogRoute = PluginsCatalogRouteImport.update({
+  id: '/catalog',
+  path: '/catalog',
+  getParentRoute: () => PluginsRoute,
+} as any)
+const PluginsChannelsRoute = PluginsChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => PluginsRoute,
+} as any)
+const PluginsCoreRoute = PluginsCoreRouteImport.update({
+  id: '/core',
+  path: '/core',
+  getParentRoute: () => PluginsRoute,
+} as any)
+const PluginsHealthRoute = PluginsHealthRouteImport.update({
+  id: '/health',
+  path: '/health',
+  getParentRoute: () => PluginsRoute,
+} as any)
+const PluginsProvidersRoute = PluginsProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => PluginsRoute,
+} as any)
 const AgentAutomationsIndexRoute = AgentAutomationsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -233,7 +275,7 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
-  '/plugins': typeof PluginsRoute
+  '/plugins': typeof PluginsRouteWithChildren
   '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
@@ -245,7 +287,14 @@ export interface FileRoutesByFullPath {
   '/agents/swarm': typeof AgentsSwarmRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
+  '/plugins/capabilities': typeof PluginsCapabilitiesRoute
+  '/plugins/catalog': typeof PluginsCatalogRoute
+  '/plugins/channels': typeof PluginsChannelsRoute
+  '/plugins/core': typeof PluginsCoreRoute
+  '/plugins/health': typeof PluginsHealthRoute
+  '/plugins/providers': typeof PluginsProvidersRoute
   '/agents/': typeof AgentsIndexRoute
+  '/plugins/': typeof PluginsIndexRoute
   '/agent/automations/connections': typeof AgentAutomationsConnectionsRoute
   '/agent/automations/create': typeof AgentAutomationsCreateRoute
   '/agent/automations/history': typeof AgentAutomationsHistoryRoute
@@ -268,7 +317,6 @@ export interface FileRoutesByTo {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
-  '/plugins': typeof PluginsRoute
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/run': typeof AgentRunRoute
@@ -279,7 +327,14 @@ export interface FileRoutesByTo {
   '/agents/swarm': typeof AgentsSwarmRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
+  '/plugins/capabilities': typeof PluginsCapabilitiesRoute
+  '/plugins/catalog': typeof PluginsCatalogRoute
+  '/plugins/channels': typeof PluginsChannelsRoute
+  '/plugins/core': typeof PluginsCoreRoute
+  '/plugins/health': typeof PluginsHealthRoute
+  '/plugins/providers': typeof PluginsProvidersRoute
   '/agents': typeof AgentsIndexRoute
+  '/plugins': typeof PluginsIndexRoute
   '/agent/automations/connections': typeof AgentAutomationsConnectionsRoute
   '/agent/automations/create': typeof AgentAutomationsCreateRoute
   '/agent/automations/history': typeof AgentAutomationsHistoryRoute
@@ -304,7 +359,7 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
-  '/plugins': typeof PluginsRoute
+  '/plugins': typeof PluginsRouteWithChildren
   '/agent/automations': typeof AgentAutomationsRouteWithChildren
   '/agent/hub': typeof AgentHubRoute
   '/agent/monitor': typeof AgentMonitorRoute
@@ -316,7 +371,14 @@ export interface FileRoutesById {
   '/agents/swarm': typeof AgentsSwarmRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
+  '/plugins/capabilities': typeof PluginsCapabilitiesRoute
+  '/plugins/catalog': typeof PluginsCatalogRoute
+  '/plugins/channels': typeof PluginsChannelsRoute
+  '/plugins/core': typeof PluginsCoreRoute
+  '/plugins/health': typeof PluginsHealthRoute
+  '/plugins/providers': typeof PluginsProvidersRoute
   '/agents/': typeof AgentsIndexRoute
+  '/plugins/': typeof PluginsIndexRoute
   '/agent/automations/connections': typeof AgentAutomationsConnectionsRoute
   '/agent/automations/create': typeof AgentAutomationsCreateRoute
   '/agent/automations/history': typeof AgentAutomationsHistoryRoute
@@ -354,7 +416,14 @@ export interface FileRouteTypes {
     | '/agents/swarm'
     | '/channels/$name'
     | '/config/raw'
+    | '/plugins/capabilities'
+    | '/plugins/catalog'
+    | '/plugins/channels'
+    | '/plugins/core'
+    | '/plugins/health'
+    | '/plugins/providers'
     | '/agents/'
+    | '/plugins/'
     | '/agent/automations/connections'
     | '/agent/automations/create'
     | '/agent/automations/history'
@@ -377,7 +446,6 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/models'
-    | '/plugins'
     | '/agent/hub'
     | '/agent/monitor'
     | '/agent/run'
@@ -388,7 +456,14 @@ export interface FileRouteTypes {
     | '/agents/swarm'
     | '/channels/$name'
     | '/config/raw'
+    | '/plugins/capabilities'
+    | '/plugins/catalog'
+    | '/plugins/channels'
+    | '/plugins/core'
+    | '/plugins/health'
+    | '/plugins/providers'
     | '/agents'
+    | '/plugins'
     | '/agent/automations/connections'
     | '/agent/automations/create'
     | '/agent/automations/history'
@@ -424,7 +499,14 @@ export interface FileRouteTypes {
     | '/agents/swarm'
     | '/channels/$name'
     | '/config/raw'
+    | '/plugins/capabilities'
+    | '/plugins/catalog'
+    | '/plugins/channels'
+    | '/plugins/core'
+    | '/plugins/health'
+    | '/plugins/providers'
     | '/agents/'
+    | '/plugins/'
     | '/agent/automations/connections'
     | '/agent/automations/create'
     | '/agent/automations/history'
@@ -449,7 +531,7 @@ export interface RootRouteChildren {
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
   ModelsRoute: typeof ModelsRoute
-  PluginsRoute: typeof PluginsRoute
+  PluginsRoute: typeof PluginsRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -657,6 +739,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigRawRouteImport
       parentRoute: typeof ConfigRoute
     }
+    '/plugins/': {
+      id: '/plugins/'
+      path: '/'
+      fullPath: '/plugins/'
+      preLoaderRoute: typeof PluginsIndexRouteImport
+      parentRoute: typeof PluginsRoute
+    }
+    '/plugins/capabilities': {
+      id: '/plugins/capabilities'
+      path: '/capabilities'
+      fullPath: '/plugins/capabilities'
+      preLoaderRoute: typeof PluginsCapabilitiesRouteImport
+      parentRoute: typeof PluginsRoute
+    }
+    '/plugins/catalog': {
+      id: '/plugins/catalog'
+      path: '/catalog'
+      fullPath: '/plugins/catalog'
+      preLoaderRoute: typeof PluginsCatalogRouteImport
+      parentRoute: typeof PluginsRoute
+    }
+    '/plugins/channels': {
+      id: '/plugins/channels'
+      path: '/channels'
+      fullPath: '/plugins/channels'
+      preLoaderRoute: typeof PluginsChannelsRouteImport
+      parentRoute: typeof PluginsRoute
+    }
+    '/plugins/core': {
+      id: '/plugins/core'
+      path: '/core'
+      fullPath: '/plugins/core'
+      preLoaderRoute: typeof PluginsCoreRouteImport
+      parentRoute: typeof PluginsRoute
+    }
+    '/plugins/health': {
+      id: '/plugins/health'
+      path: '/health'
+      fullPath: '/plugins/health'
+      preLoaderRoute: typeof PluginsHealthRouteImport
+      parentRoute: typeof PluginsRoute
+    }
+    '/plugins/providers': {
+      id: '/plugins/providers'
+      path: '/providers'
+      fullPath: '/plugins/providers'
+      preLoaderRoute: typeof PluginsProvidersRouteImport
+      parentRoute: typeof PluginsRoute
+    }
     '/agent/automations/': {
       id: '/agent/automations/'
       path: '/'
@@ -774,6 +905,29 @@ const ConfigRouteChildren: ConfigRouteChildren = {
 const ConfigRouteWithChildren =
   ConfigRoute._addFileChildren(ConfigRouteChildren)
 
+interface PluginsRouteChildren {
+  PluginsCapabilitiesRoute: typeof PluginsCapabilitiesRoute
+  PluginsCatalogRoute: typeof PluginsCatalogRoute
+  PluginsChannelsRoute: typeof PluginsChannelsRoute
+  PluginsCoreRoute: typeof PluginsCoreRoute
+  PluginsHealthRoute: typeof PluginsHealthRoute
+  PluginsProvidersRoute: typeof PluginsProvidersRoute
+  PluginsIndexRoute: typeof PluginsIndexRoute
+}
+
+const PluginsRouteChildren: PluginsRouteChildren = {
+  PluginsCapabilitiesRoute: PluginsCapabilitiesRoute,
+  PluginsCatalogRoute: PluginsCatalogRoute,
+  PluginsChannelsRoute: PluginsChannelsRoute,
+  PluginsCoreRoute: PluginsCoreRoute,
+  PluginsHealthRoute: PluginsHealthRoute,
+  PluginsProvidersRoute: PluginsProvidersRoute,
+  PluginsIndexRoute: PluginsIndexRoute,
+}
+
+const PluginsRouteWithChildren =
+  PluginsRoute._addFileChildren(PluginsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChannelsRouteRoute: ChannelsRouteRouteWithChildren,
@@ -791,7 +945,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
   ModelsRoute: ModelsRoute,
-  PluginsRoute: PluginsRoute,
+  PluginsRoute: PluginsRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

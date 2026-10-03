@@ -1479,6 +1479,8 @@ function ImagePreview({ path }: { path: string }) {
       alt={basename(path)}
       width={1280}
       height={720}
+      loading="lazy"
+      decoding="async"
       className="aspect-video max-h-full max-w-full object-contain"
     />
   )

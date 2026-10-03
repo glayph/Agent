@@ -11,6 +11,8 @@ const NodeGraph = require("./node-graph");
 const GraphCognitiveMemory = require("./graph-cognitive-memory");
 const SelectiveMemoryEngine = require("./selective-memory-engine");
 const LearningStore = require("./learning-store");
+const Mem0Adapter = require("./mem0-adapter");
+const Mem0OnlyIntegration = require("./mem0-only-integration");
 const {
   REGIONS,
   ALL_REGIONS,
@@ -40,6 +42,8 @@ module.exports = {
   GraphCognitiveMemory,
   SelectiveMemoryEngine,
   LearningStore,
+  Mem0Adapter,
+  Mem0OnlyIntegration,
   REGIONS,
   ALL_REGIONS,
   REGION_LABELS,

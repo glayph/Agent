@@ -21,7 +21,12 @@ class MemoryRuntime implements MemoryPluginRuntime {
     return {
       ok: !this.closed,
       status: this.closed ? "disabled" : "functional",
-      details: { persistent: true, backend: "temporal-knowledge-graph" },
+      details: {
+        persistent: true,
+        backend: "mem0",
+        primary: true,
+        localPersistence: false,
+      },
     };
   }
 
@@ -37,13 +42,13 @@ export const memoryPlugin: PluginDescriptor<
   MemoryPluginRuntime
 > = {
   manifest: pluginManifest({
-    id: "memory.temporal-knowledge-graph",
-    displayName: "Temporal Agent Memory",
+    id: "memory.mem0",
+    displayName: "Mem0 Primary Memory",
     version: "1.0.0",
     capabilities: ["memory"],
     runtimeStatus: "functional",
     description:
-      "Persistent memory integration with temporal graph retrieval and consolidation.",
+      "Strict Mem0 primary memory. Conversation history remains session-scoped; no local SQLite/TKG memory is used.",
     configKey: "memory",
     requiredConfig: [],
     secretFields: [],

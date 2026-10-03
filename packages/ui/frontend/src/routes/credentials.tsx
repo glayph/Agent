@@ -38,7 +38,10 @@ function CredentialsPage() {
                   }}
                 >
                   Configure Gemini
-                  <IconExternalLink className="ml-2 size-4" aria-hidden="true" />
+                  <IconExternalLink
+                    className="ml-2 size-4"
+                    aria-hidden="true"
+                  />
                 </Button>
               }
             />
@@ -56,7 +59,10 @@ function CredentialsPage() {
                   }}
                 >
                   Configure llama.cpp
-                  <IconExternalLink className="ml-2 size-4" aria-hidden="true" />
+                  <IconExternalLink
+                    className="ml-2 size-4"
+                    aria-hidden="true"
+                  />
                 </Button>
               }
             />

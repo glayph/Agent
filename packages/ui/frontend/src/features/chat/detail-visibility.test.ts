@@ -9,7 +9,12 @@ import {
 describe("shouldShowAssistantMessage", () => {
   describe("normal assistant content", () => {
     it("is always shown, regardless of visibility setting", () => {
-      for (const visibility of ["none", "thought", "tool_calls", "all"] as const) {
+      for (const visibility of [
+        "none",
+        "thought",
+        "tool_calls",
+        "all",
+      ] as const) {
         expect(shouldShowAssistantMessage(visibility, "normal")).toBe(true)
         expect(shouldShowAssistantMessage(visibility, undefined)).toBe(true)
       }
@@ -24,7 +29,12 @@ describe("shouldShowAssistantMessage", () => {
 
   describe("action_update content", () => {
     it("is never shown in the chat UI, regardless of visibility", () => {
-      for (const visibility of ["none", "thought", "tool_calls", "all"] as const) {
+      for (const visibility of [
+        "none",
+        "thought",
+        "tool_calls",
+        "all",
+      ] as const) {
         expect(shouldShowAssistantMessage(visibility, "action_update")).toBe(
           false,
         )
@@ -60,9 +70,7 @@ describe("shouldShowAssistantMessage", () => {
     })
 
     it("is shown when visibility is 'tool_calls'", () => {
-      expect(shouldShowAssistantMessage("tool_calls", "tool_calls")).toBe(
-        true,
-      )
+      expect(shouldShowAssistantMessage("tool_calls", "tool_calls")).toBe(true)
     })
 
     it("is shown when visibility is 'all'", () => {
@@ -84,15 +92,11 @@ describe("shouldShowAssistantMessage", () => {
     })
 
     it("hides an inspector_only thought message even when visibility is 'thought'", () => {
-      expect(shouldShowAssistantMessage("thought", "thought", true)).toBe(
-        false,
-      )
+      expect(shouldShowAssistantMessage("thought", "thought", true)).toBe(false)
     })
 
     it("hides an inspector_only tool_calls message even when visibility is 'all'", () => {
-      expect(shouldShowAssistantMessage("all", "tool_calls", true)).toBe(
-        false,
-      )
+      expect(shouldShowAssistantMessage("all", "tool_calls", true)).toBe(false)
     })
 
     it("still hides a non-inspector_only thought message under 'none' (baseline, unaffected by the fix)", () => {
@@ -104,9 +108,7 @@ describe("shouldShowAssistantMessage", () => {
     })
 
     it("treats an undefined inspectorOnly the same as false", () => {
-      expect(shouldShowAssistantMessage("all", "thought", undefined)).toBe(
-        true,
-      )
+      expect(shouldShowAssistantMessage("all", "thought", undefined)).toBe(true)
     })
   })
 })

@@ -316,6 +316,10 @@ export interface AgentMemoryIntegration {
     metadata?: Record<string, unknown>,
   ): WriteEventResult;
   getEnhancedSystemPrompt(userMessage: string): string;
+  getEnhancedSystemPromptAsync?(
+    userMessage: string,
+    systemState?: Record<string, unknown>,
+  ): Promise<string>;
 }
 
 export interface ConsolidationDaemonRunOnceResult {

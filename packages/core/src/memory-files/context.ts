@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import type { MemoryFilesConfig } from "./types.js";
 import type { MemoryFileInfo, MemoryFileStore } from "./store.js";
+import { resolveMemoryFile } from "./paths.js";
 
 const DATE_PREFIX = /^(\d{4})-(\d{2})-(\d{2})/;
 
@@ -117,7 +118,9 @@ export class MemoryContextBuilder {
     if (cached && cached.mtimeMs === f.mtimeMs && cached.size === f.size) return cached.digest;
     let digest = "";
     try {
-      digest = digestOf(await fs.promises.readFile(f.abs, "utf-8"), 220);
+      const safeAbs = await resolveMemoryFile(this.store.paths, f.abs);
+      if (!safeAbs) return "";
+      digest = digestOf(await fs.promises.readFile(safeAbs, "utf-8"), 220);
     } catch {
       /* unreadable file: index it without a digest */
     }

@@ -167,7 +167,9 @@ export function ConfigPage() {
       port: String(launcherConfig.port),
       publicAccess: launcherConfig.public,
       allowedCIDRsText: (launcherConfig.allowed_cidrs ?? []).join("\n"),
-      sessionTimeoutMinutes: String(launcherConfig.session_timeout_minutes ?? 0),
+      sessionTimeoutMinutes: String(
+        launcherConfig.session_timeout_minutes ?? 0,
+      ),
       dashboardPassword: "",
       dashboardPasswordConfirm: "",
     }
@@ -186,7 +188,8 @@ export function ConfigPage() {
     launcherForm.port !== launcherBaseline.port ||
     launcherForm.publicAccess !== launcherBaseline.publicAccess ||
     launcherForm.allowedCIDRsText !== launcherBaseline.allowedCIDRsText ||
-    launcherForm.sessionTimeoutMinutes !== launcherBaseline.sessionTimeoutMinutes
+    launcherForm.sessionTimeoutMinutes !==
+      launcherBaseline.sessionTimeoutMinutes
   const launcherPasswordDirty =
     launcherForm.dashboardPassword.trim() !== "" ||
     launcherForm.dashboardPasswordConfirm.trim() !== ""

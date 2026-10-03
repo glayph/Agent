@@ -105,7 +105,7 @@ describe("security helpers", () => {
     expect(isAllowedCorsOrigin("not-a-url", allowed)).toBe(false);
   });
 
-  it("allows all valid browser origins when restrictions are bypassed in workspace config", () => {
+  it("does not turn bypassed workspace restrictions into wildcard CORS", () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "Miki-cors-"));
     fs.mkdirSync(path.join(workspaceDir, "config"), { recursive: true });
     fs.writeFileSync(
@@ -116,9 +116,11 @@ describe("security helpers", () => {
 
     try {
       const allowed = allowedCorsOriginsFromEnv({ workspaceDir, env: {} });
+      expect(allowed).toEqual([]);
       expect(isAllowedCorsOrigin("https://external.example", allowed)).toBe(
-        true,
+        false,
       );
+      expect(isAllowedCorsOrigin("http://localhost:18800", allowed)).toBe(true);
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
     }

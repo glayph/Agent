@@ -1,3 +1,4 @@
+import { IconAdjustmentsHorizontal } from "@tabler/icons-react"
 import { useAtomValue, useSetAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -10,7 +11,6 @@ import {
 } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { IconAdjustmentsHorizontal } from "@tabler/icons-react"
 
 import type { SessionSummary } from "@/api/sessions"
 import { type VoiceCloudAudioResult, transcribeVoiceAudio } from "@/api/voice"
@@ -582,7 +582,7 @@ export function ChatPage() {
         setVoiceElapsedMs(0)
       }
     },
-    [defaultModelId, defaultModelName, sendMessage, t],
+    [defaultModelId, sendMessage, t],
   )
 
   const handleStopVoice = useCallback(() => {
@@ -1029,21 +1029,19 @@ export function ChatPage() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {(["none", "thought", "tool_calls", "all"] as const).map(
-            (option) => (
-              <DropdownMenuItem
-                key={option}
-                onClick={() => setAssistantDetailVisibility(option)}
-                data-active={assistantDetailVisibility === option}
-              >
-                {t(
-                  `chat.assistantDetailVisibility.${
-                    option === "tool_calls" ? "toolCalls" : option
-                  }`,
-                )}
-              </DropdownMenuItem>
-            ),
-          )}
+          {(["none", "thought", "tool_calls", "all"] as const).map((option) => (
+            <DropdownMenuItem
+              key={option}
+              onClick={() => setAssistantDetailVisibility(option)}
+              data-active={assistantDetailVisibility === option}
+            >
+              {t(
+                `chat.assistantDetailVisibility.${
+                  option === "tool_calls" ? "toolCalls" : option
+                }`,
+              )}
+            </DropdownMenuItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
       {hasAvailableModels && (

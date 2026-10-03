@@ -244,9 +244,13 @@ export class PersistentJobQueue {
     return { ...job };
   }
 
-  cancel(jobId: string): boolean {
+  cancel(jobId: string, workerId?: string): boolean {
     const job = this.jobs.get(jobId);
-    if (!job || ["completed", "dead_letter"].includes(job.status)) return false;
+    if (
+      !job ||
+      ["completed", "dead_letter"].includes(job.status) ||
+      (job.status === "running" && !this.ownsLease(job, workerId))
+    ) return false;
     job.status = "cancelled";
     job.leaseOwner = undefined;
     job.leaseUntil = undefined;
@@ -255,9 +259,13 @@ export class PersistentJobQueue {
     return true;
   }
 
-  updateProgress(jobId: string, progress: number): PersistentJob | null {
+  updateProgress(
+    jobId: string,
+    progress: number,
+    workerId?: string,
+  ): PersistentJob | null {
     const job = this.jobs.get(jobId);
-    if (!job) return null;
+    if (!job || !this.ownsLease(job, workerId)) return null;
     job.progress = Math.max(0, Math.min(100, Math.round(progress)));
     job.updatedAt = new Date().toISOString();
     this.save();
@@ -340,7 +348,14 @@ export class PersistentJobQueue {
   }
 
   private ownsLease(job: PersistentJob, workerId?: string): boolean {
-    return !workerId || !job.leaseOwner || job.leaseOwner === workerId;
+    if (job.status !== "running" || !job.leaseOwner) {
+      return !workerId;
+    }
+    return (
+      typeof workerId === "string" &&
+      workerId === job.leaseOwner &&
+      (job.leaseUntil ?? 0) > Date.now()
+    );
   }
 }
 

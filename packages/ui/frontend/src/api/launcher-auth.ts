@@ -19,7 +19,10 @@ export async function postLauncherDashboardLogin(
     const body = (await res.json().catch(() => ({}))) as {
       default_model_configured?: boolean
     }
-    return { ok: true, defaultModelConfigured: Boolean(body.default_model_configured) }
+    return {
+      ok: true,
+      defaultModelConfigured: Boolean(body.default_model_configured),
+    }
   }
 
   return {

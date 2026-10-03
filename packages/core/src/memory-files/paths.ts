@@ -1,4 +1,5 @@
 import * as path from "path";
+import * as fs from "fs";
 import type { MemoryPaths } from "./types.js";
 
 export const MEMORY_MD_FILE = "MEMORY.md";
@@ -11,8 +12,20 @@ export const MEMORY_DIR_NAME = "memory";
 export function resolveMemoryPaths(
   identityDir: string,
   override?: string,
+  scope?: string,
 ): MemoryPaths {
-  const root = path.resolve(override?.trim() ? override : identityDir);
+  const base = path.resolve(override?.trim() ? override : identityDir);
+  // Fix #11: an owner/agent/workspace scope gets its own subtree, so two
+  // scopes sharing one identity directory can never read each other's
+  // MEMORY.md, daily notes or session summaries. The slug is sanitized so a
+  // scope value can never escape the base directory.
+  const slug = (scope ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .slice(0, 64);
+  const root = slug ? path.join(base, "scopes", slug) : base;
   const dailyDir = path.join(root, MEMORY_DIR_NAME);
   return {
     root,
@@ -62,14 +75,39 @@ export function relFromRoot(paths: MemoryPaths, absolute: string): string {
  * True only for files inside the memory area (MEMORY.md or memory/**.md).
  * Used by memory_get so the tool reads memory, never arbitrary files.
  */
-export function isMemoryFile(paths: MemoryPaths, absolute: string): boolean {
+function isMemoryFileLexical(paths: MemoryPaths, absolute: string): boolean {
   const resolved = path.resolve(absolute);
   if (resolved === paths.memoryMd) return true;
   const rel = path.relative(paths.dailyDir, resolved);
-  return (
-    !!rel &&
-    !rel.startsWith("..") &&
-    !path.isAbsolute(rel) &&
-    resolved.toLowerCase().endsWith(".md")
-  );
+  return !!rel && !rel.startsWith("..") && !path.isAbsolute(rel) && resolved.toLowerCase().endsWith(".md");
+}
+
+/**
+ * Lexical containment is not enough for memory files: an allowed-looking path
+ * can be a symlink into an identity/config/OS secret. Existing files are
+ * checked against their real path; missing files remain valid so memory_get
+ * can retain its empty-file semantics.
+ */
+export function isMemoryFile(paths: MemoryPaths, absolute: string): boolean {
+  if (!isMemoryFileLexical(paths, absolute)) return false;
+  try {
+    return isMemoryFileLexical(paths, fs.realpathSync.native(path.resolve(absolute)));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+export async function resolveMemoryFile(
+  paths: MemoryPaths,
+  absolute: string,
+): Promise<string | null> {
+  const candidate = path.resolve(absolute);
+  if (!isMemoryFileLexical(paths, candidate)) return null;
+  try {
+    const real = await fs.promises.realpath(candidate);
+    return isMemoryFileLexical(paths, real) ? real : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return candidate;
+    return null;
+  }
 }
