@@ -158,12 +158,12 @@ export const AssistantMessage = memo(function AssistantMessage({
           data-chat-bubble="assistant"
           data-chat-kind={isError ? "error" : undefined}
           className={cn(
-            "group group/message-bubble relative flex w-fit max-w-[var(--chat-user-message-max)] flex-col rounded-xl rounded-bl-sm border [border-color:var(--chat-user-border)] px-3 py-2 [box-shadow:var(--chat-user-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)]",
+            "group group/message-bubble relative flex w-fit max-w-[var(--chat-message-max)] flex-col border px-3.5 py-2.5",
             isThought &&
-              "w-full rounded-lg border-transparent bg-transparent px-0 py-0 shadow-none",
+              "w-full border-transparent bg-transparent px-0 py-0 shadow-none [background:transparent] [box-shadow:none]",
             isToolCalls && hasToolCalls && "cursor-pointer",
             isError &&
-              "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)]",
+              "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)] [box-shadow:none]",
           )}
           onClick={() => {
             if (isToolCalls && hasToolCalls)
@@ -192,7 +192,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         >
           <div
             className={cn(
-              "relative [color:var(--chat-user-text)]",
+              "relative min-w-0 max-w-full [color:var(--chat-assistant-text)]",
               isCollapsedBlock && "text-muted-foreground",
               isError && "[color:var(--chat-error-text)]",
             )}
@@ -408,10 +408,10 @@ export const AssistantMessage = memo(function AssistantMessage({
               hasText && (
                 <div
                   className={cn(
-                    "prose dark:prose-invert prose-headings:mt-2 prose-headings:mb-1 prose-li:my-0.5 prose-ol:my-2 prose-p:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/50 prose-pre:p-0 prose-pre:text-foreground relative max-w-none [overflow-wrap:anywhere] break-words",
+                    "prose dark:prose-invert prose-headings:mt-3 prose-headings:mb-1.5 prose-headings:text-[0.95em] prose-headings:font-semibold prose-li:my-0.5 prose-ol:my-2 prose-ul:my-2 prose-p:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/50 prose-pre:p-0 prose-pre:text-foreground prose-table:my-3 relative max-w-none [overflow-wrap:anywhere] break-words",
                     isThought
                       ? "prose-p:my-1 prose-p:whitespace-pre-wrap py-0 text-[13px] leading-6 opacity-70"
-                      : "prose-p:whitespace-pre-wrap py-0 text-[14px] leading-6",
+                      : "prose-p:whitespace-pre-wrap py-0 text-[14px] leading-6.5",
                     isError && "text-[13px] opacity-90",
                   )}
                 >
@@ -463,9 +463,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 defaultValue: "Fork from here",
               })}
               canRetry={canRetry}
-              // Keep assistant actions mounted and hit-testable. Hover-only
-              // opacity made Retry/Edit/Delete appear visible but intercept no
-              // pointer events in the chat viewport.
+              // Always hit-testable; opacity still follows hover/focus CSS + visible.
               visible={true}
               placement="inline"
               className="mt-0 group-focus-within/message:mt-1 group-hover/message:mt-1"

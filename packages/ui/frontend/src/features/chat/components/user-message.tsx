@@ -1,4 +1,4 @@
-import { type FocusEvent, memo, useMemo, useState } from "react"
+import { type FocusEvent, memo, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { AttachmentCard } from "@/features/chat/components/attachment-card"
@@ -46,7 +46,25 @@ export const UserMessage = memo(function UserMessage({
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
   const [actionsVisible, setActionsVisible] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return
+    }
+    const media = window.matchMedia("(hover: none)")
+    const sync = () => setActionsVisible(media.matches)
+    sync()
+    media.addEventListener?.("change", sync)
+    return () => media.removeEventListener?.("change", sync)
+  }, [])
+
   const hideActionsIfFocusLeaves = (event: FocusEvent<HTMLDivElement>) => {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(hover: none)").matches
+    ) {
+      return
+    }
     const nextFocused = event.relatedTarget
     if (
       !(nextFocused instanceof Node) ||
@@ -57,7 +75,7 @@ export const UserMessage = memo(function UserMessage({
   }
 
   return (
-    <div className="group/message flex w-full flex-col items-end gap-0.5">
+    <div className="group/message flex w-full flex-col items-end gap-1">
       {imageAttachments.length > 0 && (
         <div className="flex max-w-[var(--chat-user-message-max)] flex-wrap justify-end gap-1.5">
           {imageAttachments.map((attachment, index) => (
@@ -90,30 +108,43 @@ export const UserMessage = memo(function UserMessage({
       {hasText && (
         <div
           data-chat-bubble="user"
-          className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1"
+          className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1.5 border px-3.5 py-2.5"
           title={formattedTimestamp || undefined}
           onPointerEnter={() => setActionsVisible(true)}
-          onPointerLeave={() => setActionsVisible(false)}
-          onMouseEnter={() => setActionsVisible(true)}
-          onMouseLeave={() => setActionsVisible(false)}
+          onPointerLeave={() => {
+            if (
+              typeof window !== "undefined" &&
+              window.matchMedia?.("(hover: none)").matches
+            ) {
+              return
+            }
+            setActionsVisible(false)
+          }}
           onFocusCapture={() => setActionsVisible(true)}
           onBlurCapture={hideActionsIfFocusLeaves}
         >
           <div
             className={cn(
-              "rounded-xl rounded-br-sm border [border-color:var(--chat-user-border)] px-3 py-2 text-[14px] leading-5 wrap-break-word whitespace-pre-wrap [color:var(--chat-user-text)] [box-shadow:var(--chat-user-shadow)] transition-[background-color,border-color,box-shadow] [background:var(--chat-user-bubble)]",
-              isCommand && "font-mono text-[12.5px]",
+              "w-full text-[14px] leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap [color:var(--chat-user-text)]",
+              isCommand && "font-mono text-[12.5px] leading-5",
             )}
           >
             {isCommand ? (
-              <div className="flex items-start gap-2.5">
-                <span className="font-bold opacity-70 select-none">&gt;</span>
-                <span className="mt-[1px]">{content}</span>
+              <div className="flex items-start gap-2">
+                <span className="text-primary/80 font-semibold select-none">
+                  &gt;
+                </span>
+                <span className="min-w-0 flex-1">{content}</span>
               </div>
             ) : (
-              <div>{content}</div>
+              content
             )}
           </div>
+          {formattedTimestamp && (
+            <span className="text-muted-foreground/70 self-end text-[11px] leading-none tabular-nums">
+              {formattedTimestamp}
+            </span>
+          )}
           <MessageActionBar
             content={content}
             align="end"

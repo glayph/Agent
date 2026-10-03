@@ -74,17 +74,17 @@
      =========================================================== */
   --chat-surface: var(--background);
 
-  /* --- User's own bubble --- */
-  --chat-user-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  /* --- User's own bubble (tinted, right-aligned) --- */
+  --chat-user-bubble: color-mix(in srgb, var(--primary) 9%, var(--card));
   --chat-user-text: var(--foreground);
-  --chat-user-border: color-mix(in srgb, var(--border) 50%, transparent);
-  --chat-user-shadow: none;
+  --chat-user-border: color-mix(in srgb, var(--primary) 22%, var(--border));
+  --chat-user-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 6%, transparent);
 
-  /* --- Miki's (assistant) bubble --- */
-  --chat-assistant-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  /* --- Miki's (assistant) bubble (neutral surface, left-aligned) --- */
+  --chat-assistant-bubble: color-mix(in srgb, var(--card) 96%, var(--background));
   --chat-assistant-text: var(--foreground);
-  --chat-assistant-border: color-mix(in srgb, var(--border) 50%, transparent);
-  --chat-assistant-shadow: none;
+  --chat-assistant-border: color-mix(in srgb, var(--border) 70%, transparent);
+  --chat-assistant-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
 
   /* --- Chat alerts (errors shown inline in the conversation) --- */
   --chat-alert-text: #9f302a;
@@ -129,14 +129,14 @@
 /* Dark mode overrides — only values that actually change in dark mode. */
 html.dark {
   --chat-surface: var(--background);
-  --chat-user-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  --chat-user-bubble: color-mix(in srgb, var(--primary) 14%, var(--card));
   --chat-user-text: var(--foreground);
-  --chat-user-border: color-mix(in srgb, var(--border) 50%, transparent);
-  --chat-user-shadow: none;
-  --chat-assistant-bubble: color-mix(in srgb, var(--card) 90%, transparent);
+  --chat-user-border: color-mix(in srgb, var(--primary) 28%, var(--border));
+  --chat-user-shadow: 0 1px 2px color-mix(in srgb, #000 28%, transparent);
+  --chat-assistant-bubble: color-mix(in srgb, var(--card) 92%, var(--background));
   --chat-assistant-text: var(--foreground);
-  --chat-assistant-border: color-mix(in srgb, var(--border) 50%, transparent);
-  --chat-assistant-shadow: none;
+  --chat-assistant-border: color-mix(in srgb, var(--border) 65%, transparent);
+  --chat-assistant-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
   --chat-alert-text: var(--md-sys-color-on-error-container);
   --chat-alert-icon: var(--md-sys-color-error);
   --chat-error-bubble: var(--md-sys-color-error-container);
@@ -145,39 +145,111 @@ html.dark {
   --page-grid-opacity: 0.07;
 }
 
-/* --- Chat bubbles mirror the Models page cards --- */
+/* --- Chat bubbles: distinct user vs assistant hierarchy --- */
 [data-chat-bubble="user"],
 [data-chat-bubble="assistant"] {
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   transition:
     background-color var(--motion-duration-base) var(--motion-ease-standard),
+    border-color var(--motion-duration-base) var(--motion-ease-standard),
     box-shadow var(--motion-duration-base) var(--motion-ease-standard);
 }
 
-[data-chat-bubble="user"]:hover,
-[data-chat-bubble="assistant"]:hover {
-  background: color-mix(in srgb, var(--muted) 30%, transparent);
-  box-shadow: var(--shadow-xs);
-}
-
-[data-chat-bubble="user"]:focus-within {
+[data-chat-bubble="user"] {
+  background: var(--chat-user-bubble);
   border-color: var(--chat-user-border);
-  box-shadow: none;
-  outline: none;
+  color: var(--chat-user-text);
+  box-shadow: var(--chat-user-shadow);
 }
 
-[data-chat-bubble="assistant"]:focus-within {
+[data-chat-bubble="assistant"] {
+  background: var(--chat-assistant-bubble);
   border-color: var(--chat-assistant-border);
-  box-shadow: none;
+  color: var(--chat-assistant-text);
+  box-shadow: var(--chat-assistant-shadow);
+}
+
+[data-chat-bubble="user"]:hover {
+  box-shadow: var(--chat-user-shadow), 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+[data-chat-bubble="assistant"]:hover {
+  box-shadow: var(--chat-assistant-shadow), 0 0 0 1px color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+[data-chat-bubble="user"]:focus-within,
+[data-chat-bubble="assistant"]:focus-within {
   outline: none;
 }
 
+/* Prose inside agent replies: readable long-form + overflow-safe tables */
 [data-chat-bubble="assistant"] .prose {
   color: var(--chat-assistant-text);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-[data-chat-bubble="assistant"] .prose :is(strong, h1, h2, h3, h4, h5, h6, code, pre) {
+[data-chat-bubble="assistant"] .prose :is(strong, h1, h2, h3, h4, h5, h6) {
   color: var(--chat-assistant-text);
+}
+
+[data-chat-bubble="assistant"] .prose :is(a) {
+  color: var(--text-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+[data-chat-bubble="assistant"] .prose :is(code):not(pre code) {
+  color: var(--text-code);
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.9em;
+}
+
+[data-chat-bubble="assistant"] .prose :is(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+[data-chat-bubble="assistant"] .prose :is(table) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+[data-chat-bubble="assistant"] .prose :is(th, td) {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+[data-chat-bubble="assistant"] .prose :is(th) {
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  font-weight: 600;
+}
+
+[data-chat-bubble="assistant"] .prose :is(blockquote) {
+  border-left: 3px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+  margin: 0.5rem 0;
+  padding-left: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+/* Touch devices: keep message actions reachable without hover */
+@media (hover: none) {
+  [data-chat-message-actions] {
+    pointer-events: auto !important;
+    height: 1.5rem !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+  }
 }
 
 /* =============================================================================

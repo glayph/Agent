@@ -149,3 +149,23 @@ Do **not** remove features; repair or complete them.
 - [ ] No new heavy dependencies  
 
 *End of Part 1 audit.*
+
+---
+
+## Part 2 completed (2026-10-03)
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| `appearance.css` | Distinct user (primary tint) vs assistant (neutral) tokens; light+dark; prose table/link/code/blockquote; touch action visibility |
+| `user-message.tsx` | Polished padding/typography/timestamp; touch shows actions via `matchMedia('(hover: none)')` |
+| `assistant-message.tsx` | Uses assistant tokens + `--chat-message-max` (no longer user bubble vars) |
+| `markdown-renderer.tsx` | Custom `a`, `table`, `th`, `td`, `code`; external links `rel`/`target` |
+
+### Still Part 3
+
+- Stop generation
+- Edit-mode cancel UX
+- Stream scroll / perf memoization
+- Live visual QA on running UI
