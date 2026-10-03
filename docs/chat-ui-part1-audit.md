@@ -169,3 +169,26 @@ Do **not** remove features; repair or complete them.
 - Edit-mode cancel UX
 - Stream scroll / perf memoization
 - Live visual QA on running UI
+
+---
+
+## Part 3 completed (2026-10-03)
+
+### Implemented
+
+| Item | Implementation |
+|------|----------------|
+| **Stop generation** | `stopChatGeneration()` — WS `cancel_task` + HTTP `DELETE /tasks/:id` fallback; optimistic `isTyping: false` |
+| **task_status** | Protocol handles cancelled/error → clears typing |
+| **Composer stop control** | While `isWorking`, primary button becomes Stop (`IconPlayerStop`) |
+| **Edit cancel** | Banner + Cancel clears edit buffer; send already applied edit |
+| **Memoization** | `workspace/chat-message.tsx` wrapped in `memo` |
+
+### Live visual QA note
+
+Full browser QA of the running Miki UI was not executed in this environment (no guaranteed local gateway/UI process). Static wiring and code review completed; operators should verify stop + edit cancel on a live session.
+
+### Follow-ups (optional)
+
+- Stream chunk batching if long runs still jank
+- Virtualized list beyond `useIncrementalList` for 1k+ messages

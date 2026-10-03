@@ -398,6 +398,7 @@ export function ChatPage() {
     editMessage,
     forkFromMessage,
     retryMessage,
+    stopGeneration,
     switchSession,
     newChat,
   } = useMikiChat()
@@ -886,6 +887,28 @@ export function ChatPage() {
     [focusComposer],
   )
 
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null)
+    setInput("")
+    setAttachments([])
+    focusComposer()
+  }, [focusComposer])
+
+  const handleStopGeneration = useCallback(async () => {
+    try {
+      await stopGeneration()
+    } catch (error) {
+      toast.error(
+        t("chat.actions.stopError", {
+          defaultValue:
+            error instanceof Error
+              ? error.message
+              : "Could not stop generation",
+        }),
+      )
+    }
+  }, [stopGeneration, t])
+
   const handleRetryMessage = useCallback(
     async (messageId: string) => {
       try {
@@ -1102,6 +1125,10 @@ export function ChatPage() {
             onModeClick={handleModeClick}
             onRemoveAttachment={handleRemoveAttachment}
             onSend={handleSend}
+            onStopGeneration={() => void handleStopGeneration()}
+            isWorking={isTyping}
+            isEditing={isEditingMessage}
+            onCancelEdit={handleCancelEdit}
             modeLabel={t("chat.workspace.mode")}
             inputDisabledReason={isEditingMessage ? null : inputDisabledReason}
             canSend={canSubmit && voiceState === "idle"}

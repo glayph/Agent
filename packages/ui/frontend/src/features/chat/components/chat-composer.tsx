@@ -64,6 +64,10 @@ export interface ChatComposerProps {
   onModeClick?: () => void
   onRemoveAttachment: (index: number) => void
   onSend: () => void
+  onStopGeneration?: () => void
+  isWorking?: boolean
+  isEditing?: boolean
+  onCancelEdit?: () => void
   onContextDetail?: () => void
   modeLabel?: string
   inputDisabledReason: ChatInputDisabledReason | null
@@ -144,6 +148,10 @@ export function ChatComposer({
   onModeClick,
   onRemoveAttachment,
   onSend,
+  onStopGeneration,
+  isWorking = false,
+  isEditing = false,
+  onCancelEdit,
   onContextDetail,
   modeLabel,
   inputDisabledReason,
@@ -223,6 +231,24 @@ export function ChatComposer({
           </div>
         )}
 
+        {isEditing && onCancelEdit ? (
+          <div className="text-muted-foreground mb-1.5 flex items-center justify-between gap-2 px-1 text-[12.5px] leading-5">
+            <span className="min-w-0 truncate">
+              {t("chat.editingMessage", {
+                defaultValue: "Editing message — send to apply changes",
+              })}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 px-2 text-[12px]"
+              onClick={onCancelEdit}
+            >
+              {t("common.cancel")}
+            </Button>
+          </div>
+        ) : null}
         {canInput ? (
           <div
             data-chat-composer-controls="true"
@@ -300,35 +326,45 @@ export function ChatComposer({
                           : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_4px_14px_color-mix(in_srgb,var(--primary)_32%,transparent)]",
                       )}
                       onClick={
-                        showVoiceAction
-                          ? isRecording
-                            ? onStopVoice
-                            : onStartVoice
-                          : onSend
+                        isWorking && onStopGeneration
+                          ? onStopGeneration
+                          : showVoiceAction
+                            ? isRecording
+                              ? onStopVoice
+                              : onStartVoice
+                            : onSend
                       }
                       disabled={
-                        showVoiceAction
-                          ? isTranscribing || !onStartVoice
-                          : !canSend
+                        isWorking && onStopGeneration
+                          ? false
+                          : showVoiceAction
+                            ? isTranscribing || !onStartVoice
+                            : !canSend
                       }
                       aria-label={
-                        showVoiceAction
-                          ? isTranscribing
-                            ? t("chat.transcribingVoice", {
-                                defaultValue: "Transcribing…",
-                              })
-                            : isRecording
-                              ? t("chat.stopVoice", {
-                                  defaultValue: "Stop recording",
+                        isWorking && onStopGeneration
+                          ? t("chat.stopGeneration", {
+                              defaultValue: "Stop generating",
+                            })
+                          : showVoiceAction
+                            ? isTranscribing
+                              ? t("chat.transcribingVoice", {
+                                  defaultValue: "Transcribing…",
                                 })
-                              : t("chat.startVoice", {
-                                  defaultValue: "Record voice message",
-                                })
-                          : t("chat.sendMessage")
+                              : isRecording
+                                ? t("chat.stopVoice", {
+                                    defaultValue: "Stop recording",
+                                  })
+                                : t("chat.startVoice", {
+                                    defaultValue: "Record voice message",
+                                  })
+                            : t("chat.sendMessage")
                       }
                       aria-describedby={sendHintId}
                     >
-                      {showVoiceAction ? (
+                      {isWorking && onStopGeneration ? (
+                        <IconPlayerStop className="size-3.5" />
+                      ) : showVoiceAction ? (
                         isTranscribing ? (
                           <IconLoader2 className="size-4 animate-spin" />
                         ) : isRecording ? (

@@ -792,6 +792,63 @@ export async function newChatSession() {
   }
 }
 
+
+export async function stopChatGeneration(): Promise<boolean> {
+  const state = getChatState()
+  if (!state.isTyping) {
+    return false
+  }
+
+  const taskId = state.activeRunId
+  let cancelled = false
+
+  if (wsRef && wsRef.readyState === WebSocket.OPEN && taskId) {
+    try {
+      wsRef.send(
+        JSON.stringify({
+          type: "cancel_task",
+          task_id: taskId,
+        }),
+      )
+      cancelled = true
+    } catch (error) {
+      console.error("Failed to send cancel_task over WebSocket:", error)
+    }
+  }
+
+  if (taskId) {
+    try {
+      const { launcherFetch } = await import("@/api/http")
+      const res = await launcherFetch(`/tasks/${encodeURIComponent(taskId)}`, {
+        method: "DELETE",
+        showErrorToast: false,
+      })
+      if (res.ok) {
+        cancelled = true
+      } else {
+        const resApi = await launcherFetch(
+          `/api/tasks/${encodeURIComponent(taskId)}`,
+          { method: "DELETE", showErrorToast: false },
+        )
+        if (resApi.ok) {
+          cancelled = true
+        }
+      }
+    } catch (error) {
+      console.error("Failed to cancel task via HTTP:", error)
+    }
+  }
+
+  // Optimistically end the local typing/run state so the UI unblocks even if
+  // the backend already finished or the task id was not yet assigned.
+  updateChatStore((prev) => ({
+    isTyping: false,
+    runStatus: prev.runStatus === "running" ? "cancelled" : prev.runStatus,
+  }))
+
+  return cancelled || !taskId
+}
+
 export function initializeChatStore() {
   if (initialized) {
     return

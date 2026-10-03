@@ -8,6 +8,7 @@ import {
   newChatSession,
   retryChatMessage,
   sendChatMessage,
+  stopChatGeneration,
   switchChatSession,
 } from "@/features/chat/controller"
 import { chatAtom } from "@/store/chat"
@@ -84,6 +85,7 @@ export function useMikiChat() {
     editMessage: editChatMessage,
     forkFromMessage: forkChatSessionFromMessage,
     retryMessage: retryChatMessage,
+    stopGeneration: stopChatGeneration,
     switchSession: switchChatSession,
     newChat: newChatSession,
   }

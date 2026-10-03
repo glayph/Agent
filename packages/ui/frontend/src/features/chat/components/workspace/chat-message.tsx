@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react"
+import { Suspense, lazy, memo } from "react"
 
 import { UserMessage } from "@/features/chat/components/user-message"
 import { cn } from "@/lib/utils"
@@ -19,7 +19,7 @@ interface ChatMessageProps {
   onRetry: (messageId: string) => void
 }
 
-export function ChatMessage({
+export const ChatMessage = memo(function ChatMessage({
   message,
   canRetry,
   onEdit,
@@ -74,4 +74,4 @@ export function ChatMessage({
       )}
     </article>
   )
-}
+})
