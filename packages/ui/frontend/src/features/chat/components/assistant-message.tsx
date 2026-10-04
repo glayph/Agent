@@ -158,7 +158,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           data-chat-bubble="assistant"
           data-chat-kind={isError ? "error" : undefined}
           className={cn(
-            "group group/message-bubble relative flex w-fit max-w-[var(--chat-message-max)] flex-col border px-3.5 py-2.5",
+            "group group/message-bubble relative flex w-fit max-w-[var(--chat-message-max)] flex-col border px-3 py-2",
             isThought &&
               "w-full border-transparent bg-transparent px-0 py-0 shadow-none [background:transparent] [box-shadow:none]",
             isToolCalls && hasToolCalls && "cursor-pointer",
@@ -411,7 +411,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                     "prose dark:prose-invert prose-headings:mt-3 prose-headings:mb-1.5 prose-headings:text-[0.95em] prose-headings:font-semibold prose-li:my-0.5 prose-ol:my-2 prose-ul:my-2 prose-p:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/50 prose-pre:p-0 prose-pre:text-foreground prose-table:my-3 relative max-w-none [overflow-wrap:anywhere] break-words",
                     isThought
                       ? "prose-p:my-1 prose-p:whitespace-pre-wrap py-0 text-[13px] leading-6 opacity-70"
-                      : "prose-p:whitespace-pre-wrap py-0 text-[14px] leading-6.5",
+                    : "prose-p:whitespace-pre-wrap py-0 text-[13px] [line-height:1.4rem]",
                     isError && "text-[13px] opacity-90",
                   )}
                 >
@@ -463,8 +463,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 defaultValue: "Fork from here",
               })}
               canRetry={canRetry}
-              // Always hit-testable; opacity still follows hover/focus CSS + visible.
-              visible={true}
+              // Hidden by default; the action bar reveals itself on bubble hover/focus.
               placement="inline"
               className="mt-0 group-focus-within/message:mt-1 group-hover/message:mt-1"
               onEdit={onEdit}

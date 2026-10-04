@@ -74,17 +74,21 @@
      =========================================================== */
   --chat-surface: var(--background);
 
-  /* --- User's own bubble (tinted, right-aligned) --- */
-  --chat-user-bubble: color-mix(in srgb, var(--primary) 9%, var(--card));
+  /* --- Shared minimal message bubble surface --- */
+  --chat-bubble: color-mix(in srgb, var(--card) 96%, var(--background));
+  --chat-bubble-border: color-mix(in srgb, var(--border) 70%, transparent);
+  --chat-bubble-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
+  /* Role aliases keep the appearance panel backwards-compatible. */
+  --chat-user-bubble: var(--chat-bubble);
   --chat-user-text: var(--foreground);
-  --chat-user-border: color-mix(in srgb, var(--primary) 22%, var(--border));
-  --chat-user-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 6%, transparent);
+  --chat-user-border: var(--chat-bubble-border);
+  --chat-user-shadow: var(--chat-bubble-shadow);
 
-  /* --- Miki's (assistant) bubble (neutral surface, left-aligned) --- */
-  --chat-assistant-bubble: color-mix(in srgb, var(--card) 96%, var(--background));
+  /* --- Miki's bubble shares the exact same minimal surface --- */
+  --chat-assistant-bubble: var(--chat-bubble);
   --chat-assistant-text: var(--foreground);
-  --chat-assistant-border: color-mix(in srgb, var(--border) 70%, transparent);
-  --chat-assistant-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
+  --chat-assistant-border: var(--chat-bubble-border);
+  --chat-assistant-shadow: var(--chat-bubble-shadow);
 
   /* --- Chat alerts (errors shown inline in the conversation) --- */
   --chat-alert-text: #9f302a;
@@ -129,14 +133,17 @@
 /* Dark mode overrides — only values that actually change in dark mode. */
 html.dark {
   --chat-surface: var(--background);
-  --chat-user-bubble: color-mix(in srgb, var(--primary) 14%, var(--card));
+  --chat-bubble: color-mix(in srgb, var(--card) 92%, var(--background));
+  --chat-bubble-border: color-mix(in srgb, var(--border) 65%, transparent);
+  --chat-bubble-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
+  --chat-user-bubble: var(--chat-bubble);
   --chat-user-text: var(--foreground);
-  --chat-user-border: color-mix(in srgb, var(--primary) 28%, var(--border));
-  --chat-user-shadow: 0 1px 2px color-mix(in srgb, #000 28%, transparent);
-  --chat-assistant-bubble: color-mix(in srgb, var(--card) 92%, var(--background));
+  --chat-user-border: var(--chat-bubble-border);
+  --chat-user-shadow: var(--chat-bubble-shadow);
+  --chat-assistant-bubble: var(--chat-bubble);
   --chat-assistant-text: var(--foreground);
-  --chat-assistant-border: color-mix(in srgb, var(--border) 65%, transparent);
-  --chat-assistant-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
+  --chat-assistant-border: var(--chat-bubble-border);
+  --chat-assistant-shadow: var(--chat-bubble-shadow);
   --chat-alert-text: var(--md-sys-color-on-error-container);
   --chat-alert-icon: var(--md-sys-color-error);
   --chat-error-bubble: var(--md-sys-color-error-container);
@@ -167,14 +174,6 @@ html.dark {
   border-color: var(--chat-assistant-border);
   color: var(--chat-assistant-text);
   box-shadow: var(--chat-assistant-shadow);
-}
-
-[data-chat-bubble="user"]:hover {
-  box-shadow: var(--chat-user-shadow), 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent);
-}
-
-[data-chat-bubble="assistant"]:hover {
-  box-shadow: var(--chat-assistant-shadow), 0 0 0 1px color-mix(in srgb, var(--border) 40%, transparent);
 }
 
 [data-chat-bubble="user"]:focus-within,

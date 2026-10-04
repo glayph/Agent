@@ -43,7 +43,10 @@
     "verify:workflow": "node scripts/validate-workflow-manifest.mjs",
     "verify:release": "node scripts/run-release-verify.mjs",
     "benchmark:score": "node scripts/benchmark-score-gate.mjs --write",
-    "clean": "npm run clean --workspaces --if-present"
+    "clean": "npm run clean --workspaces --if-present",
+    "test:agent-core": "npm run test --workspace=@miki/core -- src/engine",
+    "smoke:agent-core": "node scripts/smoke-agent-core.mjs",
+    "test:files": "npm run test --workspace=@miki/core -- src/engine/file src/api/file-manager"
   },
   "engines": {
     "node": ">=20"

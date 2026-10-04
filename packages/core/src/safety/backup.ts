@@ -42,7 +42,6 @@ const DEFAULT_MAX_BACKUPS = 50;
 const OPERATIONAL_DATA_FILE_PATTERNS = [
   /^miki_memory\.db(?:-(?:wal|shm))?$/i,
   /^system-index\.db(?:-(?:wal|shm))?$/i,
-  /^agent-runs\.db(?:-(?:wal|shm))?$/i,
 ];
 
 function timestampId(date = new Date()): string {

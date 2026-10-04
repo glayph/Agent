@@ -190,7 +190,9 @@ function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   const record = value as Record<string, unknown>;
   return `{${Object.keys(record)
-    .filter((key) => key !== "receivedAt")
+    // Transport timestamps are generated on each delivery and must not make
+    // the same idempotency key look like a different payload.
+    .filter((key) => key !== "receivedAt" && key !== "timestamp")
     .sort()
     .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
     .join(",")}}`;

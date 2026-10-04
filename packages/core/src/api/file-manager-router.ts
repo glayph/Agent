@@ -8,6 +8,7 @@ import * as tar from "tar";
 import { TextDecoder } from "util";
 import { type RuntimePaths } from "../paths.js";
 import { readMikiEnv } from "@miki/config";
+import { isSensitivePath } from "../engine/workspace-paths.js";
 
 const MAX_LIST_ENTRIES = 1000;
 const MAX_TEXT_READ_BYTES = 5 * 1024 * 1024;
@@ -52,10 +53,36 @@ const PREVIEW_MIME_TYPES: Record<string, string> = {
 type FileEntryType = "file" | "directory" | "symlink";
 type FileManagerSystemWritePolicy = boolean | (() => boolean);
 
-interface FileManagerRouterOptions {
+/** Result of running a file: `ok: false` is reported to the caller as an error with the output attached. */
+export interface FileRunOutcome {
+  ok: boolean;
+  message?: string;
+  result?: unknown;
+}
+
+export type FileRunHandler = (targetPath: string) => Promise<FileRunOutcome>;
+
+export interface FileManagerRouterOptions {
   runtimePaths: RuntimePaths;
   allowSystemWrite?: FileManagerSystemWritePolicy;
   allowSystemRead?: FileManagerSystemWritePolicy;
+  /**
+   * Executes a file for POST /run. Without it the router falls back to the
+   * desktop launcher (xdg-open / open / Start-Process), which needs a GUI session.
+   */
+  runFile?: FileRunHandler;
+  /** Runtime kill switch for execution. Evaluated per request; also drives `canRun` in /roots. */
+  allowRun?: () => boolean;
+  /**
+   * Files and folders (absolute) that are invisible and untouchable through the
+   * file manager, e.g. the runtime data directory with the vault and database.
+   */
+  protectedPaths?: string[];
+  /**
+   * Credential-looking files (.env, keys, *.sqlite, vault) are blocked by name.
+   * Return true to let an operator work with them anyway.
+   */
+  allowSensitive?: () => boolean;
   /** @deprecated Use runtimePaths instead */
   workspaceDir?: string;
 }
@@ -887,6 +914,7 @@ function archiveDownloadName(paths: string[]): string {
 async function sendArchiveDownload(
   res: Response,
   sourcePaths: string[],
+  isExcluded: (absolutePath: string) => boolean = () => false,
 ): Promise<void> {
   const archiveRoot = commonParentPath(sourcePaths);
   const relativePaths: string[] = [];
@@ -928,7 +956,9 @@ async function sendArchiveDownload(
         cwd: archiveRoot,
         gzip: true,
         portable: true,
-        filter: (_archivePath, stat) => {
+        filter: (archivePath, stat) => {
+          // Protected files are left out of archives instead of failing the download.
+          if (isExcluded(path.resolve(archiveRoot, archivePath))) return false;
           const filesystemStat = stat as fs.Stats | undefined;
           return Boolean(
             filesystemStat &&
@@ -1311,26 +1341,57 @@ export function createFileManagerRouter({
   runtimePaths,
   allowSystemWrite,
   allowSystemRead,
+  runFile,
+  allowRun,
+  protectedPaths = [],
+  allowSensitive,
 }: FileManagerRouterOptions): Router {
+  const protectedRoots = protectedPaths.map((entry) => path.resolve(entry));
+  const isBlocked = (targetPath: string): boolean => {
+    const resolved = path.resolve(targetPath);
+    if (protectedRoots.some((entry) => isPathInside(entry, resolved))) return true;
+    return !(allowSensitive?.() ?? false) && isSensitivePath(resolved);
+  };
+  const assertNotBlocked = async (targetPath: string): Promise<void> => {
+    let real = path.resolve(targetPath);
+    try {
+      real = await fsp.realpath(real);
+    } catch {
+      // Not created yet: the lexical path is what matters.
+    }
+    if (isBlocked(targetPath) || isBlocked(real)) {
+      throw new FileManagerError(
+        403,
+        "access to protected files is blocked by the workspace policy",
+      );
+    }
+  };
   const router = Router();
   const currentAllowSystemWrite = (): boolean =>
     resolveAllowSystemWrite(allowSystemWrite);
   const currentAllowSystemRead = (): boolean =>
     resolveAllowSystemRead(allowSystemRead);
-  const assertCurrentReadableScope = (targetPath: string): Promise<void> =>
-    assertReadableScope(targetPath, runtimePaths, currentAllowSystemRead());
-  const assertCurrentMutableScope = (targetPath: string): Promise<void> =>
-    assertMutableScope(targetPath, runtimePaths, currentAllowSystemWrite());
-  const assertCurrentMutableTarget = (targetPath: string): Promise<void> =>
-    assertMutableTarget(targetPath, runtimePaths, currentAllowSystemWrite());
+  const assertCurrentReadableScope = async (targetPath: string): Promise<void> => {
+    await assertReadableScope(targetPath, runtimePaths, currentAllowSystemRead());
+    await assertNotBlocked(targetPath);
+  };
+  const assertCurrentMutableScope = async (targetPath: string): Promise<void> => {
+    await assertMutableScope(targetPath, runtimePaths, currentAllowSystemWrite());
+    await assertNotBlocked(targetPath);
+  };
+  const assertCurrentMutableTarget = async (targetPath: string): Promise<void> => {
+    await assertMutableTarget(targetPath, runtimePaths, currentAllowSystemWrite());
+    await assertNotBlocked(targetPath);
+  };
 
   router.get("/roots", (_req, res) => {
+    const runAllowed = allowRun ? allowRun() : true;
     res.json({
       roots: rootEntries(
         runtimePaths,
         currentAllowSystemWrite(),
         currentAllowSystemRead(),
-      ),
+      ).map((root) => ({ ...root, canRun: root.canRun && runAllowed })),
     });
   });
 
@@ -1353,10 +1414,13 @@ export function createFileManagerRouter({
         ? Math.min(MAX_LIST_ENTRIES, Math.max(1, Math.floor(rawLimit)))
         : MAX_LIST_ENTRIES;
       const listing = await listDirectory(targetPath, offset, limit);
+      const visible = listing.entries.filter((entry) => !isBlocked(entry.path));
       res.json({
         path: targetPath,
         parentPath: parentPathFor(targetPath),
         ...listing,
+        entries: visible,
+        total: Math.max(0, listing.total - (listing.entries.length - visible.length)),
       });
     }),
   );
@@ -1497,9 +1561,27 @@ export function createFileManagerRouter({
     asyncRoute(async (req, res) => {
       const body = bodyRecord(req);
       const targetPath = resolveInputPath(body.path);
+      if (allowRun && !allowRun()) {
+        throw new FileManagerError(
+          403,
+          "File execution is disabled by the workspace policy",
+        );
+      }
       await assertCurrentMutableScope(targetPath);
       await assertSafeFilesystemNode(targetPath);
       await assertRegularFile(targetPath);
+      if (runFile) {
+        const outcome = await runFile(targetPath);
+        if (!outcome.ok) {
+          res.status(422).json({
+            error: outcome.message || "The file did not run successfully",
+            result: outcome.result,
+          });
+          return;
+        }
+        res.json({ status: "ok", result: outcome.result });
+        return;
+      }
       await openWithSystemLauncher(targetPath);
       res.json({ status: "ok" });
     }),
@@ -1566,7 +1648,7 @@ export function createFileManagerRouter({
       for (const sourcePath of sourcePaths) {
         await assertCurrentReadableScope(sourcePath);
       }
-      await sendArchiveDownload(res, sourcePaths);
+      await sendArchiveDownload(res, sourcePaths, isBlocked);
     }),
   );
 

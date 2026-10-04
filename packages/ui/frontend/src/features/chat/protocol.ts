@@ -429,13 +429,13 @@ export function handlemikiMessage(
         typeof payload.task_id === "string"
           ? payload.task_id
           : typeof (message as { task_id?: unknown }).task_id === "string"
-            ? (message as { task_id: string }).task_id
+            ? (message as { task_id?: unknown }).task_id as string
             : undefined
       const statusRaw =
         typeof payload.status === "string"
           ? payload.status
           : typeof (message as { status?: unknown }).status === "string"
-            ? String((message as { status: string }).status)
+            ? String((message as { status?: unknown }).status)
             : undefined
       updateChatStore((prev) => {
         if (taskId && prev.activeRunId && prev.activeRunId !== taskId) {

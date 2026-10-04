@@ -1104,7 +1104,7 @@ export async function executeRuntimePluginContract(
 }
 
 export async function executeRuntimePluginTool(
-  workspaceDir: string,
+  workspaceDir: RuntimePaths | string,
   toolName: string,
   args: Record<string, unknown>,
   options: ExecuteRuntimePluginToolOptions = {},

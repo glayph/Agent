@@ -108,7 +108,7 @@ export const UserMessage = memo(function UserMessage({
       {hasText && (
         <div
           data-chat-bubble="user"
-          className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1.5 border px-3.5 py-2.5"
+          className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1 border px-3 py-2"
           title={formattedTimestamp || undefined}
           onPointerEnter={() => setActionsVisible(true)}
           onPointerLeave={() => {
@@ -125,7 +125,7 @@ export const UserMessage = memo(function UserMessage({
         >
           <div
             className={cn(
-              "w-full text-[14px] leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap [color:var(--chat-user-text)]",
+              "w-full text-[13px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap [color:var(--chat-user-text)]",
               isCommand && "font-mono text-[12.5px] leading-5",
             )}
           >

@@ -33,6 +33,18 @@
     "./plugins": {
       "import": "./dist/plugins/index.js",
       "types": "./dist/plugins/index.d.ts"
+    },
+    "./engine": {
+      "import": "./dist/engine/index.js",
+      "types": "./dist/engine/index.d.ts"
+    },
+    "./file-manager": {
+      "import": "./dist/api/file-manager-router.js",
+      "types": "./dist/api/file-manager-router.d.ts"
+    },
+    "./paths": {
+      "import": "./dist/paths.js",
+      "types": "./dist/paths.d.ts"
     }
   },
   "scripts": {

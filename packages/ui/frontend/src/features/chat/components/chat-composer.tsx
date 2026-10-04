@@ -212,7 +212,7 @@ export function ChatComposer({
     <div className="pointer-events-none relative z-10 shrink-0 bg-transparent px-[var(--chat-inline-padding)] pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
       <div
         className={cn(
-          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col rounded-[1.5rem] border [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] transition-[border-color,box-shadow,background-color] [background:var(--chat-composer-bg)] focus-within:[border-color:var(--chat-composer-focus-border)] focus-within:[box-shadow:var(--chat-composer-focus-shadow)]",
+          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col rounded-[1.5rem] border [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] [background:var(--chat-composer-bg)]",
           canInput
             ? "min-h-[var(--chat-composer-min-height)] rounded-[1.5rem] p-2"
             : "min-h-12 rounded-[1.5rem] p-2",

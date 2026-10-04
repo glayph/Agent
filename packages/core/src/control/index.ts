@@ -3,11 +3,6 @@ export {
   DEFAULT_ALLOWED_CONFIG_PREFIXES,
 } from "./service.js";
 export { ControlJournal } from "./journal.js";
-export { createLlamaCppAdapter } from "./model-adapters.js";
-export type {
-  ModelRuntimeAdapter,
-  ModelRuntimeDescriptor,
-} from "./model-adapters.js";
 export { createControlRouter } from "./router.js";
 export { createControlToolFactory } from "./tools.js";
 export { parseControlIntent } from "./intent.js";

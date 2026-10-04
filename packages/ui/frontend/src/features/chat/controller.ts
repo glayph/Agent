@@ -819,20 +819,12 @@ export async function stopChatGeneration(): Promise<boolean> {
   if (taskId) {
     try {
       const { launcherFetch } = await import("@/api/http")
-      const res = await launcherFetch(`/tasks/${encodeURIComponent(taskId)}`, {
-        method: "DELETE",
-        showErrorToast: false,
-      })
+      const res = await launcherFetch(
+        `/api/tasks/${encodeURIComponent(taskId)}`,
+        { method: "DELETE", showErrorToast: false },
+      )
       if (res.ok) {
         cancelled = true
-      } else {
-        const resApi = await launcherFetch(
-          `/api/tasks/${encodeURIComponent(taskId)}`,
-          { method: "DELETE", showErrorToast: false },
-        )
-        if (resApi.ok) {
-          cancelled = true
-        }
       }
     } catch (error) {
       console.error("Failed to cancel task via HTTP:", error)
