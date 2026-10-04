@@ -6,7 +6,6 @@ Operator-facing single-session Chat UI and management dashboard.
 packages/ui/
 ├── README.md
 ├── appearance.css
-├── xAgent-launcher.png          # Launcher icon asset
 ├── miki-backend                 # Built Go backend binary (platform specific)
 ├── backend/                     # Go backend sources
 │   ├── api/

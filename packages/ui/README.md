@@ -3,8 +3,6 @@
 `web/` contains the standalone WebUI launcher for Miki.
 It is not just a frontend: it is a small launcher service that bundles a React dashboard, exposes a backend API, manages launcher authentication, and starts or attaches to the `Miki` runtime process.
 
-![Miki Launcher](./Miki-launcher.png)
-
 ## What This Directory Provides
 
 - A browser-based chat UI backed by the miki channel WebSocket proxy.

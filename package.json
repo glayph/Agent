@@ -40,7 +40,6 @@
     "soak": "node scripts/soak-agent.mjs",
     "test": "npm run test --workspaces --if-present",
     "verify": "node scripts/run-verify.mjs",
-    "verify:workflow": "node scripts/validate-workflow-manifest.mjs",
     "verify:release": "node scripts/run-release-verify.mjs",
     "benchmark:score": "node scripts/benchmark-score-gate.mjs --write",
     "clean": "npm run clean --workspaces --if-present",
