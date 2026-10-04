@@ -23,6 +23,11 @@ import {
   type EngineTool,
   type RunResult,
 } from "@miki/core/engine"
+import {
+  RunsStore,
+  createRunsRouter,
+  type AgentRunStatus,
+} from "./runs-store.js"
 
 type Json = Record<string, unknown>
 
@@ -219,7 +224,8 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     maxToolCalls: Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
   })
 
-  // ---- run tracking (cancel, one run per session) -------------------------
+  // ---- durable + in-memory run tracking -----------------------------------
+  const runsStore = new RunsStore(db)
   const runs = new Map<string, { controller: AbortController; sessionId?: string; startedAt: string; source: string }>()
   const sessionRuns = new Map<string, string>()
 
@@ -239,16 +245,39 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     runId?: string
     onEvent?: (event: EngineEvent) => void
     signal?: AbortSignal
+    /** Optional lane override; otherwise derived from source. */
+    lane?: "chat" | "heartbeat" | "autonomy" | "control"
   }): Promise<RunResult> {
     const runId = input.runId ?? `run_${randomUUID()}`
     if (input.sessionId && sessionRuns.has(input.sessionId))
       throw new Error("A run is already active for this session.")
     const controller = new AbortController()
     input.signal?.addEventListener("abort", () => controller.abort(), { once: true })
-    runs.set(runId, { controller, sessionId: input.sessionId, startedAt: now(), source: input.source })
+    const startedAt = now()
+    runs.set(runId, { controller, sessionId: input.sessionId, startedAt, source: input.source })
     if (input.sessionId) sessionRuns.set(input.sessionId, runId)
+
+    // Derive goal preview from last user message for the run record.
+    const lastUser = [...input.history].reverse().find((m) => m.role === "user")
+    const goalPreview =
+      typeof lastUser?.content === "string" ? lastUser.content.slice(0, 500) : undefined
+
     try {
-      return await engine.run({
+      runsStore.create({
+        id: runId,
+        sessionId: input.sessionId,
+        lane: input.lane,
+        source: input.source,
+        model: input.model,
+        goal: goalPreview,
+        startedAt,
+      })
+    } catch (err) {
+      deps.log?.("runs-store create failed", { runId, error: String(err) })
+    }
+
+    try {
+      const result = await engine.run({
         runId,
         sessionId: input.sessionId,
         history: input.history,
@@ -257,6 +286,42 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         signal: controller.signal,
         onEvent: input.onEvent,
       })
+      try {
+        const status: AgentRunStatus =
+          result.status === "completed" ||
+          result.status === "failed" ||
+          result.status === "cancelled" ||
+          result.status === "limit_reached"
+            ? result.status
+            : "failed"
+        runsStore.finish(runId, {
+          status,
+          model: result.model,
+          goal: result.goal || goalPreview,
+          finalText: result.finalText,
+          error: result.error,
+          turns: result.turns,
+          toolCalls: result.toolCalls?.length ?? 0,
+          usage: result.usage,
+          finishedAt: result.finishedAt || now(),
+        })
+      } catch (err) {
+        deps.log?.("runs-store finish failed", { runId, error: String(err) })
+      }
+      return result
+    } catch (error) {
+      try {
+        runsStore.finish(runId, {
+          status: "failed",
+          model: input.model,
+          goal: goalPreview,
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: now(),
+        })
+      } catch {
+        /* ignore secondary store errors */
+      }
+      throw error
     } finally {
       runs.delete(runId)
       if (input.sessionId && sessionRuns.get(input.sessionId) === runId) sessionRuns.delete(input.sessionId)
@@ -265,6 +330,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   // ---- HTTP routes --------------------------------------------------------
   function mount(app: express.Express) {
+    // Durable agent runs (chat + autonomy lanes).
+    app.use("/api/runs", deps.requireAuth, createRunsRouter(runsStore))
+
     // Auth covers everything under /api/control, including the approval
     // endpoints, so an unauthenticated visitor can never approve a request.
     app.use("/api/control", deps.requireAuth)
@@ -348,7 +416,20 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     })
   }
 
-  return { engine, control, approvals, registry, llmFor, mount, startRun, cancelRun, syncTools, describePlan, activeRunCount: () => runs.size }
+  return {
+    engine,
+    control,
+    approvals,
+    registry,
+    llmFor,
+    mount,
+    startRun,
+    cancelRun,
+    syncTools,
+    describePlan,
+    activeRunCount: () => runs.size,
+    runsStore,
+  }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>

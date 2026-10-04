@@ -254,8 +254,54 @@ app.post("/api/memory/chunks/:id/forget", (req, res) => { const result = db.prep
 app.get("/api/enhancements/health/full", (_req, res) => res.json({ status: "degraded", checkedAt: now(), doctor: { status: "warn", checkedAt: now(), workspaceDir: projectRoot, checks: [] }, memory: { available: false }, safeMode: { enabled: false, reasons: [] }, backups: [], migrations: [], watchdog: { enabled: false, services: [] }, jobs: { items: [], stats: {} }, performance: [], audit: [], secretScan: { scannedFiles: 0, fixedFiles: [], findings: [] }, components: [] }))
 app.get("/api/enhancements/runtime/deliveries", (_req, res) => res.json({ receipts: [], stats: {} }))
 app.get("/api/miki/info", (_req, res) => res.json({ name: "Miki", version: "1.3.14", backend: "persistent-node" }))
-app.get("/api/agents", (_req, res) => res.json({ agents: [], total: 0 }))
-app.get("/api/swarm/status", (_req, res) => res.json({ status: "idle", agents: [] }))
+app.get("/api/agents", (_req, res) => {
+  const stats = agent.runsStore.stats()
+  const active = agent.runsStore.activeByLane()
+  const recent = agent.runsStore.recent(20)
+  const agents = [
+    {
+      id: "miki-chat",
+      name: "Miki",
+      lane: "chat",
+      status: (active.chat || 0) > 0 ? "busy" : "idle",
+      active_runs: active.chat || 0,
+      total_runs: stats.byLane.chat || 0,
+    },
+    {
+      id: "miki-autonomy",
+      name: "Miki Autonomy",
+      lane: "autonomy",
+      status: (active.autonomy || 0) > 0 ? "busy" : "idle",
+      active_runs: active.autonomy || 0,
+      total_runs: stats.byLane.autonomy || 0,
+    },
+    {
+      id: "miki-heartbeat",
+      name: "Miki Heartbeat",
+      lane: "heartbeat",
+      status: (active.heartbeat || 0) > 0 ? "busy" : "idle",
+      active_runs: active.heartbeat || 0,
+      total_runs: stats.byLane.heartbeat || 0,
+    },
+  ]
+  res.json({ agents, total: agents.length, recent: recent.map((r) => ({ id: r.id, lane: r.lane, status: r.status, goal: r.goal, started_at: r.started_at })) })
+})
+app.get("/api/swarm/status", (_req, res) => {
+  const stats = agent.runsStore.stats()
+  const active = agent.runsStore.activeByLane()
+  const activeTotal = Object.values(active).reduce((a, b) => a + b, 0)
+  res.json({
+    status: activeTotal > 0 ? "busy" : "idle",
+    active_runs: activeTotal,
+    by_lane: active,
+    totals: stats,
+    agents: [
+      { id: "miki-chat", lane: "chat", status: (active.chat || 0) > 0 ? "busy" : "idle" },
+      { id: "miki-autonomy", lane: "autonomy", status: (active.autonomy || 0) > 0 ? "busy" : "idle" },
+      { id: "miki-heartbeat", lane: "heartbeat", status: (active.heartbeat || 0) > 0 ? "busy" : "idle" },
+    ],
+  })
+})
 app.get("/api/automations/platforms", (_req, res) => res.json({ platforms: [] }))
 
 async function completeWithProvider(messages: { role: string; content: string }[], model: string, requestKey?: string, requestBase?: string) {
