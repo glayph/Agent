@@ -1225,7 +1225,8 @@
           "requires_skills": "需要先启用 `tools.skills`，该技能注册表工具才能使用。",
           "requires_worker": "需要先启用后台 worker 依赖，`spawn` 才能委派任务。",
           "requires_mcp_discovery": "需要先启用 `tools.mcp.discovery`，MCP 发现工具才会可用。",
-          "requires_web_search_provider": "请至少配置一个可用的外部网络搜索 provider。"
+          "requires_web_search_provider": "请至少配置一个可用的外部网络搜索 provider。",
+          "browser_not_installed": "未安装浏览器引擎。请运行 `npx playwright install chromium` 并重启。"
         }
       }
     },

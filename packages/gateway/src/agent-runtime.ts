@@ -1,4 +1,6 @@
 import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
+import { createTerminalTool } from "./terminal-tool.js";
+import { buildIdentityContext } from "./identity-prompt.js";
 import express from "express"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
@@ -21,6 +23,7 @@ import {
   createSkillTools,
   createWorkspaceTools,
   describePlan,
+  DEFAULT_SYSTEM_PROMPT,
   type EngineEvent,
   type LayeredEvent,
   type EngineLLMClient,
@@ -66,8 +69,9 @@ const TOOL_GROUPS: Record<string, { label: string; defaultEnabled: boolean; name
   skills: { label: "Skills", defaultEnabled: true, names: (n) => n.startsWith("skill_") },
   control: { label: "Agent control", defaultEnabled: true, names: (n) => n.startsWith("agent_control_") },
   goals: { label: "Persistent goals", defaultEnabled: true, names: (n) => n.startsWith("goal_") },
-  web_search: { label: "Web search", defaultEnabled: false, names: (n) => n === "web_search" },
-  browser: { label: "Browser automation", defaultEnabled: false, names: (n) => n.startsWith("browser_") },
+  web_search: { label: "Web search", defaultEnabled: true, names: (n) => n === "web_search" },
+  browser: { label: "Browser automation", defaultEnabled: true, names: (n) => n.startsWith("browser_") },
+  terminal: { label: "Terminal", defaultEnabled: true, names: (n) => n.startsWith("terminal_") },
   computer: { label: "Computer use", defaultEnabled: false, names: (n) => n.startsWith("computer_") },
 }
 
@@ -283,27 +287,31 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       onRun: (entry) => deps.recordFileRun({ file: `${entry.skill}/${entry.script}`, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: `skill:${entry.skill}` }),
     }),
     ...createControlTools(createControlToolFactory(control)),
+    createTerminalTool({
+      root: effectiveWorkspaceRoot,
+      restrictToWorkspace: () => (deps.getAppConfig() as any)?.agents?.defaults?.restrict_to_workspace !== false,
+    }),
     {
       name: "browser_navigate",
-      description: "Open an HTTP or HTTPS page in the isolated headless browser. External navigation requires approval.",
+      description: "Open an HTTP or HTTPS page in the headless browser.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { url: { type: "string", description: "HTTP(S) URL to open." } }, required: ["url"], additionalProperties: false },
       async execute(input) { return browser.navigate(String(input.url || "")) },
     },
     {
       name: "browser_click",
-      description: "Click a visible element by a Playwright selector on the current page. Requires approval.",
+      description: "Click a visible element by a Playwright selector on the current page.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
       async execute(input) { return browser.click(String(input.selector || "")) },
     },
     {
       name: "browser_type",
-      description: "Type text into a browser selector. Requires approval.",
+      description: "Type text into a browser selector.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { selector: { type: "string" }, text: { type: "string", maxLength: 4000 } }, required: ["selector", "text"], additionalProperties: false },
       async execute(input) { return browser.type(String(input.selector || ""), String(input.text || "")) },
     },
@@ -452,6 +460,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     llm: llmFor,
     tools: registry,
     approvals,
+    // Identity + live capability context; the model still writes every reply itself.
+    systemPrompt: () => {
+      const config = deps.getAppConfig() as any
+      const persona = typeof config?.agent?.persona === "string" ? config.agent.persona : undefined
+      const state = toolState()
+      const identity = buildIdentityContext({
+        groups: Object.keys(TOOL_GROUPS).map((key) => ({ key, enabled: state[key] === true })),
+        persona,
+        identityDirs: [path.join(deps.workspaceRoot, "config", "identity"), path.join(deps.workspaceRoot, "identity")],
+      })
+      return `${DEFAULT_SYSTEM_PROMPT}\n\n${identity}`
+    },
     // Advertise only the skills permitted by the active turn profile.
     contextProvider: async () => {
       if (!registry.has("skill_read")) return undefined;
@@ -642,7 +662,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     const result = await controller.setToolState(name, enabled)
     return { ...result, status: enabled ? "enabled" : "disabled", name }
   }
-  return { engine, control, approvals, registry, llmFor, mount, startRun, cancelRun, syncTools, setToolState, describePlan, activeRunCount: () => runs.size }
+  return { engine, control, approvals, registry, llmFor, mount, startRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>

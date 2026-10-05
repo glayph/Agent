@@ -1225,7 +1225,8 @@
           "requires_skills": "Enable `tools.skills` before this skill-registry tool can be used.",
           "requires_worker": "Enable the background worker dependency before the spawn tool can delegate work.",
           "requires_mcp_discovery": "Enable `tools.mcp.discovery` before MCP discovery tools become available.",
-          "requires_web_search_provider": "Configure at least one ready external web-search provider."
+          "requires_web_search_provider": "Configure at least one ready external web-search provider.",
+          "browser_not_installed": "The browser engine is not installed. Run `npx playwright install chromium` and restart."
         }
       }
     },

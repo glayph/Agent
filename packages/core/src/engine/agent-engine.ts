@@ -33,7 +33,8 @@ export interface AgentEngineOptions {
   tools: ToolRegistry;
   /** Decides tool calls that need confirmation. Without a gate, such calls are denied. */
   approvals?: ApprovalGate;
-  systemPrompt?: string;
+  /** Base system prompt, or a resolver evaluated at the start of every run. */
+  systemPrompt?: string | (() => string);
   /** Extra system-prompt context evaluated at the start of every run (skills catalog, ...). */
   contextProvider?: () => string | undefined | Promise<string | undefined>;
   /** Maximum model round-trips per run. */
@@ -421,7 +422,7 @@ export class AgentEngine {
       ? {
           role: "system" as const,
           content: buildSystemPrompt({
-            base: this.options.systemPrompt,
+            base: typeof this.options.systemPrompt === "function" ? this.options.systemPrompt() : this.options.systemPrompt,
             plan: state.plan,
             toolNames: runToolsEnabled ? tools.names() : [],
             extraContext,

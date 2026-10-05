@@ -22,6 +22,7 @@ import { createDashboardExtendedRouter } from "./dashboard-extended.js"
 import { validateRuntimeConfig, migrateRuntimeConfig } from "@miki/config"
 import { AutonomousSupervisor } from "@miki/core/autonomy"
 import { normalizeSessionScope, resolveSessionContextId } from "./session-scope.js"
+import { resolveToolGroupKey } from "./tool-groups.js"
 import { resolveContextWindowTokens } from "./runtime-settings.js"
 import { FileMemoryService } from "@miki/core/memory-files"
 
@@ -968,20 +969,39 @@ app.use("/api/skills", requireAuth, createSkillsRouter({
     }
   },
 }))
-app.get("/api/tools", (_req, res) => {
-  const state = (getAppConfig().tools as { tool_state?: Record<string, boolean> } | undefined)?.tool_state ?? {}
-  const registered = new Set(agent.registry.names())
-  const group = (key: string, name: string, description: string, category: string, defaultEnabled: boolean, members: string[]) => {
-    const enabled = typeof state[key] === "boolean" ? state[key] : defaultEnabled
-    return { name, description, category, config_key: key, status: enabled ? "enabled" : "disabled", config_enabled: enabled, tools: members.filter((m) => registered.has(m)) }
+let browserReadyCache: { ready: boolean; at: number } | undefined
+const browserReady = async (): Promise<boolean> => {
+  if (browserReadyCache && Date.now() - browserReadyCache.at < 60_000) return browserReadyCache.ready
+  let ready = false
+  try {
+    const moduleName = "playwright"
+    const pw = (await import(moduleName)) as { chromium?: { executablePath(): string } }
+    const executable = pw.chromium?.executablePath()
+    ready = Boolean(executable && existsSync(executable))
+  } catch {
+    ready = false
   }
+  browserReadyCache = { ready, at: Date.now() }
+  return ready
+}
+app.get("/api/tools", async (_req, res) => {
+  const state = (getAppConfig().tools as { tool_state?: Record<string, boolean> } | undefined)?.tool_state ?? {}
+  // Members come from the full tool list, so a disabled group still shows what it would provide.
+  const known = new Set(agent.allToolNames())
+  const group = (key: string, name: string, description: string, category: string, defaultEnabled: boolean, members: string[], blockedReason?: string) => {
+    const enabled = typeof state[key] === "boolean" ? state[key] : defaultEnabled
+    const status = enabled && blockedReason ? "blocked" : enabled ? "enabled" : "disabled"
+    return { name, description, category, config_key: key, status, config_enabled: enabled, ...(enabled && blockedReason ? { reason_code: blockedReason } : {}), tools: members.filter((m) => known.has(m)) }
+  }
+  const browserBlocked = (await browserReady()) ? undefined : "browser_not_installed"
   res.json({ tools: [
     group("filesystem", "filesystem", "Read, search, organize and (with approval) write, delete or run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run"]),
     group("memory", "memory", "Search and store long-term memory notes.", "memory", true, ["memory_search", "memory_add"]),
     group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
     group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_request", "agent_control_execute"]),
-    group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", false, ["web_search"]),
-    group("browser", "browser", "Isolated Playwright browser tools. Navigation and interaction require approval.", "browser", false, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"]),
+    group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
+    group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"], browserBlocked),
+    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to add approval and guard rails).", "system", true, ["terminal_run"]),
   ] })
 })
 app.put("/api/tools/:name/state", requireAuth, async (req, res) => {
@@ -989,10 +1009,10 @@ app.put("/api/tools/:name/state", requireAuth, async (req, res) => {
   const enabled = req.body?.enabled
   if (!name) return res.status(400).json({ error: "Tool name is required." })
   if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be a boolean." })
-  const supported = new Set(["filesystem", "memory", "skills", "control", "web_search", "browser"])
-  if (!supported.has(name)) return res.status(404).json({ error: `Tool group "${name}" is not available in this backend.` })
+  const key = resolveToolGroupKey(name)
+  if (!key) return res.status(404).json({ error: `Tool group "${name}" is not available in this backend.` })
   try {
-    const result = await agent.setToolState(name, enabled)
+    const result = await agent.setToolState(key, enabled)
     return res.json(result)
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) })

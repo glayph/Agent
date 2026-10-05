@@ -1225,7 +1225,8 @@
           "requires_skills": "Habilite `tools.skills` antes que esta ferramenta de skill-registry possa ser usada.",
           "requires_worker": "Habilite a dependencia de worker em segundo plano antes que a ferramenta de spawn possa delegar trabalho.",
           "requires_mcp_discovery": "Habilite `tools.mcp.discovery` antes que as ferramentas de descoberta MCP fiquem disponíveis.",
-          "requires_web_search_provider": "Configure ao menos um provedor externo de pesquisa web pronto para uso."
+          "requires_web_search_provider": "Configure ao menos um provedor externo de pesquisa web pronto para uso.",
+          "browser_not_installed": "O mecanismo do navegador não está instalado. Execute `npx playwright install chromium` e reinicie."
         }
       }
     },
