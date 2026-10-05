@@ -14,7 +14,6 @@ import {
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
-import { shutdownGateway } from "@/api/gateway"
 import { postLauncherDashboardLogout } from "@/api/launcher-auth"
 import { useGateway } from "@/hooks/use-gateway.ts"
 import { type ThemePreference, useTheme } from "@/hooks/use-theme.ts"
@@ -86,15 +85,8 @@ export function GlobalHeaderActions() {
     globalThis.location.assign("/launcher-login")
   }
 
-  const handleShutdownBackend = async () => {
-    if (
-      confirm(
-        "Are you sure you want to completely shut down the backend daemon?",
-      )
-    ) {
-      await shutdownGateway()
-      alert("Backend shutting down. You can close this tab.")
-    }
+  const handleShutdownBackend = () => {
+    setShowStopDialog(true)
   }
 
   const handleGatewayToggle = () => {
@@ -210,22 +202,12 @@ export function GlobalHeaderActions() {
 
       <div className="flex items-center gap-1.5">
         {showNotConnectedHint && (
-          <div className="border-border text-muted-foreground bg-card hidden items-center gap-2 rounded-md border border-dashed px-3 py-1.5 text-xs xl:flex">
-            <span className="bg-destructive/50 relative flex size-2 shrink-0 items-center justify-center rounded-full">
-              <span className="bg-destructive absolute inline-flex size-full animate-ping rounded-full opacity-75"></span>
-            </span>
-            {t("chat.notConnected")}
-          </div>
+          <span
+            className="bg-destructive relative hidden size-2 rounded-full xl:inline-flex"
+            title={t("chat.notConnected")}
+            aria-label={t("chat.notConnected")}
+          />
         )}
-
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-8 rounded-md px-3 text-xs"
-          onClick={() => void handleShutdownBackend()}
-        >
-          Shutdown Backend
-        </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -337,6 +319,15 @@ export function GlobalHeaderActions() {
             </div>
 
             <div className="bg-border/70 my-1 h-px" />
+
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => void handleShutdownBackend()}
+              className="h-8 px-2 py-1.5 text-xs"
+            >
+              <IconPower className="size-3.5" />
+              <span className="truncate">Shutdown backend</span>
+            </DropdownMenuItem>
 
             <DropdownMenuItem
               variant="destructive"

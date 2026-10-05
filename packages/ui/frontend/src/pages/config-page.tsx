@@ -16,6 +16,7 @@ import {
   setLauncherConfig as updateLauncherConfig,
 } from "@/api/system"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
+import { RawConfigPage } from "@/features/config/components/raw-config-page"
 import { PageHeader } from "@/app/layout/page-header"
 import {
   AgentDefaultsSection,
@@ -102,6 +103,9 @@ function buildTurnProfilePatch(
 }
 
 export function ConfigPage() {
+  if (new URLSearchParams(globalThis.location.search).get("view") === "raw") {
+    return <RawConfigPage />
+  }
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [form, setForm] = useState<CoreConfigForm>(EMPTY_FORM)
@@ -332,7 +336,7 @@ export function ConfigPage() {
           )
         }
 
-        const maxTokens = parseIntField(form.maxTokens, "Max tokens", {
+        const maxCompletionTokens = parseIntField(form.maxCompletionTokens, "Max completion tokens", {
           min: 1,
         })
         const contextWindow = parseOptionalPositiveIntField(
@@ -594,7 +598,7 @@ export function ConfigPage() {
                 max_args_length: toolFeedbackMaxArgsLength,
                 separate_messages: form.toolFeedbackSeparateMessages,
               },
-              max_tokens: maxTokens,
+              max_completion_tokens: maxCompletionTokens,
               context_window: contextWindow,
               max_tool_iterations: maxToolIterations,
               summarize_message_threshold: summarizeMessageThreshold,
@@ -638,6 +642,12 @@ export function ConfigPage() {
           devices: {
             enabled: form.devicesEnabled,
             monitor_usb: form.monitorUSB,
+          },
+          memory_files: {
+            compaction: {
+              trigger_percent: summarizeTokenPercent,
+              min_messages: summarizeMessageThreshold,
+            },
           },
         })
 
@@ -792,7 +802,11 @@ export function ConfigPage() {
           )
         }
         children={
-          <Button
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/plugins">Plugin Center</Link>
+            </Button>
+            <Button
             variant="outline"
             size="sm"
             asChild
@@ -800,13 +814,14 @@ export function ConfigPage() {
             aria-label={t("pages.config.open_raw")}
             title={t("pages.config.open_raw")}
           >
-            <Link to="/config/raw">
+            <a href="/config?view=raw">
               <IconCode className="size-4" />
               <span className="max-sm:hidden">
                 {t("pages.config.open_raw")}
               </span>
-            </Link>
-          </Button>
+            </a>
+            </Button>
+          </div>
         }
       />
       <div className="flex-1 overflow-auto p-3 lg:p-6">

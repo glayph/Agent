@@ -15,6 +15,7 @@ import type {
 import { ToolRegistry } from "./tool-registry.js";
 import { analyzeGoal, createPlan } from "./planner.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { TokenBudgetManager } from "../token-budget-manager.js";
 import {
   errorMessage,
   raceAbort,
@@ -33,16 +34,34 @@ export interface AgentEngineOptions {
   /** Decides tool calls that need confirmation. Without a gate, such calls are denied. */
   approvals?: ApprovalGate;
   systemPrompt?: string;
+  /** Extra system-prompt context evaluated at the start of every run (skills catalog, ...). */
+  contextProvider?: () => string | undefined | Promise<string | undefined>;
   /** Maximum model round-trips per run. */
-  maxTurns?: number;
+  maxTurns?: number | (() => number);
   /** Maximum tool calls per run across all turns. */
-  maxToolCalls?: number;
+  maxToolCalls?: number | (() => number);
+  /** Maximum model turns that actually produce tool calls. */
+  maxToolIterations?: number | (() => number);
+  /** Optional approximate context-window cap in tokens. */
+  contextWindowTokens?: number | (() => number);
+  /** Maximum completion tokens requested from the model. */
+  maxCompletionTokens?: number | (() => number);
+  /** Controls whether the configured base system prompt is included. */
+  systemPromptEnabled?: boolean | (() => boolean);
   toolTimeoutMs?: number;
   maxToolResultChars?: number;
   /** An identical call may be made this many times before it is blocked as a loop. */
   duplicateCallLimit?: number;
   /** Diagnostic hook for non-fatal problems (planner fallback, listener errors). */
   logger?: (message: string, details?: Record<string, unknown>) => void;
+}
+
+function requestApprovalPolicy(
+  request: RunRequest,
+  tool: import("./types.js").EngineTool,
+  input: Record<string, unknown>,
+): import("./types.js").ToolApprovalDecision | undefined {
+  return request.approvalPolicy?.decide(tool, input);
 }
 
 export class NoModelConfiguredError extends Error {
@@ -75,6 +94,91 @@ const EMPTY_USAGE = (): RunUsage => ({
   totalTokens: 0,
 });
 
+const contextEstimator = new TokenBudgetManager();
+
+function estimateContext(messages: EngineMessage[], toolSchemas: unknown): number {
+  return contextEstimator.estimateMessagesTokens(messages, toolSchemas);
+}
+
+function trimMessageContent(message: EngineMessage, tokenBudget: number): EngineMessage {
+  if (typeof message.content !== "string") return message;
+  const maxChars = Math.max(32, Math.floor(tokenBudget * 4));
+  if (message.content.length <= maxChars) return message;
+  const marker = "\n…[context trimmed]…\n";
+  const room = Math.max(8, maxChars - marker.length);
+  const head = Math.max(4, Math.floor(room * 0.75));
+  const tail = Math.max(4, room - head);
+  return { ...message, content: `${message.content.slice(0, head)}${marker}${message.content.slice(-tail)}` };
+}
+
+/** Keep the newest complete user-turn groups under the configured input budget. */
+function fitContextWindow(
+  messages: EngineMessage[],
+  contextWindowTokens: number,
+  toolSchemas: unknown,
+): EngineMessage[] {
+  if (estimateContext(messages, toolSchemas) <= contextWindowTokens && contextWindowTokens > 1024) return messages;
+
+  const system = messages.find((message) => message.role === "system");
+  const conversation = messages.filter((message) => message.role !== "system");
+  const groups: EngineMessage[][] = [];
+  let current: EngineMessage[] = [];
+  for (const message of conversation) {
+    if (message.role === "user" && current.length) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(message);
+  }
+  if (current.length) groups.push(current);
+
+  const schemaTokens = contextEstimator.estimateMessagesTokens([], toolSchemas);
+  const base = system
+    ? [
+        estimateContext([system], toolSchemas) <= contextWindowTokens
+          ? system
+          : trimMessageContent(system, Math.max(16, contextWindowTokens - schemaTokens)),
+    ]
+    : [];
+  if (contextWindowTokens <= 1024 && groups.length > 1) {
+    const newestGroup = groups[groups.length - 1];
+    const user = newestGroup.find((message) => message.role === "user") ?? newestGroup[0];
+    const newest = newestGroup[newestGroup.length - 1];
+    const available = Math.max(64, contextWindowTokens - estimateContext(base, toolSchemas));
+    const half = Math.max(32, Math.floor(available / 2));
+    return newest === user
+      ? [...base, trimMessageContent(user, available)]
+      : [...base, trimMessageContent(user, half), trimMessageContent(newest, half)];
+  }
+  const kept: EngineMessage[][] = [];
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const candidate = [...groups[index], ...kept.flat()];
+    if (estimateContext([...base, ...candidate], toolSchemas) <= contextWindowTokens) {
+      kept.unshift(groups[index]);
+      continue;
+    }
+
+    // The newest user turn must remain visible even when its tool output is
+    // larger than the configured input budget. Truncate textual payloads
+    // rather than silently discarding the current task.
+    if (!kept.length) {
+      const user = groups[index].find((message) => message.role === "user") ?? groups[index][0];
+      const newest = groups[index][groups[index].length - 1];
+      const baseTokens = estimateContext(base, toolSchemas);
+      const available = Math.max(64, contextWindowTokens - baseTokens);
+      if (newest === user) return [...base, trimMessageContent(user, available)];
+
+      const half = Math.max(32, Math.floor(available / 2));
+      const safe = [trimMessageContent(user, half)];
+      if (newest !== user) safe.push(trimMessageContent(newest, half));
+      return [...base, ...safe];
+    }
+    break;
+  }
+
+  return [...base, ...kept.flat()];
+}
+
 function normalizeToolCalls(raw: unknown): EngineToolCall[] {
   if (!Array.isArray(raw)) return [];
   const calls: EngineToolCall[] = [];
@@ -82,6 +186,7 @@ function normalizeToolCalls(raw: unknown): EngineToolCall[] {
     const call = item as {
       id?: unknown;
       function?: { name?: unknown; arguments?: unknown };
+      extra_content?: unknown;
     };
     const name = typeof call?.function?.name === "string" ? call.function.name : "";
     if (!name) continue;
@@ -101,6 +206,9 @@ function normalizeToolCalls(raw: unknown): EngineToolCall[] {
               ? JSON.stringify(args)
               : "{}",
       },
+      ...(call.extra_content && typeof call.extra_content === "object" && !Array.isArray(call.extra_content)
+        ? { extra_content: call.extra_content as Record<string, unknown> }
+        : {}),
     });
   }
   return calls;
@@ -122,8 +230,12 @@ function lastUserText(history: EngineMessage[]): string {
  * the gateway maps its events onto WebSocket/HTTP responses.
  */
 export class AgentEngine {
-  private readonly maxTurns: number;
-  private readonly maxToolCalls: number;
+  private readonly maxTurns: number | (() => number);
+  private readonly maxToolCalls: number | (() => number);
+  private readonly maxToolIterations: number | (() => number);
+  private readonly contextWindowTokens?: number | (() => number);
+  private readonly maxCompletionTokens?: number | (() => number);
+  private readonly systemPromptEnabled: boolean | (() => boolean);
   private readonly toolTimeoutMs: number;
   private readonly maxToolResultChars: number;
   private readonly duplicateCallLimit: number;
@@ -131,6 +243,10 @@ export class AgentEngine {
   constructor(private readonly options: AgentEngineOptions) {
     this.maxTurns = options.maxTurns ?? 12;
     this.maxToolCalls = options.maxToolCalls ?? 40;
+    this.maxToolIterations = options.maxToolIterations ?? 12;
+    this.contextWindowTokens = options.contextWindowTokens;
+    this.maxCompletionTokens = options.maxCompletionTokens;
+    this.systemPromptEnabled = options.systemPromptEnabled ?? true;
     this.toolTimeoutMs = options.toolTimeoutMs ?? 60_000;
     this.maxToolResultChars = options.maxToolResultChars ?? 12_000;
     this.duplicateCallLimit = options.duplicateCallLimit ?? 2;
@@ -151,7 +267,7 @@ export class AgentEngine {
     return createPlan({
       goal,
       llm: this.resolveLLM(options.model),
-      toolNames: this.tools.names(),
+      toolNames: this.options.tools.names(),
       signal: options.signal,
       onFallback: (reason) =>
         this.options.logger?.("planner.fallback", { reason }),
@@ -243,19 +359,40 @@ export class AgentEngine {
     if (!llm) return finish("failed", "", new NoModelConfiguredError(request.model).message);
     if (!goal) return finish("failed", "", "The request has no user message.");
 
-    const toolsEnabled = request.allowTools !== false && this.tools.size > 0;
+    const tools = request.tools ?? this.tools;
+    const toolsEnabled = request.allowTools !== false && tools.size > 0;
+    const maxTurns = Math.max(1, Math.floor(typeof this.maxTurns === "function" ? this.maxTurns() : this.maxTurns));
+    const maxToolCalls = Math.max(1, Math.floor(typeof this.maxToolCalls === "function" ? this.maxToolCalls() : this.maxToolCalls));
+    const maxToolIterations = Math.max(1, Math.floor(typeof this.maxToolIterations === "function" ? this.maxToolIterations() : this.maxToolIterations));
+    const contextWindowTokens = this.contextWindowTokens === undefined ? undefined : Math.max(128, Math.floor(typeof this.contextWindowTokens === "function" ? this.contextWindowTokens() : this.contextWindowTokens));
+    const maxCompletionTokens = this.maxCompletionTokens === undefined ? undefined : Math.max(1, Math.floor(typeof this.maxCompletionTokens === "function" ? this.maxCompletionTokens() : this.maxCompletionTokens));
+
+    // Tool schemas are part of the model's input context. If the schemas alone
+    // exceed the configured window, disable tool advertisement/execution for
+    // this run rather than violating the user's context limit.
+    const configuredSchemas = toolsEnabled ? tools.schemas() : [];
+    const toolSchemasFitContext = !contextWindowTokens || estimateContext([], configuredSchemas) <= contextWindowTokens;
+    const runToolsEnabled = toolsEnabled && toolSchemasFitContext;
+    const schemas = runToolsEnabled ? configuredSchemas : [];
+    if (!toolSchemasFitContext && toolsEnabled) {
+      this.options.logger?.("context_window.tool_schemas_exceed_budget", {
+        contextWindowTokens,
+        schemaTokens: estimateContext([], configuredSchemas),
+        toolCount: configuredSchemas.length,
+      });
+    }
 
     // 1. Plan (only for multi-step work; planner failures never fail the run).
     if (request.plan === false) {
       // Planning explicitly disabled for this run.
     } else if (request.plan) {
       state.plan = request.plan;
-    } else if (toolsEnabled && analyzeGoal(goal).complexity === "multi_step") {
+    } else if (runToolsEnabled && analyzeGoal(goal).complexity === "multi_step") {
       try {
         state.plan = await createPlan({
           goal,
           llm,
-          toolNames: this.tools.names(),
+          toolNames: tools.names(),
           signal,
           onFallback: (reason) =>
             this.options.logger?.("planner.fallback", { reason }),
@@ -267,32 +404,59 @@ export class AgentEngine {
     if (state.plan && state.plan.source !== "none")
       emit({ type: "plan.created", runId, plan: structuredClone(state.plan) });
 
+    let extraContext: string | undefined;
+    if (runToolsEnabled && this.options.contextProvider) {
+      try {
+        extraContext = await this.options.contextProvider();
+      } catch (error) {
+        this.options.logger?.("context_provider.failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const configuredSystemPrompt = typeof this.systemPromptEnabled === "function" ? this.systemPromptEnabled() : this.systemPromptEnabled;
+    const promptHistory = request.history;
+    const systemMessage = configuredSystemPrompt
+      ? {
+          role: "system" as const,
+          content: buildSystemPrompt({
+            base: this.options.systemPrompt,
+            plan: state.plan,
+            toolNames: runToolsEnabled ? tools.names() : [],
+            extraContext,
+          }),
+        }
+      : undefined;
     state.messages = [
-      {
-        role: "system",
-        content: buildSystemPrompt({
-          base: this.options.systemPrompt,
-          plan: state.plan,
-          toolNames: toolsEnabled ? this.tools.names() : [],
-        }),
-      },
-      ...request.history.filter((message) => message.role !== "system"),
+      ...(systemMessage ? [systemMessage] : []),
+      ...(configuredSystemPrompt ? promptHistory.filter((message) => message.role === "system") : []),
+      ...promptHistory.filter((message) => message.role !== "system"),
     ];
 
     // 2. Agent loop.
-    const schemas = toolsEnabled ? this.tools.schemas() : [];
     let nudged = false;
     let limitReason: string | undefined;
+    let toolIterations = 0;
 
-    for (let turn = 1; turn <= this.maxTurns; turn += 1) {
+    for (let turn = 1; turn <= maxTurns; turn += 1) {
+      if (toolIterations >= maxToolIterations) {
+        limitReason = `Tool iteration budget of ${maxToolIterations} reached.`;
+        break;
+      }
       if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
       turns = turn;
       emit({ type: "turn.started", runId, turn });
 
       let response;
       try {
-        response = await llm.complete(state.messages, {
+        const promptMessages = contextWindowTokens
+          ? fitContextWindow(state.messages, contextWindowTokens, schemas)
+          : state.messages;
+        response = await llm.complete(promptMessages, {
           ...(schemas.length ? { tools: schemas, toolChoice: "auto" as const } : {}),
+          ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+          ...(maxCompletionTokens ? { maxCompletionTokens } : {}),
           signal,
         });
       } catch (error) {
@@ -309,7 +473,8 @@ export class AgentEngine {
       const message = response.choices?.[0]?.message;
       if (!message) return finish("failed", "", "The model returned no choices.");
       const text = typeof message.content === "string" ? message.content : "";
-      const calls = toolsEnabled ? normalizeToolCalls(message.tool_calls) : [];
+      const calls = runToolsEnabled ? normalizeToolCalls(message.tool_calls) : [];
+      if (calls.length > 0) toolIterations += 1;
 
       if (calls.length === 0) {
         if (!text.trim()) {
@@ -337,12 +502,12 @@ export class AgentEngine {
       if (text.trim()) emit({ type: "thought", runId, turn, content: text.trim() });
 
       for (const call of calls) {
-        if (state.records.length >= this.maxToolCalls) {
-          limitReason = `Tool call budget of ${this.maxToolCalls} reached.`;
-          this.answerSkippedCall(state, call, turn, limitReason);
+        if (state.records.length >= maxToolCalls) {
+          limitReason = `Tool call budget of ${maxToolCalls} reached.`;
+          this.answerSkippedCall(state, call, turn, limitReason, tools);
           continue;
         }
-        await this.runToolCall(state, call, turn);
+        await this.runToolCall(state, call, turn, tools, request);
         if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
       }
 
@@ -354,7 +519,7 @@ export class AgentEngine {
     }
 
     // 3. Budget exhausted: ask for a wrap-up without tools so the user still gets an answer.
-    limitReason ??= `Step limit of ${this.maxTurns} turns reached.`;
+    limitReason ??= `Step limit of ${maxTurns} turns reached.`;
     if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
     let summary = "";
     try {
@@ -362,7 +527,13 @@ export class AgentEngine {
         role: "user",
         content: `${limitReason} Without calling any tools, summarize what you accomplished, what remains, and any blockers.`,
       });
-      const wrap = await llm.complete(state.messages, { signal });
+      const wrapMessages = contextWindowTokens
+        ? fitContextWindow(state.messages, contextWindowTokens, undefined)
+        : state.messages;
+      const wrap = await llm.complete(wrapMessages, {
+        ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+        signal,
+      });
       const wrapText = wrap.choices?.[0]?.message?.content;
       summary = typeof wrapText === "string" ? wrapText.trim() : "";
     } catch (error) {
@@ -400,12 +571,13 @@ export class AgentEngine {
     call: EngineToolCall,
     turn: number,
     reason: string,
+    tools: ToolRegistry,
   ): void {
     const record: ToolCallRecord = {
       id: call.id,
       name: call.function.name,
       arguments: call.function.arguments,
-      risk: this.tools.get(call.function.name)?.risk ?? "read",
+      risk: tools.get(call.function.name)?.risk ?? "read",
       status: "blocked",
       turn,
       startedAt: new Date().toISOString(),
@@ -420,8 +592,10 @@ export class AgentEngine {
     state: RunState,
     call: EngineToolCall,
     turn: number,
+    tools: ToolRegistry,
+    request: RunRequest,
   ): Promise<void> {
-    const tool = this.tools.get(call.function.name);
+    const tool = tools.get(call.function.name);
     const record: ToolCallRecord = {
       id: call.id,
       name: call.function.name,
@@ -450,7 +624,7 @@ export class AgentEngine {
     if (!tool) {
       fail(
         "failed",
-        `Unknown tool "${call.function.name}". Available tools: ${this.tools.names().join(", ") || "none"}.`,
+        `Unknown tool "${call.function.name}". Available tools: ${tools.names().join(", ") || "none"}.`,
       );
       return;
     }
@@ -486,7 +660,16 @@ export class AgentEngine {
     }
     state.blockedStreak = 0;
 
-    if (ToolRegistry.needsApproval(tool)) {
+    const policyDecision = requestApprovalPolicy(request, tool, args);
+    if (policyDecision?.mode === "block") {
+      fail("blocked", policyDecision.reason);
+      return;
+    }
+
+    const requiresApproval = policyDecision
+      ? policyDecision.mode === "approval"
+      : ToolRegistry.needsApproval(tool);
+    if (requiresApproval) {
       record.status = "awaiting_approval";
       this.snapshot(state, turn, record);
       const gate = this.options.approvals;

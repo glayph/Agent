@@ -106,3 +106,22 @@ describe("DeliveryQueue idempotency safety", () => {
     }
   });
 });
+
+
+describe("DeliveryQueue adaptive output", () => {
+  it("persists ordered adaptive chunks with stable idempotency keys", async () => {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "miki-adaptive-"));
+    const queue = new DeliveryQueue(path.join(dir, "deliveries.json"));
+    const receipts = queue.enqueueAdaptive(
+      { id: "response-1", runId: "run-1", channel: "discord", kind: "response", content: "# A\n\n" + "One. " + "a".repeat(180) + "\n\n# B\n\n" + "Two. " + "b".repeat(180), final: true },
+      { destination: "channel-1", maxAttempts: 2 },
+      { multiMessageMinLength: 256 },
+    );
+    expect(receipts.length).toBe(2);
+    expect(receipts.map((item) => item.messageSequence)).toEqual([1, 2]);
+    expect(new Set(receipts.map((item) => item.idempotencyKey)).size).toBe(2);
+  });
+});

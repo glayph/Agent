@@ -11,13 +11,24 @@ import (
 
 func TestCompatibilityStubDefaultPort(t *testing.T) {
 	t.Setenv("GATEWAY_PORT", "")
-	if got := compatibilityStubDefaultPort(); got != "18800" {
-		t.Fatalf("default port = %q, want 18800", got)
+	if got := compatibilityStubDefaultPort(); got != "18801" {
+		t.Fatalf("default port = %q, want 18801", got)
 	}
 
 	t.Setenv("GATEWAY_PORT", "19000")
 	if got := compatibilityStubDefaultPort(); got != "19000" {
 		t.Fatalf("env port = %q, want 19000", got)
+	}
+}
+
+func TestValidateCompatibilityPortRejectsPrimaryPortByDefault(t *testing.T) {
+	t.Setenv("MIKI_ALLOW_COMPATIBILITY_STUB_PRIMARY_PORT", "")
+	if err := validateCompatibilityPort("18800"); err == nil {
+		t.Fatal("expected primary port to be rejected")
+	}
+	t.Setenv("MIKI_ALLOW_COMPATIBILITY_STUB_PRIMARY_PORT", "1")
+	if err := validateCompatibilityPort("18800"); err != nil {
+		t.Fatalf("allow override should pass: %v", err)
 	}
 }
 
@@ -51,8 +62,11 @@ func TestCompatibilityStubHealth(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if body := rec.Body.String(); body != `{"status":"ok","mode":"compatibility-stub"}` {
+	if body := rec.Body.String(); body != `{"status":"ok","mode":"compatibility-stub","backend_role":"compatibility-stub","primary_backend":"node-gateway"}` {
 		t.Fatalf("body = %q", body)
+	}
+	if got := rec.Header().Get("X-Miki-Backend-Role"); got != "compatibility-stub" {
+		t.Fatalf("backend role header = %q, want compatibility-stub", got)
 	}
 }
 

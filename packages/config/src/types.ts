@@ -2,6 +2,8 @@ export interface ToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Provider-specific metadata such as Gemini thought signatures. */
+  extra_content?: Record<string, unknown>;
 }
 
 export interface VoiceMessageMetadata {
@@ -115,6 +117,15 @@ export interface AgentConfig {
         max_tokens_per_cycle: number;
         max_idle_minutes: number;
       };
+    };
+    evolution?: {
+      enabled?: boolean;
+      mode: "observe" | "draft" | "apply";
+      min_task_count?: number;
+      min_success_ratio?: number;
+      cold_path_trigger?: string;
+      cold_path_times?: string[];
+      state_dir?: string | null;
     };
     self_improvement: {
       enabled: boolean;

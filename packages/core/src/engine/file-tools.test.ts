@@ -112,4 +112,30 @@ describe("file management tools", () => {
     const off = setup({ executionEnabled: () => false });
     await expect(off.call("file_run", { path: "job.js" })).rejects.toThrow("disabled");
   });
+
+  it("honors dynamic workspace roots and trusted absolute paths when unrestricted", async () => {
+    const rootA = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-a-")));
+    const rootB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-b-")));
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-out-")));
+    fs.writeFileSync(path.join(rootB, "b.txt"), "B");
+    fs.writeFileSync(path.join(outside, "c.txt"), "C");
+    let root = rootA;
+    let restricted = true;
+    const tools = Object.fromEntries(createFileManagementTools({ root: () => root, restrictToWorkspace: () => restricted }).map((t) => [t.name, t]));
+    await expect(tools.file_read.execute({ path: "b.txt" }, ctx())).rejects.toThrow("does not exist");
+    root = rootB;
+    await expect(tools.file_read.execute({ path: "b.txt" }, ctx())).resolves.toMatchObject({ content: "B" });
+    restricted = false;
+    await expect(tools.file_read.execute({ path: path.join(outside, "c.txt") }, ctx())).resolves.toMatchObject({ content: "C" });
+  });
+
+  it("passes the workspace restriction through to script execution", async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-run-root-")));
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-run-out-")));
+    const script = path.join(outside, "outside.js");
+    fs.writeFileSync(script, 'console.log("outside-ok")');
+    const tools = Object.fromEntries(createFileManagementTools({ root, restrictToWorkspace: false }).map((t) => [t.name, t]));
+    const result = await tools.file_run.execute({ path: script }, ctx()) as { stdout: string };
+    expect(result.stdout.trim()).toBe("outside-ok");
+  });
 });

@@ -358,6 +358,18 @@ const AgentBlockSchema = z
   })
   .passthrough();
 
+const EvolutionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    mode: z.enum(["observe", "draft", "apply"]).default("observe"),
+    min_task_count: z.number().int().min(1).max(1000).optional(),
+    min_success_ratio: z.number().min(0).max(1).optional(),
+    cold_path_trigger: z.string().optional(),
+    cold_path_times: z.array(z.string()).optional(),
+    state_dir: z.string().nullable().optional(),
+  })
+  .passthrough();
+
 const BehaviorLearningSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -430,9 +442,10 @@ export const RuntimeConfigSchema = z
     heartbeat: JsonRecordSchema.optional(),
     autonomy: JsonRecordSchema.optional(),
     skill_governance: JsonRecordSchema.optional(),
+    messaging: JsonRecordSchema.optional(),
     agents: JsonRecordSchema.optional(),
     session: JsonRecordSchema.optional(),
-    evolution: JsonRecordSchema.optional(),
+    evolution: EvolutionSchema.optional(),
     tools: JsonRecordSchema.optional(),
     models: z.array(JsonRecordSchema).optional(),
     devices: JsonRecordSchema.optional(),
@@ -510,15 +523,27 @@ export function migrateRuntimeConfig(
 
   const agents = isRecord(migrated.agents) ? migrated.agents : {};
   const defaults = isRecord(agents.defaults) ? agents.defaults : {};
-  if (typeof defaults.max_tokens === "number") {
-    migrated.agent = {
-      ...agent,
-      max_tokens_per_cycle:
-        typeof agent.max_tokens_per_cycle === "number"
-          ? agent.max_tokens_per_cycle
-          : defaults.max_tokens,
-    };
-  } else if (Object.keys(agent).length > 0) {
+  if (typeof defaults.max_tokens === "number" && defaults.max_completion_tokens == null) {
+    defaults.max_completion_tokens = defaults.max_tokens;
+  }
+  if (typeof defaults.max_completion_tokens === "number") {
+    delete defaults.max_tokens;
+    agents.defaults = defaults;
+    migrated.agents = agents;
+  }
+
+  const rawEvolution = isRecord(migrated.evolution) ? migrated.evolution : {};
+  const rawSelfImprovement = isRecord(migrated.self_improvement) ? migrated.self_improvement : {};
+  const rawBehavior = isRecord(rawSelfImprovement.behavior_learning) ? rawSelfImprovement.behavior_learning : {};
+  const canonicalEvolutionMode = ["observe", "draft", "apply"].includes(String(rawEvolution.mode))
+    ? String(rawEvolution.mode)
+    : (["observe", "draft", "apply"].includes(String(rawBehavior.mode)) ? String(rawBehavior.mode) : "observe");
+  migrated.evolution = { ...rawEvolution, mode: canonicalEvolutionMode };
+  migrated.self_improvement = {
+    ...rawSelfImprovement,
+    behavior_learning: { ...rawBehavior, mode: canonicalEvolutionMode },
+  };
+  if (Object.keys(agent).length > 0) {
     migrated.agent = agent;
   }
 
@@ -548,6 +573,7 @@ export function validateRuntimeConfig(
     "heartbeat",
     "autonomy",
     "skill_governance",
+    "messaging",
     "agents",
     "session",
     "evolution",

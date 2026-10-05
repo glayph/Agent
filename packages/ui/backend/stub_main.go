@@ -1,10 +1,8 @@
 // Package main implements a minimal compatibility stub web server.
 //
-// IMPORTANT: This is a STUB backend that only registers /api/version and
-// /api/health endpoints. The full launcher API (models, config, gateway
-// control, etc.) is served by the Node.js launcher-compat API server.
-// This Go binary is used only for static file serving and basic health
-// checks in environments where the full Node.js backend is not available.
+// IMPORTANT: This is NOT the primary Web UI backend. The Node Gateway owns
+// the dashboard REST APIs and /miki/ws. This Go binary exists only for
+// compatibility/static serving and basic health checks in legacy environments.
 package main
 
 import (
@@ -74,7 +72,15 @@ func compatibilityStubDefaultPort() string {
 	if port := strings.TrimSpace(os.Getenv("GATEWAY_PORT")); port != "" {
 		return port
 	}
-	return "18800"
+	// Keep the compatibility server off the primary Node Gateway default port.
+	return "18801"
+}
+
+func validateCompatibilityPort(port string) error {
+	if port == "18800" && strings.TrimSpace(os.Getenv("MIKI_ALLOW_COMPATIBILITY_STUB_PRIMARY_PORT")) != "1" {
+		return fmt.Errorf("refusing to bind the Go compatibility stub to primary Node Gateway port 18800; use port 18801 or set MIKI_ALLOW_COMPATIBILITY_STUB_PRIMARY_PORT=1 for legacy compatibility")
+	}
+	return nil
 }
 
 func resolveDistDir(executablePath, cwd string) string {
@@ -121,7 +127,7 @@ func newCompatibilityStubHandler(distDir string) http.Handler {
 	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","mode":"compatibility-stub"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","mode":"compatibility-stub","backend_role":"compatibility-stub","primary_backend":"node-gateway"}`))
 	})
 
 	if _, err := os.Stat(filepath.Join(distDir, "index.html")); err == nil {
@@ -149,13 +155,20 @@ func newCompatibilityStubHandler(distDir string) http.Handler {
 			http.Error(w, "miki WebUI assets are not built. Run npm run build.", http.StatusServiceUnavailable)
 		})
 	}
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Miki-Backend-Role", "compatibility-stub")
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func main() {
 	host := flag.String("host", "127.0.0.1", "host to bind")
 	port := flag.String("port", compatibilityStubDefaultPort(), "port to bind")
 	flag.Parse()
+	if err := validateCompatibilityPort(*port); err != nil {
+		log.Print(err)
+		return
+	}
 
 	executablePath, err := os.Executable()
 	if err != nil {
@@ -165,6 +178,6 @@ func main() {
 	mux := newCompatibilityStubHandler(distDir)
 
 	addr := fmt.Sprintf("%s:%s", *host, *port)
-	log.Printf("miki Go compatibility backend listening on http://%s", addr)
+	log.Printf("miki Go compatibility stub listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

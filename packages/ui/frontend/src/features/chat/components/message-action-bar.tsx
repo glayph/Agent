@@ -145,7 +145,7 @@ export function MessageActionBar({
         "flex w-max max-w-[min(13rem,calc(100vw-2rem))] transition-[height,opacity] duration-150",
         placement === "floating"
           ? "pointer-events-none absolute top-full z-20 mt-0.5 h-6 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-focus-within/message-bubble:pointer-events-auto group-focus-within/message-bubble:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-hover/message-bubble:pointer-events-auto group-hover/message-bubble:opacity-100"
-          : "pointer-events-none h-0 overflow-hidden opacity-0 group-focus-within/message:pointer-events-auto group-focus-within/message:h-6 group-focus-within/message:overflow-visible group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:h-6 group-hover/message:overflow-visible group-hover/message:opacity-100",
+          : "pointer-events-none h-0 overflow-hidden opacity-0",
         visible && "pointer-events-auto h-6 overflow-visible opacity-100",
         align === "end" ? "justify-end" : "justify-start",
         className,

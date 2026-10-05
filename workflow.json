@@ -1,0 +1,216 @@
+{
+  "id": "miki-agent-test-1790168316680",
+  "projectName": "Miki Agent Test",
+  "targetType": "app",
+  "createdAt": "2026-09-23T12:58:36.680Z",
+  "brief": "Create a folder 'repaired-agent-test', inside it a file 'summary.md' with five practical numbered examples of Agent Miki’s capabilities, then verify folder and file existence, exact number of entries, and provide the final path and summary.",
+  "constraints": [],
+  "assumptions": [
+    "Start with a verifiable vertical slice before expanding scope.",
+    "Every generated file must have an acceptance gate or a clear reason to exist.",
+    "Prefer deterministic local checks before relying on external services.",
+    "Keep domain logic independent from UI and transport adapters."
+  ],
+  "architecture": {
+    "style": "Modular vertical-slice architecture with domain, adapter, interface, and verification layers.",
+    "modules": [
+      {
+        "name": "ui",
+        "responsibility": "User flows, state, responsive layout, and accessibility."
+      },
+      {
+        "name": "api",
+        "responsibility": "Backend endpoints, auth boundary, validation, and integration contracts."
+      },
+      {
+        "name": "domain",
+        "responsibility": "Core business rules independent from UI and transport."
+      },
+      {
+        "name": "persistence",
+        "responsibility": "Data models, migrations, caching, and recovery behavior."
+      },
+      {
+        "name": "tests",
+        "responsibility": "Unit, integration, visual, and smoke verification gates."
+      }
+    ],
+    "dataFlow": [
+      "1. ui: User flows, state, responsive layout, and accessibility.",
+      "2. api: Backend endpoints, auth boundary, validation, and integration contracts.",
+      "3. domain: Core business rules independent from UI and transport.",
+      "4. persistence: Data models, migrations, caching, and recovery behavior.",
+      "5. tests: Unit, integration, visual, and smoke verification gates."
+    ]
+  },
+  "fileTree": [
+    {
+      "path": "miki-agent-test/README.md",
+      "purpose": "Project overview, setup, and delivery checklist.",
+      "priority": "must"
+    },
+    {
+      "path": "miki-agent-test/docs/architecture.md",
+      "purpose": "Architecture decisions, boundaries, and data flow.",
+      "priority": "must"
+    },
+    {
+      "path": "miki-agent-test/src/index.ts",
+      "purpose": "Main application or library entry point.",
+      "priority": "must"
+    },
+    {
+      "path": "miki-agent-test/src/domain/index.ts",
+      "purpose": "Core domain rules separated from adapters.",
+      "priority": "must"
+    },
+    {
+      "path": "miki-agent-test/src/adapters/index.ts",
+      "purpose": "External service and platform adapter boundary.",
+      "priority": "should"
+    },
+    {
+      "path": "miki-agent-test/tests/smoke.test.ts",
+      "purpose": "End-to-end or integration smoke gate.",
+      "priority": "must"
+    },
+    {
+      "path": "miki-agent-test/scripts/verify.mjs",
+      "purpose": "Portable scaffold verification used by post-generation gates.",
+      "priority": "must"
+    },
+    {
+      "path": "miki-agent-test/package.json",
+      "purpose": "Scripts for build, test, lint, and smoke.",
+      "priority": "must"
+    }
+  ],
+  "milestones": [
+    {
+      "name": "Blueprint",
+      "outcome": "Requirements, architecture, and risk plan are explicit before writing broad code.",
+      "steps": [
+        "Extract concrete requirements from the brief and any sketches/assets.",
+        "Define module boundaries, data flow, and runtime constraints.",
+        "Choose the smallest vertical slice that proves the architecture."
+      ],
+      "gates": [
+        {
+          "name": "blueprint review",
+          "evidence": "Requirements and acceptance gates are written down."
+        }
+      ]
+    },
+    {
+      "name": "Vertical Slice",
+      "outcome": "A minimal running artifact proves the highest-risk path.",
+      "steps": [
+        "Create the workspace and core files.",
+        "Implement the startup path and one end-to-end user/system workflow.",
+        "Keep placeholders isolated behind interfaces so later expansion does not require rewrites."
+      ],
+      "gates": [
+        {
+          "name": "unit tests",
+          "command": "node miki-agent-test/scripts/verify.mjs test",
+          "evidence": "Core behavior and adapters pass focused tests."
+        },
+        {
+          "name": "build",
+          "command": "node miki-agent-test/scripts/verify.mjs build",
+          "evidence": "Production artifact builds without type or bundling errors."
+        }
+      ]
+    },
+    {
+      "name": "Feature Expansion",
+      "outcome": "Expected capabilities are added behind the established boundaries.",
+      "steps": [
+        "Implement modules in dependency order.",
+        "Add regression tests next to each module contract.",
+        "Run smoke checks after each meaningful integration step."
+      ],
+      "gates": [
+        {
+          "name": "unit tests",
+          "command": "node miki-agent-test/scripts/verify.mjs test",
+          "evidence": "Core behavior and adapters pass focused tests."
+        },
+        {
+          "name": "build",
+          "command": "node miki-agent-test/scripts/verify.mjs build",
+          "evidence": "Production artifact builds without type or bundling errors."
+        },
+        {
+          "name": "smoke",
+          "command": "node miki-agent-test/scripts/verify.mjs smoke",
+          "evidence": "Primary user workflow works in runtime."
+        }
+      ]
+    },
+    {
+      "name": "Hardening",
+      "outcome": "The artifact is maintainable, testable, and ready for review.",
+      "steps": [
+        "Remove dead paths, insecure defaults, and placeholder behavior.",
+        "Document setup, limitations, and verification evidence.",
+        "Run the full gate list from a clean state."
+      ],
+      "gates": [
+        {
+          "name": "unit tests",
+          "command": "node miki-agent-test/scripts/verify.mjs test",
+          "evidence": "Core behavior and adapters pass focused tests."
+        },
+        {
+          "name": "build",
+          "command": "node miki-agent-test/scripts/verify.mjs build",
+          "evidence": "Production artifact builds without type or bundling errors."
+        },
+        {
+          "name": "smoke",
+          "command": "node miki-agent-test/scripts/verify.mjs smoke",
+          "evidence": "Primary user workflow works in runtime."
+        }
+      ]
+    }
+  ],
+  "riskRegister": [
+    {
+      "risk": "Scope expands faster than verification.",
+      "mitigation": "Gate every milestone with build/test/smoke evidence before adding broad features."
+    },
+    {
+      "risk": "Generated structure does not match the user's sketch or domain.",
+      "mitigation": "Keep a blueprint review step and revise file tree before implementation."
+    },
+    {
+      "risk": "Platform-specific assumptions break runtime.",
+      "mitigation": "Run unit tests, build, smoke on the target platform early."
+    }
+  ],
+  "reviewLoop": [
+    "Plan the smallest next change.",
+    "Edit only the files needed for that change.",
+    "Run the narrowest meaningful gate.",
+    "Broaden tests/build/smoke before declaring the milestone done.",
+    "Record evidence and remaining risk."
+  ],
+  "outputDir": "/home/ubuntu/miki-project/Miki-final",
+  "writtenFiles": [
+    "/home/ubuntu/miki-project/Miki-final/workflow.json",
+    "/home/ubuntu/miki-project/Miki-final/README.md"
+  ],
+  "scaffoldRoot": "/home/ubuntu/miki-project/Miki-final",
+  "scaffoldedFiles": [
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/README.md",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/docs/architecture.md",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/src/index.ts",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/src/domain/index.ts",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/src/adapters/index.ts",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/tests/smoke.test.ts",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/scripts/verify.mjs",
+    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/package.json"
+  ],
+  "skippedFiles": []
+}

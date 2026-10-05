@@ -10,7 +10,6 @@ import {
   disconnectChat,
   editChatMessage,
   hydrateActiveSession,
-  isPlatformConnectionIntent,
   sendChatMessage,
   setWebSocketFactory,
 } from "./controller"
@@ -251,44 +250,6 @@ describe("chat controller message editing", () => {
       "Original",
       "Answer",
     ])
-  })
-})
-
-describe("chat controller platform intent detection", () => {
-  it("keeps informational token questions in Chat", () => {
-    expect(isPlatformConnectionIntent("What is a Telegram bot token?")).toBe(
-      false,
-    )
-    expect(isPlatformConnectionIntent("টেলিগ্রাম বট টোকেন কী? ")).toBe(false)
-    expect(isPlatformConnectionIntent("Explain API keys in simple terms")).toBe(
-      false,
-    )
-  })
-
-  it("recognizes explicit connection and setup requests", () => {
-    expect(isPlatformConnectionIntent("Connect my Telegram account")).toBe(true)
-    expect(
-      isPlatformConnectionIntent("Configure the YouTube integration"),
-    ).toBe(true)
-    expect(isPlatformConnectionIntent("OAuth setup for Instagram")).toBe(true)
-  })
-
-  it("does not intercept ordinary social-link sharing requests", () => {
-    expect(
-      isPlatformConnectionIntent(
-        "Share this public social-media link: https://www.youtube.com/watch?v=aqz-KE-bpKQ",
-      ),
-    ).toBe(false)
-    expect(
-      isPlatformConnectionIntent(
-        "Return the direct link to the official MDN video page",
-      ),
-    ).toBe(false)
-    expect(
-      isPlatformConnectionIntent(
-        "Share this YouTube link. Do not open a connection setup or log in.",
-      ),
-    ).toBe(false)
   })
 })
 

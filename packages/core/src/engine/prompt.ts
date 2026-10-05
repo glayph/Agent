@@ -15,12 +15,16 @@ export function buildSystemPrompt(input: {
   base?: string;
   plan?: AgentPlan;
   toolNames: string[];
+  /** Host-supplied context, e.g. the installed-skills catalog. */
+  extraContext?: string;
 }): string {
   const parts = [input.base?.trim() || DEFAULT_SYSTEM_PROMPT];
   if (input.toolNames.length)
     parts.push(`Available tools: ${input.toolNames.join(", ")}.`);
   else
     parts.push("No tools are available in this run; answer from the conversation alone.");
+  if (input.extraContext?.trim() && input.toolNames.length)
+    parts.push(input.extraContext.trim());
   if (input.plan && input.plan.source !== "none" && input.plan.steps.length > 1)
     parts.push(
       `Working plan (adapt it if the evidence requires):\n${describePlan(input.plan)}`,

@@ -23,6 +23,7 @@ function resetChatState() {
     hasHydratedActiveSession: true,
     contextUsage: undefined,
     activeRunId: undefined,
+    runningRunIds: [],
     recentRunIds: [],
     runStatus: undefined,
     runError: undefined,
@@ -93,6 +94,64 @@ describe("chat protocol flow", () => {
       ],
       timestamp: 1_700_000_000_000,
     })
+  })
+
+
+  it("keeps concurrent execution lanes alive when one run finishes", () => {
+    handlemikiMessage(
+      { type: "node.run_start", session_id: "session-1", payload: { run_id: "background-run" } },
+      "session-1",
+    )
+    handlemikiMessage(
+      { type: "node.run_start", session_id: "session-1", payload: { run_id: "interactive-run" } },
+      "session-1",
+    )
+    expect(getChatState().runningRunIds).toEqual(["background-run", "interactive-run"])
+    expect(getChatState().isTyping).toBe(true)
+
+    handlemikiMessage(
+      { type: "node.run_end", session_id: "session-1", payload: { run_id: "interactive-run", status: "completed" } },
+      "session-1",
+    )
+
+    expect(getChatState().runningRunIds).toEqual(["background-run"])
+    expect(getChatState().activeRunId).toBe("background-run")
+    expect(getChatState().runStatus).toBe("running")
+    expect(getChatState().isTyping).toBe(true)
+  })
+
+  it("preserves adaptive output metadata and ordered assistant chunks", () => {
+    handlemikiMessage(
+      { type: "message.create", session_id: "session-1", payload: {
+        message_id: "group-1:1",
+        run_id: "run-1",
+        content: "Found the issue.",
+        kind: "normal",
+        message_group_id: "group-1",
+        message_sequence: 1,
+        message_total: 2,
+        message_strategy: "multi_message",
+      } },
+      "session-1",
+    )
+    handlemikiMessage(
+      { type: "message.create", session_id: "session-1", payload: {
+        message_id: "group-1:2",
+        run_id: "run-1",
+        content: "Applying the fix.",
+        kind: "normal",
+        message_group_id: "group-1",
+        message_sequence: 2,
+        message_total: 2,
+        message_strategy: "multi_message",
+      } },
+      "session-1",
+    )
+
+    expect(getChatState().messages).toMatchObject([
+      { id: "group-1:1", messageGroupId: "group-1", messageSequence: 1, messageTotal: 2, messageStrategy: "multi_message" },
+      { id: "group-1:2", messageGroupId: "group-1", messageSequence: 2, messageTotal: 2, messageStrategy: "multi_message" },
+    ])
   })
 
   it("renders AI-generated action updates without treating them as final replies", () => {

@@ -73,6 +73,9 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
         body.tool_choice = callOptions.toolChoice ?? "auto";
       }
       if (callOptions.json) body.response_format = { type: "json_object" };
+      if (typeof callOptions.temperature === "number") body.temperature = callOptions.temperature;
+      if (typeof callOptions.maxCompletionTokens === "number") body.max_completion_tokens = callOptions.maxCompletionTokens;
+      if (callOptions.thinkingLevel) body.thinking_level = callOptions.thinkingLevel;
 
       let lastError: EngineLLMError | undefined;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -100,6 +103,30 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
                 "The model provider returned a response without choices.",
               );
             return payload;
+          }
+          const unsupportedThinking =
+            Boolean(callOptions.thinkingLevel) &&
+            response.status === 400 &&
+            /thinking[_ ]level|reasoning[_ ]effort|unknown (field|parameter)|unrecognized.*thinking/i.test(
+              typeof payload.error === "string" ? payload.error : payload.error?.message || "",
+            );
+          if (unsupportedThinking) {
+            delete body.thinking_level;
+            // Retry once immediately without the optional provider-specific field.
+            const fallback = await doFetch(`${base}/chat/completions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {}),
+                ...(options.headers ?? {}),
+              },
+              body: JSON.stringify(body),
+              signal: combineSignals(signals),
+            });
+            const fallbackPayload = (await fallback.json().catch(() => ({}))) as LLMResponse & { error?: { message?: string } | string };
+            if (fallback.ok && Array.isArray(fallbackPayload.choices)) return fallbackPayload;
+            const fallbackDetail = typeof fallbackPayload.error === "string" ? fallbackPayload.error : fallbackPayload.error?.message;
+            throw new EngineLLMError(fallbackDetail || `Model provider returned HTTP ${fallback.status}.`, { status: fallback.status, retryable: fallback.status === 429 || fallback.status >= 500 });
           }
           const detail =
             typeof payload.error === "string"

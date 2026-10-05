@@ -7,7 +7,7 @@ import {
   IconKey,
   IconTool,
 } from "@tabler/icons-react"
-import { type FocusEvent, Suspense, lazy, memo, useMemo, useState } from "react"
+import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
@@ -29,10 +29,15 @@ const MarkdownRenderer = lazy(() => import("./markdown-renderer"))
 interface AssistantMessageProps {
   id: string
   content: string
+  selected?: boolean
+  onSelect?: () => void
   attachments?: ChatAttachment[]
   kind?: AssistantMessageKind
   modelName?: string
   toolCalls?: ChatToolCall[]
+  messageStrategy?: "single" | "multi_message" | "chunked" | "streaming" | "progressive"
+  messageSequence?: number
+  messageTotal?: number
   timestamp?: string | number
   canRetry?: boolean
   onEdit?: () => void
@@ -99,10 +104,15 @@ function classifyErrorContent(content: string): ErrorCategory {
 
 export const AssistantMessage = memo(function AssistantMessage({
   content,
+  selected = false,
+  onSelect,
   attachments = EMPTY_ATTACHMENTS,
   kind = "normal",
   modelName,
   toolCalls = EMPTY_TOOL_CALLS,
+  messageStrategy = "single",
+  messageSequence,
+  messageTotal,
   timestamp = "",
   canRetry = true,
   onEdit,
@@ -128,16 +138,6 @@ export const AssistantMessage = memo(function AssistantMessage({
     [attachments],
   )
   const [isExpanded, setIsExpanded] = useState(true)
-  const [, setActionsVisible] = useState(false)
-  const hideActionsIfFocusLeaves = (event: FocusEvent<HTMLDivElement>) => {
-    const nextFocused = event.relatedTarget
-    if (
-      !(nextFocused instanceof Node) ||
-      !event.currentTarget.contains(nextFocused)
-    ) {
-      setActionsVisible(false)
-    }
-  }
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
   const collapsedLabel = isThought
@@ -152,13 +152,15 @@ export const AssistantMessage = memo(function AssistantMessage({
     ? visibleAssistantContent(trimmedContent)
     : trimmedContent
   return (
-    <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-2 px-1">
+    <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-1 px-0">
       {(hasText || isCollapsedBlock || hasToolCalls) && (
+        <>
         <div
           data-chat-bubble="assistant"
           data-chat-kind={isError ? "error" : undefined}
+          data-chat-strategy={messageStrategy}
           className={cn(
-            "group group/message-bubble relative flex w-fit max-w-[var(--chat-message-max)] flex-col border px-3 py-2",
+            "group group/message-bubble relative flex w-full max-w-[var(--chat-message-max)] flex-col",
             isThought &&
               "w-full border-transparent bg-transparent px-0 py-0 shadow-none [background:transparent] [box-shadow:none]",
             isToolCalls && hasToolCalls && "cursor-pointer",
@@ -166,6 +168,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)] [box-shadow:none]",
           )}
           onClick={() => {
+            onSelect?.()
             if (isToolCalls && hasToolCalls)
               setIsExpanded((expanded) => !expanded)
           }}
@@ -183,13 +186,16 @@ export const AssistantMessage = memo(function AssistantMessage({
           tabIndex={isToolCalls && hasToolCalls ? 0 : undefined}
           aria-expanded={isToolCalls && hasToolCalls ? isExpanded : undefined}
           title={formattedTimestamp || undefined}
-          onPointerEnter={() => setActionsVisible(true)}
-          onPointerLeave={() => setActionsVisible(false)}
-          onMouseEnter={() => setActionsVisible(true)}
-          onMouseLeave={() => setActionsVisible(false)}
-          onFocusCapture={() => setActionsVisible(true)}
-          onBlurCapture={hideActionsIfFocusLeaves}
         >
+          {!isCollapsedBlock && !isError && (
+            <div className="miki-agent-output__header" aria-label="Miki agent response">
+              <span className="miki-agent-output__identity">MIKI</span>
+              <span className="miki-agent-output__state">{messageStrategy.replace("_", " ")}</span>
+              {messageTotal && messageTotal > 1 && messageSequence ? (
+                <span className="miki-agent-output__sequence">{messageSequence}/{messageTotal}</span>
+              ) : null}
+            </div>
+          )}
           <div
             className={cn(
               "relative min-w-0 max-w-full [color:var(--chat-assistant-text)]",
@@ -386,7 +392,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                       className="size-6 shrink-0 rounded-md bg-transparent [color:var(--chat-alert-text)] hover:bg-transparent hover:[color:var(--chat-alert-icon)]"
                     >
                       <a
-                        href="/credentials"
+                        href="/models"
                         aria-label={t("chat.errors.openCredentials", {
                           defaultValue: "Credentials",
                         })}
@@ -429,61 +435,35 @@ export const AssistantMessage = memo(function AssistantMessage({
               )}
           </div>
 
-          {!isCollapsedBlock && !isActionUpdate && hasText && (
-            <MessageActionBar
-              content={content}
-              align="start"
-              copyLabel={t("chat.copyMessage")}
-              copiedLabel={t("chat.copiedLabel")}
-              editLabel={t("chat.actions.edit", {
-                defaultValue: "Edit message",
-              })}
-              retryLabel={t("chat.actions.retry", { defaultValue: "Retry" })}
-              retryDisabledLabel={t("chat.actions.retryUnavailable", {
-                defaultValue: "Connect chat before retrying",
-              })}
-              deleteLabel={t("chat.actions.delete", {
-                defaultValue: "Delete message",
-              })}
-              deleteConfirmTitle={t("chat.actions.deleteConfirmTitle", {
-                defaultValue: "Delete message?",
-              })}
-              deleteConfirmDescription={t(
-                "chat.actions.deleteConfirmDescription",
-                {
-                  defaultValue:
-                    "This message will be removed from the conversation.",
-                },
-              )}
-              deleteConfirmCancelLabel={t("common.cancel")}
-              deleteConfirmActionLabel={t("chat.actions.delete", {
-                defaultValue: "Delete message",
-              })}
-              forkLabel={t("chat.actions.fork", {
-                defaultValue: "Fork from here",
-              })}
-              canRetry={canRetry}
-              // Hidden by default; the action bar reveals itself on bubble hover/focus.
-              placement="inline"
-              className="mt-0 group-focus-within/message:mt-1 group-hover/message:mt-1"
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onFork={onFork}
-              onRetry={onRetry}
-              inspectorLabel={t("chat.actions.inspect", {
-                defaultValue: "Inspect agent",
-              })}
-              modelLabel={
-                trimmedModelName
-                  ? t("chat.actions.modelInfo", {
-                      defaultValue: `Model ${trimmedModelName}`,
-                      model: trimmedModelName,
-                    })
-                  : undefined
-              }
-            />
-          )}
         </div>
+        {!isCollapsedBlock && !isActionUpdate && hasText && (
+          <MessageActionBar
+            content={content}
+            align="start"
+            copyLabel={t("chat.copyMessage")}
+            copiedLabel={t("chat.copiedLabel")}
+            editLabel={t("chat.actions.edit", { defaultValue: "Edit message" })}
+            retryLabel={t("chat.actions.retry", { defaultValue: "Retry" })}
+            retryDisabledLabel={t("chat.actions.retryUnavailable", { defaultValue: "Connect chat before retrying" })}
+            deleteLabel={t("chat.actions.delete", { defaultValue: "Delete message" })}
+            deleteConfirmTitle={t("chat.actions.deleteConfirmTitle", { defaultValue: "Delete message?" })}
+            deleteConfirmDescription={t("chat.actions.deleteConfirmDescription", { defaultValue: "This message will be removed from the conversation." })}
+            deleteConfirmCancelLabel={t("common.cancel")}
+            deleteConfirmActionLabel={t("chat.actions.delete", { defaultValue: "Delete message" })}
+            forkLabel={t("chat.actions.fork", { defaultValue: "Fork from here" })}
+            canRetry={canRetry}
+            placement="inline"
+            className="mt-1"
+            visible={selected}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onFork={onFork}
+            onRetry={canRetry ? onRetry : undefined}
+            inspectorLabel={t("chat.actions.inspect", { defaultValue: "Inspect agent" })}
+            modelLabel={trimmedModelName ? t("chat.actions.modelInfo", { defaultValue: `Model ${trimmedModelName}`, model: trimmedModelName }) : undefined}
+          />
+        )}
+        </>
       )}
 
       {imageAttachments.length > 0 && (

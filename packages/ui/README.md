@@ -1,35 +1,35 @@
 # Miki Web
 
-`web/` contains the standalone WebUI launcher for Miki.
-It is not just a frontend: it is a small launcher service that bundles a React dashboard, exposes a backend API, manages launcher authentication, and starts or attaches to the `Miki` runtime process.
-
-## What This Directory Provides
-
-- A browser-based chat UI backed by the miki channel WebSocket proxy.
-- A dashboard for models, credentials, channels, agent tools, skills, logs, and runtime settings.
-- A launcher process that can auto-open the browser, show a system tray menu, and persist launcher-specific settings.
-- A controlled way to start, stop, restart, and inspect the `Miki` subprocess.
-- A single-binary deployment target where the frontend is embedded into the Go backend.
+This directory contains the React Web UI and the legacy Go compatibility stub used by the current Miki runtime.
 
 ## Architecture
 
-This directory is a small monorepo:
+The primary Web UI path is:
 
-- `backend/`
-  - Go HTTP server and launcher runtime.
-  - Serves REST APIs, authentication endpoints, channel helper flows, and the miki WebSocket reverse proxy.
-  - Embeds compiled frontend assets from `backend/dist`.
-- `frontend/`
-  - Vite + React 19 + TanStack Router SPA.
-  - Provides the launcher dashboard and chat UI.
+```text
+React dashboard
+      │
+      ├── /api/*
+      ├── /gateway/*
+      └── /miki/ws
+      │
+      ▼
+Node Gateway (packages/gateway)
+      │
+      ├── Core / Agent
+      ├── Memory
+      └── Provider integrations
+```
 
-At runtime the launcher and the main Miki engine are separate processes:
+The Go code under `packages/ui/backend` is **compatibility/legacy only**. `stub_main.go` is not a full dashboard backend and must not be selected as the primary Web UI server. The files under `packages/ui/backend/api/*.go` are guarded by the `legacy_backend` build tag and remain compatibility code.
 
-1. The launcher starts the web backend on port `18800` by default.
-2. The launcher serves the dashboard and handles dashboard authentication.
-3. When allowed, it starts or attaches to `Miki`.
-4. The frontend talks only to the launcher backend.
-5. The launcher proxies chat traffic to the gateway through `/miki/ws`.
+The default Node Gateway port is `18800`. The Vite development server must proxy `/api`, `/gateway`, `/miki/media`, and `/miki/ws` to that same gateway origin.
+
+## Runtime Ownership
+
+The Node Gateway owns the Web UI HTTP API and the `/miki/ws` connection. The launcher/supervisor owns process start/restart/stop semantics. A gateway `restart` request therefore reports `pending_restart` when a process replacement is required; it does not claim that the current process has already restarted.
+
+Gateway runtime data is stored under the active workspace data directory when `MIKI_WORKSPACE_DIR`/`MIKI_DATA_DIR` are provided. This keeps auth sessions, model configuration, chat state, and runtime state aligned with the launched workspace.
 
 ## Dashboard Capabilities
 
@@ -102,36 +102,22 @@ If onboarding or gateway startup cannot find the main binary, set `Miki_BINARY` 
 
 ### Gateway Management
 
-The launcher manages `Miki`.
+The launcher/supervisor owns the Node Gateway process. The Node Gateway owns the Web UI API and `/miki/ws`.
 
-On startup it tries to auto-start or attach to the gateway, but only when startup preconditions pass. In the current code, the main checks are:
+- `start` reports the already-running state when the current process is active.
+- `restart` reports `pending_restart` when a process replacement is required.
+- `reload` applies in-process configuration changes without pretending to restart the process.
+- `shutdown` records a request for the launcher/supervisor and then terminates the gateway so the process owner can settle on the real `stopped` state.
 
-- a default model is configured
-- the default model entry is valid
-- the default model has usable credentials
-- local/runtime-probed models are reachable
+### Dashboard Authentication
 
-When a gateway process is started by the launcher, the launcher:
+The Node Gateway and WebSocket use the same `miki_session` cookie backed by the gateway runtime database.
 
-- captures stdout and stderr into an in-memory ring buffer
-- tracks transient states such as `starting`, `restarting`, and `stopping`
-- marks restart-required when the default model or enabled tool set changed since boot
-- ensures the miki channel is configured before startup
-
-### Launcher Authentication
-
-The dashboard is protected by password login.
-
-- First run uses `/launcher-setup` to create the dashboard password.
-- Manual login uses `/launcher-login`.
-- Successful login sets an HttpOnly session cookie.
-- Existing sessions are invalidated when the launcher process restarts; otherwise the browser cookie expires after 31 days.
-- When the launcher auto-opens a local browser after startup, it uses a one-shot loopback-only bootstrap endpoint to set the session cookie automatically.
-- On supported platforms, the password is stored as a bcrypt hash in `launcher-auth.db`.
-- On platforms where the SQLite password store is unavailable, the launcher stores the bcrypt hash in `launcher-config.json`.
-- Legacy `launcher_token` values are migrated once into password login and are removed from saved launcher config.
-- `Miki_LAUNCHER_TOKEN` is deprecated and ignored; after upgrading from env-token auth, open `/launcher-setup` to create a password.
-- URL token login and `Authorization: Bearer` dashboard auth are not supported.
+- `/launcher-setup` creates the dashboard password.
+- `/launcher-login` creates the authenticated session.
+- REST dashboard APIs return `401` when the session is missing or expired.
+- WebSocket authentication uses the same session cookie and returns a controlled `authentication_required` event when re-authentication is needed.
+- The session is stored in the active runtime data directory, so launcher/gateway restarts use the same session store unless the runtime workspace changes.
 
 ### Network Exposure
 
@@ -149,181 +135,66 @@ With `-public` or `public: true`, it listens on all interfaces:
 
 When public access is enabled:
 
-- the launcher still protects the dashboard with password login
+- the Node Gateway still protects dashboard APIs with password-backed `miki_session` auth
 - optional `allowed_cidrs` can restrict which client IP ranges may connect
-- the gateway host is overridden so remote clients can still use the launcher-managed proxy paths
+- the launcher/runtime keeps the configured gateway host and port consistent with the frontend proxy
 
 ## Build And Run
 
 ### Prerequisites
 
-- Go `1.25+`
-- Node.js 20.19+ or 22.13+
+- Node.js 20.19+ (or 22.13+)
 - `pnpm`
+- Go 1.26.2+ only when building the legacy Go compatibility stub
 
-On macOS, the `web` Makefile enables `CGO_ENABLED=1` so tray-enabled launcher builds work as expected.
-On Darwin or FreeBSD without cgo, the launcher falls back to headless mode without a tray.
+### Recommended Runtime
 
-If you want to prepare the frontend workspace manually, you can still install dependencies yourself:
+From the repository root:
 
 ```bash
-cd frontend
+npm run build:all
+npm start
+```
+
+The launcher/runtime starts `packages/gateway/dist/index.js`. The dashboard is served by the Node Gateway. Do not run the Go compatibility stub on the gateway's primary port.
+
+### Frontend Development
+
+```bash
+cd packages/ui/frontend
 pnpm install
+pnpm run dev
 ```
 
-### Recommended Development Workflow
+The Vite proxy derives its target from `VITE_GATEWAY_ORIGIN` or the configured `GATEWAY_HOST`/`GATEWAY_PORT`; otherwise it uses `http://127.0.0.1:18800`. Restart Vite after changing the gateway port.
 
-From the `web/` directory:
+### Compatibility Stub
+
+The optional Go compatibility stub can be built with:
 
 ```bash
-make dev
+npm run build:go-backend
 ```
 
-This does three things:
+It is intentionally separate from the primary dashboard backend and defaults to port `18801` when `GATEWAY_PORT` is not explicitly provided. Its health response identifies itself with `backend_role=compatibility-stub`.
 
-1. Builds `../build/Miki` for launcher development.
-2. Starts the Go backend with `Miki_BINARY` pointing at that binary.
-3. Starts the Vite frontend dev server.
+### Minimum Smoke Checks
 
-Use this when you want the full launcher flow during development.
-
-### Run Frontend And Backend Separately
-
-```bash
-make dev-frontend
-make dev-backend
-```
-
-Notes:
-
-- `dev-frontend` runs the Vite server.
-- `dev-backend` runs the Go backend only.
-- The Vite dev server proxies `/api` to `http://localhost:18800`.
-- Chat WebSocket URLs are generated by the backend, so the frontend does not hardcode gateway addresses.
-- Running `dev-backend` alone is mainly useful for backend work or when `backend/dist` already contains a built frontend.
-
-### Build The Standalone Launcher Binary
-
-From `web/`:
-
-```bash
-make build
-```
-
-This:
-
-1. Installs frontend dependencies when needed.
-2. Builds the frontend into `backend/dist`.
-3. Embeds those assets into the Go backend.
-4. Produces `build/Miki-launcher`.
-
-Override the output path if needed:
-
-```bash
-make build OUTPUT=/tmp/Miki-launcher
-```
-
-From the repository root you can also use:
-
-```bash
-make build-launcher
-```
-
-That writes the platform-specific launcher to:
+With an authenticated dashboard session, verify:
 
 ```text
-build/Miki-launcher-<platform>-<arch>
+GET  /api/health
+GET  /api/models
+GET  /api/config
+GET  /api/sessions
+GET  /api/tools
+GET  /api/skills
+GET  /api/gateway/status
+GET  /api/gateway/logs?offset=0
+WS   /miki/ws
 ```
 
-and refreshes the `build/Miki-launcher` symlink.
-
-### Frontend-Only Builds
-
-For frontend work there are two useful package scripts:
-
-```bash
-cd frontend
-pnpm build
-pnpm build:backend
-```
-
-- `pnpm build` writes a normal Vite build to `frontend/dist`
-- `pnpm build:backend` writes the embeddable build to `../backend/dist`
-
-### Run The Built Launcher
-
-Examples:
-
-```bash
-./build/Miki-launcher
-./build/Miki-launcher -console
-./build/Miki-launcher -public
-./build/Miki-launcher -port 18800 /path/to/config.json
-```
-
-Current launcher flags:
-
-- `-port`
-- `-public`
-- `-no-browser`
-- `-lang`
-- `-console`
-
-## Make Targets
-
-From `web/`:
-
-```bash
-make dev
-make dev-frontend
-make dev-backend
-make build
-make build-frontend
-make test
-make lint
-make clean
-```
-
-What they do today:
-
-- `make build-frontend`
-  - Runs `pnpm install --frozen-lockfile` when dependencies are missing or stale.
-  - Builds the embeddable frontend into `backend/dist`.
-- `make test`
-  - Runs backend Go tests.
-  - Runs frontend `pnpm lint`.
-- `make lint`
-  - Runs backend `go vet`.
-  - Runs frontend `pnpm check`.
-  - `pnpm check` currently formats files with Prettier and fixes lint issues with ESLint, so this target can modify your working tree.
-- `make clean`
-  - Removes `frontend/dist`, `backend/dist`, and `build/`, then recreates `backend/dist/.gitkeep`.
-
-## Directory Layout
-
-```text
-web/
-├── backend/
-│   ├── api/             # REST API handlers and launcher runtime endpoints
-│   ├── launcherconfig/  # launcher-config.json load/save/validation
-│   ├── middleware/      # auth, content type, logging, CIDR allowlist
-│   ├── model/           # Go data structures and logic wrappers
-│   ├── utils/           # runtime helpers, onboarding, browser launch
-│   ├── winres/          # Windows application resources
-│   └── dist/            # embedded frontend build output
-├── frontend/
-│   ├── src/api/         # browser API clients
-│   ├── src/components/  # UI pages and shared components
-│   ├── src/features/    # feature-specific state, controllers, and protocol helpers
-│   ├── src/hooks/       # shared React hooks
-│   ├── src/i18n/        # internationalization language packs
-│   ├── src/lib/         # generic library utilities
-│   ├── src/routes/      # TanStack file routes
-│   ├── src/store/       # global state management
-│   └── vite.config.ts   # dev server and build config
-├── Makefile
-└── README.md
-```
+For API/log requests the canonical pagination parameter is `offset`, with `run_id` for run filtering.
 
 ## Troubleshooting
 
@@ -335,12 +206,7 @@ Sign in again with the dashboard password on `/launcher-login`.
 
 ### "Start Gateway" stays disabled
 
-The launcher only allows gateway startup when the configured default model is usable.
-Check these in the dashboard:
-
-- a default model is selected
-- the model has credentials or OAuth state
-- local models such as Ollama or vLLM are reachable
+The Node Gateway is normally already owned by the launcher/supervisor. If the UI reports that it cannot start, first inspect `/api/gateway/status` and the gateway logs. A `pending_restart` state means the supervisor must replace the gateway process.
 
 ### The launcher cannot find `Miki`
 
@@ -352,10 +218,9 @@ export Miki_BINARY=/absolute/path/to/Miki
 
 This affects onboarding and gateway subprocess startup.
 
-### The backend starts but the UI is blank in development
+### The UI shows connection or 404 errors in development
 
-Use `make dev` for the normal workflow.
-If you run only `make dev-backend`, either run `make dev-frontend` alongside it or build the embedded frontend first with `make build-frontend`.
+Confirm that the Node Gateway is listening on the same host/port configured for Vite (default `127.0.0.1:18800`). Do not point Vite at the Go compatibility stub or a Core service directly. Restart Vite after changing the gateway port.
 
 ## Related Docs
 

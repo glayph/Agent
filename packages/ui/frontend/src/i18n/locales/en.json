@@ -12,8 +12,6 @@
     "search": "Search",
     "skills": "Skills",
     "tools": "Tools",
-    "runs": "Runs",
-    "automations": "Automations",
     "monitor": "Monitor",
     "services": "Services",
     "channels_group": "Channels",
@@ -25,7 +23,6 @@
     "logs": "Logs",
     "health": "Health",
     "control": "Agent Control",
-    "agents": "Agents",
     "toggle_sidebar": "Toggle sidebar",
     "channels": "Channels",
     "plugins": "Plugins",
@@ -69,6 +66,8 @@
     },
     "newChat": "New Chat",
     "notConnected": "Gateway is not running. Start it to chat.",
+    "thinkingMenuTitle": "Thinking",
+    "thinkingMode": { "auto": "Auto", "low": "Low", "medium": "Medium", "high": "High", "off": "Off" },
     "thinking": {
       "step1": "Thinking…",
       "step2": "Analyzing your request…",
@@ -216,7 +215,8 @@
       "apikey": "API Key",
       "oauth": "OAuth",
       "local": "Local"
-    }
+    },
+    "assistantDetailMenuTitle": "Response details"
   },
   "header": {
     "logout": {
@@ -360,6 +360,7 @@
     "noDefaultHintSuffix": "to set one.",
     "status": {
       "available": "Available",
+      "configured": "Configured",
       "unconfigured": "Not configured",
       "unreachable": "Service unreachable"
     },
@@ -1268,8 +1269,8 @@
       "allow_shell_execution_hint": "Allow scheduled tasks to run commands by default. When disabled, users must pass command_confirm=true to schedule a command task.",
       "cron_exec_timeout": "Scheduled Command Timeout (minutes)",
       "cron_exec_timeout_hint": "Maximum runtime for scheduled commands. Set to 0 to disable the timeout.",
-      "max_tokens": "Max Tokens",
-      "max_tokens_hint": "Upper token limit per model response.",
+      "max_completion_tokens": "Max Completion Tokens",
+      "max_completion_tokens_hint": "Maximum number of tokens the model may generate in one response.",
       "context_window": "Context Window",
       "context_window_hint": "Model input context capacity in tokens. Leave empty to use the default (4x max tokens).",
       "max_tool_iterations": "Max Tool Iterations",

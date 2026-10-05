@@ -1,6 +1,8 @@
+import { IconInfoCircle } from "@tabler/icons-react"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 
 export function StatusDot({
   tone = "neutral",
@@ -40,6 +42,7 @@ export function EmptyState({
 }) {
   return (
     <div
+      data-miki-empty-state="true"
       className={cn(
         "mx-auto flex min-h-[220px] max-w-[560px] flex-col items-center justify-center px-6 py-10 text-center",
         className,
@@ -52,7 +55,7 @@ export function EmptyState({
       )}
       <h3 className="text-foreground text-base font-semibold">{title}</h3>
       {description && (
-        <p className="text-muted-foreground mt-2 max-w-[440px] text-sm leading-6">
+        <p className="text-muted-foreground mt-1.5 max-w-[42rem] text-[13px] leading-5">
           {description}
         </p>
       )}
@@ -82,12 +85,23 @@ export function SectionPanel({
       )}
     >
       <div className="border-border flex items-start justify-between gap-4 border-b px-4 py-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold">{title}</h3>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h3 className="truncate text-[13px] font-semibold tracking-[-0.01em]">{title}</h3>
           {description && (
-            <p className="text-muted-foreground mt-1 text-xs leading-5">
-              {description}
-            </p>
+            <Tooltip delayDuration={350}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="More information"
+                  className="miki-section-info ml-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  <IconInfoCircle className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" align="start" className="max-w-[20rem] whitespace-normal">
+                {description}
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
         {action}

@@ -46,5 +46,21 @@ export {
 export type { RunFileOptions, RunFileResult, RunOutcome } from "./file-runner.js";
 export { createFileManagementTools } from "./file-tools.js";
 export type { FileToolsOptions } from "./file-tools.js";
+export { buildSkillsContext, createSkillTools } from "./skill-tools.js";
+export type { SkillToolsOptions } from "./skill-tools.js";
 export { redactSecrets, stableStringify } from "./util.js";
+export { MessageRouter } from "../message-router.js";
+export type { FastChatResult, MessageRouteDecision, MessageRouteMode, MessageRouterOptions } from "../message-router.js";
 export type * from "./types.js";
+export { LayeredOrchestrator } from "../orchestration/layered-orchestrator.js";
+export type {
+  LayeredEvent,
+  LayeredMemoryHit,
+  LayeredMemoryPort,
+  LayeredOrchestratorOptions,
+  LayeredPhase,
+  LayeredRunRequest,
+  LayeredRunResult,
+  LayeredRunSnapshot,
+  LayeredStateStore,
+} from "../orchestration/layered-orchestrator.js";

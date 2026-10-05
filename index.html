@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Welcome to the Future! (2010 Style)</title>
+    <style>
+        body {
+            background: #eef2f5;
+            background: radial-gradient(circle, #ffffff 0%, #dbe3ed 100%);
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            color: #333333;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background: #ffffff;
+            border: 1px solid #b7c9d9;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+            padding: 50px;
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+        h1 {
+            font-size: 38px;
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #1a4f8b;
+            text-shadow: 0 1px 0 #ffffff;
+            letter-spacing: -0.5px;
+        }
+        p {
+            font-size: 16px;
+            color: #666666;
+            line-height: 1.5;
+            margin-bottom: 30px;
+        }
+        .btn {
+            background: linear-gradient(to bottom, #5da2ef 0%, #2b73d8 100%);
+            border: 1px solid #1f57a6;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 12px 30px;
+            text-decoration: none;
+            display: inline-block;
+            text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.3);
+            transition: background 0.1s ease;
+        }
+        .btn:hover {
+            background: linear-gradient(to bottom, #6fb0ff 0%, #3482ee 100%);
+        }
+        .btn:active {
+            background: linear-gradient(to bottom, #2b73d8 0%, #5da2ef 100%);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .footer {
+            margin-top: 40px;
+            font-size: 12px;
+            color: #999999;
+            border-top: 1px solid #eeeeee;
+            padding-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello, World!</h1>
+        <p>Welcome to our brand new web presence. Built with clean HTML & CSS, optimized for modern browsers.</p>
+        <a href="#" class="btn" onclick="alert('Hello from 2010!'); return false;">Get Started</a>
+        <div class="footer">
+            &copy; 2010 My Awesome Project. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>

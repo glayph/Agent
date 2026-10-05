@@ -224,6 +224,74 @@ describe("AgentEngine", () => {
     expect(result.finalText).toBe("Summary of partial work.");
   });
 
+  it("resolves max tool iterations dynamically from the runtime setting", async () => {
+    let limit = 2;
+    const { engine, llm } = setup(
+      [
+        { calls: [{ name: "step", args: { n: 1 } }] },
+        { calls: [{ name: "step", args: { n: 2 } }] },
+        { text: "wrapped" },
+      ],
+      [tool({ name: "step" })],
+      { maxTurns: () => limit },
+    );
+    const result = await engine.run({ history: user("do the task") });
+    expect(result.status).toBe("limit_reached");
+    expect(result.turns).toBe(2);
+    expect(llm.requests).toHaveLength(3);
+    limit = 5;
+  });
+
+
+  it("does not send tool schemas when they alone exceed the configured context window", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "huge",
+      description: "x".repeat(20_000),
+      risk: "read",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true }),
+    });
+    const requests: Array<{ options: Record<string, unknown> }> = [];
+    const llm = {
+      model: "test",
+      complete: async (_messages: EngineMessage[], options: Record<string, unknown> = {}) => {
+        requests.push({ options });
+        if (requests.length === 1) {
+          return { choices: [{ message: { content: "done" } }], usage: {} };
+        }
+        throw new Error("unexpected request");
+      },
+    };
+    const engine = new AgentEngine({ llm, tools: registry, contextWindowTokens: 1024 });
+    const result = await engine.run({ history: [{ role: "user", content: "task" }] });
+    expect(result.status).toBe("completed");
+    expect(requests[0].options.tools).toBeUndefined();
+  });
+  it("enforces context window before every model request, including tool loops", async () => {
+    const { engine, llm } = setup(
+      [
+        { calls: [{ name: "grow" }] },
+        { calls: [{ name: "grow" }] },
+        { text: "done" },
+      ],
+      [tool({ name: "grow", execute: () => ({ payload: "X".repeat(900) }) })],
+      { contextWindowTokens: 512 },
+    );
+    const result = await engine.run({
+      history: [
+        { role: "user", content: "old question" },
+        { role: "assistant", content: "old answer" },
+        { role: "user", content: "new task" },
+      ],
+    });
+    expect(result.status).toBe("completed");
+    for (const request of llm.requests) {
+      expect(request.messages.some((message) => message.content === "old question")).toBe(false);
+      expect(request.messages.some((message) => String(message.content || "").length >= 900)).toBe(false);
+    }
+  });
+
   it("never invents answer text when the wrap-up call fails", async () => {
     let calls = 0;
     const { engine } = setup(

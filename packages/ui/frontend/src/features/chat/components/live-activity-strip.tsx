@@ -5,6 +5,7 @@ import {
   IconChevronRight,
   IconLoader2,
 } from "@tabler/icons-react"
+import { Link } from "@tanstack/react-router"
 
 import {
   activityStatusLabel,
@@ -42,9 +43,17 @@ export function LiveActivityStrip({
       aria-label="Live agent activity"
       className="border-border/50 bg-card/65 mx-auto w-full max-w-[var(--chat-content-width)] rounded-xl border px-3 py-2 shadow-sm backdrop-blur-sm"
     >
-      <div className="text-muted-foreground flex items-center gap-2 px-1 pb-1.5 text-[10px] font-semibold tracking-[0.14em] uppercase">
-        <IconActivity className="text-primary size-3.5" aria-hidden="true" />
-        <span>Live activity</span>
+      <div className="flex items-center justify-between gap-3 px-1 pb-1.5">
+        <div className="text-muted-foreground flex items-center gap-2 text-[10px] font-semibold tracking-[0.14em] uppercase">
+          <IconActivity className="text-primary size-3.5" aria-hidden="true" />
+          <span>Live activity</span>
+        </div>
+        <Link
+          to="/agent/monitor"
+          className="text-primary hover:bg-primary/10 rounded-md px-2 py-1 text-[10px] font-medium transition-colors"
+        >
+          Open monitor
+        </Link>
       </div>
       <div className="flex flex-col gap-1 sm:flex-row sm:items-stretch">
         {nodes.map((node) => {
@@ -52,9 +61,9 @@ export function LiveActivityStrip({
             node.status === "running" || node.status === "retrying"
           const isSelected = node.id === selectedNodeId
           return (
-            <button
+            <Link
               key={node.id}
-              type="button"
+              to="/agent/monitor"
               onClick={() => onSelect(node)}
               className={cn(
                 "group flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
@@ -90,7 +99,7 @@ export function LiveActivityStrip({
                 className="text-muted-foreground/50 size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5"
                 aria-hidden="true"
               />
-            </button>
+            </Link>
           )
         })}
       </div>

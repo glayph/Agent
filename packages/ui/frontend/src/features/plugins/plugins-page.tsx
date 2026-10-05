@@ -1,6 +1,5 @@
 import {
   IconActivityHeartbeat,
-  IconArrowLeft,
   IconAtom,
   IconBroadcast,
   IconChevronRight,
@@ -12,6 +11,7 @@ import {
   IconRefresh,
   IconSearch,
   IconSettings,
+  IconInfoCircle,
   IconTool,
 } from "@tabler/icons-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Input } from "@/shared/ui/input"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import { Switch } from "@/shared/ui/switch"
 
 export type PluginPageSection =
@@ -49,42 +50,42 @@ const NAVIGATION = [
   {
     label: "Catalog",
     description: "Browse available plugins",
-    to: "/plugins/catalog",
+    to: "/plugins?section=catalog",
     section: "catalog" as const,
     icon: IconDatabase,
   },
   {
     label: "Providers & Models",
     description: "AI providers and models",
-    to: "/plugins/providers",
+    to: "/plugins?section=provider",
     section: "provider" as const,
     icon: IconAtom,
   },
   {
     label: "Core Services",
     description: "System runtime services",
-    to: "/plugins/core",
+    to: "/plugins?section=core",
     section: "core" as const,
     icon: IconSettings,
   },
   {
     label: "Channels",
     description: "Messaging connections",
-    to: "/plugins/channels",
+    to: "/plugins?section=channel",
     section: "channel" as const,
     icon: IconBroadcast,
   },
   {
     label: "Skills & Tools",
     description: "Agent skills and tools",
-    to: "/plugins/capabilities",
+    to: "/plugins?section=capability",
     section: "capability" as const,
     icon: IconTool,
   },
   {
     label: "Health & Logs",
     description: "Runtime health and logs",
-    to: "/plugins/health",
+    to: "/plugins?section=health",
     section: "health" as const,
     icon: IconActivityHeartbeat,
   },
@@ -222,14 +223,22 @@ function SectionHeading({
       data-page-section="true"
       className="flex flex-wrap items-end justify-between gap-3 border-b pb-3"
     >
-      <div>
-        <h2 className="text-base font-semibold">{title}</h2>
-        <p
-          data-text-role="supporting"
-          className="text-muted-foreground mt-1 text-sm"
-        >
-          {description}
-        </p>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <h2 className="text-base font-semibold tracking-[-0.015em]">{title}</h2>
+        <Tooltip delayDuration={350}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="More information"
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <IconInfoCircle className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" align="start" className="max-w-[20rem] whitespace-normal">
+            {description}
+          </TooltipContent>
+        </Tooltip>
       </div>
       {action}
     </div>
@@ -261,7 +270,7 @@ function Row({
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{title}</div>
           {description && (
-            <div className="text-muted-foreground mt-1 line-clamp-2 text-xs">
+            <div className="text-muted-foreground mt-1 line-clamp-1 text-xs">
               {description}
             </div>
           )}
@@ -289,9 +298,9 @@ export function PluginHomePage() {
           </p>
           <div className="divide-border divide-y border-y">
             {NAVIGATION.map((item) => (
-              <Link
+              <a
                 key={item.to}
-                to={item.to}
+                href={item.to}
                 data-page-row="true"
                 className="group flex items-center gap-3 py-4"
               >
@@ -302,15 +311,10 @@ export function PluginHomePage() {
                   <span className="block text-sm font-medium">
                     {item.label}
                   </span>
-                  <span
-                    data-text-role="supporting"
-                    className="text-muted-foreground mt-1 block text-xs"
-                  >
-                    {item.description}
-                  </span>
+
                 </span>
                 <IconChevronRight className="text-muted-foreground size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
-              </Link>
+              </a>
             ))}
           </div>
         </div>
@@ -400,10 +404,10 @@ function CatalogPage() {
             const family = familyForManifest(manifest)
             const target =
               family === "provider"
-                ? "/plugins/providers"
+                ? "/plugins?section=provider"
                 : family === "channel"
-                  ? "/plugins/channels"
-                  : "/plugins/capabilities"
+                  ? "/plugins?section=channel"
+                  : "/plugins?section=capability"
             return (
               <Row
                 key={manifest.id}
@@ -413,9 +417,9 @@ function CatalogPage() {
                 icon={<IconPuzzle className="size-4" />}
                 action={
                   <Button asChild size="sm" variant="outline">
-                    <Link to={target}>
+                    <a href={target}>
                       Open <IconChevronRight className="size-3.5" />
-                    </Link>
+                    </a>
                   </Button>
                 }
               />
@@ -712,7 +716,7 @@ function CapabilitiesPage() {
                           checked={tool.status === "enabled"}
                           disabled={toolMutation.isPending}
                           onCheckedChange={(enabled) =>
-                            toolMutation.mutate({ name: tool.name, enabled })
+                            toolMutation.mutate({ name: tool.config_key, enabled })
                           }
                           aria-label={`Enable ${tool.name}`}
                         />
@@ -866,24 +870,38 @@ function HealthPage() {
   )
 }
 
-export function PluginsPage({
-  section = "catalog",
-}: {
-  section?: PluginPageSection
-}) {
+export function PluginsPage() {
+  const requested = new URLSearchParams(globalThis.location.search).get("section")
+  const section: PluginPageSection =
+    requested === "provider" ||
+    requested === "core" ||
+    requested === "channel" ||
+    requested === "capability" ||
+    requested === "health"
+      ? requested
+      : "catalog"
   const meta = PAGE_META[section]
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title={`Plugins · ${meta.title}`} titleLevel={1} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
         <div className="mx-auto w-full max-w-5xl space-y-6 pt-2">
-          <Link
-            to="/plugins"
-            className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm"
-          >
-            <IconArrowLeft className="size-3.5" />
-            Plugins
-          </Link>
+          <div className="border-border flex flex-wrap gap-2 border-b pb-3">
+            {NAVIGATION.map((item) => (
+              <a
+                key={item.section}
+                href={item.to}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm transition-colors",
+                  section === item.section
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                )}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
           <div className="pt-1">
             {section === "catalog" && <CatalogPage />}
             {section === "provider" && <ProvidersPage />}

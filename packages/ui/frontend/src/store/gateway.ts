@@ -102,7 +102,7 @@ export function beginGatewayStoppingTransition() {
   gatewayStoppingTimer = setTimeout(() => {
     gatewayStoppingTimer = null
     updateGatewayStore((prev) =>
-      prev.status === "stopping" ? { status: "running" } : prev,
+      prev.status === "stopping" ? { status: "unknown", canStart: true } : prev,
     )
     void refreshGatewayState({ force: true })
   }, GATEWAY_STOPPING_TIMEOUT_MS)

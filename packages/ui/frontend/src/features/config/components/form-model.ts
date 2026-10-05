@@ -16,7 +16,7 @@ export interface CoreConfigForm {
   execTimeoutSeconds: string
   allowCommand: boolean
   cronExecTimeoutMinutes: string
-  maxTokens: string
+  maxCompletionTokens: string
   contextWindow: string
   maxToolIterations: string
   summarizeMessageThreshold: string
@@ -127,7 +127,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   execTimeoutSeconds: "0",
   allowCommand: false,
   cronExecTimeoutMinutes: "5",
-  maxTokens: "32768",
+  maxCompletionTokens: "32768",
   contextWindow: "",
   maxToolIterations: "50",
   summarizeMessageThreshold: "20",
@@ -380,7 +380,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       cron.exec_timeout_minutes,
       EMPTY_FORM.cronExecTimeoutMinutes,
     ),
-    maxTokens: asNumberString(defaults.max_tokens, EMPTY_FORM.maxTokens),
+    maxCompletionTokens: asNumberString(defaults.max_completion_tokens ?? defaults.max_tokens, EMPTY_FORM.maxCompletionTokens),
     contextWindow: asOptionalPositiveNumberString(
       defaults.context_window,
       EMPTY_FORM.contextWindow,

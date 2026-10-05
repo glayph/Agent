@@ -11,7 +11,8 @@ export { HIDDEN_DIRS, isSensitivePath, resolveWorkspacePath } from "./workspace-
 import { HIDDEN_DIRS, isSensitivePath, resolveWorkspacePath } from "./workspace-paths.js";
 
 export interface WorkspaceToolsOptions {
-  root: string;
+  root: string | (() => string);
+  restrictToWorkspace?: boolean | (() => boolean);
   maxReadBytes?: number;
   maxListEntries?: number;
   maxSearchResults?: number;
@@ -28,17 +29,22 @@ function looksBinary(buffer: Buffer): boolean {
 }
 
 export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool[] {
-  const root = path.resolve(options.root);
+  const getRoot = () => path.resolve(typeof options.root === "function" ? options.root() : options.root);
+  const isRestricted = () => typeof options.restrictToWorkspace === "function" ? options.restrictToWorkspace() : options.restrictToWorkspace !== false;
+  const resolvePath = (input: string | undefined) => {
+    const root = getRoot();
+    if (isRestricted()) return resolveWorkspacePath(root, input);
+    const raw = input || root;
+    return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
+  };
   const maxRead = options.maxReadBytes ?? 200_000;
   const maxList = options.maxListEntries ?? 300;
   const maxMatches = options.maxSearchResults ?? 50;
-  const rel = (abs: string) => path.relative(root, abs) || ".";
+  const rel = (abs: string) => path.relative(getRoot(), abs) || ".";
 
   const guard = (input: unknown, name = "path"): string => {
-    const abs = resolveWorkspacePath(
-      root,
-      input === undefined ? undefined : asString(input, name),
-    );
+    const raw = input === undefined ? undefined : asString(input, name);
+    const abs = resolvePath(raw);
     if (isSensitivePath(abs))
       throw new Error("Access to credential and secret files is blocked by the workspace policy.");
     return abs;
@@ -58,7 +64,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
         additionalProperties: false,
       },
       execute(input) {
-        const dir = resolveWorkspacePath(root, input.path as string | undefined);
+        const dir = resolvePath(input.path as string | undefined);
         if (!fs.statSync(dir).isDirectory()) throw new Error("Path is not a directory.");
         const entries = fs
           .readdirSync(dir, { withFileTypes: true })
@@ -133,7 +139,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
       execute(input) {
         const query = asString(input.query, "query").toLowerCase();
         if (!query.trim()) throw new Error('"query" must not be empty.');
-        const start = resolveWorkspacePath(root, input.path as string | undefined);
+        const start = resolvePath(input.path as string | undefined);
         const limit = Math.min(maxMatches, Math.max(1, Number(input.maxResults ?? maxMatches)));
         const matches: Array<{ file: string; line: number; text: string }> = [];
         let scanned = 0;

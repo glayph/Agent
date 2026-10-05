@@ -11,7 +11,7 @@ packages/
 ├── installer/     # Workspace registration and installation helpers
 ├── memory/        # Temporal Knowledge Graph & memory consolidation
 ├── skills/        # Pre-bundled skills and skill loading
-└── ui/            # Web dashboard (React frontend + Go backend)
+└── ui/            # Web dashboard (React frontend + Node Gateway; Go compatibility stub)
 ```
 
 ## Dependency flow (simplified)

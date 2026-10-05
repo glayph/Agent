@@ -1,5 +1,5 @@
 import type { RefObject, UIEvent } from "react"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
@@ -46,6 +46,7 @@ export function ChatMessageList({
   onRetryMessage,
 }: ChatMessageListProps) {
   const { t } = useTranslation()
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
   const renderableMessages = useMemo(
     () =>
       messages.filter((message) =>
@@ -73,6 +74,12 @@ export function ChatMessageList({
     <div
       ref={scrollRef}
       onScroll={onScroll}
+      onClick={(event) => {
+        const target = event.target
+        if (!(target instanceof Element) || !target.closest("[data-chat-bubble]")) {
+          setSelectedMessageId(null)
+        }
+      }}
       data-chat-scroll="true"
       className="h-full min-h-0 overflow-y-auto px-4 py-4 [background:var(--chat-surface)] sm:px-6 sm:py-7 lg:px-8"
     >
@@ -105,6 +112,8 @@ export function ChatMessageList({
           <WorkspaceChatMessage
             key={message.id}
             message={message}
+            selected={selectedMessageId === message.id}
+            onSelect={setSelectedMessageId}
             canRetry={
               connectionState === "connected" &&
               !isTyping &&

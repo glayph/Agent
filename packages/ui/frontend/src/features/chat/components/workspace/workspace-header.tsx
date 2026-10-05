@@ -1,23 +1,15 @@
+import { IconLoader2 } from "@tabler/icons-react"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
-import { Badge } from "@/shared/ui/badge"
 import { SidebarTrigger } from "@/shared/ui/sidebar"
 
 import type { WorkspaceStatusPill, WorkspaceStatusTone } from "./types"
 
-const statusToneClass: Record<WorkspaceStatusTone, string> = {
-  neutral: "border-border/80 bg-background/75 text-muted-foreground",
-  success:
-    "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  warning: "border-primary/25 bg-primary/10 text-primary",
-  info: "border-primary/30 bg-primary/10 text-primary",
-}
-
 const statusDotClass: Record<WorkspaceStatusTone, string> = {
   neutral: "bg-muted-foreground",
-  success: "bg-emerald-500",
-  warning: "bg-amber-500",
+  success: "bg-primary",
+  warning: "bg-primary",
   info: "bg-primary",
 }
 
@@ -85,43 +77,41 @@ export function WorkspaceHeader({
           })}
         </div>
 
-        <div className="hidden min-w-0 items-center gap-1.5 sm:flex">
-          {statuses.map((status) => {
-            const badge = (
-              <Badge
-                variant="outline"
-                className={cn(
-                  "h-5 border px-2 text-[10px] leading-none font-medium",
-                  statusToneClass[status.tone ?? "neutral"],
-                  status.onClick &&
-                    "hover:bg-primary/15 cursor-pointer transition-colors",
-                )}
-              >
-                {status.label}
-              </Badge>
-            )
-            return status.onClick ? (
+        <div className="hidden min-w-0 items-center gap-2 sm:flex">
+          {statuses[0] ? (
+            statuses[0].onClick ? (
               <button
-                key={status.label}
                 type="button"
-                className="rounded-md"
-                onClick={status.onClick}
-                aria-label={status.label}
-                title={status.label}
+                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-[11px] transition-colors"
+                onClick={statuses[0].onClick}
+                aria-label={statuses[0].label}
+                title={statuses[0].label}
               >
-                {badge}
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    statusDotClass[statuses[0].tone ?? "neutral"],
+                  )}
+                />
+                <span>{statuses[0].label}</span>
               </button>
             ) : (
-              <span key={status.label}>{badge}</span>
+              <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[11px]">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    statusDotClass[statuses[0].tone ?? "neutral"],
+                  )}
+                />
+                <span>{statuses[0].label}</span>
+              </span>
             )
-          })}
+          ) : null}
+          <span className="sr-only">{statuses.slice(1).map((status) => status.label).join(", ")}</span>
+          {subtitle ? <span className="sr-only">{subtitle}</span> : null}
         </div>
-
-        {subtitle && (
-          <span className="text-muted-foreground hidden shrink-0 text-xs sm:inline">
-            {subtitle}
-          </span>
-        )}
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
@@ -134,12 +124,10 @@ export function WorkspaceHeader({
             aria-label="Agent is working"
             title="Agent is working"
           >
-            <span
+            <IconLoader2
               aria-hidden="true"
-              className="inline-block text-[15px] leading-none motion-safe:animate-bounce motion-reduce:animate-none"
-            >
-              🛠️
-            </span>
+              className="size-3.5 motion-safe:animate-spin motion-reduce:animate-none"
+            />
           </button>
         )}
         {controls}

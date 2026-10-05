@@ -12,8 +12,6 @@
     "search": "Pesquisar",
     "skills": "Skills",
     "tools": "Ferramentas",
-    "runs": "Runs",
-    "automations": "Automacoes",
     "monitor": "Monitor",
     "services": "Serviços",
     "channels_group": "Canais",
@@ -25,7 +23,6 @@
     "logs": "Logs",
     "health": "Saude",
     "control": "Controle do agente",
-    "agents": "Agentes",
     "toggle_sidebar": "Alternar barra lateral",
     "channels": "Canais",
     "plugins": "Plugins",
@@ -69,6 +66,8 @@
     },
     "newChat": "Novo Chat",
     "notConnected": "O Gateway não está rodando. Inicie-o para conversar.",
+    "thinkingMenuTitle": "Pensamento",
+    "thinkingMode": { "auto": "Automático", "low": "Baixo", "medium": "Médio", "high": "Alto", "off": "Desligado" },
     "thinking": {
       "step1": "Pensando…",
       "step2": "Analisando sua solicitação…",
@@ -216,7 +215,8 @@
       "apikey": "API Key",
       "oauth": "OAuth",
       "local": "Local"
-    }
+    },
+    "assistantDetailMenuTitle": "Detalhes da resposta"
   },
   "header": {
     "logout": {
@@ -360,6 +360,7 @@
     "noDefaultHintSuffix": "para definir um.",
     "status": {
       "available": "Disponível",
+      "configured": "Configurado",
       "unconfigured": "Não configurado",
       "unreachable": "Serviço inacessível"
     },
@@ -1268,8 +1269,8 @@
       "allow_shell_execution_hint": "Permitir que tarefas agendadas executem comandos por padrão. Quando desabilitado, usuários precisam passar command_confirm=true para agendar uma tarefa de comando.",
       "cron_exec_timeout": "Timeout de Comando Agendado (minutos)",
       "cron_exec_timeout_hint": "Tempo máximo de execução para comandos agendados. Defina 0 para desabilitar o timeout.",
-      "max_tokens": "Max Tokens",
-      "max_tokens_hint": "Limite superior de tokens por resposta do modelo.",
+      "max_completion_tokens": "Max Completion Tokens",
+      "max_completion_tokens_hint": "Número máximo de tokens que o modelo pode gerar em uma resposta.",
       "context_window": "Janela de Contexto",
       "context_window_hint": "Capacidade do contexto de entrada do modelo em tokens. Deixe vazio para usar o padrão (4x max tokens).",
       "max_tool_iterations": "Máx. de Iterações de Ferramenta",

@@ -17,7 +17,7 @@ describe("config page form model", () => {
         defaults: {
           workspace: "D:/work",
           restrict_to_workspace: false,
-          max_tokens: 64000,
+          max_completion_tokens: 64000,
           turn_profile: {
             enabled: true,
             history: { mode: "off" },
@@ -66,7 +66,7 @@ describe("config page form model", () => {
     expect(form.workspace).toBe("D:/work")
     expect(form.restrictToWorkspace).toBe(false)
     expect(form.bypassRestrictions).toBe(true)
-    expect(form.maxTokens).toBe("64000")
+    expect(form.maxCompletionTokens).toBe("64000")
     expect(form.contextWindow).toBe("")
     expect(form.allowCommand).toBe(true)
     expect(form.cronExecTimeoutMinutes).toBe("12")

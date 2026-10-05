@@ -34,7 +34,7 @@ Agent-1.3.7-offline/
 │   ├── installer/       # Workspace registration helpers
 │   ├── memory/          # Temporal Knowledge Graph + consolidation
 │   ├── skills/          # Pre-bundled skills
-│   └── ui/              # React web dashboard + Go backend
+│   └── ui/              # React web dashboard (Node Gateway backend; Go compatibility stub)
 ├── providers/           # Example external provider plugin
 ├── scripts/             # Build, model, verify, release, soak scripts
 └── (root configs)       # package.json, tsconfig, jest, eslint, turbo, locks

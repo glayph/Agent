@@ -1,4 +1,4 @@
-import { launcherFetch } from "@/api/http"
+import { GatewayBackendError, launcherFetch } from "@/api/http"
 import { refreshGatewayState } from "@/store/gateway"
 
 // API client for model list management.
@@ -72,7 +72,7 @@ export interface ModelInfo {
   // Meta
   enabled: boolean
   available: boolean
-  status: "available" | "unconfigured" | "unreachable"
+  status: "available" | "configured" | "unconfigured" | "unreachable"
   is_default: boolean
   is_virtual: boolean
   default_model_allowed?: boolean
@@ -135,16 +135,45 @@ interface ModelActionResponse {
 
 const BASE_URL = ""
 
+class ModelApiError extends Error {
+  readonly category: "frontend_network" | "backend_api"
+  readonly status?: number
+  readonly providerCategory?: TestModelResponse["error_category"]
+
+  constructor(
+    message: string,
+    category: "frontend_network" | "backend_api",
+    status?: number,
+    providerCategory?: TestModelResponse["error_category"],
+  ) {
+    super(message)
+    this.category = category
+    this.status = status
+    this.providerCategory = providerCategory
+    this.name = "ModelApiError"
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await launcherFetch(`${BASE_URL}${path}`, options)
-  if (!res.ok) {
-    let detail = ""
-    try {
-      detail = await res.text()
-    } catch {
-      // ignore
+  let res: Response
+  try {
+    res = await launcherFetch(`${BASE_URL}${path}`, options)
+  } catch (error) {
+    if (error instanceof GatewayBackendError) {
+      throw new ModelApiError(error.message, "backend_api", undefined, "backend_api")
     }
-    throw new Error(detail || `API error: ${res.status} ${res.statusText}`)
+    throw new ModelApiError(
+      `Frontend/network error: ${error instanceof Error ? error.message : String(error)}`,
+      "frontend_network",
+    )
+  }
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null) as { error?: string; error_category?: TestModelResponse["error_category"] } | null
+    const category = detail?.error_category || "backend_api"
+    const message =
+      detail?.error ||
+      `Backend/API error: ${res.status} ${res.statusText}`
+    throw new ModelApiError(message, "backend_api", res.status, category)
   }
   return res.json() as Promise<T>
 }
@@ -217,6 +246,13 @@ export interface TestModelResponse {
     finishReason?: string | null
   }
   correlation_id?: string
+  error_category?:
+    | "provider_api_key"
+    | "local_model_unavailable"
+    | "upstream_provider_error"
+    | "provider_network"
+    | "frontend_network"
+    | "backend_api"
   error?: string
 }
 

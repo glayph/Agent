@@ -58,15 +58,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const isPluginSurface = [
     "/plugins",
     "/models",
-    "/credentials",
     "/channels",
     "/agent/skills",
     "/agent/tools",
     "/memory",
     "/config",
-    "/agent/automations",
     "/health",
-    "/logs",
   ].some((path) => pathname === path || pathname.startsWith(`${path}/`))
 
   return (

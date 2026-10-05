@@ -92,6 +92,17 @@ describe("workspace tools", () => {
     for (const name of ["README.md", "src/secret-scan.ts", "environment.ts"])
       expect(isSensitivePath(name)).toBe(false);
   });
+
+  it("allows trusted absolute reads when workspace restriction is disabled", async () => {
+    const { root } = workspace();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "miki-builtin-outside-"));
+    fs.writeFileSync(path.join(outside, "outside.txt"), "outside");
+    let restricted = true;
+    const tools = Object.fromEntries(createWorkspaceTools({ root, restrictToWorkspace: () => restricted }).map((t) => [t.name, t]));
+    await expect(run(tools.file_read, { path: path.join(outside, "outside.txt") })).rejects.toThrow("outside the workspace");
+    restricted = false;
+    await expect(run(tools.file_read, { path: path.join(outside, "outside.txt") })).resolves.toMatchObject({ content: "outside" });
+  });
 });
 
 describe("memory and control tools", () => {

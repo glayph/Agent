@@ -113,6 +113,10 @@ func (r *Runtime) startRuntime() error {
 		return r.failStart(err)
 	}
 
+	stopRequestPath := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway-stop.request")
+	_ = os.MkdirAll(filepath.Dir(stopRequestPath), 0755)
+	_ = os.Remove(stopRequestPath)
+
 	r.mu.Lock()
 	r.done = make(chan struct{})
 	r.cancel = cancel
@@ -157,34 +161,40 @@ func (r *Runtime) Stop() error {
 	return r.forceStop()
 }
 
-// StopDaemon sends a shutdown request to a gateway backend started outside
-// this Runtime instance. It is used by the external stop command.
+// StopDaemon requests a graceful shutdown of a gateway started outside
+// this Runtime instance. The launcher/supervisor owns the lifecycle, so do
+// not call an unauthenticated HTTP shutdown endpoint. Signal the PID from the
+// runtime-owned PID file and leave the supervisor stop marker in place so it
+// does not immediately restart the requested shutdown.
 func (r *Runtime) StopDaemon() error {
-	// Try reading PID file
 	pidFile := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway.pid")
 	pidBytes, err := os.ReadFile(pidFile)
 	if err != nil {
 		return fmt.Errorf("no running backend found (PID file missing: %s)", pidFile)
 	}
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-
-	// Send shutdown request via HTTP
-	hostPort := net.JoinHostPort(r.cfg.Host, fmt.Sprintf("%d", r.cfg.Port))
-	shutdownURL := fmt.Sprintf("http://%s/gateway/shutdown", hostPort)
-	client := http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(shutdownURL, "application/json", nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to backend (PID %d): %w", pid, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil || pid <= 0 {
+		return fmt.Errorf("invalid gateway PID in %s", pidFile)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("Miki backend (PID %d) is shutting down...\n", pid)
-		// Clean up PID file
-		_ = os.Remove(pidFile)
-		return nil
+	dataDir := filepath.Join(r.cfg.WorkspaceDir, "data")
+	_ = os.MkdirAll(dataDir, 0755)
+	// Keep both lifecycle markers compatible with the regular CLI runtime and
+	// the 24/7 supervisor. Only the active supervisor's configured marker is
+	// consumed; the extra marker is harmless for standalone runtime use.
+	for _, stopFile := range []string{
+		filepath.Join(dataDir, "gateway-stop.request"),
+		filepath.Join(dataDir, "24-7-gateway-stop.request"),
+	} {
+		_ = os.WriteFile(stopFile, []byte(fmt.Sprintf("{\"requested_at\":%q,\"pid\":%d}\n", time.Now().UTC().Format(time.RFC3339Nano), pid)), 0600)
 	}
-	return fmt.Errorf("shutdown request failed with status %d", resp.StatusCode)
+
+	if err := requestProcessStop(pid); err != nil {
+		return fmt.Errorf("failed to stop backend PID %d: %w", pid, err)
+	}
+	fmt.Printf("Miki backend (PID %d) is shutting down...\n", pid)
+	_ = os.Remove(pidFile)
+	return nil
 }
 
 // ForceStop terminates the backend process tree. It is used for Stop,
@@ -351,13 +361,22 @@ func (r *Runtime) scan(reader io.Reader) {
 func (r *Runtime) watch(cmd *exec.Cmd, cancel context.CancelFunc) {
 	err := cmd.Wait()
 	cancel()
+	requestedStopPath := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway-stop.request")
+	requestedStop := fileExists(requestedStopPath)
+	if requestedStop {
+		_ = os.Remove(requestedStopPath)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cmd == cmd {
 		r.cmd = nil
 		r.cancel = nil
 	}
-	if err != nil && r.state != stateStopping && r.state != stateRestarting {
+	if requestedStop {
+		r.state = stateStopped
+		r.err = ""
+		r.appendLocked("Runtime stopped by gateway shutdown request.")
+	} else if err != nil && r.state != stateStopping && r.state != stateRestarting {
 		r.state = stateError
 		r.err = err.Error()
 		r.appendLocked("Runtime exited: " + err.Error())
@@ -456,6 +475,9 @@ func runtimeEnv(base []string, cfg Config) []string {
 	// MIKI_* first, so these are only a fallback.
 	env = setEnv(env, "Miki_RUNTIME_ROOT", cfg.RuntimeRoot)
 	env = setEnv(env, "Miki_WORKSPACE_DIR", cfg.WorkspaceDir)
+	env = setEnv(env, "MIKI_DATA_DIR", filepath.Join(cfg.WorkspaceDir, "data"))
+	env = setEnv(env, "MIKI_CONFIG_DIR", filepath.Join(cfg.WorkspaceDir, "config"))
+	env = setEnv(env, "MIKI_GATEWAY_STOP_FILE", filepath.Join(cfg.WorkspaceDir, "data", "gateway-stop.request"))
 	env = setEnv(env, "GATEWAY_HOST", cfg.Host)
 	env = setEnv(env, "GATEWAY_PORT", fmt.Sprintf("%d", cfg.Port))
 	if cfg.CorePort > 0 {

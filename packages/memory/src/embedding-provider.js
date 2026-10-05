@@ -71,6 +71,99 @@ class HashEmbeddingProvider {
 }
 
 /**
+ * Optional local ONNX embedding provider. The model is intentionally loaded
+ * only when MIKI_EMBEDDING_PROVIDER=onnx and MIKI_ONNX_EMBEDDING_MODEL is set.
+ *
+ * Contract for the lightweight local router/index model:
+ *  - input tensor: `input` or `features`, shape [1, dimensions], float32
+ *  - output tensor: first output, flattened into a vector
+ * The text is converted to a deterministic normalized feature vector before
+ * inference. This keeps the provider dependency-optional and offline. A
+ * semantic/text encoder with its own tokenizer can be wrapped with the same
+ * interface later without changing callers.
+ */
+class OnnxEmbeddingProvider {
+  /**
+   * @param {{ modelPath?: string, dimensions?: number } | null} [options]
+   */
+  constructor(options = null) {
+    const opts = options || {};
+    this.modelPath = String(opts.modelPath || process.env.MIKI_ONNX_EMBEDDING_MODEL || '').trim();
+    this.dimensions = Number(opts.dimensions || process.env.MIKI_EMBEDDING_DIMS || 384);
+    this.name = 'onnx-local';
+    this._sessionPromise = null;
+  }
+
+  _features(text) {
+    const crypto = require('crypto');
+    const input = String(text || '').normalize('NFKC').toLowerCase();
+    const vec = new Float32Array(this.dimensions);
+    const tokens = input.split(/\s+/).filter(Boolean);
+    const grams = [];
+    for (const token of tokens) {
+      grams.push(token);
+      for (let i = 0; i + 2 < token.length; i++) grams.push(token.slice(i, i + 3));
+    }
+    for (const gram of grams.length ? grams : ['']) {
+      const digest = crypto.createHash('sha256').update(gram).digest();
+      for (let offset = 0; offset < digest.length; offset += 4) {
+        const bucket = digest.readUInt32BE(offset) % this.dimensions;
+        const sign = (digest[offset] & 1) ? 1 : -1;
+        vec[bucket] += sign;
+      }
+    }
+    let norm = 0;
+    for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < vec.length; i++) vec[i] /= norm;
+    return vec;
+  }
+
+  async _session() {
+    if (!this.modelPath) throw new Error('MIKI_ONNX_EMBEDDING_MODEL is not configured.');
+    if (this._sessionPromise) return this._sessionPromise;
+    this._sessionPromise = (async () => {
+      let ort;
+      try {
+        const load = Function('specifier', 'return import(specifier)');
+        ort = await load('onnxruntime-node');
+      } catch (error) {
+        this._sessionPromise = null;
+        throw new Error(`onnxruntime-node is not installed: ${error && error.message ? error.message : String(error)}`);
+      }
+      return ort.InferenceSession.create(this.modelPath, { executionProviders: ['cpu'] });
+    })();
+    return this._sessionPromise;
+  }
+
+  async embed(text) {
+    const session = await this._session();
+    const load = Function('specifier', 'return import(specifier)');
+    const ort = await load('onnxruntime-node');
+    const input = this._features(text);
+    const name = session.inputNames.includes('input') ? 'input' : session.inputNames.includes('features') ? 'features' : session.inputNames[0];
+    if (!name) throw new Error('ONNX embedding model exposes no input tensor.');
+    const tensor = new ort.Tensor('float32', input, [1, this.dimensions]);
+    const output = await session.run({ [name]: tensor });
+    const first = output[session.outputNames[0]];
+    const data = first?.data;
+    if (!data || typeof data.length !== 'number') throw new Error('ONNX embedding model returned no vector.');
+    const vec = Float32Array.from(data);
+    let norm = 0;
+    for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < vec.length; i++) vec[i] /= norm;
+    return vec;
+  }
+
+  async embedBatch(texts) {
+    const out = [];
+    for (const text of texts || []) out.push(await this.embed(text));
+    return out;
+  }
+}
+
+/**
  * Explicit no-op provider. embed() returns a zero vector of the configured
  * dimension. Useful when embeddings are intentionally disabled.
  */
@@ -115,7 +208,7 @@ function cosineSimilarity(a, b) {
  * Future: xenova / openai-compatible local servers.
  *
  * @param {{ provider?: string, dimensions?: number } | null} [options]
- * @returns {HashEmbeddingProvider|NoopEmbeddingProvider}
+ * @returns {HashEmbeddingProvider|NoopEmbeddingProvider|OnnxEmbeddingProvider}
  */
 function createEmbeddingProvider(options = null) {
   const opts = options || {};
@@ -124,13 +217,20 @@ function createEmbeddingProvider(options = null) {
   if (name === 'noop' || name === 'none' || name === 'off') {
     return new NoopEmbeddingProvider(dimensions);
   }
-  // Default offline foundation. Real model providers plug in here later.
+  if (name === 'onnx' || name === 'onnx-local') {
+    return new OnnxEmbeddingProvider({
+      modelPath: opts.modelPath || process.env.MIKI_ONNX_EMBEDDING_MODEL,
+      dimensions,
+    });
+  }
+  // Default offline foundation. Real semantic models plug in here later.
   return new HashEmbeddingProvider(dimensions);
 }
 
 module.exports = {
   HashEmbeddingProvider,
   NoopEmbeddingProvider,
+  OnnxEmbeddingProvider,
   createEmbeddingProvider,
   cosineSimilarity,
 };

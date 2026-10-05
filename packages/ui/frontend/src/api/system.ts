@@ -107,3 +107,14 @@ export async function getSystemVersionInfo(): Promise<SystemVersionInfo> {
 export async function getFlowStatus(): Promise<FlowStatusResponse> {
   return request<FlowStatusResponse>("/api/system/flow")
 }
+
+export interface ConfigValidationIssue { path: string; message: string; code: string }
+export interface ConfigValidationResponse { valid: boolean; config: Record<string, unknown>; errors: ConfigValidationIssue[]; warnings: ConfigValidationIssue[] }
+
+export async function validateAppConfig(config: Record<string, unknown>): Promise<ConfigValidationResponse> {
+  return request<ConfigValidationResponse>("/api/config/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  })
+}

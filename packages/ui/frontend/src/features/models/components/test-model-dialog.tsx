@@ -55,6 +55,7 @@ interface TestResult {
   provider?: string
   model?: string
   correlation_id?: string
+  error_category?: string
   error?: string
 }
 
@@ -102,6 +103,12 @@ export function TestModelDialog({
         success: false,
         latency_ms: 0,
         status: "error",
+        error_category:
+          e && typeof e === "object" && "providerCategory" in e
+            ? String((e as { providerCategory?: unknown }).providerCategory || "backend_api")
+            : e && typeof e === "object" && "category" in e
+              ? String((e as { category?: unknown }).category || "frontend_network")
+              : "frontend_network",
         error: e instanceof Error ? e.message : t("models.test.testFailed"),
       })
     } finally {
@@ -237,6 +244,11 @@ export function TestModelDialog({
                       <IconX className="size-4" />
                       {t("models.test.failed")}
                     </div>
+                    {result.error_category && (
+                      <div className="text-xs font-medium uppercase tracking-wide opacity-70">
+                        {result.error_category.replaceAll("_", " ")}
+                      </div>
+                    )}
                     <div className="text-xs opacity-80">
                       {result.error ||
                         t("models.test.status", { status: result.status })}

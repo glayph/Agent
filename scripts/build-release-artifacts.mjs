@@ -4,7 +4,7 @@
  *
  * Full build pipeline for Miki:
  *   1. TypeScript compilation (tsc -b with project references)
- *   2. Go backend (ui/backend) + CLI (Miki-cli) binaries
+ *   2. Go compatibility stub (ui/backend) + CLI (Miki-cli) binaries
  *   3. React frontend (Vite via pnpm)
  *   4. Runtime package assembly (prepare-runtime-package.mjs)
  */
@@ -61,7 +61,7 @@ function buildGoBackend() {
 
   fs.mkdirSync(outDir, { recursive: true });
 
-  log("Building Go backend (Miki-web)...");
+  log("Building Go compatibility stub (Miki-web, legacy)...");
   const result = spawnSync(
     "go",
     ["build", "-trimpath", "-ldflags", "-s -w", "-o", path.join(outDir, exe), "."],

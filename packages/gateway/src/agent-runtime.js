@@ -1,0 +1,779 @@
+import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { AgentControlService, createControlRouter, createControlToolFactory, } from "@miki/core/control";
+import { AgentEngine, ApprovalStore, ToolRegistry, buildSkillsContext, createControlTools, createFileManagementTools, createFetchLLMClient, createMemoryTools, createSkillTools, createWorkspaceTools, describePlan, } from "@miki/core/engine";
+import { searchWeb } from "@miki/core/web-search-service";
+import { BrowserTool, ComputerAgent } from "@miki/core/plugins";
+import { getLifecycleBus } from "@miki/core/hooks";
+const TOOL_GROUPS = {
+    filesystem: {
+        label: "Workspace files",
+        defaultEnabled: true,
+        names: (n) => ["workspace_list", "file_read", "workspace_search", "file_write"].includes(n) || n.startsWith("file_"),
+    },
+    memory: { label: "Long-term memory", defaultEnabled: true, names: (n) => n.startsWith("memory_") },
+    skills: { label: "Skills", defaultEnabled: true, names: (n) => n.startsWith("skill_") },
+    control: { label: "Agent control", defaultEnabled: true, names: (n) => n.startsWith("agent_control_") },
+    web_search: { label: "Web search", defaultEnabled: false, names: (n) => n === "web_search" },
+    browser: { label: "Browser automation", defaultEnabled: false, names: (n) => n.startsWith("browser_") },
+    computer: { label: "Computer use", defaultEnabled: false, names: (n) => n.startsWith("computer_") },
+};
+const isRecord = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+function deepMerge(base, patch) {
+    const out = { ...base };
+    for (const [key, value] of Object.entries(patch)) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype")
+            continue;
+        out[key] = isRecord(value) && isRecord(out[key]) ? deepMerge(out[key], value) : value;
+    }
+    return out;
+}
+function isLocalUrl(url) {
+    try {
+        const host = new URL(url).hostname;
+        return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+    }
+    catch {
+        return false;
+    }
+}
+function providerDefaults(provider) {
+    const normalized = provider.trim().toLowerCase();
+    if (normalized === "gemini" || normalized === "google")
+        return { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/", apiKey: process.env.GEMINI_API_KEY || "" };
+    if (normalized === "openrouter" || normalized === "open-router")
+        return { baseUrl: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY || "" };
+    if (normalized === "openai-compatible" || normalized === "compatible" || normalized === "openai_compatible")
+        return { baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL || "http://127.0.0.1:8000/v1", apiKey: process.env.OPENAI_COMPATIBLE_API_KEY || "" };
+    if (normalized === "llama.cpp" || normalized === "llama-cpp" || normalized === "llamacpp" || normalized === "local")
+        return { baseUrl: process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1", apiKey: "" };
+    return { baseUrl: "https://api.openai.com/v1", apiKey: process.env.OPENAI_API_KEY || "" };
+}
+export function createAgentRuntime(deps) {
+    const { db } = deps;
+    const now = () => new Date().toISOString();
+    // ---- model resolution ---------------------------------------------------
+    const llmFor = (requested) => {
+        const stored = deps.storedModels();
+        const entry = requested
+            ? stored.find((item) => item.payload.model === requested || item.payload.model_name === requested)
+            : stored.find((item) => item.isDefault) ?? stored[0];
+        const payload = entry?.payload ?? {};
+        // The UI sends model_name (a friendly label such as "Test"), while the
+        // provider requires the stored model identifier (for example
+        // "gemini-3.5-flash-lite"). Prefer the stored identifier whenever the
+        // request matched a configured entry by either field.
+        const model = String(entry?.payload.model || entry?.payload.model_name || requested || process.env.MIKI_MODEL || process.env.OPENAI_MODEL || "").trim();
+        if (!model)
+            return undefined;
+        const provider = String(payload.provider || process.env.MIKI_PROVIDER || "openai-compatible");
+        const defaults = providerDefaults(provider);
+        const apiKey = String(payload.api_key || defaults.apiKey || process.env.OPENAI_API_KEY || "");
+        const baseUrl = String(payload.api_base || defaults.baseUrl || process.env.OPENAI_API_BASE || "https://api.openai.com/v1");
+        if (!apiKey && !isLocalUrl(baseUrl))
+            return undefined;
+        const extraBody = isRecord(payload.extra_body) ? { ...payload.extra_body } : {};
+        const configuredThinking = String(payload.thinking_level || "").trim();
+        if (configuredThinking && extraBody.thinking_level === undefined) {
+            extraBody.thinking_level = configuredThinking;
+        }
+        return createFetchLLMClient({ baseUrl, model, apiKey: apiKey || undefined, ...(Object.keys(extraBody).length ? { extraBody } : {}) });
+    };
+    // ---- tools --------------------------------------------------------------
+    const memoryPort = {
+        search(query, limit) {
+            const needle = `%${query.replace(/[%_\\]/g, (c) => `\\${c}`).toLowerCase()}%`;
+            const rows = db
+                .prepare("SELECT id,content,region FROM memory_chunks WHERE lower(content) LIKE ? ESCAPE '\\' OR lower(summary) LIKE ? ESCAPE '\\' ORDER BY importance DESC, updated_at DESC LIMIT ?")
+                .all(needle, needle, limit);
+            return rows.map((row) => ({ id: row.id, text: row.content, region: row.region }));
+        },
+        add(entry) {
+            const id = randomUUID();
+            const stamp = now();
+            db.prepare("INSERT INTO memory_chunks(id,region,content,summary,provenance,confidence,importance,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(id, entry.region || "long_term", entry.content, entry.summary || entry.content.slice(0, 160), "agent", 1, 0.5, stamp, stamp);
+            return { id };
+        },
+    };
+    const registry = new ToolRegistry();
+    const approvals = new ApprovalStore();
+    const browser = new BrowserTool(true, deps.dataRoot);
+    const effectiveWorkspaceRoot = () => {
+        const configured = deps.getAppConfig()?.agents?.defaults?.workspace;
+        return typeof configured === "string" && configured.trim() ? path.resolve(configured) : deps.workspaceRoot;
+    };
+    browser.setWorkspaceDir(effectiveWorkspaceRoot());
+    const computer = new ComputerAgent();
+    // ---- control service ----------------------------------------------------
+    const toolState = () => {
+        const tools = deps.getAppConfig().tools;
+        const state = isRecord(tools) && isRecord(tools.tool_state) ? tools.tool_state : {};
+        const out = {};
+        for (const [name, group] of Object.entries(TOOL_GROUPS))
+            out[name] = typeof state[name] === "boolean" ? state[name] : group.defaultEnabled;
+        for (const [name, value] of Object.entries(state))
+            if (typeof value === "boolean" && !(name in out))
+                out[name] = value;
+        return out;
+    };
+    let allTools = [];
+    const syncTools = () => {
+        const autonomy = deps.getAppConfig().autonomy;
+        const autonomyConfig = isRecord(autonomy) ? autonomy : {};
+        const toolPolicy = isRecord(autonomyConfig.tool_policy) ? autonomyConfig.tool_policy : {};
+        const allowedDomains = Array.isArray(toolPolicy.browser_allowed_domains)
+            ? toolPolicy.browser_allowed_domains.filter((value) => typeof value === "string")
+            : [];
+        const bypassRestrictions = deps.getAppConfig()?.agent?.security?.bypass_restrictions === true;
+        browser.setBypassRestrictions(bypassRestrictions);
+        browser.setAllowedDomains(bypassRestrictions ? [] : allowedDomains);
+        browser.setWorkspaceDir(effectiveWorkspaceRoot());
+        const state = toolState();
+        for (const name of registry.names())
+            registry.unregister(name);
+        for (const tool of allTools) {
+            const group = Object.entries(TOOL_GROUPS).find(([, g]) => g.names(tool.name))?.[0];
+            if (!group || state[group])
+                registry.register(tool);
+        }
+    };
+    const controller = {
+        getConfig: () => {
+            const config = deps.getAppConfig();
+            const tools = isRecord(config.tools) ? config.tools : {};
+            return {
+                ...config,
+                tools: { ...tools, tool_state: toolState() },
+                models: deps.storedModels().map((item) => ({ ...item.payload, is_default: item.isDefault })),
+            };
+        },
+        validateConfig: (candidate) => validate(candidate),
+        validatePatch: (patch) => validate(patch),
+        async applyPatch(patch) {
+            if (!validate(patch).valid)
+                throw new Error("Configuration patch is not valid.");
+            const { models: _models, ...storable } = patch;
+            deps.setAppConfig(deepMerge(deps.getAppConfig(), storable));
+            syncTools();
+            return { runtime_apply_status: "applied", gateway_restart_required: false };
+        },
+        async setToolState(name, enabled) {
+            const config = deps.getAppConfig();
+            const tools = isRecord(config.tools) ? config.tools : {};
+            const state = isRecord(tools.tool_state) ? tools.tool_state : {};
+            deps.setAppConfig({ ...config, tools: { ...tools, tool_state: { ...state, [name]: enabled } } });
+            syncTools();
+            return { runtime_apply_status: "applied", gateway_restart_required: false };
+        },
+    };
+    function validate(value) {
+        const errors = [];
+        if (!isRecord(value))
+            errors.push("Configuration must be an object.");
+        else {
+            try {
+                if (JSON.stringify(value).length > 64_000)
+                    errors.push("Configuration is larger than 64 KB.");
+            }
+            catch {
+                errors.push("Configuration is not serializable.");
+            }
+            if ("factory_reset" in value)
+                errors.push("factory_reset is not allowed.");
+        }
+        return { valid: errors.length === 0, errors };
+    }
+    const control = new AgentControlService({
+        controller,
+        runtimePaths: { dataDir: deps.dataRoot },
+        approvals,
+        hooks: {
+            reload: async () => ({ pendingRestart: false }),
+            readToolState: toolState,
+            readExtraState: () => ({
+                engine: {
+                    tools: registry.names(),
+                    pending_approvals: approvals.pendingCount(),
+                    model: llmFor()?.model ?? null,
+                },
+            }),
+        },
+    });
+    allTools = [
+        ...createWorkspaceTools({
+            root: effectiveWorkspaceRoot,
+            restrictToWorkspace: () => deps.getAppConfig()?.agents?.defaults?.restrict_to_workspace !== false,
+        }).filter((tool) => tool.name !== "file_read"),
+        ...createFileManagementTools({
+            root: effectiveWorkspaceRoot,
+            restrictToWorkspace: () => deps.getAppConfig()?.agents?.defaults?.restrict_to_workspace !== false,
+            executionEnabled: deps.fileExecutionEnabled,
+            onRun: (entry) => deps.recordFileRun({ file: entry.file, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: "agent" }),
+        }),
+        ...createMemoryTools(memoryPort),
+        ...createSkillTools({
+            store: deps.skills.store,
+            registry: deps.skills.registry,
+            workspaceRoot: effectiveWorkspaceRoot,
+            executionEnabled: deps.fileExecutionEnabled,
+            allowedSkills: () => {
+                const profile = deps.getAppConfig()?.agents?.defaults?.turn_profile;
+                if (!profile || profile.enabled !== true)
+                    return undefined;
+                const skills = profile.skills || {};
+                if (String(skills.mode || "default") === "off")
+                    return [];
+                if (String(skills.mode || "default") !== "custom")
+                    return undefined;
+                return Array.isArray(skills.allow) ? skills.allow.filter((value) => typeof value === "string") : [];
+            },
+            onRun: (entry) => deps.recordFileRun({ file: `${entry.skill}/${entry.script}`, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: `skill:${entry.skill}` }),
+        }),
+        ...createControlTools(createControlToolFactory(control)),
+        {
+            name: "browser_navigate",
+            description: "Open an HTTP or HTTPS page in the isolated headless browser. External navigation requires approval.",
+            risk: "config_write",
+            approval: "required",
+            parameters: { type: "object", properties: { url: { type: "string", description: "HTTP(S) URL to open." } }, required: ["url"], additionalProperties: false },
+            async execute(input) { return browser.navigate(String(input.url || "")); },
+        },
+        {
+            name: "browser_click",
+            description: "Click a visible element by a Playwright selector on the current page. Requires approval.",
+            risk: "config_write",
+            approval: "required",
+            parameters: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
+            async execute(input) { return browser.click(String(input.selector || "")); },
+        },
+        {
+            name: "browser_type",
+            description: "Type text into a browser selector. Requires approval.",
+            risk: "config_write",
+            approval: "required",
+            parameters: { type: "object", properties: { selector: { type: "string" }, text: { type: "string", maxLength: 4000 } }, required: ["selector", "text"], additionalProperties: false },
+            async execute(input) { return browser.type(String(input.selector || ""), String(input.text || "")); },
+        },
+        {
+            name: "browser_extract",
+            description: "Extract visible text from the current browser page or a CSS selector. Read-only.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: { selector: { type: "string" } }, additionalProperties: false },
+            async execute(input) { return browser.extract(typeof input.selector === "string" ? input.selector : undefined); },
+        },
+        {
+            name: "browser_screenshot",
+            description: "Capture a screenshot of the current browser page and return its saved path.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+            async execute() { return browser.screenshot(); },
+        },
+        {
+            name: "web_search",
+            description: "Search the web and return ranked results with citations.",
+            risk: "read",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: { type: "string", description: "The search query." },
+                    max_results: { type: "integer", minimum: 1, maximum: 10, description: "Maximum number of results." },
+                    mode: { type: "string", enum: ["local", "cloud", "auto"], description: "Search execution mode." },
+                    provider: { type: "string", description: "Optional provider override." },
+                },
+                required: ["query"],
+                additionalProperties: false,
+            },
+            async execute(input) {
+                const query = typeof input.query === "string" ? input.query : "";
+                const config = deps.getAppConfig().web_search;
+                const webSearchConfig = isRecord(config) ? config : {};
+                return searchWeb(path.join(deps.workspaceRoot, "config"), webSearchConfig, query, {
+                    maxResults: input.max_results,
+                    mode: input.mode,
+                    provider: input.provider,
+                });
+            },
+        },
+        {
+            name: "computer_observe",
+            description: "Observe accessible desktop UI elements using Windows UI Automation.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: { active_only: { type: "boolean" }, max_elements: { type: "integer", minimum: 1, maximum: 300 }, query: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
+            async execute(input) { return computer.observe(input); },
+        },
+        {
+            name: "computer_focus",
+            description: "Focus a native desktop window.",
+            risk: "write",
+            approval: "required",
+            parameters: { type: "object", properties: { window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
+            async execute(input) { return computer.focus(input); },
+        },
+        {
+            name: "computer_invoke",
+            description: "Invoke an accessible desktop UI element observed by computer_observe.",
+            risk: "write",
+            approval: "required",
+            parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
+            async execute(input) { return computer.invoke(input); },
+        },
+        {
+            name: "computer_set_text",
+            description: "Set text in an accessible native UI field.",
+            risk: "write",
+            approval: "required",
+            parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, text: { type: "string", maxLength: 4000 }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["text"], additionalProperties: false },
+            async execute(input) { return computer.setText(input); },
+        },
+        {
+            name: "computer_hotkey",
+            description: "Send a deterministic keyboard shortcut to the focused desktop window.",
+            risk: "write",
+            approval: "required",
+            parameters: { type: "object", properties: { keys: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["keys"], additionalProperties: false },
+            async execute(input) { return computer.hotkey(input); },
+        },
+        {
+            name: "computer_clipboard",
+            description: "Read, set, or clear the system clipboard.",
+            risk: "write",
+            approval: "required",
+            parameters: { type: "object", properties: { action: { type: "string", enum: ["get", "set", "clear"] }, text: { type: "string", maxLength: 10000 } }, additionalProperties: false },
+            async execute(input) { return computer.clipboard(input); },
+        },
+        {
+            name: "computer_launch",
+            description: "Launch a local application without shell command interpretation.",
+            risk: "write",
+            approval: "required",
+            parameters: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, required: ["command"], additionalProperties: false },
+            async execute(input) { return computer.launch(input); },
+        },
+        {
+            name: "computer_verify",
+            description: "Verify that native desktop UI contains or does not contain expected text.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: { contains: { type: "string" }, not_contains: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" }, max_elements: { type: "integer", minimum: 1, maximum: 300 } }, additionalProperties: false },
+            async execute(input) { return computer.verify(input); },
+        },
+        {
+            name: "computer_screenshot",
+            description: "Capture a screenshot of the primary display.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: { grid: { type: "boolean" }, grid_step: { type: "integer", minimum: 20, maximum: 500 } }, additionalProperties: false },
+            async execute(input) { return computer.screenshot(input); },
+        },
+        {
+            name: "computer_list_processes",
+            description: "List running desktop processes.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+            async execute(input) { return computer.listProcesses(input); },
+        },
+        {
+            name: "computer_get_system_info",
+            description: "Get operating system and hardware information.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+            async execute(input) { return computer.getSystemInfo(input); },
+        },
+        {
+            name: "computer_list_displays",
+            description: "List connected displays and their bounds.",
+            risk: "read",
+            approval: "auto",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+            async execute(input) { return computer.listDisplays(input); },
+        },
+    ];
+    syncTools();
+    const engine = new AgentEngine({
+        llm: llmFor,
+        tools: registry,
+        approvals,
+        // Advertise only the skills permitted by the active turn profile.
+        contextProvider: async () => {
+            if (!registry.has("skill_read"))
+                return undefined;
+            const profile = deps.getAppConfig()?.agents?.defaults?.turn_profile;
+            if (profile?.enabled === true) {
+                const skills = profile.skills || {};
+                const mode = String(skills.mode || "default");
+                if (mode === "off")
+                    return undefined;
+                if (mode === "custom") {
+                    const allow = new Set(Array.isArray(skills.allow) ? skills.allow.filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean) : []);
+                    const records = (await deps.skills.store.list()).filter((record) => allow.has(record.name));
+                    if (!records.length)
+                        return undefined;
+                    const lines = records.map((skill) => `- ${skill.name}: ${skill.description.replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
+                    return [
+                        "Installed skills enabled for this turn:",
+                        "Only the following skills are permitted. Call skill_read with one of these names before following its instructions.",
+                        lines,
+                    ].join("\n");
+                }
+            }
+            return buildSkillsContext(deps.skills.store);
+        },
+        logger: (message, details) => deps.log?.(message, details),
+        maxTurns: () => Math.max(1, resolveMaxToolIterations((deps.getAppConfig()?.agents?.defaults ?? {}))),
+        maxToolCalls: () => Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
+        maxToolIterations: () => resolveMaxToolIterations((deps.getAppConfig()?.agents?.defaults ?? {})),
+        contextWindowTokens: () => resolveContextWindowTokens((deps.getAppConfig()?.agents?.defaults ?? {})),
+        maxCompletionTokens: () => Number(deps.getAppConfig()?.agents?.defaults?.max_completion_tokens ?? deps.getAppConfig()?.agents?.defaults?.max_tokens ?? 0) || undefined,
+        systemPromptEnabled: () => {
+            const p = deps.getAppConfig()?.agents?.defaults?.turn_profile;
+            return !p || p.enabled !== true || String(p?.system_prompt?.mode || "default") !== "off";
+        },
+    });
+    // ---- run tracking (cancel, one run per session) -------------------------
+    const runs = new Map();
+    const sessionRuns = new Map();
+    function cancelRun(runId) {
+        const run = runs.get(runId);
+        if (!run)
+            return false;
+        run.controller.abort();
+        return true;
+    }
+    async function startRun(input) {
+        const runId = input.runId ?? `run_${randomUUID()}`;
+        if (input.sessionId && sessionRuns.has(input.sessionId))
+            throw new Error("A run is already active for this session.");
+        const controller = new AbortController();
+        input.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+        runs.set(runId, { controller, sessionId: input.sessionId, startedAt: now(), source: input.source });
+        if (input.sessionId)
+            sessionRuns.set(input.sessionId, runId);
+        try {
+            getLifecycleBus().emit("message:received", {
+                eventId: runId,
+                session_key: input.sessionId,
+                text: input.history.at(-1)?.content,
+                surface: input.source,
+            });
+            const result = await engine.run({
+                runId,
+                sessionId: input.sessionId,
+                history: input.history,
+                model: input.model,
+                allowTools: input.allowTools,
+                signal: controller.signal,
+                onEvent: input.onEvent,
+            });
+            getLifecycleBus().emit("message:sent", {
+                eventId: runId,
+                session_key: input.sessionId,
+                text: result.finalText,
+                surface: input.source,
+                status: result.status,
+            });
+            return result;
+        }
+        finally {
+            runs.delete(runId);
+            if (input.sessionId && sessionRuns.get(input.sessionId) === runId)
+                sessionRuns.delete(input.sessionId);
+        }
+    }
+    // ---- HTTP routes --------------------------------------------------------
+    function mount(app) {
+        // Auth covers everything under /api/control, including the approval
+        // endpoints, so an unauthenticated visitor can never approve a request.
+        app.use("/api/control", deps.requireAuth);
+        // Approval queue (dashboard-facing). Mounted before the typed control router.
+        app.get("/api/control/approvals", (_req, res) => res.json({ requests: approvals.list() }));
+        app.post("/api/control/approvals/:id/approve", (req, res) => {
+            const decidedBy = typeof req.body?.decidedBy === "string" ? req.body.decidedBy : "dashboard-operator";
+            const record = approvals.approve(req.params.id, decidedBy);
+            if (!record)
+                return res.status(404).json({ error: "Approval request not found" });
+            if (record.status !== "approved")
+                return res.status(409).json({ error: `Request is already ${record.status}`, request: record });
+            return res.json({ request: record });
+        });
+        app.post("/api/control/approvals/:id/deny", (req, res) => {
+            const decidedBy = typeof req.body?.decidedBy === "string" ? req.body.decidedBy : "dashboard-operator";
+            const reason = typeof req.body?.reason === "string" ? req.body.reason : undefined;
+            const record = approvals.deny(req.params.id, decidedBy, reason);
+            if (!record)
+                return res.status(404).json({ error: "Approval request not found" });
+            if (record.status !== "denied")
+                return res.status(409).json({ error: `Request is already ${record.status}`, request: record });
+            return res.json({ request: record });
+        });
+        // capabilities, state, operations, plan, execute: core's typed control router.
+        app.use("/api/control", createControlRouter(() => control));
+        // Task handles used by the dashboard's stop button.
+        app.get("/api/tasks/:id", deps.requireAuth, (req, res) => {
+            const run = runs.get(req.params.id);
+            if (run)
+                return res.json({ id: req.params.id, status: "running", sessionId: run.sessionId, startedAt: run.startedAt });
+            if (deps.externalRunActive?.(req.params.id))
+                return res.json({ id: req.params.id, status: "running" });
+            return res.status(404).json({ error: "Task not found or already finished" });
+        });
+        app.delete("/api/tasks/:id", deps.requireAuth, (req, res) => {
+            if (cancelRun(req.params.id) || deps.externalCancelRun?.(req.params.id))
+                return res.json({ status: "cancelling", id: req.params.id });
+            return res.status(404).json({ error: "Task not found or already finished" });
+        });
+        // Engine self-test. GET never calls a model; POST runs one real agent turn.
+        app.get("/api/test", deps.requireAuth, (_req, res) => {
+            const llm = llmFor();
+            const checks = [
+                { name: "model", ok: Boolean(llm), detail: llm ? `Resolved model ${llm.model}.` : "No model with credentials is configured." },
+                { name: "tools", ok: registry.size > 0, detail: `${registry.size} tool(s): ${registry.names().join(", ")}` },
+                { name: "control_service", ok: control.listCapabilities().length > 0, detail: `${control.listCapabilities().length} capability(ies).` },
+                { name: "approvals", ok: true, detail: `${approvals.pendingCount()} pending.` },
+                { name: "database", ok: Boolean(db.prepare("SELECT 1 AS ok").get()), detail: "SQLite reachable." },
+                { name: "workspace", ok: true, detail: deps.workspaceRoot },
+            ];
+            res.json({ ok: checks.every((c) => c.ok), engine: "agent-engine", checks, activeRuns: runs.size, checkedAt: now() });
+        });
+        app.post("/api/test", deps.requireAuth, async (req, res) => {
+            const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+            if (!prompt)
+                return res.status(400).json({ error: "prompt is required" });
+            const model = typeof req.body?.model === "string" && req.body.model.trim() ? req.body.model.trim() : undefined;
+            const events = [];
+            try {
+                const result = await startRun({
+                    history: [{ role: "user", content: prompt }],
+                    model,
+                    allowTools: req.body?.tools === true,
+                    source: "api-test",
+                    onEvent: (event) => {
+                        if (event.type === "tool.call")
+                            events.push({ type: event.type, detail: { name: event.call.name, status: event.call.status } });
+                        else if (event.type !== "message.final")
+                            events.push({ type: event.type });
+                    },
+                });
+                return res.status(result.status === "failed" ? 502 : 200).json({
+                    ok: result.status === "completed",
+                    status: result.status,
+                    model: result.model,
+                    answer: result.finalText,
+                    error: result.error,
+                    turns: result.turns,
+                    toolCalls: result.toolCalls.map((c) => ({ id: c.id, name: c.name, status: c.status, error: c.error })),
+                    plan: result.plan,
+                    usage: result.usage,
+                    events,
+                });
+            }
+            catch (error) {
+                return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+    }
+    async function setToolState(name, enabled) {
+        const result = await controller.setToolState(name, enabled);
+        return { ...result, status: enabled ? "enabled" : "disabled", name };
+    }
+    return { engine, control, approvals, registry, llmFor, mount, startRun, cancelRun, syncTools, setToolState, describePlan, activeRunCount: () => runs.size };
+}
+/** Map engine events onto the dashboard's WebSocket protocol. */
+export function createWsEventMapper(send, model, getToolFeedbackConfig = () => ({ enabled: true, separateMessages: false, maxArgsLength: 300 })) {
+    const toolMessageId = (callId) => `tool-${callId}`;
+    const created = new Set();
+    /** Id of the final assistant message, so the caller can persist it under the same id. */
+    const finalId = randomUUID();
+    let thoughtSeq = 0;
+    let stateSeq = 0;
+    let toolFeedbackSeq = 0;
+    const toolFeedbackPayload = (call, runId) => {
+        const cfg = getToolFeedbackConfig();
+        if (!cfg.enabled)
+            return;
+        const rawArgs = typeof call.arguments === "string" ? call.arguments : "{}";
+        const max = Math.max(0, Math.floor(cfg.maxArgsLength || 0));
+        const argumentsText = max > 0 && rawArgs.length > max ? `${rawArgs.slice(0, Math.max(0, max - 1))}…` : rawArgs;
+        const messageId = cfg.separateMessages
+            ? `tool-${call.id}-${call.status}-${++toolFeedbackSeq}`
+            : `tool-${call.id}`;
+        send(cfg.separateMessages || !created.has(messageId) ? "message.create" : "message.update", {
+            message_id: messageId,
+            content: `Tool ${call.name}: ${call.status}${call.error ? ` — ${call.error}` : ""}`,
+            kind: "tool_calls",
+            run_id: runId,
+            tool_calls: [{
+                    id: call.id,
+                    type: "function",
+                    function: { name: call.name, arguments: argumentsText },
+                    extra_content: { tool_feedback_explanation: call.error ? `${call.status}: ${call.error}` : call.status },
+                }],
+        });
+        created.add(messageId);
+    };
+    const handle = (event) => {
+        const runId = event.runId;
+        switch (event.type) {
+            case "orchestrator.started":
+                send("node.run_start", { run_id: runId, status: "running", objective: event.goal });
+                send("typing.start", { run_id: runId });
+                break;
+            case "orchestrator.route":
+                send("message.create", {
+                    message_id: `router-${runId}`,
+                    content: `Router → ${event.decision.mode} (${Math.round(event.decision.confidence * 100)}%)${event.decision.reason ? ` — ${event.decision.reason}` : ""}`,
+                    kind: "thought",
+                    thought_category: "Router",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.state":
+                send("message.create", {
+                    message_id: `state-${runId}-${++stateSeq}`,
+                    content: `${event.phase}: ${event.detail || ""}`.trim(),
+                    kind: "thought",
+                    thought_category: "State",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.plan":
+                send("message.create", {
+                    message_id: `plan-${event.plan.id}`,
+                    content: describePlan(event.plan),
+                    kind: "thought",
+                    thought_category: "Plan",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.subtask.started":
+                send("message.create", {
+                    message_id: `subtask-${runId}-${event.nodeId}`,
+                    content: `Sub-task ${event.nodeId} attempt ${event.attempt}: ${event.title}`,
+                    kind: "thought",
+                    thought_category: "Sub-task",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.subtask.event": {
+                const child = event.event;
+                if (child.type === "thought") {
+                    // Never stream raw chain-of-thought text to the client. Expose a
+                    // progress signal instead; the final answer and tool status remain visible.
+                    send("message.create", {
+                        message_id: `thought-${runId}-${event.nodeId}-${child.turn}-${++thoughtSeq}`,
+                        content: `Working on sub-task ${event.nodeId} (turn ${child.turn}).`,
+                        kind: "thought",
+                        thought_category: "Progress",
+                        run_id: runId,
+                    });
+                }
+                else {
+                    const cfg = getToolFeedbackConfig();
+                    if (cfg.enabled) {
+                        const call = child.call;
+                        const rawArgs = typeof call.arguments === "string" ? call.arguments : "{}";
+                        const max = Math.max(0, Math.floor(cfg.maxArgsLength || 0));
+                        const argumentsText = max > 0 && rawArgs.length > max ? `${rawArgs.slice(0, Math.max(0, max - 1))}…` : rawArgs;
+                        const id = cfg.separateMessages ? `tool-${call.id}-${call.status}-${++toolFeedbackSeq}` : toolMessageId(call.id);
+                        send(cfg.separateMessages || !created.has(id) ? "message.create" : "message.update", {
+                            message_id: id,
+                            content: `Sub-task ${event.nodeId}: ${call.name} ${call.status}`,
+                            kind: "tool_calls",
+                            run_id: runId,
+                            tool_calls: [{ id: call.id, type: "function", function: { name: call.name, arguments: argumentsText }, extra_content: { tool_feedback_explanation: call.error ? `${call.status}: ${call.error}` : call.status } }],
+                        });
+                        created.add(id);
+                    }
+                }
+                break;
+            }
+            case "orchestrator.subtask.finished":
+                send("message.create", {
+                    message_id: `subtask-finished-${runId}-${event.nodeId}-${event.attempt}`,
+                    content: `${event.nodeId}: ${event.ok ? "completed" : "failed"}${event.error ? ` — ${event.error}` : ""}`,
+                    kind: "thought",
+                    thought_category: "Sub-task",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.evaluation":
+                send("message.create", {
+                    message_id: `eval-${runId}-${event.nodeId}-${event.attempt}`,
+                    content: `${event.nodeId}: ${event.pass ? "PASS" : "RETRY/FAIL"} — ${event.reason}`,
+                    kind: "thought",
+                    thought_category: "Evaluation",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.memory_sync":
+                send("message.create", {
+                    message_id: `memory-sync-${runId}`,
+                    content: `Memory sync: ${event.detail}`,
+                    kind: "thought",
+                    thought_category: "Memory",
+                    run_id: runId,
+                });
+                break;
+            case "orchestrator.finished":
+                send("typing.stop", { run_id: runId });
+                send("node.run_end", {
+                    run_id: runId,
+                    status: event.status === "completed" ? "completed" : event.status === "cancelled" ? "cancelled" : "failed",
+                    ...(event.error ? { error: event.error } : {}),
+                });
+                break;
+            case "message.final":
+                send("message.create", {
+                    message_id: finalId,
+                    content: event.content,
+                    kind: "normal",
+                    run_id: runId,
+                    ...(model ? { model_name: model } : {}),
+                });
+                break;
+            case "run.started":
+                send("node.run_start", { run_id: runId, status: "running" });
+                send("typing.start", { run_id: runId });
+                break;
+            case "plan.created":
+                send("message.create", {
+                    message_id: `plan-${event.plan.id}`,
+                    content: describePlan(event.plan),
+                    kind: "thought",
+                    thought_category: "Plan",
+                    run_id: runId,
+                });
+                break;
+            case "thought":
+                // Raw chain-of-thought is intentionally not sent to clients.
+                send("message.create", {
+                    message_id: `thought-${runId}-${event.turn}`,
+                    content: `Working on the task (turn ${event.turn}).`,
+                    kind: "thought",
+                    thought_category: "Progress",
+                    run_id: runId,
+                });
+                break;
+            case "tool.call": {
+                toolFeedbackPayload(event.call, runId);
+                break;
+            }
+            case "run.finished":
+                send("typing.stop", { run_id: runId });
+                send("node.run_end", {
+                    run_id: runId,
+                    status: event.status === "completed" ? "completed" : event.status === "cancelled" ? "cancelled" : "failed",
+                    ...(event.error ? { error: event.error } : {}),
+                });
+                break;
+            default:
+                break;
+        }
+    };
+    return { handle, finalId };
+}

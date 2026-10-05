@@ -3,7 +3,7 @@ import { launcherFetch } from "@/api/http"
 // API client for gateway process management.
 
 interface GatewayStatusResponse {
-  gateway_status: "running" | "starting" | "restarting" | "stopped" | "error"
+  gateway_status: "running" | "starting" | "restarting" | "stopping" | "stopped" | "error"
   gateway_start_allowed?: boolean
   gateway_start_reason?: string
   gateway_restart_required?: boolean
@@ -23,7 +23,7 @@ interface GatewayLogsResponse {
 }
 
 interface GatewayActionResponse {
-  status: "ok" | "running" | "reloaded" | "pending_restart" | "failed" | string
+  status: "ok" | "running" | "reloaded" | "pending_restart" | "pending_shutdown" | "failed" | string
   supported?: boolean
   pid?: number
   log_total?: number
@@ -60,15 +60,15 @@ export async function getGatewayStatus(): Promise<GatewayStatusResponse> {
 }
 
 export async function getGatewayLogs(options?: {
-  log_offset?: number
-  log_run_id?: number
+  offset?: number
+  run_id?: number
 }): Promise<GatewayLogsResponse> {
   const params = new URLSearchParams()
-  if (options?.log_offset !== undefined) {
-    params.set("log_offset", options.log_offset.toString())
+  if (options?.offset !== undefined) {
+    params.set("offset", options.offset.toString())
   }
-  if (options?.log_run_id !== undefined) {
-    params.set("log_run_id", options.log_run_id.toString())
+  if (options?.run_id !== undefined) {
+    params.set("run_id", options.run_id.toString())
   }
   const queryString = params.toString() ? `?${params.toString()}` : ""
   return request<GatewayLogsResponse>(`/api/gateway/logs${queryString}`)
@@ -81,10 +81,7 @@ export async function startGateway(): Promise<GatewayActionResponse> {
 }
 
 export async function stopGateway(): Promise<GatewayActionResponse> {
-  // The Node runtime is the gateway process itself, so the compatibility
-  // /api/gateway/stop route cannot stop its parent and intentionally returns
-  // 501. Use the authenticated gateway-owned shutdown handoff instead.
-  return request<GatewayActionResponse>("/gateway/shutdown", {
+  return request<GatewayActionResponse>("/api/gateway/shutdown", {
     method: "POST",
   })
 }
@@ -95,17 +92,9 @@ export async function restartGateway(): Promise<GatewayActionResponse> {
   })
 }
 
-export async function shutdownGateway(): Promise<GatewayActionResponse> {
-  return request<GatewayActionResponse>("/gateway/shutdown", {
-    method: "POST",
-  })
-}
-
 export async function clearGatewayLogs(): Promise<GatewayActionResponse> {
-  // Core only registers POST /gateway/logs/clear (see
-  // packages/core/src/api/launcher-compat.ts). There is no DELETE handler
-  // for /gateway/logs, so calling that verb 404s every time (#123) and the
-  // request never reaches the real per-file clear logic on the backend.
+  // Log management is owned by the Node Gateway; keep this client on the
+  // canonical /api/gateway contract.
   return request<GatewayActionResponse>("/api/gateway/logs/clear", {
     method: "POST",
   })

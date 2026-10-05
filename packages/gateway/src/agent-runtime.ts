@@ -1,5 +1,7 @@
+import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
 import express from "express"
 import { randomUUID } from "node:crypto"
+import path from "node:path"
 import type Database from "better-sqlite3"
 import {
   AgentControlService,
@@ -11,23 +13,27 @@ import {
   AgentEngine,
   ApprovalStore,
   ToolRegistry,
+  buildSkillsContext,
   createControlTools,
   createFileManagementTools,
   createFetchLLMClient,
   createMemoryTools,
+  createSkillTools,
   createWorkspaceTools,
   describePlan,
   type EngineEvent,
+  type LayeredEvent,
   type EngineLLMClient,
   type EngineMessage,
   type EngineTool,
   type RunResult,
 } from "@miki/core/engine"
-import {
-  RunsStore,
-  createRunsRouter,
-  type AgentRunStatus,
-} from "./runs-store.js"
+import type { SkillRegistryClient, SkillStore } from "@miki/core/skills"
+import { searchWeb } from "@miki/core/web-search-service"
+import { BrowserTool, ComputerAgent } from "@miki/core/plugins"
+import { createGoalTools, GoalStore } from "@miki/core/api/goals"
+import { AdaptiveMessageCoordinator, planAdaptiveOutput, type AdaptiveMessagingConfig } from "@miki/core"
+import { getLifecycleBus } from "@miki/core/hooks"
 
 type Json = Record<string, unknown>
 
@@ -43,6 +49,10 @@ export interface AgentRuntimeDeps {
   /** Runtime kill switch for script execution (dashboard and agent). */
   fileExecutionEnabled(): boolean
   recordFileRun(entry: { file: string; args: string[]; status: string; exitCode: number | null; durationMs: number; source: string }): void
+  /** Skills the agent can discover, read, run, install and delete. */
+  skills: { store: SkillStore; registry: SkillRegistryClient }
+  externalRunActive?: (runId: string) => boolean
+  externalCancelRun?: (runId: string) => boolean
   log?: (message: string, details?: Json) => void
 }
 
@@ -53,7 +63,12 @@ const TOOL_GROUPS: Record<string, { label: string; defaultEnabled: boolean; name
     names: (n) => ["workspace_list", "file_read", "workspace_search", "file_write"].includes(n) || n.startsWith("file_"),
   },
   memory: { label: "Long-term memory", defaultEnabled: true, names: (n) => n.startsWith("memory_") },
+  skills: { label: "Skills", defaultEnabled: true, names: (n) => n.startsWith("skill_") },
   control: { label: "Agent control", defaultEnabled: true, names: (n) => n.startsWith("agent_control_") },
+  goals: { label: "Persistent goals", defaultEnabled: true, names: (n) => n.startsWith("goal_") },
+  web_search: { label: "Web search", defaultEnabled: false, names: (n) => n === "web_search" },
+  browser: { label: "Browser automation", defaultEnabled: false, names: (n) => n.startsWith("browser_") },
+  computer: { label: "Computer use", defaultEnabled: false, names: (n) => n.startsWith("computer_") },
 }
 
 const isRecord = (value: unknown): value is Json =>
@@ -76,6 +91,14 @@ function isLocalUrl(url: string): boolean {
     return false
   }
 }
+function providerDefaults(provider: string): { baseUrl: string; apiKey: string } {
+  const normalized = provider.trim().toLowerCase()
+  if (normalized === "gemini" || normalized === "google") return { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/", apiKey: process.env.GEMINI_API_KEY || "" }
+  if (normalized === "openrouter" || normalized === "open-router") return { baseUrl: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY || "" }
+  if (normalized === "openai-compatible" || normalized === "compatible" || normalized === "openai_compatible") return { baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL || "http://127.0.0.1:8000/v1", apiKey: process.env.OPENAI_COMPATIBLE_API_KEY || "" }
+  if (normalized === "llama.cpp" || normalized === "llama-cpp" || normalized === "llamacpp" || normalized === "local") return { baseUrl: process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1", apiKey: "" }
+  return { baseUrl: "https://api.openai.com/v1", apiKey: process.env.OPENAI_API_KEY || "" }
+}
 
 export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const { db } = deps
@@ -88,14 +111,25 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       ? stored.find((item) => item.payload.model === requested || item.payload.model_name === requested)
       : stored.find((item) => item.isDefault) ?? stored[0]
     const payload = entry?.payload ?? {}
+    // The UI sends model_name (a friendly label such as "Test"), while the
+    // provider requires the stored model identifier (for example
+    // "gemini-3.5-flash-lite"). Prefer the stored identifier whenever the
+    // request matched a configured entry by either field.
     const model = String(
-      requested || payload.model || payload.model_name || process.env.MIKI_MODEL || process.env.OPENAI_MODEL || "",
+      entry?.payload.model || entry?.payload.model_name || requested || process.env.MIKI_MODEL || process.env.OPENAI_MODEL || "",
     ).trim()
     if (!model) return undefined
-    const apiKey = String(payload.api_key || process.env.OPENAI_API_KEY || "")
-    const baseUrl = String(payload.api_base || process.env.OPENAI_API_BASE || "https://api.openai.com/v1")
+    const provider = String(payload.provider || process.env.MIKI_PROVIDER || "openai-compatible")
+    const defaults = providerDefaults(provider)
+    const apiKey = String(payload.api_key || defaults.apiKey || process.env.OPENAI_API_KEY || "")
+    const baseUrl = String(payload.api_base || defaults.baseUrl || process.env.OPENAI_API_BASE || "https://api.openai.com/v1")
     if (!apiKey && !isLocalUrl(baseUrl)) return undefined
-    return createFetchLLMClient({ baseUrl, model, apiKey: apiKey || undefined })
+    const extraBody: Record<string, unknown> = isRecord(payload.extra_body) ? { ...payload.extra_body } : {};
+    const configuredThinking = String(payload.thinking_level || "").trim();
+    if (configuredThinking && extraBody.thinking_level === undefined) {
+      extraBody.thinking_level = configuredThinking;
+    }
+    return createFetchLLMClient({ baseUrl, model, apiKey: apiKey || undefined, ...(Object.keys(extraBody).length ? { extraBody } : {}) })
   }
 
   // ---- tools --------------------------------------------------------------
@@ -121,6 +155,13 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   const registry = new ToolRegistry()
   const approvals = new ApprovalStore()
+  const browser = new BrowserTool(true, deps.dataRoot)
+  const effectiveWorkspaceRoot = () => {
+    const configured = (deps.getAppConfig() as any)?.agents?.defaults?.workspace
+    return typeof configured === "string" && configured.trim() ? path.resolve(configured) : deps.workspaceRoot
+  }
+  browser.setWorkspaceDir(effectiveWorkspaceRoot())
+  const computer = new ComputerAgent()
 
   // ---- control service ----------------------------------------------------
   const toolState = (): Record<string, boolean> => {
@@ -135,6 +176,16 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   let allTools: EngineTool[] = []
   const syncTools = () => {
+    const autonomy = deps.getAppConfig().autonomy
+    const autonomyConfig = isRecord(autonomy) ? autonomy : {}
+    const toolPolicy = isRecord(autonomyConfig.tool_policy) ? autonomyConfig.tool_policy : {}
+    const allowedDomains = Array.isArray(toolPolicy.browser_allowed_domains)
+      ? toolPolicy.browser_allowed_domains.filter((value): value is string => typeof value === "string")
+      : []
+    const bypassRestrictions = (deps.getAppConfig() as any)?.agent?.security?.bypass_restrictions === true
+    browser.setBypassRestrictions(bypassRestrictions)
+    browser.setAllowedDomains(bypassRestrictions ? [] : allowedDomains)
+    browser.setWorkspaceDir(effectiveWorkspaceRoot())
     const state = toolState()
     for (const name of registry.names()) registry.unregister(name)
     for (const tool of allTools) {
@@ -204,14 +255,196 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
   })
 
   allTools = [
-    ...createWorkspaceTools({ root: deps.workspaceRoot }),
+    ...createGoalTools(new GoalStore(db)),
+    ...createWorkspaceTools({
+      root: effectiveWorkspaceRoot,
+      restrictToWorkspace: () => (deps.getAppConfig() as any)?.agents?.defaults?.restrict_to_workspace !== false,
+    }).filter((tool) => tool.name !== "file_read"),
     ...createFileManagementTools({
-      root: deps.workspaceRoot,
+      root: effectiveWorkspaceRoot,
+      restrictToWorkspace: () => (deps.getAppConfig() as any)?.agents?.defaults?.restrict_to_workspace !== false,
       executionEnabled: deps.fileExecutionEnabled,
       onRun: (entry) => deps.recordFileRun({ file: entry.file, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: "agent" }),
     }),
     ...createMemoryTools(memoryPort),
+    ...createSkillTools({
+      store: deps.skills.store,
+      registry: deps.skills.registry,
+      workspaceRoot: effectiveWorkspaceRoot,
+      executionEnabled: deps.fileExecutionEnabled,
+      allowedSkills: () => {
+        const profile = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile;
+        if (!profile || profile.enabled !== true) return undefined;
+        const skills = profile.skills || {};
+        if (String(skills.mode || "default") === "off") return [];
+        if (String(skills.mode || "default") !== "custom") return undefined;
+        return Array.isArray(skills.allow) ? skills.allow.filter((value: unknown): value is string => typeof value === "string") : [];
+      },
+      onRun: (entry) => deps.recordFileRun({ file: `${entry.skill}/${entry.script}`, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: `skill:${entry.skill}` }),
+    }),
     ...createControlTools(createControlToolFactory(control)),
+    {
+      name: "browser_navigate",
+      description: "Open an HTTP or HTTPS page in the isolated headless browser. External navigation requires approval.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { url: { type: "string", description: "HTTP(S) URL to open." } }, required: ["url"], additionalProperties: false },
+      async execute(input) { return browser.navigate(String(input.url || "")) },
+    },
+    {
+      name: "browser_click",
+      description: "Click a visible element by a Playwright selector on the current page. Requires approval.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
+      async execute(input) { return browser.click(String(input.selector || "")) },
+    },
+    {
+      name: "browser_type",
+      description: "Type text into a browser selector. Requires approval.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { selector: { type: "string" }, text: { type: "string", maxLength: 4000 } }, required: ["selector", "text"], additionalProperties: false },
+      async execute(input) { return browser.type(String(input.selector || ""), String(input.text || "")) },
+    },
+    {
+      name: "browser_extract",
+      description: "Extract visible text from the current browser page or a CSS selector. Read-only.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: { selector: { type: "string" } }, additionalProperties: false },
+      async execute(input) { return browser.extract(typeof input.selector === "string" ? input.selector : undefined) },
+    },
+    {
+      name: "browser_screenshot",
+      description: "Capture a screenshot of the current browser page and return its saved path.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute() { return browser.screenshot() },
+    },
+    {
+      name: "web_search",
+      description: "Search the web and return ranked results with citations.",
+      risk: "read",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query." },
+          max_results: { type: "integer", minimum: 1, maximum: 10, description: "Maximum number of results." },
+          mode: { type: "string", enum: ["local", "cloud", "auto"], description: "Search execution mode." },
+          provider: { type: "string", description: "Optional provider override." },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      async execute(input) {
+        const query = typeof input.query === "string" ? input.query : ""
+        const config = deps.getAppConfig().web_search
+        const webSearchConfig = isRecord(config) ? config : {}
+        return searchWeb(path.join(deps.workspaceRoot, "config"), webSearchConfig, query, {
+          maxResults: input.max_results,
+          mode: input.mode,
+          provider: input.provider,
+        })
+      },
+    },
+    {
+      name: "computer_observe",
+      description: "Observe accessible desktop UI elements using Windows UI Automation.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: { active_only: { type: "boolean" }, max_elements: { type: "integer", minimum: 1, maximum: 300 }, query: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
+      async execute(input) { return computer.observe(input) },
+    },
+    {
+      name: "computer_focus",
+      description: "Focus a native desktop window.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
+      async execute(input) { return computer.focus(input) },
+    },
+    {
+      name: "computer_invoke",
+      description: "Invoke an accessible desktop UI element observed by computer_observe.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
+      async execute(input) { return computer.invoke(input) },
+    },
+    {
+      name: "computer_set_text",
+      description: "Set text in an accessible native UI field.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, text: { type: "string", maxLength: 4000 }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["text"], additionalProperties: false },
+      async execute(input) { return computer.setText(input) },
+    },
+    {
+      name: "computer_hotkey",
+      description: "Send a deterministic keyboard shortcut to the focused desktop window.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { keys: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["keys"], additionalProperties: false },
+      async execute(input) { return computer.hotkey(input) },
+    },
+    {
+      name: "computer_clipboard",
+      description: "Read, set, or clear the system clipboard.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { action: { type: "string", enum: ["get", "set", "clear"] }, text: { type: "string", maxLength: 10000 } }, additionalProperties: false },
+      async execute(input) { return computer.clipboard(input) },
+    },
+    {
+      name: "computer_launch",
+      description: "Launch a local application without shell command interpretation.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, required: ["command"], additionalProperties: false },
+      async execute(input) { return computer.launch(input) },
+    },
+    {
+      name: "computer_verify",
+      description: "Verify that native desktop UI contains or does not contain expected text.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: { contains: { type: "string" }, not_contains: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" }, max_elements: { type: "integer", minimum: 1, maximum: 300 } }, additionalProperties: false },
+      async execute(input) { return computer.verify(input) },
+    },
+    {
+      name: "computer_screenshot",
+      description: "Capture a screenshot of the primary display.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: { grid: { type: "boolean" }, grid_step: { type: "integer", minimum: 20, maximum: 500 } }, additionalProperties: false },
+      async execute(input) { return computer.screenshot(input) },
+    },
+    {
+      name: "computer_list_processes",
+      description: "List running desktop processes.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute(input) { return computer.listProcesses(input) },
+    },
+    {
+      name: "computer_get_system_info",
+      description: "Get operating system and hardware information.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute(input) { return computer.getSystemInfo(input) },
+    },
+    {
+      name: "computer_list_displays",
+      description: "List connected displays and their bounds.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute(input) { return computer.listDisplays(input) },
+    },
   ]
   syncTools()
 
@@ -219,15 +452,47 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     llm: llmFor,
     tools: registry,
     approvals,
+    // Advertise only the skills permitted by the active turn profile.
+    contextProvider: async () => {
+      if (!registry.has("skill_read")) return undefined;
+      const profile = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile;
+      if (profile?.enabled === true) {
+        const skills = profile.skills || {};
+        const mode = String(skills.mode || "default");
+        if (mode === "off") return undefined;
+        if (mode === "custom") {
+          const allow = new Set(Array.isArray(skills.allow) ? skills.allow.filter((value: unknown): value is string => typeof value === "string").map((value: string) => value.trim()).filter(Boolean) : []);
+          const records = (await deps.skills.store.list()).filter((record) => allow.has(record.name));
+          if (!records.length) return undefined;
+          const lines = records.map((skill) => `- ${skill.name}: ${skill.description.replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
+          return [
+            "Installed skills enabled for this turn:",
+            "Only the following skills are permitted. Call skill_read with one of these names before following its instructions.",
+            lines,
+          ].join("\n");
+        }
+      }
+      return buildSkillsContext(deps.skills.store);
+    },
     logger: (message, details) => deps.log?.(message, details as Json),
-    maxTurns: Number(process.env.MIKI_AGENT_MAX_TURNS || 12),
-    maxToolCalls: Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
+    maxTurns: () => Math.max(1, resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>)),
+    maxToolCalls: () => Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
+    maxToolIterations: () => resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
+    contextWindowTokens: () => resolveContextWindowTokens(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
+    maxCompletionTokens: () => Number((deps.getAppConfig() as any)?.agents?.defaults?.max_completion_tokens ?? (deps.getAppConfig() as any)?.agents?.defaults?.max_tokens ?? 0) || undefined,
+    systemPromptEnabled: () => {
+      const p = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile;
+      return !p || p.enabled !== true || String(p?.system_prompt?.mode || "default") !== "off";
+    },
   })
 
-  // ---- durable + in-memory run tracking -----------------------------------
-  const runsStore = new RunsStore(db)
+  // ---- run tracking (cancel, one run per session) -------------------------
   const runs = new Map<string, { controller: AbortController; sessionId?: string; startedAt: string; source: string }>()
   const sessionRuns = new Map<string, string>()
+  // A session can host independent work streams (for example a background
+  // autonomous task plus an interactive user question). Callers that do not
+  // provide a lane keep the legacy one-run-per-session behavior.
+  const executionLanes = new Map<string, string>()
 
   function cancelRun(runId: string): boolean {
     const run = runs.get(runId)
@@ -243,40 +508,26 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     allowTools?: boolean
     source: string
     runId?: string
+    executionLaneId?: string
     onEvent?: (event: EngineEvent) => void
     signal?: AbortSignal
-    /** Optional lane override; otherwise derived from source. */
-    lane?: "chat" | "heartbeat" | "autonomy" | "control"
   }): Promise<RunResult> {
     const runId = input.runId ?? `run_${randomUUID()}`
-    if (input.sessionId && sessionRuns.has(input.sessionId))
-      throw new Error("A run is already active for this session.")
+    const laneId = input.executionLaneId ?? input.sessionId
+    if (laneId && executionLanes.has(laneId))
+      throw new Error("A run is already active for this execution lane.")
     const controller = new AbortController()
     input.signal?.addEventListener("abort", () => controller.abort(), { once: true })
-    const startedAt = now()
-    runs.set(runId, { controller, sessionId: input.sessionId, startedAt, source: input.source })
-    if (input.sessionId) sessionRuns.set(input.sessionId, runId)
-
-    // Derive goal preview from last user message for the run record.
-    const lastUser = [...input.history].reverse().find((m) => m.role === "user")
-    const goalPreview =
-      typeof lastUser?.content === "string" ? lastUser.content.slice(0, 500) : undefined
-
+    runs.set(runId, { controller, sessionId: input.sessionId, startedAt: now(), source: input.source })
+    if (laneId) executionLanes.set(laneId, runId)
+    if (input.sessionId && !input.executionLaneId) sessionRuns.set(input.sessionId, runId)
     try {
-      runsStore.create({
-        id: runId,
-        sessionId: input.sessionId,
-        lane: input.lane,
-        source: input.source,
-        model: input.model,
-        goal: goalPreview,
-        startedAt,
+      getLifecycleBus().emit("message:received", {
+        eventId: runId,
+        session_key: input.sessionId,
+        text: input.history.at(-1)?.content,
+        surface: input.source,
       })
-    } catch (err) {
-      deps.log?.("runs-store create failed", { runId, error: String(err) })
-    }
-
-    try {
       const result = await engine.run({
         runId,
         sessionId: input.sessionId,
@@ -286,53 +537,23 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         signal: controller.signal,
         onEvent: input.onEvent,
       })
-      try {
-        const status: AgentRunStatus =
-          result.status === "completed" ||
-          result.status === "failed" ||
-          result.status === "cancelled" ||
-          result.status === "limit_reached"
-            ? result.status
-            : "failed"
-        runsStore.finish(runId, {
-          status,
-          model: result.model,
-          goal: result.goal || goalPreview,
-          finalText: result.finalText,
-          error: result.error,
-          turns: result.turns,
-          toolCalls: result.toolCalls?.length ?? 0,
-          usage: result.usage,
-          finishedAt: result.finishedAt || now(),
-        })
-      } catch (err) {
-        deps.log?.("runs-store finish failed", { runId, error: String(err) })
-      }
+      getLifecycleBus().emit("message:sent", {
+        eventId: runId,
+        session_key: input.sessionId,
+        text: result.finalText,
+        surface: input.source,
+        status: result.status,
+      })
       return result
-    } catch (error) {
-      try {
-        runsStore.finish(runId, {
-          status: "failed",
-          model: input.model,
-          goal: goalPreview,
-          error: error instanceof Error ? error.message : String(error),
-          finishedAt: now(),
-        })
-      } catch {
-        /* ignore secondary store errors */
-      }
-      throw error
     } finally {
       runs.delete(runId)
-      if (input.sessionId && sessionRuns.get(input.sessionId) === runId) sessionRuns.delete(input.sessionId)
+      if (laneId && executionLanes.get(laneId) === runId) executionLanes.delete(laneId)
+      if (input.sessionId && !input.executionLaneId && sessionRuns.get(input.sessionId) === runId) sessionRuns.delete(input.sessionId)
     }
   }
 
   // ---- HTTP routes --------------------------------------------------------
   function mount(app: express.Express) {
-    // Durable agent runs (chat + autonomy lanes).
-    app.use("/api/runs", deps.requireAuth, createRunsRouter(runsStore))
-
     // Auth covers everything under /api/control, including the approval
     // endpoints, so an unauthenticated visitor can never approve a request.
     app.use("/api/control", deps.requireAuth)
@@ -361,12 +582,13 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     // Task handles used by the dashboard's stop button.
     app.get("/api/tasks/:id", deps.requireAuth, (req, res) => {
       const run = runs.get(req.params.id)
-      if (!run) return res.status(404).json({ error: "Task not found or already finished" })
-      return res.json({ id: req.params.id, status: "running", sessionId: run.sessionId, startedAt: run.startedAt })
+      if (run) return res.json({ id: req.params.id, status: "running", sessionId: run.sessionId, startedAt: run.startedAt })
+      if (deps.externalRunActive?.(req.params.id)) return res.json({ id: req.params.id, status: "running" })
+      return res.status(404).json({ error: "Task not found or already finished" })
     })
     app.delete("/api/tasks/:id", deps.requireAuth, (req, res) => {
-      if (!cancelRun(req.params.id)) return res.status(404).json({ error: "Task not found or already finished" })
-      return res.json({ status: "cancelling", id: req.params.id })
+      if (cancelRun(req.params.id) || deps.externalCancelRun?.(req.params.id)) return res.json({ status: "cancelling", id: req.params.id })
+      return res.status(404).json({ error: "Task not found or already finished" })
     })
 
     // Engine self-test. GET never calls a model; POST runs one real agent turn.
@@ -416,33 +638,177 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     })
   }
 
-  return {
-    engine,
-    control,
-    approvals,
-    registry,
-    llmFor,
-    mount,
-    startRun,
-    cancelRun,
-    syncTools,
-    describePlan,
-    activeRunCount: () => runs.size,
-    runsStore,
+  async function setToolState(name: string, enabled: boolean): Promise<Json> {
+    const result = await controller.setToolState(name, enabled)
+    return { ...result, status: enabled ? "enabled" : "disabled", name }
   }
+  return { engine, control, approvals, registry, llmFor, mount, startRun, cancelRun, syncTools, setToolState, describePlan, activeRunCount: () => runs.size }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>
 
 /** Map engine events onto the dashboard's WebSocket protocol. */
-export function createWsEventMapper(send: (type: string, payload: Json) => void, model?: string) {
+export function createWsEventMapper(
+  send: (type: string, payload: Json) => void,
+  model?: string,
+  getToolFeedbackConfig: () => { enabled: boolean; separateMessages: boolean; maxArgsLength: number } = () => ({ enabled: true, separateMessages: false, maxArgsLength: 300 }),
+  getMessagingConfig: () => Partial<AdaptiveMessagingConfig> = () => ({}),
+) {
   const toolMessageId = (callId: string) => `tool-${callId}`
   const created = new Set<string>()
-  /** Id of the final assistant message, so the caller can persist it under the same id. */
-  const finalId = randomUUID()
-  const handle = (event: EngineEvent) => {
+  const messaging = new AdaptiveMessageCoordinator(getMessagingConfig() as AdaptiveMessagingConfig)
+  /** Id of the primary/final assistant message. For adaptive output, finalIds contains all ordered chunks. */
+  let finalId: string = randomUUID()
+  const finalIds: string[] = []
+  let thoughtSeq = 0
+  let stateSeq = 0
+  let toolFeedbackSeq = 0
+  const toolFeedbackPayload = (call: { id: string; name: string; arguments?: string; status: string; error?: string }, runId: string) => {
+    const cfg = getToolFeedbackConfig()
+    if (!cfg.enabled) return
+    const rawArgs = typeof call.arguments === "string" ? call.arguments : "{}"
+    const max = Math.max(0, Math.floor(cfg.maxArgsLength || 0))
+    const argumentsText = max > 0 && rawArgs.length > max ? `${rawArgs.slice(0, Math.max(0, max - 1))}…` : rawArgs
+    const messageId = cfg.separateMessages
+      ? `tool-${call.id}-${call.status}-${++toolFeedbackSeq}`
+      : `tool-${call.id}`
+    send(cfg.separateMessages || !created.has(messageId) ? "message.create" : "message.update", {
+      message_id: messageId,
+      content: `Tool ${call.name}: ${call.status}${call.error ? ` — ${call.error}` : ""}`,
+      kind: "tool_calls",
+      run_id: runId,
+      tool_calls: [{
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: argumentsText },
+        extra_content: { tool_feedback_explanation: call.error ? `${call.status}: ${call.error}` : call.status },
+      }],
+    })
+    created.add(messageId)
+  }
+  const emitAdaptiveResponse = (runId: string, content: string, model?: string) => {
+    const planned = planAdaptiveOutput(
+      {
+        id: `final-${runId}`,
+        runId,
+        channel: "web",
+        kind: "response",
+        content,
+        final: true,
+        longRunning: true,
+        streamingRequested: false,
+      },
+      undefined,
+      getMessagingConfig(),
+    )
+    finalIds.length = 0
+    for (const item of planned) {
+      const id = randomUUID()
+      if (!finalId) finalId = id
+      finalIds.push(id)
+      send("message.create", {
+        message_id: id,
+        message_group_id: item.groupId,
+        message_sequence: item.sequence,
+        message_total: item.total,
+        message_strategy: item.strategy,
+        content: item.content,
+        kind: "normal",
+        run_id: runId,
+        ...(model ? { model_name: model } : {}),
+      })
+    }
+    if (finalIds[0]) finalId = finalIds[0]
+  }
+
+  const emitProgress = (runId: string, id: string, content: string, thoughtCategory = "Progress") => {
+    if (!messaging.canEmitProgress(`${runId}:progress`)) return
+    send("message.create", {
+      message_id: id,
+      content,
+      kind: "thought",
+      thought_category: thoughtCategory,
+      run_id: runId,
+    })
+  }
+
+  const handle = (event: EngineEvent | LayeredEvent) => {
     const runId = event.runId
     switch (event.type) {
+      case "orchestrator.started":
+        send("node.run_start", { run_id: runId, status: "running", objective: event.goal });
+        send("typing.start", { run_id: runId });
+        break;
+      case "orchestrator.route":
+        send("message.create", {
+          message_id: `router-${runId}`,
+          content: `Router → ${event.decision.mode} (${Math.round(event.decision.confidence * 100)}%)${event.decision.reason ? ` — ${event.decision.reason}` : ""}`,
+          kind: "thought",
+          thought_category: "Router",
+          run_id: runId,
+        });
+        break;
+      case "orchestrator.state":
+        emitProgress(runId, `state-${runId}-${++stateSeq}`, `${event.phase}: ${event.detail || ""}`.trim(), "Progress")
+        break;
+      case "orchestrator.plan":
+        send("message.create", {
+          message_id: `plan-${event.plan.id}`,
+          content: describePlan(event.plan),
+          kind: "thought",
+          thought_category: "Plan",
+          run_id: runId,
+        });
+        break;
+      case "orchestrator.subtask.started":
+        emitProgress(runId, `subtask-${runId}-${event.nodeId}`, `Working on ${event.nodeId}: ${event.title} (attempt ${event.attempt}).`)
+        break;
+      case "orchestrator.subtask.event": {
+        const child = event.event;
+        if (child.type === "thought") {
+          // Never stream raw chain-of-thought text to the client. Expose a
+          // progress signal instead; the final answer and tool status remain visible.
+          emitProgress(runId, `thought-${runId}-${event.nodeId}-${child.turn}-${++thoughtSeq}`, `Working on sub-task ${event.nodeId}.`)
+        } else {
+          const cfg = getToolFeedbackConfig();
+          if (cfg.enabled) {
+            const call = child.call;
+            const rawArgs = typeof call.arguments === "string" ? call.arguments : "{}";
+            const max = Math.max(0, Math.floor(cfg.maxArgsLength || 0));
+            const argumentsText = max > 0 && rawArgs.length > max ? `${rawArgs.slice(0, Math.max(0, max - 1))}…` : rawArgs;
+            const id = cfg.separateMessages ? `tool-${call.id}-${call.status}-${++toolFeedbackSeq}` : toolMessageId(call.id);
+            send(cfg.separateMessages || !created.has(id) ? "message.create" : "message.update", {
+              message_id: id,
+              content: `Sub-task ${event.nodeId}: ${call.name} ${call.status}`,
+              kind: "tool_calls",
+              run_id: runId,
+              tool_calls: [{ id: call.id, type: "function", function: { name: call.name, arguments: argumentsText }, extra_content: { tool_feedback_explanation: call.error ? `${call.status}: ${call.error}` : call.status } }],
+            });
+            created.add(id);
+          }
+        }
+        break;
+      }
+      case "orchestrator.subtask.finished":
+        emitProgress(runId, `subtask-finished-${runId}-${event.nodeId}-${event.attempt}`, `${event.nodeId}: ${event.ok ? "completed" : "failed"}${event.error ? ` — ${event.error}` : ""}`)
+        break;
+      case "orchestrator.evaluation":
+        emitProgress(runId, `eval-${runId}-${event.nodeId}-${event.attempt}`, `${event.nodeId}: ${event.pass ? "PASS" : "RETRY/FAIL"} — ${event.reason}`, "Verification")
+        break;
+      case "orchestrator.memory_sync":
+        emitProgress(runId, `memory-sync-${runId}`, `Memory sync: ${event.detail}`)
+        break;
+      case "orchestrator.finished":
+        send("typing.stop", { run_id: runId });
+        send("node.run_end", {
+          run_id: runId,
+          status: event.status === "completed" ? "completed" : event.status === "cancelled" ? "cancelled" : "failed",
+          ...(event.error ? { error: event.error } : {}),
+        });
+        break;
+      case "message.final":
+        emitAdaptiveResponse(runId, event.content, model)
+        break;
       case "run.started":
         send("node.run_start", { run_id: runId, status: "running" })
         send("typing.start", { run_id: runId })
@@ -457,46 +823,13 @@ export function createWsEventMapper(send: (type: string, payload: Json) => void,
         })
         break
       case "thought":
-        send("message.create", {
-          message_id: `thought-${runId}-${event.turn}`,
-          content: event.content,
-          kind: "thought",
-          thought_category: "Thought",
-          run_id: runId,
-        })
+        // Raw chain-of-thought is intentionally not sent to clients.
+        emitProgress(runId, `thought-${runId}-${event.turn}`, `Working on the task (turn ${event.turn}).`)
         break
       case "tool.call": {
-        const call = event.call
-        const id = toolMessageId(call.id)
-        const payload = {
-          message_id: id,
-          content: "",
-          kind: "tool_calls",
-          run_id: runId,
-          tool_calls: [
-            {
-              id: call.id,
-              type: "function",
-              function: { name: call.name, arguments: call.arguments },
-              extra_content: {
-                tool_feedback_explanation: call.error ? `${call.status}: ${call.error}` : call.status,
-              },
-            },
-          ],
-        }
-        send(created.has(id) ? "message.update" : "message.create", payload)
-        created.add(id)
+        toolFeedbackPayload(event.call, runId)
         break
       }
-      case "message.final":
-        send("message.create", {
-          message_id: finalId,
-          content: event.content,
-          kind: "normal",
-          run_id: runId,
-          ...(model ? { model_name: model } : {}),
-        })
-        break
       case "run.finished":
         send("typing.stop", { run_id: runId })
         send("node.run_end", {
@@ -509,5 +842,5 @@ export function createWsEventMapper(send: (type: string, payload: Json) => void,
         break
     }
   }
-  return { handle, finalId }
+  return { handle, finalId, finalIds }
 }

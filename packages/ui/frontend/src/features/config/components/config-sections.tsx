@@ -13,6 +13,7 @@ import {
   type TurnProfileMode,
 } from "@/features/config/components/form-model"
 import { cn } from "@/lib/utils"
+import { launcherFetch } from "@/api/http"
 import { Field, SwitchCardField } from "@/shared/forms/shared-form"
 import { Button } from "@/shared/ui/button"
 import {
@@ -229,15 +230,15 @@ export function AgentDefaultsSection({
       )}
 
       <Field
-        label={t("pages.config.max_tokens")}
-        hint={t("pages.config.max_tokens_hint")}
+        label={t("pages.config.max_completion_tokens")}
+        hint={t("pages.config.max_completion_tokens_hint")}
         layout="setting-row"
       >
         <Input
           type="number"
           min={1}
-          value={form.maxTokens}
-          onChange={(e) => onFieldChange("maxTokens", e.target.value)}
+          value={form.maxCompletionTokens}
+          onChange={(e) => onFieldChange("maxCompletionTokens", e.target.value)}
         />
       </Field>
 
@@ -248,7 +249,7 @@ export function AgentDefaultsSection({
       >
         <Input
           type="number"
-          min={1}
+          min={1024}
           value={form.contextWindow}
           onChange={(e) => onFieldChange("contextWindow", e.target.value)}
           placeholder="131072"
@@ -495,7 +496,7 @@ export function EvolutionSection({
 
   return (
     <ConfigSectionCard
-      title={`${t("pages.config.sections.evolution")} — Coming Soon`}
+      title={t("pages.config.sections.evolution")}
       description={t("pages.config.evolution_section_hint")}
     >
       <SwitchCardField
@@ -503,7 +504,6 @@ export function EvolutionSection({
         hint={t("pages.config.evolution_enabled_hint")}
         layout="setting-row"
         checked={form.evolutionEnabled}
-        disabled
         onCheckedChange={(checked) =>
           onFieldChange("evolutionEnabled", checked)
         }
@@ -637,6 +637,32 @@ export function MCPSection({
   onServerFieldChange,
 }: MCPSectionProps) {
   const { t } = useTranslation()
+  const [testingServer, setTestingServer] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<Record<string, string>>({})
+
+  const testServer = async (server: MCPServerForm) => {
+    const name = server.name.trim()
+    if (!name) return
+    setTestingServer(server.id)
+    try {
+      const response = await launcherFetch("/api/mcp/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })
+      const body = (await response.json()) as { error?: string; status?: string; tools?: number }
+      setTestResult((prev) => ({
+        ...prev,
+        [server.id]: response.ok
+          ? `Connected (${body.tools ?? 0} tools)`
+          : body.error || body.status || `Failed (${response.status})`,
+      }))
+    } catch (error) {
+      setTestResult((prev) => ({ ...prev, [server.id]: error instanceof Error ? error.message : "Connection failed" }))
+    } finally {
+      setTestingServer(null)
+    }
+  }
 
   return (
     <ConfigSectionCard
@@ -937,6 +963,20 @@ export function MCPSection({
                       />
                     </div>
                   )}
+                  <div className="mt-3 flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!server.name.trim() || testingServer === server.id}
+                      onClick={() => void testServer(server)}
+                    >
+                      {testingServer === server.id ? "Testing…" : "Test connection"}
+                    </Button>
+                    {testResult[server.id] && (
+                      <span className="text-muted-foreground text-xs">{testResult[server.id]}</span>
+                    )}
+                  </div>
                 </div>
               ))}
 
@@ -1390,14 +1430,13 @@ export function DevicesSection({
 
   return (
     <ConfigSectionCard
-      title={`${t("pages.config.sections.devices")} — Coming Soon`}
+      title={t("pages.config.sections.devices")}
     >
       <SwitchCardField
         label={t("pages.config.devices_enabled")}
         hint={t("pages.config.devices_enabled_hint")}
         layout="setting-row"
         checked={form.devicesEnabled}
-        disabled
         onCheckedChange={(checked) => onFieldChange("devicesEnabled", checked)}
       />
 
@@ -1406,7 +1445,6 @@ export function DevicesSection({
         hint={t("pages.config.monitor_usb_hint")}
         layout="setting-row"
         checked={form.monitorUSB}
-        disabled
         onCheckedChange={(checked) => onFieldChange("monitorUSB", checked)}
       />
 

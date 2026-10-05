@@ -2,23 +2,20 @@ import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
 import {
-  type PlatformProvider,
-  completeConnectionFromOpaqueToken,
-  listPlatforms,
-  startBrowserPlatformConnection,
-} from "@/api/automations"
-import {
   deleteSessionMessage,
   forkSessionAtMessage,
   isSessionNotFoundError,
-  retrySessionFromMessage,
   updateSessionMessage,
 } from "@/api/sessions"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
 } from "@/features/chat/history"
-import { handlemikiMessage, type mikiMessage } from "@/features/chat/protocol"
+import {
+  handlemikiMessage,
+  type MikiWsClientMessage,
+  type MikiWsServerMessage,
+} from "@/features/chat/protocol"
 import {
   SINGLE_CHAT_SESSION_ID,
   clearStoredSessionId,
@@ -33,6 +30,7 @@ import {
   type ChatMessage,
   type ChatVoiceMetadata,
   getChatState,
+  thinkingModeAtom,
   updateChatStore,
 } from "@/store/chat"
 import { type GatewayState, gatewayAtom } from "@/store/gateway"
@@ -121,6 +119,16 @@ function scheduleReconnect(generation: number, sessionId: string) {
     }
     void connectChat()
   }, delay)
+}
+
+async function isGatewaySessionAuthenticated(): Promise<boolean> {
+  try {
+    const { getLauncherAuthStatus } = await import("@/api/launcher-auth")
+    const status = await getLauncherAuthStatus()
+    return status.authenticated === true
+  } catch {
+    return true
+  }
 }
 
 function needsActiveSessionHydration(): boolean {
@@ -222,16 +230,16 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected" })
       isConnecting = false
       reconnectAttempts = 0
+      socket.send(JSON.stringify({ type: "authenticate", session_id: sessionId }))
       const currentState = getChatState()
       if (activeCheckpointId && currentState.isTyping) {
-        socket.send(
-          JSON.stringify({
-            type: "resume",
-            session_id: sessionId,
-            checkpoint_id: activeCheckpointId,
-            last_sequence: activeSequence,
-          }),
-        )
+        const resumeMessage: MikiWsClientMessage = {
+          type: "resume",
+          session_id: sessionId,
+          checkpoint_id: activeCheckpointId,
+          last_sequence: activeSequence,
+        }
+        socket.send(JSON.stringify(resumeMessage))
       }
     }
 
@@ -256,9 +264,27 @@ export async function connectChat() {
             : event.data instanceof ArrayBuffer
               ? new TextDecoder().decode(event.data)
               : String(event.data)
-        const message = JSON.parse(raw) as mikiMessage & {
+        const message = JSON.parse(raw) as MikiWsServerMessage & {
           checkpoint_id?: unknown
           sequence?: unknown
+        }
+        if (message.type === "auth.ok") {
+          return
+        }
+        if (
+          message.type === "error" &&
+          typeof message.payload === "object" &&
+          message.payload !== null &&
+          "code" in message.payload &&
+          String(message.payload.code) === "authentication_required"
+        ) {
+          shouldMaintainConnection = false
+          clearReconnectTimer()
+          updateChatStore({ connectionState: "error", isTyping: false })
+          if (typeof globalThis.location !== "undefined") {
+            globalThis.location.assign("/launcher-login")
+          }
+          return
         }
         if (message.type === "stream_checkpoint") {
           activeCheckpointId =
@@ -267,6 +293,7 @@ export async function connectChat() {
               : null
           activeSequence =
             typeof message.sequence === "number" ? message.sequence : -1
+          updateChatStore({ isTyping: Boolean(activeCheckpointId) })
           return
         }
         if (typeof message.checkpoint_id === "string") {
@@ -280,10 +307,15 @@ export async function connectChat() {
             typeof message.sequence === "number"
               ? message.sequence
               : activeSequence
+          activeCheckpointId = null
+          activeSequence = -1
           updateChatStore({ isTyping: false })
           return
         }
         if (message.type === "resume") {
+          return
+        }
+        if (message.type === "connection.ready" || message.type === "auth.ok") {
           return
         }
         if (message.type?.startsWith("node.")) {
@@ -311,11 +343,19 @@ export async function connectChat() {
       }
       wsRef = null
       isConnecting = false
-      updateChatStore({
-        connectionState: "disconnected",
-        isTyping: false,
+      void isGatewaySessionAuthenticated().then((authenticated) => {
+        if (!authenticated) {
+          updateChatStore({ connectionState: "error", isTyping: false })
+          shouldMaintainConnection = false
+          clearReconnectTimer()
+          if (typeof globalThis.location !== "undefined") {
+            globalThis.location.assign("/launcher-login")
+          }
+          return
+        }
+        updateChatStore({ connectionState: "disconnected", isTyping: Boolean(activeCheckpointId) })
+        scheduleReconnect(generation, sessionId)
       })
-      scheduleReconnect(generation, sessionId)
     }
 
     socket.onerror = () => {
@@ -332,8 +372,19 @@ export async function connectChat() {
         return
       }
       isConnecting = false
-      updateChatStore({ connectionState: "error" })
-      scheduleReconnect(generation, sessionId)
+      void isGatewaySessionAuthenticated().then((authenticated) => {
+        if (!authenticated) {
+          updateChatStore({ connectionState: "error", isTyping: false })
+          shouldMaintainConnection = false
+          clearReconnectTimer()
+          if (typeof globalThis.location !== "undefined") {
+            globalThis.location.assign("/launcher-login")
+          }
+          return
+        }
+        updateChatStore({ connectionState: "error", isTyping: Boolean(activeCheckpointId) })
+        scheduleReconnect(generation, sessionId)
+      })
     }
 
     wsRef = socket
@@ -444,6 +495,7 @@ interface SendChatMessageInput {
   requestedModel?: string
   voice?: ChatVoiceMetadata
   audio?: EphemeralAudioPayload
+  thinkingMode?: "auto" | "off" | "low" | "medium" | "high"
 }
 
 interface EditChatMessageInput {
@@ -468,6 +520,7 @@ function sendmikiMessage(
   requestedModel?: string,
   voice?: ChatVoiceMetadata,
   audio?: EphemeralAudioPayload,
+  thinkingMode?: "auto" | "off" | "low" | "medium" | "high",
 ) {
   socket.send(
     JSON.stringify({
@@ -481,127 +534,10 @@ function sendmikiMessage(
           : {}),
         ...(voice ? { voice } : {}),
         ...(audio ? { audio } : {}),
+        ...(thinkingMode ? { thinking_mode: thinkingMode } : {}),
       },
     }),
   )
-}
-
-const PROVIDER_ALIASES: Array<{
-  provider: PlatformProvider
-  aliases: string[]
-}> = [
-  { provider: "facebook", aliases: ["facebook", "fb", "ফেসবুক"] },
-  { provider: "youtube", aliases: ["youtube", "yt", "ইউটিউব"] },
-  { provider: "x", aliases: ["twitter", "x.com", " x ", "টুইটার"] },
-  { provider: "telegram", aliases: ["telegram", "tg", "টেলিগ্রাম"] },
-  { provider: "whatsapp", aliases: ["whatsapp", "wa", "হোয়াটসঅ্যাপ"] },
-  { provider: "instagram", aliases: ["instagram", "ig", "ইনস্টাগ্রাম"] },
-  { provider: "linkedin", aliases: ["linkedin", "লিংকডইন"] },
-  { provider: "discord", aliases: ["discord"] },
-  { provider: "slack", aliases: ["slack"] },
-  { provider: "webhook", aliases: ["webhook", "ওয়েবহুক"] },
-]
-
-function detectPlatform(content: string): PlatformProvider | null {
-  const normalized = ` ${content.toLowerCase()} `
-  for (const item of PROVIDER_ALIASES) {
-    if (item.aliases.some((alias) => normalized.includes(alias))) {
-      return item.provider
-    }
-  }
-  return null
-}
-
-function extractPlatformToken(content: string): string | null {
-  const match = content.match(
-    /(?:token|api\s*key|access\s*token|bot\s*token|টোকেন|এপিআই\s*কি)\s*(?:is|হলো|হচ্ছে|:|=)?\s*(?:["'`]([^"'`]+)["'`]|([A-Za-z0-9._~+/=-]{8,}))/i,
-  )
-  const token = match?.[1] ?? match?.[2]
-  return token?.trim() || null
-}
-
-export function isPlatformConnectionIntent(content: string): boolean {
-  // Only explicit connection/setup actions should leave Chat. Informational
-  // questions, ordinary link sharing, and explicit "do not connect" clauses
-  // must stay in the agent loop.
-  const hasConnectionNegation =
-    /\b(?:do not|don't|no|without|avoid|never)\b[^.!?\n]{0,100}\b(?:connect|connection|setup|configure|authorize|integrat)\b/i.test(
-      content,
-    )
-  if (hasConnectionNegation) return false
-  if (
-    /(?:\bconnect\b|সংযোগ|কানেক্ট|যোগ|\bsetup\b|সেটআপ|\bconfigure\b|কনফিগার|\bauthorize\b|অনুমতি|\bintegrat\w*\b|ইন্টিগ্রেট)/i.test(
-      content,
-    )
-  ) {
-    return true
-  }
-  return /(?:link|লিংক)\s+(?:my|your|the)?\s*(?:account|channel|profile|platform|service|integration|অ্যাকাউন্ট|চ্যানেল|প্রোফাইল)/i.test(
-    content,
-  )
-}
-
-async function handlePlatformConnectionIntent(
-  content: string,
-): Promise<boolean | null> {
-  if (!isPlatformConnectionIntent(content)) return null
-  const provider = detectPlatform(content)
-  if (!provider) return null
-
-  const token = extractPlatformToken(content)
-  if (token) {
-    try {
-      const platforms = await listPlatforms()
-      const descriptor = platforms.platforms.find(
-        (item) => item.id === provider,
-      )
-      const result = await completeConnectionFromOpaqueToken(
-        provider,
-        `${descriptor?.label ?? provider} account`,
-        token,
-        descriptor?.requiredScopes,
-      )
-      toast.success(
-        `${descriptor?.label ?? provider} token stored securely. Connection requires validation before external actions.`,
-      )
-      void result
-      return true
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Platform token could not be stored securely.",
-      )
-      return false
-    }
-  }
-
-  const popup =
-    typeof window !== "undefined"
-      ? window.open("about:blank", "_blank", "popup,width=960,height=760")
-      : null
-  if (!popup) {
-    toast.error(
-      "The browser popup was blocked. Open Automation Center → Connections and try again.",
-    )
-    return false
-  }
-  try {
-    const result = await startBrowserPlatformConnection(provider)
-    popup.location.href = result.browser.url
-    toast.success(
-      `${provider} official setup opened. Complete login and consent in the browser, then finish the connection in Connections.`,
-    )
-    return true
-  } catch (error) {
-    popup?.close()
-    toast.error(
-      error instanceof Error
-        ? error.message
-        : "Could not start the official browser setup.",
-    )
-    return false
-  }
 }
 
 export async function sendChatMessage({
@@ -610,6 +546,7 @@ export async function sendChatMessage({
   requestedModel,
   voice,
   audio,
+  thinkingMode = "auto",
 }: SendChatMessageInput): Promise<boolean> {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
@@ -621,14 +558,6 @@ export async function sendChatMessage({
 
   if (!normalizedContent && normalizedAttachments.length === 0 && !audio) {
     return false
-  }
-
-  if (normalizedContent && normalizedAttachments.length === 0) {
-    const connectionResult =
-      await handlePlatformConnectionIntent(normalizedContent)
-    if (connectionResult !== null) {
-      return connectionResult
-    }
   }
 
   const socket = wsRef
@@ -661,6 +590,7 @@ export async function sendChatMessage({
       requestedModel,
       voice,
       audio,
+      thinkingMode,
     )
     return true
   } catch (error) {
@@ -738,17 +668,29 @@ export async function forkChatSessionFromMessage(
 }
 
 export async function retryChatMessage(messageId: string): Promise<boolean> {
+  if (!wsRef || wsRef.readyState !== WebSocket.OPEN) return false
+  const state = getChatState()
+  const targetIndex = state.messages.findIndex((message) => message.id === messageId)
+  if (targetIndex < 0 || targetIndex !== state.messages.length - 1) return false
+  const target = state.messages[targetIndex]
+  activeCheckpointId = null
+  activeSequence = -1
   try {
-    const retry = await retrySessionFromMessage(activeSessionIdRef, messageId)
-    await switchChatSession(retry.session_id)
-    const attachments = (retry.message.image_urls ?? []).map((url) => ({
-      type: "image" as const,
-      url,
+    wsRef.send(
+      JSON.stringify({
+        type: "message.retry",
+        id: messageId,
+        payload: { message_id: messageId, thinking_mode: store.get(thinkingModeAtom) },
+      }),
+    )
+    updateChatStore((prev) => ({
+      messages:
+        target.role === "assistant"
+          ? prev.messages.filter((message) => message.id !== messageId)
+          : prev.messages,
+      isTyping: true,
     }))
-    return sendChatMessage({
-      content: retry.message.content,
-      attachments,
-    })
+    return true
   } catch (error) {
     console.error("Failed to retry chat message:", error)
     return false

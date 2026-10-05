@@ -75,18 +75,14 @@ export function PageHeader({
       >
         <Button
           type="button"
-          variant="outline"
-          size="sm"
+          variant="ghost"
+          size="icon"
           onClick={openCommand}
-          className="text-muted-foreground hidden h-8 gap-2 rounded-md px-2.5 text-xs lg:inline-flex"
-          aria-label={t("command.open")}
-          title={t("command.open")}
+          className="text-muted-foreground hover:text-foreground hidden size-8 rounded-md lg:inline-flex"
+          aria-label={`${t("command.search")} (${commandShortcut})`}
+          title={`${t("command.search")} (${commandShortcut})`}
         >
-          <IconSearch className="size-3.5" />
-          <span>{t("command.search")}</span>
-          <kbd className="border-border bg-muted text-muted-foreground rounded border px-1 text-[10px] font-medium">
-            {commandShortcut}
-          </kbd>
+          <IconSearch className="size-4" />
         </Button>
         {children}
         <GlobalHeaderActions />

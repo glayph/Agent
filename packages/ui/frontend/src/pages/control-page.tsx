@@ -233,7 +233,7 @@ export function ControlPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Agent Control"
-        titleExtra={<Badge variant="secondary">Shared control plane</Badge>}
+
       >
         <Button
           variant="outline"
@@ -336,9 +336,7 @@ export function ControlPage() {
                     <p className="text-2xl font-semibold">
                       {improvement?.accumulatedTunings || 0}
                     </p>
-                    <p className="text-muted-foreground">
-                      No draft is applied automatically.
-                    </p>
+                    <p className="text-muted-foreground text-xs">Awaiting review.</p>
                   </CardContent>
                 </Card>
                 <Card size="sm">
@@ -375,10 +373,7 @@ export function ControlPage() {
                     <CardTitle>Active model</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <p className="text-muted-foreground text-sm">
-                      Select a configured model. Provider readiness and runtime
-                      availability are checked by the existing Models page.
-                    </p>
+                    <p className="text-muted-foreground text-xs">Configured models only.</p>
                     <select
                       value={activeModel}
                       disabled={
@@ -418,11 +413,7 @@ export function ControlPage() {
                     <CardTitle>Resource profile</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <p className="text-muted-foreground text-sm">
-                      Choose the agent’s supported workload profile. The change
-                      is reversible and remains inside the configuration
-                      allowlist.
-                    </p>
+                    <p className="text-muted-foreground text-xs">Reversible workload profile.</p>
                     <select
                       value={mode}
                       disabled={busyAction === "resource-mode"}

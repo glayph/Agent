@@ -1,4 +1,4 @@
-import { IconAdjustmentsHorizontal } from "@tabler/icons-react"
+import { IconBrain, IconCheck, IconEye } from "@tabler/icons-react"
 import { useAtomValue, useSetAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -18,6 +18,7 @@ import type { ChatInputDisabledReason } from "@/features/chat/components/chat-co
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
 import { ModelSelector } from "@/features/chat/components/model-selector"
 import { SessionHistoryMenu } from "@/features/chat/components/session-history-menu"
+import { LiveActivityStrip } from "@/features/chat/components/live-activity-strip"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
 import { Composer } from "@/features/chat/components/workspace/composer"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
@@ -38,7 +39,7 @@ import {
 } from "@/shared/ui/dropdown-menu"
 import type { ConnectionState } from "@/store/chat"
 import type { ChatAttachment, ChatMessage } from "@/store/chat"
-import { assistantDetailVisibilityAtom } from "@/store/chat"
+import { assistantDetailVisibilityAtom, thinkingModeAtom } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
 
 const MAX_IMAGE_SIZE_BYTES = 7 * 1024 * 1024
@@ -184,7 +185,6 @@ function resolveChatInputDisabledReason({
 
 function messageHasRetryPrompt(message: ChatMessage): boolean {
   return (
-    message.role === "user" &&
     (message.content.trim().length > 0 ||
       Boolean(
         message.attachments?.some(
@@ -195,20 +195,10 @@ function messageHasRetryPrompt(message: ChatMessage): boolean {
 }
 
 function getRetryableMessageIds(messages: ChatMessage[]): Set<string> {
-  const retryableMessageIds = new Set<string>()
-  let hasPrompt = false
-
-  for (const message of messages) {
-    if (messageHasRetryPrompt(message)) {
-      hasPrompt = true
-    }
-
-    if (hasPrompt) {
-      retryableMessageIds.add(message.id)
-    }
-  }
-
-  return retryableMessageIds
+  const lastMessage = messages.at(-1)
+  return lastMessage && messageHasRetryPrompt(lastMessage)
+    ? new Set([lastMessage.id])
+    : new Set()
 }
 
 function normalizePreview(value: string): string {
@@ -405,6 +395,8 @@ export function ChatPage() {
   const monitorState = useAtomValue(monitorAtom)
   const assistantDetailVisibility = useAtomValue(assistantDetailVisibilityAtom)
   const setAssistantDetailVisibility = useSetAtom(assistantDetailVisibilityAtom)
+  const thinkingMode = useAtomValue(thinkingModeAtom)
+  const setThinkingMode = useSetAtom(thinkingModeAtom)
   const liveActivityNodes = useMemo(() => {
     const latestRun = Object.values(monitorState.runs).sort(
       (a, b) => b.startedAt - a.startedAt,
@@ -421,13 +413,6 @@ export function ChatPage() {
     [messages],
   )
 
-  useEffect(() => {
-    if (!monitorState.selectedNodeId) return
-    const timeoutId = window.setTimeout(() => {
-      selectMonitorNode(undefined)
-    }, 2600)
-    return () => window.clearTimeout(timeoutId)
-  }, [monitorState.selectedNodeId])
   const {
     sessions,
     hasMore: hasMoreSessions,
@@ -1044,25 +1029,53 @@ export function ChatPage() {
           <Button
             size="sm"
             variant="ghost"
-            className="text-muted-foreground hover:text-foreground size-8 px-0"
-            aria-label={t("chat.showAssistantDetails")}
-            title={t("chat.showAssistantDetails")}
+            className="text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground size-8 px-0"
+            aria-label={t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
+            title={t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
           >
-            <IconAdjustmentsHorizontal className="size-4" />
+            <IconBrain className="size-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="center" className="w-56">
+          <div className="text-muted-foreground px-2 py-1.5 text-[11px] font-medium">
+            {t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
+          </div>
+          {(["auto", "low", "medium", "high", "off"] as const).map((option) => (
+            <DropdownMenuItem
+              key={option}
+              onSelect={() => setThinkingMode(option)}
+              className="gap-2"
+            >
+              <span className="flex size-4 items-center justify-center">
+                {thinkingMode === option && <IconCheck className="size-3.5" aria-hidden="true" />}
+              </span>
+              <span>
+                {t(`chat.thinkingMode.${option}`, {
+                  defaultValue: option[0].toUpperCase() + option.slice(1),
+                })}
+              </span>
+            </DropdownMenuItem>
+          ))}
+          <div className="border-border my-1 border-t" />
+          <div className="text-muted-foreground flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium">
+            <IconEye className="size-3.5" />
+            {t("chat.assistantDetailMenuTitle", { defaultValue: "Display" })}
+          </div>
           {(["none", "thought", "tool_calls", "all"] as const).map((option) => (
             <DropdownMenuItem
               key={option}
-              onClick={() => setAssistantDetailVisibility(option)}
-              data-active={assistantDetailVisibility === option}
+              onSelect={() => setAssistantDetailVisibility(option)}
+              className="gap-2"
             >
-              {t(
-                `chat.assistantDetailVisibility.${
-                  option === "tool_calls" ? "toolCalls" : option
-                }`,
-              )}
+              <span className="flex size-4 items-center justify-center">
+                {assistantDetailVisibility === option && <IconCheck className="size-3.5" aria-hidden="true" />}
+              </span>
+              <span>
+                {t(`chat.assistantDetailVisibility.${option === "tool_calls" ? "toolCalls" : option}`, {
+                  defaultValue:
+                    option === "none" ? "Hide details" : option === "thought" ? "Reasoning" : option === "tool_calls" ? "Tool calls" : "All details",
+                })}
+              </span>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
@@ -1093,23 +1106,36 @@ export function ChatPage() {
         }
 
         activityStream={
-          <ChatMessageList
-            messages={messages}
-            assistantDetailVisibility={assistantDetailVisibility}
-            isTyping={isTyping}
-            hasHydratedActiveSession={hasHydratedActiveSession}
-            isGatewayRunning={isGatewayRunning}
-            hasAvailableModels={hasAvailableModels}
-            defaultModelName={defaultModelName}
-            connectionState={connectionState}
-            retryableMessageIds={retryableMessageIds}
-            scrollRef={scrollRef}
-            onScroll={handleScroll}
-            onEditMessage={handleEditMessage}
-            onDeleteMessage={deleteMessage}
-            onForkMessage={handleForkMessage}
-            onRetryMessage={handleRetryMessage}
-          />
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1">
+              <ChatMessageList
+                messages={messages}
+                assistantDetailVisibility={assistantDetailVisibility}
+                isTyping={isTyping}
+                hasHydratedActiveSession={hasHydratedActiveSession}
+                isGatewayRunning={isGatewayRunning}
+                hasAvailableModels={hasAvailableModels}
+                defaultModelName={defaultModelName}
+                connectionState={connectionState}
+                retryableMessageIds={retryableMessageIds}
+                scrollRef={scrollRef}
+                onScroll={handleScroll}
+                onEditMessage={handleEditMessage}
+                onDeleteMessage={deleteMessage}
+                onForkMessage={handleForkMessage}
+                onRetryMessage={handleRetryMessage}
+              />
+            </div>
+            {liveActivityNodes.length > 0 && (
+              <div className="shrink-0 px-3 pb-2 pt-1 sm:px-6">
+                <LiveActivityStrip
+                  nodes={liveActivityNodes}
+                  selectedNodeId={monitorState.selectedNodeId}
+                  onSelect={(node) => selectMonitorNode(node.id)}
+                />
+              </div>
+            )}
+          </div>
         }
         composer={
           <Composer

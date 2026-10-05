@@ -1,18 +1,5 @@
 import {
-  IconActivityHeartbeat,
-  IconAtom,
   IconBolt,
-  IconBrain,
-  IconFolder,
-  IconKey,
-  IconListDetails,
-  IconMessageCircle,
-  IconPuzzle,
-  IconSearch,
-  IconSettings,
-  IconSparkles,
-  IconTimeline,
-  IconTools,
 } from "@tabler/icons-react"
 import { useNavigate } from "@tanstack/react-router"
 import * as React from "react"
@@ -21,6 +8,7 @@ import { useTranslation } from "react-i18next"
 import { useGateway } from "@/hooks/use-gateway"
 import { useMikiChat } from "@/hooks/use-miki-chat"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
+import { secondaryNavigation } from "@/app/layout/app-navigation"
 import {
   CommandDialog,
   CommandEmpty,
@@ -44,99 +32,7 @@ interface AppCommandPaletteProps {
   initialOpen?: boolean
 }
 
-const staticRoutes = [
-  {
-    id: "chat",
-    labelKey: "navigation.chat",
-    url: "/",
-    description: "Talk with the agent and manage the current workspace.",
-    icon: IconMessageCircle,
-  },
-  {
-    id: "drive",
-    labelKey: "navigation.drive",
-    url: "/drive",
-    description: "Browse files, assets, and generated outputs.",
-    icon: IconFolder,
-  },
-  {
-    id: "plugins",
-    labelKey: "navigation.plugins",
-    url: "/plugins",
-    description: "Review the canonical Plugin catalog and runtime status.",
-    icon: IconPuzzle,
-  },
-  {
-    id: "models",
-    labelKey: "navigation.models",
-    url: "/models",
-    description: "Configure model providers, defaults, and API access.",
-    icon: IconAtom,
-  },
-  {
-    id: "memory",
-    labelKey: "navigation.memory",
-    url: "/memory",
-    description: "Inspect selective memory, retrieval scores, and graph links.",
-    icon: IconBrain,
-  },
-  {
-    id: "credentials",
-    labelKey: "navigation.credentials",
-    url: "/credentials",
-    description: "Connect OAuth and token-based service accounts.",
-    icon: IconKey,
-  },
-  {
-    id: "hub",
-    labelKey: "navigation.hub",
-    url: "/agent/hub",
-    description: "Agent command center and high-level controls.",
-    icon: IconSearch,
-  },
-  {
-    id: "skills",
-    labelKey: "navigation.skills",
-    url: "/agent/skills",
-    description: "Install, inspect, and manage agent skills.",
-    icon: IconSparkles,
-  },
-  {
-    id: "tools",
-    labelKey: "navigation.tools",
-    url: "/agent/tools",
-    description: "Review tool capabilities and runtime settings.",
-    icon: IconTools,
-  },
-  {
-    id: "runs",
-    labelKey: "navigation.runs",
-    url: "/agent/runs",
-    description: "Track autonomous runs, plans, and verification steps.",
-    icon: IconTimeline,
-  },
-  {
-    id: "config",
-    labelKey: "navigation.config",
-    url: "/config",
-    description: "Edit app, gateway, memory, and safety configuration.",
-    icon: IconSettings,
-  },
-  {
-    id: "logs",
-    labelKey: "navigation.logs",
-    url: "/logs",
-    description: "Read gateway, proxy, and app diagnostic logs.",
-    icon: IconListDetails,
-  },
-  {
-    id: "health",
-    labelKey: "navigation.health",
-    url: "/health",
-    description: "Check runtime status and service health signals.",
-    icon: IconActivityHeartbeat,
-  },
-]
+const staticRoutes = secondaryNavigation
 
 function PaletteGroup({
   heading,
@@ -309,12 +205,12 @@ export function AppCommandPalette({
             return (
               <CommandItem
                 key={item.id}
-                value={`${t(item.labelKey)} ${item.description} ${item.url}`}
+                value={`${t(item.titleKey)} ${item.description} ${item.url}`}
                 onSelect={() => goTo(item.url)}
                 className="group data-[selected=true]:bg-primary/10 mx-0 min-h-8 gap-2 rounded-md border border-transparent px-2 text-sm"
               >
                 <PaletteItemIcon icon={Icon} />
-                <PaletteItemText title={t(item.labelKey)} />
+                <PaletteItemText title={t(item.titleKey)} />
               </CommandItem>
             )
           })}

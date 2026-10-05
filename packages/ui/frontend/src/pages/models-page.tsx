@@ -6,6 +6,7 @@ import {
   IconStar,
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -14,8 +15,10 @@ import {
   type ModelProviderOption,
   getModels,
   setDefaultModel,
-} from "@/api/models"
+ } from "@/api/models"
+import { getCredentialStatus } from "@/api/credentials"
 import { PageHeader } from "@/app/layout/page-header"
+import { CredentialCard } from "@/features/credentials/components/credential-card"
 import { AddModelSheet } from "@/features/models/components/add-model-sheet"
 import { CatalogDialog } from "@/features/models/components/catalog-dialog"
 import { DeleteModelDialog } from "@/features/models/components/delete-model-dialog"
@@ -43,6 +46,11 @@ export function ModelsPage() {
   const [settingDefaultIndex, setSettingDefaultIndex] = useState<number | null>(
     null,
   )
+  const credentialsQuery = useQuery({
+    queryKey: ["credentials", "status"],
+    queryFn: getCredentialStatus,
+    staleTime: 30_000,
+  })
   const fetchModels = useCallback(async () => {
     setLoading(true)
     try {
@@ -172,6 +180,24 @@ export function ModelsPage() {
           >
             {t("models.description")}
           </p>
+          <section className="mt-5 grid gap-4 lg:grid-cols-2">
+            <CredentialCard
+              title="Google Gemini"
+              description="Gemini · API key"
+              status={credentialsQuery.data?.providers.gemini.status ?? "not_logged_in"}
+              authMethod={credentialsQuery.data?.providers.gemini.authMethod}
+              details={credentialsQuery.isError ? "Unable to load status." : credentialsQuery.isLoading ? "Checking status…" : credentialsQuery.data?.providers.gemini.configured ? `Configured${credentialsQuery.data.providers.gemini.apiKeyMask ? ` · ${credentialsQuery.data.providers.gemini.apiKeyMask}` : ""}.` : "Not configured."}
+              actions={null}
+            />
+            <CredentialCard
+              title="llama.cpp Local"
+              description="llama.cpp · local runtime"
+              status={credentialsQuery.data?.providers.llama.status ?? "not_logged_in"}
+              authMethod={credentialsQuery.data?.providers.llama.authMethod}
+              details={credentialsQuery.isError ? "Unable to load status." : credentialsQuery.isLoading ? "Checking status…" : credentialsQuery.data?.providers.llama.configured ? "Configured." : "Not configured."}
+              actions={null}
+            />
+          </section>
           {!loading && providerOptions.length === 0 && (
             <p
               data-text-role="supporting"

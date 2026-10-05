@@ -69,6 +69,7 @@ export function ModelCard({
       return "bg-[#B8B8B8] shadow-[0_0_0_2px_rgba(184,184,184,0.22)]"
     }
     if (status === "available") return "bg-[#FFB45C]"
+    if (status === "configured") return "bg-amber-400"
     if (status === "unreachable") return "bg-[#B8B8B8]"
     return "bg-muted-foreground/25"
   })()

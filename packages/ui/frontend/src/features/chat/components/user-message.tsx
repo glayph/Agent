@@ -1,4 +1,4 @@
-import { type FocusEvent, memo, useEffect, useMemo, useState } from "react"
+import { memo, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
 import { AttachmentCard } from "@/features/chat/components/attachment-card"
@@ -10,6 +10,8 @@ import type { ChatAttachment } from "@/store/chat"
 interface UserMessageProps {
   id: string
   content: string
+  selected?: boolean
+  onSelect?: () => void
   attachments?: ChatAttachment[]
   timestamp?: string | number
   canRetry?: boolean
@@ -23,6 +25,8 @@ const EMPTY_ATTACHMENTS: ChatAttachment[] = []
 
 export const UserMessage = memo(function UserMessage({
   content,
+  selected = false,
+  onSelect,
   attachments = EMPTY_ATTACHMENTS,
   timestamp = "",
   canRetry = true,
@@ -45,37 +49,8 @@ export const UserMessage = memo(function UserMessage({
   )
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
-  const [actionsVisible, setActionsVisible] = useState(false)
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return
-    }
-    const media = window.matchMedia("(hover: none)")
-    const sync = () => setActionsVisible(media.matches)
-    sync()
-    media.addEventListener?.("change", sync)
-    return () => media.removeEventListener?.("change", sync)
-  }, [])
-
-  const hideActionsIfFocusLeaves = (event: FocusEvent<HTMLDivElement>) => {
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(hover: none)").matches
-    ) {
-      return
-    }
-    const nextFocused = event.relatedTarget
-    if (
-      !(nextFocused instanceof Node) ||
-      !event.currentTarget.contains(nextFocused)
-    ) {
-      setActionsVisible(false)
-    }
-  }
-
   return (
-    <div className="group/message flex w-full flex-col items-end gap-1">
+    <div className="group/message flex w-full flex-col items-end gap-0.5">
       {imageAttachments.length > 0 && (
         <div className="flex max-w-[var(--chat-user-message-max)] flex-wrap justify-end gap-1.5">
           {imageAttachments.map((attachment, index) => (
@@ -106,22 +81,12 @@ export const UserMessage = memo(function UserMessage({
       )}
 
       {hasText && (
+        <>
         <div
           data-chat-bubble="user"
           className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1 border px-3 py-2"
           title={formattedTimestamp || undefined}
-          onPointerEnter={() => setActionsVisible(true)}
-          onPointerLeave={() => {
-            if (
-              typeof window !== "undefined" &&
-              window.matchMedia?.("(hover: none)").matches
-            ) {
-              return
-            }
-            setActionsVisible(false)
-          }}
-          onFocusCapture={() => setActionsVisible(true)}
-          onBlurCapture={hideActionsIfFocusLeaves}
+          onClick={() => onSelect?.()}
         >
           <div
             className={cn(
@@ -145,7 +110,8 @@ export const UserMessage = memo(function UserMessage({
               {formattedTimestamp}
             </span>
           )}
-          <MessageActionBar
+        </div>
+        <MessageActionBar
             content={content}
             align="end"
             placement="inline"
@@ -180,13 +146,13 @@ export const UserMessage = memo(function UserMessage({
             })}
             canRetry={canRetry}
             className="self-end"
-            visible={actionsVisible}
+            visible={selected}
             onEdit={onEdit}
             onDelete={onDelete}
             onFork={onFork}
-            onRetry={onRetry}
-          />
-        </div>
+            onRetry={canRetry ? onRetry : undefined}
+        />
+        </>
       )}
     </div>
   )

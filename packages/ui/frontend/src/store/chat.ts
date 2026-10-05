@@ -7,6 +7,10 @@ import {
   DEFAULT_ASSISTANT_DETAIL_VISIBILITY,
   assistantDetailVisibilityStorage,
   shouldShowAssistantMessage,
+  DEFAULT_THINKING_MODE,
+  THINKING_MODE_STORAGE_KEY,
+  type ThinkingMode,
+  thinkingModeStorage,
 } from "@/features/chat/detail-visibility"
 import {
   clearSessionIdFromHash,
@@ -62,6 +66,10 @@ export interface ChatMessage {
   kind?: AssistantMessageKind
   modelName?: string
   runId?: string
+  messageGroupId?: string
+  messageSequence?: number
+  messageTotal?: number
+  messageStrategy?: "single" | "multi_message" | "chunked" | "streaming" | "progressive"
   thoughtCategory?: AssistantThoughtCategory
   inspectorOnly?: boolean
   attachments?: ChatAttachment[]
@@ -128,6 +136,7 @@ export interface ChatStoreState {
   hasHydratedActiveSession: boolean
   contextUsage?: ContextUsage
   activeRunId?: string
+  runningRunIds: string[]
   recentRunIds?: string[]
   activeRunModel?: string
   activeRunProvider?: string
@@ -142,6 +151,7 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   messages: [],
   connectionState: "disconnected",
   isTyping: false,
+  runningRunIds: [],
   activeSessionId: getInitialActiveSessionId(),
   hasHydratedActiveSession: false,
 }
@@ -156,6 +166,13 @@ export const assistantDetailVisibilityAtom =
   )
 export const showAssistantDetailsAtom = atom(
   (get) => get(assistantDetailVisibilityAtom) !== "none",
+)
+
+export const thinkingModeAtom = atomWithStorage<ThinkingMode>(
+  THINKING_MODE_STORAGE_KEY,
+  DEFAULT_THINKING_MODE,
+  thinkingModeStorage,
+  { getOnInit: true },
 )
 
 const store = getDefaultStore()

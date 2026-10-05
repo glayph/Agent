@@ -10,63 +10,29 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AboutRouteImport } from './routes/about'
-import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
-import { Route as ChatRouteImport } from './routes/chat'
 import { Route as ConfigRouteImport } from './routes/config'
 import { Route as ControlRouteImport } from './routes/control'
-import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DriveRouteImport } from './routes/drive'
 import { Route as HealthRouteImport } from './routes/health'
 import { Route as LauncherLoginRouteImport } from './routes/launcher-login'
 import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
-import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as PluginsRouteImport } from './routes/plugins'
-import { Route as AgentHubRouteImport } from './routes/agent/hub'
 import { Route as AgentMonitorRouteImport } from './routes/agent/monitor'
-import { Route as AgentRunRouteImport } from './routes/agent/run'
-import { Route as AgentRunsRouteImport } from './routes/agent/runs'
 import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
 import { Route as AgentToolsRouteImport } from './routes/agent/tools'
-import { Route as AgentsIndexRouteImport } from './routes/agents.index'
-import { Route as AgentsIdRouteImport } from './routes/agents.$id'
-import { Route as AgentsSwarmRouteImport } from './routes/agents.swarm'
 import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
-import { Route as ConfigRawRouteImport } from './routes/config.raw'
-import { Route as PluginsIndexRouteImport } from './routes/plugins.index'
-import { Route as PluginsCapabilitiesRouteImport } from './routes/plugins.capabilities'
-import { Route as PluginsCatalogRouteImport } from './routes/plugins.catalog'
-import { Route as PluginsChannelsRouteImport } from './routes/plugins.channels'
-import { Route as PluginsCoreRouteImport } from './routes/plugins.core'
-import { Route as PluginsHealthRouteImport } from './routes/plugins.health'
-import { Route as PluginsProvidersRouteImport } from './routes/plugins.providers'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsRoute = AgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
   id: '/channels',
   path: '/channels',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfigRoute = ConfigRouteImport.update({
@@ -77,11 +43,6 @@ const ConfigRoute = ConfigRouteImport.update({
 const ControlRoute = ControlRouteImport.update({
   id: '/control',
   path: '/control',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CredentialsRoute = CredentialsRouteImport.update({
-  id: '/credentials',
-  path: '/credentials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DriveRoute = DriveRouteImport.update({
@@ -104,11 +65,6 @@ const LauncherSetupRoute = LauncherSetupRouteImport.update({
   path: '/launcher-setup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LogsRoute = LogsRouteImport.update({
-  id: '/logs',
-  path: '/logs',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const MemoryRoute = MemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
@@ -124,24 +80,9 @@ const PluginsRoute = PluginsRouteImport.update({
   path: '/plugins',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentHubRoute = AgentHubRouteImport.update({
-  id: '/agent/hub',
-  path: '/agent/hub',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AgentMonitorRoute = AgentMonitorRouteImport.update({
   id: '/agent/monitor',
   path: '/agent/monitor',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentRunRoute = AgentRunRouteImport.update({
-  id: '/agent/run',
-  path: '/agent/run',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentRunsRoute = AgentRunsRouteImport.update({
-  id: '/agent/runs',
-  path: '/agent/runs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentSkillsRoute = AgentSkillsRouteImport.update({
@@ -154,304 +95,131 @@ const AgentToolsRoute = AgentToolsRouteImport.update({
   path: '/agent/tools',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsIndexRoute = AgentsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const AgentsIdRoute = AgentsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const AgentsSwarmRoute = AgentsSwarmRouteImport.update({
-  id: '/swarm',
-  path: '/swarm',
-  getParentRoute: () => AgentsRoute,
-} as any)
 const ChannelsNameRoute = ChannelsNameRouteImport.update({
   id: '/$name',
   path: '/$name',
   getParentRoute: () => ChannelsRouteRoute,
 } as any)
-const ConfigRawRoute = ConfigRawRouteImport.update({
-  id: '/raw',
-  path: '/raw',
-  getParentRoute: () => ConfigRoute,
-} as any)
-const PluginsIndexRoute = PluginsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => PluginsRoute,
-} as any)
-const PluginsCapabilitiesRoute = PluginsCapabilitiesRouteImport.update({
-  id: '/capabilities',
-  path: '/capabilities',
-  getParentRoute: () => PluginsRoute,
-} as any)
-const PluginsCatalogRoute = PluginsCatalogRouteImport.update({
-  id: '/catalog',
-  path: '/catalog',
-  getParentRoute: () => PluginsRoute,
-} as any)
-const PluginsChannelsRoute = PluginsChannelsRouteImport.update({
-  id: '/channels',
-  path: '/channels',
-  getParentRoute: () => PluginsRoute,
-} as any)
-const PluginsCoreRoute = PluginsCoreRouteImport.update({
-  id: '/core',
-  path: '/core',
-  getParentRoute: () => PluginsRoute,
-} as any)
-const PluginsHealthRoute = PluginsHealthRouteImport.update({
-  id: '/health',
-  path: '/health',
-  getParentRoute: () => PluginsRoute,
-} as any)
-const PluginsProvidersRoute = PluginsProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
-  getParentRoute: () => PluginsRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
-  '/about': typeof AboutRoute
-  '/agents': typeof AgentsRouteWithChildren
-  '/chat': typeof ChatRoute
-  '/config': typeof ConfigRouteWithChildren
+  '/config': typeof ConfigRoute
   '/control': typeof ControlRoute
-  '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
   '/launcher-login': typeof LauncherLoginRoute
   '/launcher-setup': typeof LauncherSetupRoute
-  '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
-  '/plugins': typeof PluginsRouteWithChildren
-  '/agent/hub': typeof AgentHubRoute
+  '/plugins': typeof PluginsRoute
   '/agent/monitor': typeof AgentMonitorRoute
-  '/agent/run': typeof AgentRunRoute
-  '/agent/runs': typeof AgentRunsRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
-  '/agents/$id': typeof AgentsIdRoute
-  '/agents/swarm': typeof AgentsSwarmRoute
   '/channels/$name': typeof ChannelsNameRoute
-  '/config/raw': typeof ConfigRawRoute
-  '/plugins/capabilities': typeof PluginsCapabilitiesRoute
-  '/plugins/catalog': typeof PluginsCatalogRoute
-  '/plugins/channels': typeof PluginsChannelsRoute
-  '/plugins/core': typeof PluginsCoreRoute
-  '/plugins/health': typeof PluginsHealthRoute
-  '/plugins/providers': typeof PluginsProvidersRoute
-  '/agents/': typeof AgentsIndexRoute
-  '/plugins/': typeof PluginsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
-  '/about': typeof AboutRoute
-  '/chat': typeof ChatRoute
-  '/config': typeof ConfigRouteWithChildren
+  '/config': typeof ConfigRoute
   '/control': typeof ControlRoute
-  '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
   '/launcher-login': typeof LauncherLoginRoute
   '/launcher-setup': typeof LauncherSetupRoute
-  '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
-  '/agent/hub': typeof AgentHubRoute
+  '/plugins': typeof PluginsRoute
   '/agent/monitor': typeof AgentMonitorRoute
-  '/agent/run': typeof AgentRunRoute
-  '/agent/runs': typeof AgentRunsRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
-  '/agents/$id': typeof AgentsIdRoute
-  '/agents/swarm': typeof AgentsSwarmRoute
   '/channels/$name': typeof ChannelsNameRoute
-  '/config/raw': typeof ConfigRawRoute
-  '/plugins/capabilities': typeof PluginsCapabilitiesRoute
-  '/plugins/catalog': typeof PluginsCatalogRoute
-  '/plugins/channels': typeof PluginsChannelsRoute
-  '/plugins/core': typeof PluginsCoreRoute
-  '/plugins/health': typeof PluginsHealthRoute
-  '/plugins/providers': typeof PluginsProvidersRoute
-  '/agents': typeof AgentsIndexRoute
-  '/plugins': typeof PluginsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
-  '/about': typeof AboutRoute
-  '/agents': typeof AgentsRouteWithChildren
-  '/chat': typeof ChatRoute
-  '/config': typeof ConfigRouteWithChildren
+  '/config': typeof ConfigRoute
   '/control': typeof ControlRoute
-  '/credentials': typeof CredentialsRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
   '/launcher-login': typeof LauncherLoginRoute
   '/launcher-setup': typeof LauncherSetupRoute
-  '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
-  '/plugins': typeof PluginsRouteWithChildren
-  '/agent/hub': typeof AgentHubRoute
+  '/plugins': typeof PluginsRoute
   '/agent/monitor': typeof AgentMonitorRoute
-  '/agent/run': typeof AgentRunRoute
-  '/agent/runs': typeof AgentRunsRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
-  '/agents/$id': typeof AgentsIdRoute
-  '/agents/swarm': typeof AgentsSwarmRoute
   '/channels/$name': typeof ChannelsNameRoute
-  '/config/raw': typeof ConfigRawRoute
-  '/plugins/capabilities': typeof PluginsCapabilitiesRoute
-  '/plugins/catalog': typeof PluginsCatalogRoute
-  '/plugins/channels': typeof PluginsChannelsRoute
-  '/plugins/core': typeof PluginsCoreRoute
-  '/plugins/health': typeof PluginsHealthRoute
-  '/plugins/providers': typeof PluginsProvidersRoute
-  '/agents/': typeof AgentsIndexRoute
-  '/plugins/': typeof PluginsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/channels'
-    | '/about'
-    | '/agents'
-    | '/chat'
     | '/config'
     | '/control'
-    | '/credentials'
     | '/drive'
     | '/health'
     | '/launcher-login'
     | '/launcher-setup'
-    | '/logs'
     | '/memory'
     | '/models'
     | '/plugins'
-    | '/agent/hub'
     | '/agent/monitor'
-    | '/agent/run'
-    | '/agent/runs'
     | '/agent/skills'
     | '/agent/tools'
-    | '/agents/$id'
-    | '/agents/swarm'
     | '/channels/$name'
-    | '/config/raw'
-    | '/plugins/capabilities'
-    | '/plugins/catalog'
-    | '/plugins/channels'
-    | '/plugins/core'
-    | '/plugins/health'
-    | '/plugins/providers'
-    | '/agents/'
-    | '/plugins/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/channels'
-    | '/about'
-    | '/chat'
     | '/config'
     | '/control'
-    | '/credentials'
     | '/drive'
     | '/health'
     | '/launcher-login'
     | '/launcher-setup'
-    | '/logs'
     | '/memory'
     | '/models'
-    | '/agent/hub'
+    | '/plugins'
     | '/agent/monitor'
-    | '/agent/run'
-    | '/agent/runs'
     | '/agent/skills'
     | '/agent/tools'
-    | '/agents/$id'
-    | '/agents/swarm'
     | '/channels/$name'
-    | '/config/raw'
-    | '/plugins/capabilities'
-    | '/plugins/catalog'
-    | '/plugins/channels'
-    | '/plugins/core'
-    | '/plugins/health'
-    | '/plugins/providers'
-    | '/agents'
-    | '/plugins'
   id:
     | '__root__'
     | '/'
     | '/channels'
-    | '/about'
-    | '/agents'
-    | '/chat'
     | '/config'
     | '/control'
-    | '/credentials'
     | '/drive'
     | '/health'
     | '/launcher-login'
     | '/launcher-setup'
-    | '/logs'
     | '/memory'
     | '/models'
     | '/plugins'
-    | '/agent/hub'
     | '/agent/monitor'
-    | '/agent/run'
-    | '/agent/runs'
     | '/agent/skills'
     | '/agent/tools'
-    | '/agents/$id'
-    | '/agents/swarm'
     | '/channels/$name'
-    | '/config/raw'
-    | '/plugins/capabilities'
-    | '/plugins/catalog'
-    | '/plugins/channels'
-    | '/plugins/core'
-    | '/plugins/health'
-    | '/plugins/providers'
-    | '/agents/'
-    | '/plugins/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChannelsRouteRoute: typeof ChannelsRouteRouteWithChildren
-  AboutRoute: typeof AboutRoute
-  AgentsRoute: typeof AgentsRouteWithChildren
-  ChatRoute: typeof ChatRoute
-  ConfigRoute: typeof ConfigRouteWithChildren
+  ConfigRoute: typeof ConfigRoute
   ControlRoute: typeof ControlRoute
-  CredentialsRoute: typeof CredentialsRoute
   DriveRoute: typeof DriveRoute
   HealthRoute: typeof HealthRoute
   LauncherLoginRoute: typeof LauncherLoginRoute
   LauncherSetupRoute: typeof LauncherSetupRoute
-  LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
   ModelsRoute: typeof ModelsRoute
-  PluginsRoute: typeof PluginsRouteWithChildren
-  AgentHubRoute: typeof AgentHubRoute
+  PluginsRoute: typeof PluginsRoute
   AgentMonitorRoute: typeof AgentMonitorRoute
-  AgentRunRoute: typeof AgentRunRoute
-  AgentRunsRoute: typeof AgentRunsRoute
   AgentSkillsRoute: typeof AgentSkillsRoute
   AgentToolsRoute: typeof AgentToolsRoute
 }
@@ -465,32 +233,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents': {
-      id: '/agents'
-      path: '/agents'
-      fullPath: '/agents'
-      preLoaderRoute: typeof AgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/channels': {
       id: '/channels'
       path: '/channels'
       fullPath: '/channels'
       preLoaderRoute: typeof ChannelsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/config': {
@@ -505,13 +252,6 @@ declare module '@tanstack/react-router' {
       path: '/control'
       fullPath: '/control'
       preLoaderRoute: typeof ControlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/credentials': {
-      id: '/credentials'
-      path: '/credentials'
-      fullPath: '/credentials'
-      preLoaderRoute: typeof CredentialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/drive': {
@@ -542,13 +282,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LauncherSetupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/logs': {
-      id: '/logs'
-      path: '/logs'
-      fullPath: '/logs'
-      preLoaderRoute: typeof LogsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/memory': {
       id: '/memory'
       path: '/memory'
@@ -570,32 +303,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PluginsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agent/hub': {
-      id: '/agent/hub'
-      path: '/agent/hub'
-      fullPath: '/agent/hub'
-      preLoaderRoute: typeof AgentHubRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/agent/monitor': {
       id: '/agent/monitor'
       path: '/agent/monitor'
       fullPath: '/agent/monitor'
       preLoaderRoute: typeof AgentMonitorRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agent/run': {
-      id: '/agent/run'
-      path: '/agent/run'
-      fullPath: '/agent/run'
-      preLoaderRoute: typeof AgentRunRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agent/runs': {
-      id: '/agent/runs'
-      path: '/agent/runs'
-      fullPath: '/agent/runs'
-      preLoaderRoute: typeof AgentRunsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agent/skills': {
@@ -612,89 +324,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentToolsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/': {
-      id: '/agents/'
-      path: '/'
-      fullPath: '/agents/'
-      preLoaderRoute: typeof AgentsIndexRouteImport
-      parentRoute: typeof AgentsRoute
-    }
-    '/agents/$id': {
-      id: '/agents/$id'
-      path: '/$id'
-      fullPath: '/agents/$id'
-      preLoaderRoute: typeof AgentsIdRouteImport
-      parentRoute: typeof AgentsRoute
-    }
-    '/agents/swarm': {
-      id: '/agents/swarm'
-      path: '/swarm'
-      fullPath: '/agents/swarm'
-      preLoaderRoute: typeof AgentsSwarmRouteImport
-      parentRoute: typeof AgentsRoute
-    }
     '/channels/$name': {
       id: '/channels/$name'
       path: '/$name'
       fullPath: '/channels/$name'
       preLoaderRoute: typeof ChannelsNameRouteImport
       parentRoute: typeof ChannelsRouteRoute
-    }
-    '/config/raw': {
-      id: '/config/raw'
-      path: '/raw'
-      fullPath: '/config/raw'
-      preLoaderRoute: typeof ConfigRawRouteImport
-      parentRoute: typeof ConfigRoute
-    }
-    '/plugins/': {
-      id: '/plugins/'
-      path: '/'
-      fullPath: '/plugins/'
-      preLoaderRoute: typeof PluginsIndexRouteImport
-      parentRoute: typeof PluginsRoute
-    }
-    '/plugins/capabilities': {
-      id: '/plugins/capabilities'
-      path: '/capabilities'
-      fullPath: '/plugins/capabilities'
-      preLoaderRoute: typeof PluginsCapabilitiesRouteImport
-      parentRoute: typeof PluginsRoute
-    }
-    '/plugins/catalog': {
-      id: '/plugins/catalog'
-      path: '/catalog'
-      fullPath: '/plugins/catalog'
-      preLoaderRoute: typeof PluginsCatalogRouteImport
-      parentRoute: typeof PluginsRoute
-    }
-    '/plugins/channels': {
-      id: '/plugins/channels'
-      path: '/channels'
-      fullPath: '/plugins/channels'
-      preLoaderRoute: typeof PluginsChannelsRouteImport
-      parentRoute: typeof PluginsRoute
-    }
-    '/plugins/core': {
-      id: '/plugins/core'
-      path: '/core'
-      fullPath: '/plugins/core'
-      preLoaderRoute: typeof PluginsCoreRouteImport
-      parentRoute: typeof PluginsRoute
-    }
-    '/plugins/health': {
-      id: '/plugins/health'
-      path: '/health'
-      fullPath: '/plugins/health'
-      preLoaderRoute: typeof PluginsHealthRouteImport
-      parentRoute: typeof PluginsRoute
-    }
-    '/plugins/providers': {
-      id: '/plugins/providers'
-      path: '/providers'
-      fullPath: '/plugins/providers'
-      preLoaderRoute: typeof PluginsProvidersRouteImport
-      parentRoute: typeof PluginsRoute
     }
   }
 }
@@ -711,76 +346,19 @@ const ChannelsRouteRouteWithChildren = ChannelsRouteRoute._addFileChildren(
   ChannelsRouteRouteChildren,
 )
 
-interface AgentsRouteChildren {
-  AgentsIdRoute: typeof AgentsIdRoute
-  AgentsSwarmRoute: typeof AgentsSwarmRoute
-  AgentsIndexRoute: typeof AgentsIndexRoute
-}
-
-const AgentsRouteChildren: AgentsRouteChildren = {
-  AgentsIdRoute: AgentsIdRoute,
-  AgentsSwarmRoute: AgentsSwarmRoute,
-  AgentsIndexRoute: AgentsIndexRoute,
-}
-
-const AgentsRouteWithChildren =
-  AgentsRoute._addFileChildren(AgentsRouteChildren)
-
-interface ConfigRouteChildren {
-  ConfigRawRoute: typeof ConfigRawRoute
-}
-
-const ConfigRouteChildren: ConfigRouteChildren = {
-  ConfigRawRoute: ConfigRawRoute,
-}
-
-const ConfigRouteWithChildren =
-  ConfigRoute._addFileChildren(ConfigRouteChildren)
-
-interface PluginsRouteChildren {
-  PluginsCapabilitiesRoute: typeof PluginsCapabilitiesRoute
-  PluginsCatalogRoute: typeof PluginsCatalogRoute
-  PluginsChannelsRoute: typeof PluginsChannelsRoute
-  PluginsCoreRoute: typeof PluginsCoreRoute
-  PluginsHealthRoute: typeof PluginsHealthRoute
-  PluginsProvidersRoute: typeof PluginsProvidersRoute
-  PluginsIndexRoute: typeof PluginsIndexRoute
-}
-
-const PluginsRouteChildren: PluginsRouteChildren = {
-  PluginsCapabilitiesRoute: PluginsCapabilitiesRoute,
-  PluginsCatalogRoute: PluginsCatalogRoute,
-  PluginsChannelsRoute: PluginsChannelsRoute,
-  PluginsCoreRoute: PluginsCoreRoute,
-  PluginsHealthRoute: PluginsHealthRoute,
-  PluginsProvidersRoute: PluginsProvidersRoute,
-  PluginsIndexRoute: PluginsIndexRoute,
-}
-
-const PluginsRouteWithChildren =
-  PluginsRoute._addFileChildren(PluginsRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChannelsRouteRoute: ChannelsRouteRouteWithChildren,
-  AboutRoute: AboutRoute,
-  AgentsRoute: AgentsRouteWithChildren,
-  ChatRoute: ChatRoute,
-  ConfigRoute: ConfigRouteWithChildren,
+  ConfigRoute: ConfigRoute,
   ControlRoute: ControlRoute,
-  CredentialsRoute: CredentialsRoute,
   DriveRoute: DriveRoute,
   HealthRoute: HealthRoute,
   LauncherLoginRoute: LauncherLoginRoute,
   LauncherSetupRoute: LauncherSetupRoute,
-  LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
   ModelsRoute: ModelsRoute,
-  PluginsRoute: PluginsRouteWithChildren,
-  AgentHubRoute: AgentHubRoute,
+  PluginsRoute: PluginsRoute,
   AgentMonitorRoute: AgentMonitorRoute,
-  AgentRunRoute: AgentRunRoute,
-  AgentRunsRoute: AgentRunsRoute,
   AgentSkillsRoute: AgentSkillsRoute,
   AgentToolsRoute: AgentToolsRoute,
 }

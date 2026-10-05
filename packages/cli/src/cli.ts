@@ -129,13 +129,15 @@ class Runtime {
     }
     const args = loaderArgs(this.config.runtimeLoader);
     args.push(this.config.gatewayEntry);
-    const env = { ...process.env, MIKI_RUNTIME_ROOT: this.config.runtimeRoot, Miki_RUNTIME_ROOT: this.config.runtimeRoot, MIKI_WORKSPACE_DIR: this.config.workspaceDir, Miki_WORKSPACE_DIR: this.config.workspaceDir, GATEWAY_HOST: this.config.host, GATEWAY_PORT: String(this.config.port), CORE_PORT: String(this.config.corePort), LITELLM_PORT: String(this.config.liteLLMPort), ...(this.config.debug ? { LOG_LEVEL: "debug" } : {}) };
+    const gatewayStopFile = join(this.config.workspaceDir, "data", "gateway-stop.request");
+    try { rmSync(gatewayStopFile, { force: true }); } catch {}
+    const env = { ...process.env, MIKI_RUNTIME_ROOT: this.config.runtimeRoot, Miki_RUNTIME_ROOT: this.config.runtimeRoot, MIKI_WORKSPACE_DIR: this.config.workspaceDir, Miki_WORKSPACE_DIR: this.config.workspaceDir, MIKI_DATA_DIR: join(this.config.workspaceDir, "data"), MIKI_GATEWAY_STOP_FILE: gatewayStopFile, GATEWAY_HOST: this.config.host, GATEWAY_PORT: String(this.config.port), CORE_PORT: String(this.config.corePort), LITELLM_PORT: String(this.config.liteLLMPort), ...(this.config.debug ? { LOG_LEVEL: "debug" } : {}) };
     mkdirSync(join(this.config.workspaceDir, "data"), { recursive: true });
     const child = spawn(this.config.nodePath, args, { cwd: this.config.workspaceDir, env, stdio: ["ignore", "pipe", "pipe"] });
     this.child = child; writeFileSync(join(this.config.workspaceDir, "data", "gateway.pid"), String(child.pid)); this.log(`Runtime PID: ${child.pid}`);
     child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8"); child.stdout?.on("data", (chunk: string) => this.consume(chunk)); child.stderr?.on("data", (chunk: string) => this.consume(chunk));
     child.once("error", (err) => this.fail(`runtime failed: ${err.message}`));
-    child.once("exit", (code, signal) => { this.child = null; if (this.healthTimer) clearInterval(this.healthTimer); this.healthTimer = null; if (this.state !== "stopping") { this.state = code === 0 ? "stopped" : "error"; if (code !== 0) this.error = `runtime exited with code ${code ?? signal ?? "unknown"}`; this.log(this.error || "Runtime stopped."); } });
+    child.once("exit", (code, signal) => { this.child = null; if (this.healthTimer) clearInterval(this.healthTimer); this.healthTimer = null; const requestedStop = existsSync(gatewayStopFile); if (requestedStop) { try { rmSync(gatewayStopFile, { force: true }); } catch {} } if (this.state !== "stopping") { this.state = requestedStop || code === 0 ? "stopped" : "error"; if (!requestedStop && code !== 0) this.error = `runtime exited with code ${code ?? signal ?? "unknown"}`; this.log(this.error || "Runtime stopped."); } });
     this.healthTimer = setInterval(() => void this.pollHealth(), 900);
     await this.pollHealth();
   }); }

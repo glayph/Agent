@@ -1,9 +1,6 @@
-import {
-  Navigate,
-  Outlet,
-  createFileRoute,
-  useRouterState,
-} from "@tanstack/react-router"
+import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
+
+import { ChannelsPage } from "@/pages/channels-page"
 
 export const Route = createFileRoute("/channels")({
   component: ChannelsLayout,
@@ -15,7 +12,7 @@ function ChannelsLayout() {
   })
 
   if (pathname === "/channels") {
-    return <Navigate to="/channels/$name" params={{ name: "miki" }} />
+    return <ChannelsPage channelName="miki" />
   }
 
   return <Outlet />

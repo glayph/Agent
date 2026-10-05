@@ -77,8 +77,26 @@ function runNpm(args, opts = {}) {
   run("npm", args, opts);
 }
 
+function requireExists(file) {
+  try {
+    return require("node:fs").existsSync(file);
+  } catch {
+    return false;
+  }
+}
+
 function main() {
   log("Starting verification...");
+
+  const [major, minor, patch] = process.versions.node.split(".").map(Number);
+  const nodeOk = major > 22 || (major === 22 && (minor > 19 || (minor === 19 && patch >= 0)));
+  if (!nodeOk) {
+    fatal(`Node.js ${process.versions.node} is unsupported by the locked dependency set; Node.js >=22.19.0 is required.`);
+  }
+
+  if (!requireExists(eslintEntry)) {
+    fatal("Dependencies are not installed. Run `npm ci` from a clean checkout before production verification.");
+  }
 
   // Step 1: TypeScript lint
   if (skipLint) {

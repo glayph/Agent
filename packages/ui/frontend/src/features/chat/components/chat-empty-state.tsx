@@ -51,16 +51,16 @@ export function ChatEmptyState({
   }
 
   return (
-    <div className="flex min-h-[8.25rem] flex-col justify-center gap-3 px-4 py-4 sm:min-h-[9rem] sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="flex min-h-[6rem] flex-col justify-center gap-3 py-4 sm:min-h-[7rem] sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-start gap-3">
-        <div className="bg-warning/10 text-warning border-warning/20 flex size-10 shrink-0 items-center justify-center rounded-lg border">
+        <div className="text-primary/80 flex size-8 shrink-0 items-center justify-center rounded-md">
           {icon}
         </div>
         <div className="min-w-0">
-          <h3 className="text-foreground text-[15px] leading-6 font-semibold">
+          <h3 className="text-foreground text-[14px] leading-5 font-semibold">
             {title}
           </h3>
-          <p className="text-muted-foreground mt-1 max-w-[28rem] text-sm leading-5 text-pretty">
+          <p className="text-muted-foreground mt-1 max-w-[30rem] text-[13px] leading-5 text-pretty">
             {description}
           </p>
         </div>

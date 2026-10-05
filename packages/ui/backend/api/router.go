@@ -109,9 +109,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// WeCom QR login flow
 	h.registerWecomRoutes(mux)
-	
-	// Phase 5 Multi-Agent Observability
-	h.registerAgentRoutes(mux)
+
 }
 
 // Shutdown gracefully shuts down the handler, stopping the gateway if it was started by this handler.

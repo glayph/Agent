@@ -45,6 +45,58 @@
     "./paths": {
       "import": "./dist/paths.js",
       "types": "./dist/paths.d.ts"
+    },
+    "./skills": {
+      "import": "./dist/skills-manager/index.js",
+      "types": "./dist/skills-manager/index.d.ts"
+    },
+    "./web-search-service": {
+      "import": "./dist/web-search-service.js",
+      "types": "./dist/web-search-service.d.ts"
+    },
+    "./api/goals": {
+      "import": "./dist/api/goals-router.js",
+      "types": "./dist/api/goals-router.d.ts"
+    },
+    "./api/link-preview": {
+      "import": "./dist/api/link-preview.js",
+      "types": "./dist/api/link-preview.d.ts"
+    },
+    "./speech-to-text": {
+      "import": "./dist/speech-to-text.js",
+      "types": "./dist/speech-to-text.d.ts"
+    },
+    "./self-improvement": {
+      "import": "./dist/self-improvement/index.js",
+      "types": "./dist/self-improvement/index.d.ts"
+    },
+    "./memory-files": {
+      "import": "./dist/memory-files/index.js",
+      "types": "./dist/memory-files/index.d.ts"
+    },
+    "./autonomy": {
+      "import": "./dist/autonomy/autonomous-supervisor.js",
+      "types": "./dist/autonomy/autonomous-supervisor.d.ts"
+    },
+    "./autonomy/policy": {
+      "import": "./dist/autonomy/autonomy-policy.js",
+      "types": "./dist/autonomy/autonomy-policy.d.ts"
+    },
+    "./messaging": {
+      "import": "./dist/messaging-adaptive.js",
+      "types": "./dist/messaging-adaptive.d.ts"
+    },
+    "./hooks": {
+      "import": "./dist/hooks/index.js",
+      "types": "./dist/hooks/index.d.ts"
+    },
+    "./mcp/connectors": {
+      "import": "./dist/mcp/connectors.js",
+      "types": "./dist/mcp/connectors.d.ts"
+    },
+    "./mcp/types": {
+      "import": "./dist/mcp/types.js",
+      "types": "./dist/mcp/types.d.ts"
     }
   },
   "scripts": {

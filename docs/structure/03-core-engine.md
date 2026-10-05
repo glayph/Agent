@@ -63,7 +63,7 @@ packages/core/
     │   ├── system-monitoring.ts
     │   ├── workspace-folders-router.ts
     │   ├── auth-middleware.ts
-    │   ├── launcher-compat.ts
+    │   ├── gateway integration is owned by packages/gateway
     │   └── ...
     ├── autonomy/                # Autonomous goal management
     │   ├── autonomy-controller.ts

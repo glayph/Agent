@@ -12,7 +12,9 @@ const AssistantMessage = lazy(() =>
 
 interface ChatMessageProps {
   message: ChatMessageModel
+  selected: boolean
   canRetry: boolean
+  onSelect: (messageId: string) => void
   onEdit: (message: ChatMessageModel) => void
   onDelete: (messageId: string) => void
   onFork: (messageId: string) => void
@@ -21,7 +23,9 @@ interface ChatMessageProps {
 
 export const ChatMessage = memo(function ChatMessage({
   message,
+  selected,
   canRetry,
+  onSelect,
   onEdit,
   onDelete,
   onFork,
@@ -51,7 +55,12 @@ export const ChatMessage = memo(function ChatMessage({
             kind={message.kind}
             modelName={message.modelName}
             toolCalls={message.toolCalls}
+            messageStrategy={message.messageStrategy}
+            messageSequence={message.messageSequence}
+            messageTotal={message.messageTotal}
             timestamp={message.timestamp}
+            selected={selected}
+            onSelect={() => onSelect(message.id)}
             canRetry={canRetry}
             onEdit={() => onEdit(message)}
             onDelete={() => onDelete(message.id)}
@@ -65,6 +74,8 @@ export const ChatMessage = memo(function ChatMessage({
           content={message.content}
           attachments={message.attachments}
           timestamp={message.timestamp}
+          selected={selected}
+          onSelect={() => onSelect(message.id)}
           canRetry={canRetry}
           onEdit={() => onEdit(message)}
           onDelete={() => onDelete(message.id)}

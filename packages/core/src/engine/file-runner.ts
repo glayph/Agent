@@ -72,6 +72,8 @@ export interface RunFileOptions {
   root: string;
   /** Script path, absolute or relative to `root`. */
   file: string;
+  /** When false, absolute paths and working directories outside `root` are allowed. */
+  restrictToRoot?: boolean;
   args?: string[];
   /** Working directory, defaults to the script's folder. Must stay inside `root`. */
   cwd?: string;
@@ -122,9 +124,14 @@ export function prepareRun(options: RunFileOptions): {
   args: string[];
 } {
   const root = path.resolve(options.root);
+  const restrictToRoot = options.restrictToRoot !== false;
   let absFile: string;
   try {
-    absFile = resolveWorkspacePath(root, options.file);
+    absFile = restrictToRoot
+      ? resolveWorkspacePath(root, options.file)
+      : path.isAbsolute(options.file)
+        ? path.resolve(options.file)
+        : path.resolve(root, options.file);
   } catch (error) {
     throw new FileRunError(403, "outside_workspace", errorMessage(error));
   }
@@ -150,7 +157,11 @@ export function prepareRun(options: RunFileOptions): {
   let cwd = path.dirname(absFile);
   if (options.cwd) {
     try {
-      cwd = resolveWorkspacePath(root, options.cwd);
+      cwd = restrictToRoot
+        ? resolveWorkspacePath(root, options.cwd)
+        : path.isAbsolute(options.cwd)
+          ? path.resolve(options.cwd)
+          : path.resolve(root, options.cwd);
     } catch (error) {
       throw new FileRunError(403, "outside_workspace", errorMessage(error));
     }

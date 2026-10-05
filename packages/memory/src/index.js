@@ -24,6 +24,7 @@ const {
 const {
   HashEmbeddingProvider,
   NoopEmbeddingProvider,
+  OnnxEmbeddingProvider,
   createEmbeddingProvider,
   cosineSimilarity,
 } = require("./embedding-provider");
@@ -50,6 +51,7 @@ module.exports = {
   canonicalRegion,
   HashEmbeddingProvider,
   NoopEmbeddingProvider,
+  OnnxEmbeddingProvider,
   createEmbeddingProvider,
   cosineSimilarity,
 };

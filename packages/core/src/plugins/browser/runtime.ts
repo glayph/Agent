@@ -2,6 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { createServer, type Server } from "node:http";
 import crypto from "crypto";
+import { validateNetworkUrl } from "../../autonomy/network-security.js";
 import type { BrowserContext, Locator, Page, Route } from "playwright";
 import { ProfileManager } from "./profile-manager.js";
 import { getErrorMessage } from "../../errors.js";
@@ -11,6 +12,7 @@ export interface BrowserConfig {
   clearStateEveryN?: number;
   chromePath?: string | null;
   allowMedia?: boolean;
+  allowPrivateNetworks?: boolean;
 }
 
 export interface BrowserSemanticTarget {
@@ -149,6 +151,8 @@ export class BrowserTool {
   private _maxRetries: number = 3;
   private _chromePath: string | null = null;
   private _allowMedia = true;
+  private _allowPrivateNetworks = false;
+  private _allowedDomains: string[] = [];
   private workspacePreviewServer: Server | null = null;
   private workspacePreviewRoot: string | null = null;
   private workspacePreviewPort: number | null = null;
@@ -173,6 +177,7 @@ export class BrowserTool {
         this.maxNavigationsBeforeClear = config.clearStateEveryN;
       if (config.chromePath) this._chromePath = config.chromePath;
       if (config.allowMedia != null) this._allowMedia = config.allowMedia;
+      if (config.allowPrivateNetworks != null) this._allowPrivateNetworks = config.allowPrivateNetworks;
     }
   }
 
@@ -182,10 +187,10 @@ export class BrowserTool {
       userAgent: this.userAgent,
       locale: "en-US",
       timezoneId: "America/New_York",
-      permissions: ["geolocation"],
+      permissions: [],
       javaScriptEnabled: true,
-      bypassCSP: true,
-      ignoreHTTPSErrors: true,
+      bypassCSP: false,
+      ignoreHTTPSErrors: false,
     };
   }
 
@@ -208,6 +213,33 @@ export class BrowserTool {
       throw new Error("Browser page is not available");
     }
     return this.page;
+  }
+
+  public currentUrl(): string {
+    return this.page?.url() || "";
+  }
+
+  public setBypassRestrictions(enabled: boolean): void {
+    if (enabled) {
+      this._allowedDomains = [];
+      this._allowPrivateNetworks = true;
+      return;
+    }
+    this._allowPrivateNetworks = false;
+  }
+
+  public setAllowedDomains(domains: string[]): void {
+    this._allowedDomains = domains
+      .map((domain) => domain.trim().toLowerCase().replace(/^\.+|\.+$/g, ""))
+      .filter(Boolean);
+  }
+
+  private async assertAutonomousDomain(url: string): Promise<void> {
+    if (!this._allowedDomains.length) return;
+    await validateNetworkUrl(url, {
+      allowedDomains: this._allowedDomains,
+      allowPrivateNetworks: this._allowPrivateNetworks,
+    });
   }
 
   private async _setupRequestInterception(page: Page): Promise<void> {
@@ -239,8 +271,23 @@ export class BrowserTool {
     ];
     // Also block media/images if requested for ultra-fast mode (optional)
     await page.route("**/*", async (route: Route) => {
-      const url = route.request().url().toLowerCase();
+      const rawUrl = route.request().url();
+      const url = rawUrl.toLowerCase();
       const resourceType = route.request().resourceType();
+
+      try {
+        const parsed = new URL(rawUrl);
+        const isOwnedPreview =
+          (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
+          this.workspacePreviewPort != null &&
+          Number(parsed.port || 80) === this.workspacePreviewPort;
+        if (!isOwnedPreview) {
+          await validateNetworkUrl(rawUrl, { allowPrivateNetworks: this._allowPrivateNetworks });
+        }
+      } catch (error) {
+        await route.abort();
+        return;
+      }
 
       const isAd = adDomains.some((d) => url.includes(d));
       if (
@@ -515,6 +562,7 @@ export class BrowserTool {
     await this.ensureLaunched();
 
     url = normalizeBrowserUrl(url);
+    await this.assertAutonomousDomain(url);
     const parsedUrl = new URL(url);
     if (
       (parsedUrl.hostname === "127.0.0.1" ||
@@ -558,6 +606,7 @@ export class BrowserTool {
 
         const title: string = await this.activePage.title();
         const currentUrl: string = this.activePage.url();
+        await this.assertAutonomousDomain(currentUrl);
 
         this.navCount++;
         if (this.navCount % this.maxNavigationsBeforeClear === 0) {
@@ -606,6 +655,7 @@ export class BrowserTool {
     try {
       const pwSelector = this.toPlaywrightSelector(selector);
       const page = this.activePage;
+      await this.assertAutonomousDomain(page.url());
       await page.waitForSelector(pwSelector, { timeout: 10000 });
       const el = await page.$(pwSelector);
       if (!el)
@@ -628,6 +678,7 @@ export class BrowserTool {
       }
 
       await this.randomDelay(DELAY_MEDIUM[0], DELAY_MEDIUM[1]);
+      await this.assertAutonomousDomain(page.url());
       return "Clicked element: " + selector;
     } catch (e: unknown) {
       return "Error clicking '" + selector + "': " + getErrorMessage(e);
@@ -643,6 +694,7 @@ export class BrowserTool {
     try {
       const pwSelector = this.toPlaywrightSelector(selector);
       const page = this.activePage;
+      await this.assertAutonomousDomain(page.url());
       await page.waitForSelector(pwSelector, { timeout: 10000 });
       const el = await page.$(pwSelector);
       if (!el)
@@ -673,6 +725,7 @@ export class BrowserTool {
         await page.keyboard.press("Enter");
         await this.randomDelay(DELAY_LONG[0], DELAY_LONG[1]);
       }
+      await this.assertAutonomousDomain(page.url());
       return (
         "Typed '" +
         text +
@@ -800,6 +853,7 @@ export class BrowserTool {
   public async extract(selector?: string): Promise<string> {
     await this.ensureLaunched();
     try {
+      await this.assertAutonomousDomain(this.activePage.url());
       if (selector) {
         const page = this.activePage;
         const elements = await page.$$(selector);
@@ -836,6 +890,7 @@ export class BrowserTool {
   public async screenshot(destinationPath?: string): Promise<string> {
     await this.ensureLaunched();
     try {
+      await this.assertAutonomousDomain(this.activePage.url());
       const requested = destinationPath?.trim();
       let filepath: string;
       if (requested) {

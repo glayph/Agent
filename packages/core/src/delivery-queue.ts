@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ChannelName } from "./event-envelope.js";
+import { getChannelMessagingCapabilities, planAdaptiveOutput, type AdaptiveMessagingConfig, type OutputCandidate, type PlannedOutputMessage } from "./messaging-adaptive.js";
 
 export type DeliveryStatus =
   | "pending"
@@ -39,6 +40,10 @@ export interface DeliveryReceipt {
   previewHash?: string;
   replayOf?: string;
   errorClass?: string;
+  messageGroupId?: string;
+  messageSequence?: number;
+  messageTotal?: number;
+  messageStrategy?: string;
   nextAction?: string;
   replayAllowed?: boolean;
 }
@@ -144,6 +149,30 @@ export class DeliveryQueue {
     return { ...receipt };
   }
 
+  enqueueAdaptive(
+    candidate: OutputCandidate,
+    base: Omit<Parameters<DeliveryQueue["enqueue"]>[0], "channel" | "body" | "idempotencyKey">,
+    config?: Partial<AdaptiveMessagingConfig>,
+  ): DeliveryReceipt[] {
+    const planned = planAdaptiveOutput(
+      candidate,
+      getChannelMessagingCapabilities(candidate.channel),
+      config,
+    );
+    return planned.map((message: PlannedOutputMessage) =>
+      this.enqueue({
+        ...base,
+        channel: candidate.channel,
+        body: message.content,
+        idempotencyKey: `${message.groupId}:${message.sequence}`,
+        messageGroupId: message.groupId,
+        messageSequence: message.sequence,
+        messageTotal: message.total,
+        messageStrategy: message.strategy,
+      } as Parameters<DeliveryQueue["enqueue"]>[0]),
+    );
+  }
+
   list(status?: DeliveryStatus): DeliveryReceipt[] {
     return [...this.receipts.values()]
       .filter((receipt) => !status || receipt.status === status)
@@ -154,7 +183,14 @@ export class DeliveryQueue {
   claim(now = Date.now()): DeliveryReceipt | null {
     const receipt = [...this.receipts.values()]
       .filter((item) => item.status === "pending" && item.nextAttemptAt <= now)
-      .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt)[0];
+      .sort((a, b) => {
+        const due = a.nextAttemptAt - b.nextAttemptAt;
+        if (due !== 0) return due;
+        if (a.messageGroupId && a.messageGroupId === b.messageGroupId) {
+          return (a.messageSequence ?? 0) - (b.messageSequence ?? 0);
+        }
+        return a.createdAt.localeCompare(b.createdAt);
+      })[0];
     if (!receipt) return null;
     receipt.status = "sending";
     receipt.attempts += 1;

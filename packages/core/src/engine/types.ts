@@ -1,5 +1,6 @@
 import type { LLMResponse } from "@miki/config";
 import type { ControlRisk } from "../control/types.js";
+import type { ToolRegistry } from "./tool-registry.js";
 
 export type EngineRisk = ControlRisk;
 
@@ -11,6 +12,8 @@ export interface EngineToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Provider-specific metadata required when continuing a tool call. */
+  extra_content?: Record<string, unknown>;
 }
 
 export interface EngineMessage {
@@ -36,6 +39,11 @@ export interface LLMCompletionOptions {
   signal?: AbortSignal;
   /** Ask the provider for a JSON-object response when it supports that. */
   json?: boolean;
+  /** Optional provider-neutral controls for short routing/chat completions. */
+  temperature?: number;
+  maxCompletionTokens?: number;
+  /** Optional provider-compatible thinking level, e.g. off/low/medium/high. */
+  thinkingLevel?: string;
 }
 
 /** Minimal port the engine needs from any LLM backend. */
@@ -92,6 +100,15 @@ export interface ApprovalDecision {
   approvalId?: string;
 }
 
+export interface ToolApprovalDecision {
+  mode: "auto" | "approval" | "block";
+  reason: string;
+}
+
+export interface ToolApprovalPolicy {
+  decide(tool: EngineTool, input: Record<string, unknown>): ToolApprovalDecision;
+}
+
 export interface ApprovalGate {
   request(
     request: ToolApprovalRequest,
@@ -112,6 +129,8 @@ export interface PlanStep {
   title: string;
   /** Optional name of the tool the step is expected to use. */
   tool?: string;
+  /** Step ids that must finish before this step may start. */
+  dependsOn?: string[];
   status: PlanStepStatus;
 }
 
@@ -200,7 +219,13 @@ export interface RunRequest {
   plan?: AgentPlan | false;
   /** `false` runs a plain chat completion without tools. */
   allowTools?: boolean;
+  /** Optional provider-compatible thinking level for this run. */
+  thinkingLevel?: string;
+  /** Optional per-run tool registry used by the layered orchestrator. */
+  tools?: ToolRegistry;
   signal?: AbortSignal;
+  /** Optional per-run approval policy (used by bounded autonomous execution). */
+  approvalPolicy?: ToolApprovalPolicy;
   onEvent?: (event: EngineEvent) => void;
 }
 

@@ -20,7 +20,30 @@ describe("runtime config schema", () => {
       interval: 30,
       interval_seconds: 30,
     });
-    expect(migrated.agent?.max_tokens_per_cycle).toBe(4096);
+    expect((migrated.agents as any)?.defaults?.max_completion_tokens).toBe(4096);
+    expect((migrated.agents as any)?.defaults?.max_tokens).toBeUndefined();
+    expect(migrated.agent?.max_tokens_per_cycle).toBeUndefined();
+  });
+
+
+  it("uses evolution.mode as the canonical evolution behavior mode", () => {
+    const migrated = migrateRuntimeConfig({
+      self_improvement: {
+        behavior_learning: { mode: "draft" },
+      },
+    });
+
+    expect((migrated.evolution as any)?.mode).toBe("draft");
+    expect((migrated.self_improvement as any)?.behavior_learning?.mode).toBe("draft");
+
+    const canonical = migrateRuntimeConfig({
+      evolution: { mode: "observe" },
+      self_improvement: {
+        behavior_learning: { mode: "apply" },
+      },
+    });
+    expect((canonical.evolution as any)?.mode).toBe("observe");
+    expect((canonical.self_improvement as any)?.behavior_learning?.mode).toBe("observe");
   });
 
   it("returns field-level errors for invalid values", () => {

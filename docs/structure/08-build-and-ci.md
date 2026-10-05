@@ -6,7 +6,7 @@
 scripts/
 ├── build-all related
 │   ├── build-cli.mjs                 # Builds the CLI package
-│   ├── build-go-backend.mjs          # Compiles the Go backend binary
+│   ├── build-go-backend.mjs          # Builds the legacy Go compatibility stub
 │   ├── build-llama.mjs               # Builds / prepares llama.cpp integration
 │   ├── build-local.mjs               # Local development build
 │   ├── build-offline-release.mjs     # Full offline release packaging
@@ -45,7 +45,7 @@ scripts/
 ```
 
 **Comments**
-- `npm run build:all` orchestrates the full monorepo build (llama → config → installer → skills → memory → core → gateway → frontend → cli → go-backend).
+- `npm run build:all` orchestrates the full monorepo build (llama → config → installer → skills → memory → core → Node Gateway → frontend → cli). The Go compatibility stub is separate legacy packaging and is not the primary Web UI backend.
 - Model scripts allow installing approved GGUF models (default local target: gemma-4-E2B style) and verifying health.
 - 24/7 scripts support continuous operation with policy checks.
 - Soak and benchmark scripts are used for reliability and quality gating.

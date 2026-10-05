@@ -2,6 +2,7 @@ import { IconLoader2, IconPlus } from "@tabler/icons-react"
 import { useTranslation } from "react-i18next"
 
 import { PageHeader } from "@/app/layout/page-header"
+import { HubPage } from "@/features/agent/hub/hub-page"
 import { Button } from "@/shared/ui/button"
 
 import { DeleteDialog } from "./delete-dialog"
@@ -16,6 +17,9 @@ import { useSkillsPage } from "./use-skills-page"
 
 export function SkillsPage() {
   const { t } = useTranslation()
+  if (new URLSearchParams(globalThis.location.search).get("view") === "discover") {
+    return <HubPage />
+  }
   const {
     searchQuery,
     sourceFilter,
@@ -68,6 +72,9 @@ export function SkillsPage() {
         title={t("navigation.skills")}
         children={
           <>
+            <Button asChild variant="outline" size="sm">
+              <a href="/agent/skills?view=discover">Discover skills</a>
+            </Button>
             <input
               ref={importInputRef}
               type="file"

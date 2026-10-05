@@ -50,3 +50,13 @@ func waitProcess(cmd *exec.Cmd, timeout time.Duration) bool {
 		}
 	}
 }
+
+func requestProcessStop(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid PID %d", pid)
+	}
+	if err := exec.Command("taskkill", "/T", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+		return fmt.Errorf("taskkill failed: %w", err)
+	}
+	return nil
+}

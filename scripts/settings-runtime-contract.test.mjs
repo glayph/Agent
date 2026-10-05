@@ -1,0 +1,27 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const read=(f)=>fs.readFileSync(f,"utf8");
+const engine=read("packages/core/src/engine/agent-engine.ts");
+const builtin=read("packages/core/src/engine/builtin-tools.ts");
+const fileTools=read("packages/core/src/engine/file-tools.ts");
+const fileRunner=read("packages/core/src/engine/file-runner.ts");
+const browser=read("packages/core/src/plugins/browser/runtime.ts");
+const gateway=read("packages/gateway/src/agent-runtime.ts");
+const runtimeSettings=read("packages/gateway/src/runtime-settings.ts");
+const sessionScope=read("packages/gateway/src/session-scope.ts");
+const index=read("packages/gateway/src/index.ts");
+const ui=read("packages/ui/frontend/src/features/config/components/config-sections.tsx");
+
+for (const n of ["contextWindowTokens","maxCompletionTokens","maxTurns =","maxToolCalls =","fitContextWindow"]) assert.ok(engine.includes(n),n);
+assert.ok(builtin.includes("root: string | (() => string)"));
+assert.ok(builtin.includes("restrictToWorkspace"));
+assert.ok(fileTools.includes("restrictToWorkspace"));
+assert.ok(fileRunner.includes("restrictToRoot"));
+assert.ok(browser.includes("setBypassRestrictions"));
+for (const n of ["effectiveWorkspaceRoot","restrictToWorkspace","maxToolIterations: () => resolveMaxToolIterations","contextWindowTokens: () => resolveContextWindowTokens"]) assert.ok(gateway.includes(n),n);
+for (const n of ["DEFAULT_MAX_TOOL_ITERATIONS = 50","DEFAULT_MAX_COMPLETION_TOKENS = 32768","return maxTokens * 4"]) assert.ok(runtimeSettings.includes(n),n);
+for (const n of ["per-channel-peer","per-channel","per-peer","global","miki-global"]) assert.ok(sessionScope.includes(n),n);
+for (const n of ["context_id","WHERE context_id=?","sessionScope","resolveSessionContextId"]) assert.ok(index.includes(n),n);
+assert.ok(ui.includes('label={t("pages.config.context_window")}'));
+assert.ok(ui.includes('min={1024}'));
+console.log("settings-runtime-contract: PASS");

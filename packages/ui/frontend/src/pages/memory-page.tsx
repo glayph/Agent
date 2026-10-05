@@ -1,5 +1,4 @@
 import {
-  IconBrain,
   IconDatabase,
   IconRefresh,
   IconSearch,
@@ -229,11 +228,7 @@ export function MemoryPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title={t("pages.memory.title", { defaultValue: "Memory" })}
-        titleExtra={
-          <Badge variant="secondary">
-            <IconBrain className="mr-1 size-3" /> selective retrieval
-          </Badge>
-        }
+
       >
         <Button
           variant="outline"

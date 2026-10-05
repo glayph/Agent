@@ -13,14 +13,21 @@ function firstNonEmpty(
 }
 
 function localGatewayOrigin(env: Record<string, string>): string {
-  // GATEWAY_PORT from .env can be a pending restart value. Use only explicit
-  // frontend overrides here so the dev proxy keeps targeting the live gateway.
   const port = firstNonEmpty(
     env.VITE_GATEWAY_PORT,
     process.env.VITE_GATEWAY_PORT,
+    env.GATEWAY_PORT,
+    process.env.GATEWAY_PORT,
   )
-  return `http://127.0.0.1:${port ?? "18800"}`
+  const host = firstNonEmpty(
+    env.VITE_GATEWAY_HOST,
+    process.env.VITE_GATEWAY_HOST,
+    env.GATEWAY_HOST,
+    process.env.GATEWAY_HOST,
+  )
+  return `http://${host ?? "127.0.0.1"}:${port ?? "18800"}`
 }
+
 
 const configDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -28,11 +35,10 @@ const configDir = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "")
   const apiOrigin =
-    env.VITE_API_HOST ||
-    env.CORE_DEV_ORIGIN ||
-    process.env.VITE_API_HOST ||
-    process.env.CORE_DEV_ORIGIN ||
-    localGatewayOrigin(env)
+    firstNonEmpty(
+      env.VITE_GATEWAY_ORIGIN,
+      process.env.VITE_GATEWAY_ORIGIN,
+    ) || localGatewayOrigin(env)
   const wsOrigin = apiOrigin.replace(/^http(s?):\/\//, (_, secure) =>
     secure ? "wss://" : "ws://",
   )
@@ -112,6 +118,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      allowedHosts: true,
       proxy: {
         "/api": {
           target: apiOrigin,

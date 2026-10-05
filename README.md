@@ -1,202 +1,67 @@
-# Miki
+# Miki Agent Test Workflow
 
-**Local-first autonomous AI agent**
+Target: app
+Created: 2026-09-23T12:58:36.680Z
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Version](https://img.shields.io/badge/version-1.3.14-informational.svg)](https://github.com/glayph/Agent)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey.svg)](https://github.com/glayph/Agent)
+## Brief
+Create a folder 'repaired-agent-test', inside it a file 'summary.md' with five practical numbered examples of Agent Miki’s capabilities, then verify folder and file existence, exact number of entries, and provide the final path and summary.
 
-> Run a capable agent on your machine — plan, call tools, manage files, remember context — with a real dashboard, local models, and clear approval gates.
+## Architecture
+Modular vertical-slice architecture with domain, adapter, interface, and verification layers.
 
----
+- ui: User flows, state, responsive layout, and accessibility.
+- api: Backend endpoints, auth boundary, validation, and integration contracts.
+- domain: Core business rules independent from UI and transport.
+- persistence: Data models, migrations, caching, and recovery behavior.
+- tests: Unit, integration, visual, and smoke verification gates.
 
-## Overview
+## File Tree
+- [must] miki-agent-test/README.md - Project overview, setup, and delivery checklist.
+- [must] miki-agent-test/docs/architecture.md - Architecture decisions, boundaries, and data flow.
+- [must] miki-agent-test/src/index.ts - Main application or library entry point.
+- [must] miki-agent-test/src/domain/index.ts - Core domain rules separated from adapters.
+- [should] miki-agent-test/src/adapters/index.ts - External service and platform adapter boundary.
+- [must] miki-agent-test/tests/smoke.test.ts - End-to-end or integration smoke gate.
+- [must] miki-agent-test/scripts/verify.mjs - Portable scaffold verification used by post-generation gates.
+- [must] miki-agent-test/package.json - Scripts for build, test, lint, and smoke.
 
-Miki is a **local-first** monorepo agent runtime. It combines:
+## Milestones
+### Blueprint
+Requirements, architecture, and risk plan are explicit before writing broad code.
+- Extract concrete requirements from the brief and any sketches/assets.
+- Define module boundaries, data flow, and runtime constraints.
+- Choose the smallest vertical slice that proves the architecture.
+- Gate: blueprint review - Requirements and acceptance gates are written down.
 
-- A **React dashboard** (chat, models, files, control)
-- An **Express gateway** (HTTP + WebSocket, auth, static UI)
-- A **TypeScript core engine** (observe → plan → tool loop → answer)
-- **Local GGUF** models via vendored llama.cpp and optional **cloud/API** providers
-- **Fully local memory** (Temporal Knowledge Graph + file memory)
-- **Safe file/Drive tools** and gated script execution
+### Vertical Slice
+A minimal running artifact proves the highest-risk path.
+- Create the workspace and core files.
+- Implement the startup path and one end-to-end user/system workflow.
+- Keep placeholders isolated behind interfaces so later expansion does not require rewrites.
+- Gate: unit tests (node scripts/verify.mjs test) - Core behavior and adapters pass focused tests.
+- Gate: build (node scripts/verify.mjs build) - Production artifact builds without type or bundling errors.
 
-It solves the gap between “chat-only” assistants and brittle scripts: one process that can plan multi-step work, request approval for risky actions, and keep durable local state without shipping your data to a third-party host by default.
+### Feature Expansion
+Expected capabilities are added behind the established boundaries.
+- Implement modules in dependency order.
+- Add regression tests next to each module contract.
+- Run smoke checks after each meaningful integration step.
+- Gate: unit tests (node scripts/verify.mjs test) - Core behavior and adapters pass focused tests.
+- Gate: build (node scripts/verify.mjs build) - Production artifact builds without type or bundling errors.
+- Gate: smoke (node scripts/verify.mjs smoke) - Primary user workflow works in runtime.
 
----
+### Hardening
+The artifact is maintainable, testable, and ready for review.
+- Remove dead paths, insecure defaults, and placeholder behavior.
+- Document setup, limitations, and verification evidence.
+- Run the full gate list from a clean state.
+- Gate: unit tests (node scripts/verify.mjs test) - Core behavior and adapters pass focused tests.
+- Gate: build (node scripts/verify.mjs build) - Production artifact builds without type or bundling errors.
+- Gate: smoke (node scripts/verify.mjs smoke) - Primary user workflow works in runtime.
 
-## Key Features
-
-- **Agent loop** — Plan → model turns → tool calls → results → limits/cancel, with structured events over WebSocket
-- **Approval gates** — Risky tools and control operations require explicit approval (expiry, single-use, input-bound)
-- **File / Drive manager** — Upload, download, preview (Range), copy/move, conflict-aware writes, protected-path policy
-- **Script runner** — `POST /api/files/run` with allowlisted env, timeout, output cap, process-group kill (kill switch: `MIKI_FILE_EXECUTION=false`)
-- **Local + cloud models** — llama-server for GGUF; OpenAI-compatible cloud paths when configured
-- **Local memory** — Temporal Knowledge Graph and file-backed memory under `identity/` / data dir
-- **Skills** — Bundled skills catalog under `@miki/skills`
-- **Cross-platform builds** — Linux x64/arm64 and Windows x64 via GitHub Actions
-- **Single-session Chat UI** — One dashboard session; control and agent APIs behind session or API key
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-| --- | --- |
-| Runtime | Node.js ≥ 20 (engines pin 20.19+ / 22.13+ / ≥24 for gateway) |
-| Language | TypeScript 5.9, ESM workspaces |
-| Gateway | Express, `ws`, better-sqlite3 |
-| UI | React (Vite) dashboard under `packages/ui/frontend` |
-| Core | Agent engine, tool registry, planner, approvals, file-manager |
-| Memory | `@miki/memory` — local TKG + file memory |
-| Local LLM | Vendored llama.cpp → headless `llama-server` |
-| Build | npm workspaces, Turbo, Jest, ESLint |
-| Deploy | systemd / Windows scripts under `deploy/` |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Node.js** ≥ 20
-- **npm** (or pnpm for workspace tooling)
-- Optional: **Go** and platform toolchains for full offline/native builds (see CI workflows)
-- Optional: GGUF model path for local inference
-
-### Installation
-
-```bash
-git clone https://github.com/glayph/Agent.git
-cd Agent
-npm install
-```
-
-Copy environment defaults and adjust:
-
-```bash
-cp .env.example .env
-# Set dashboard password, data dir, model defaults as needed
-```
-
-### Build
-
-```bash
-npm run build          # full monorepo build (llama, packages, frontend, CLI)
-# or targeted:
-npm run build:frontend
-npm run build --workspace=@miki/core
-npm run build --workspace=@miki/gateway
-```
-
-### Run
-
-```bash
-npm start              # production-style launcher (bin/miki.js)
-npm run dev            # development launcher
-```
-
-Dashboard defaults to **http://127.0.0.1:18800** (see `.env.example`).  
-When a dashboard password is set, session auth protects control and agent surfaces.
-
-### Useful commands
-
-| Command | Purpose |
-| --- | --- |
-| `npm start` / `npm run dev` | Start gateway + UI |
-| `npm run model:list` / `model:install` / `model:status` | Local model management |
-| `npm run smoke:agent-core` | Agent engine smoke |
-| `npm run test:files` | File manager / runner tests |
-| `npm run verify` | Project verification script |
-| `npm run build:release:linux` / `build:release:windows` | Offline release artifacts |
-
-Full install and doctor flows are documented in [`SETUP.md`](SETUP.md).
-
----
-
-## Project Structure
-
-```text
-.
-├── bin/                 # Launcher (miki.js)
-├── config/              # agent.yaml, tools.yaml
-├── deploy/              # systemd, Windows, reverse-proxy, firewall
-├── docs/                # AGENT_ENGINE.md, FILES_DRIVE.md, …
-├── identity/            # SOUL, IDENTITY, memory, agents notes
-├── packages/
-│   ├── cli/             # Self-contained miki CLI package
-│   ├── config/          # Shared config package
-│   ├── core/            # Engine, API, tools, providers, file-manager
-│   ├── gateway/         # Express + WS, agent-runtime
-│   ├── installer/       # Install helpers
-│   ├── memory/          # Local TKG & memory services
-│   ├── skills/          # Bundled skills
-│   └── ui/              # Dashboard (frontend + backend helpers)
-├── scripts/             # Build, model, soak, verify utilities
-├── package.json         # Workspace root (version 1.3.14)
-└── workflow.json        # Workflow manifest
-```
-
-Engine details: [`docs/AGENT_ENGINE.md`](docs/AGENT_ENGINE.md)  
-Files / Drive: [`docs/FILES_DRIVE.md`](docs/FILES_DRIVE.md)
-
----
-
-## Screenshots & Demo
-
-> Add product screenshots under `docs/` or `packages/ui/` and reference them here.
-
-```markdown
-![Dashboard chat](docs/screenshots/chat-ui.png)
-![File manager](docs/screenshots/files-drive.png)
-```
-
-Architectural flow (engine):
-
-```text
-Observe → Plan → [ model turn → tool calls → results ]* → Verify/limits → Answer
-```
-
----
-
-## Configuration
-
-Primary knobs live in `.env` / `.env.example` and `config/agent.yaml`.
-
-| Variable | Role |
-| --- | --- |
-| `MIKI_DATA_DIR` | Override gateway data directory |
-| `MIKI_FILE_EXECUTION` | Kill switch for script runner (`false` disables) |
-| `MIKI_AGENT_MAX_TURNS` / `MIKI_AGENT_MAX_TOOL_CALLS` | Agent loop budgets |
-| `DEFAULT_MODEL` | Default provider model id |
-| `ENABLE_API_KEY_AUTH` / `API_KEY_SECRET` | Non-dashboard API protection |
-| `MIKI_ALLOWED_ORIGINS` | CORS allowlist for the dashboard origin |
-
----
-
-## Contributing
-
-1. Fork and branch from `main`.
-2. Keep changes focused; prefer tests next to engine/file code (`packages/core/src/engine/`).
-3. Run `npm run verify` / targeted package tests before opening a PR.
-4. Document user-facing behavior in `docs/` (Markdown only under `docs/`).
-
-CI builds and verifies on Linux x64, Linux arm64, and Windows x64 (see `.github/workflows/`).
-
----
-
-## License
-
-MIT — see `package.json` (`"license": "MIT"`).  
-Add a root `LICENSE` file if you redistribute binaries and need the full text checked into the tree.
-
----
-
-## Links
-
-- **Repository:** [https://github.com/glayph/Agent](https://github.com/glayph/Agent)
-- **Setup guide:** [SETUP.md](SETUP.md)
-- **Agent engine:** [docs/AGENT_ENGINE.md](docs/AGENT_ENGINE.md)
-- **Files / Drive:** [docs/FILES_DRIVE.md](docs/FILES_DRIVE.md)
+## Review Loop
+- Plan the smallest next change.
+- Edit only the files needed for that change.
+- Run the narrowest meaningful gate.
+- Broaden tests/build/smoke before declaring the milestone done.
+- Record evidence and remaining risk.

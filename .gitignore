@@ -94,12 +94,3 @@ test-results/
 skills-lock.json
 **/.agents/
 **/downloaded-skills/
-
-# Identity runtime state (keep SOUL/IDENTITY docs; never commit session dumps)
-identity/.wal/
-identity/memory/**
-!identity/memory/.gitkeep
-
-# Compiled UI launcher binary (build to packages/ui/backend/dist/bin/)
-packages/ui/miki-backend
-packages/ui/backend/dist/bin/

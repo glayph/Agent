@@ -8,9 +8,11 @@ import { errorMessage } from "./util.js";
 const MAX_TREE_ENTRIES = 5_000;
 const MAX_TREE_BYTES = 200 * 1024 * 1024;
 const MAX_TREE_DEPTH = 24;
+const MAX_READ_BYTES = 1_000_000;
 
 export interface FileToolsOptions {
-  root: string;
+  root: string | (() => string);
+  restrictToWorkspace?: boolean | (() => boolean);
   /** Kill switch for execution; evaluated on every call so it can be toggled at runtime. */
   executionEnabled?: () => boolean;
   allowNativeExecution?: boolean;
@@ -63,17 +65,31 @@ function copyTree(source: string, target: string): void {
 }
 
 export function createFileManagementTools(options: FileToolsOptions): EngineTool[] {
-  const root = fs.realpathSync(path.resolve(options.root));
-  const rel = (abs: string) => path.relative(root, abs) || ".";
+  const getRoot = () => {
+    const configured = typeof options.root === "function" ? options.root() : options.root;
+    return fs.realpathSync(path.resolve(configured));
+  };
+  const isRestricted = () =>
+    typeof options.restrictToWorkspace === "function"
+      ? options.restrictToWorkspace()
+      : options.restrictToWorkspace !== false;
+  const rel = (abs: string) => path.relative(getRoot(), abs) || ".";
   const executionOn = () => options.executionEnabled?.() ?? true;
 
   const resolve = (input: unknown, name = "path"): string => {
-    const abs = resolveWorkspacePath(root, str(input, name));
+    const root = getRoot();
+    const raw = str(input, name);
+    const abs = isRestricted()
+      ? resolveWorkspacePath(root, raw)
+      : path.isAbsolute(raw)
+        ? path.resolve(raw)
+        : path.resolve(root, raw);
     if (isSensitivePath(abs))
       throw new Error("Access to credential and secret files is blocked by the workspace policy.");
     return abs;
   };
   const notRoot = (abs: string) => {
+    const root = getRoot();
     if (abs === root) throw new Error("The workspace root cannot be modified.");
   };
   const requireExisting = (abs: string) => {
@@ -103,6 +119,35 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
   };
 
   return [
+    {
+      name: "file_read",
+      description: "Read a UTF-8 text file from the workspace.",
+      risk: "read",
+      parameters: {
+        type: "object",
+        required: ["path"],
+        properties: { path: { type: "string" }, offset: { type: "integer" }, maxBytes: { type: "integer" } },
+        additionalProperties: false,
+      },
+      async execute(input) {
+        const file = resolve(input.path);
+        requireExisting(file);
+        const info = fs.statSync(file);
+        if (!info.isFile()) throw new Error("Path is not a file.");
+        const offset = Math.max(0, Number(input.offset ?? 0));
+        const limit = Math.min(MAX_READ_BYTES, Math.max(1, Number(input.maxBytes ?? MAX_READ_BYTES)));
+        const fd = fs.openSync(file, "r");
+        try {
+          const buffer = Buffer.alloc(Math.min(limit, Math.max(0, info.size - offset)));
+          const bytes = fs.readSync(fd, buffer, 0, buffer.length, offset);
+          const content = buffer.subarray(0, bytes).toString("utf8");
+          if (content.includes("\u0000")) throw new Error("File appears to be binary.");
+          return { path: rel(file), sizeBytes: info.size, offset, truncated: offset + bytes < info.size, content };
+        } finally {
+          fs.closeSync(fd);
+        }
+      },
+    },
     {
       name: "file_info",
       description: "Show type, size and modification time of a workspace file or folder.",
@@ -232,8 +277,9 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         const timeoutSeconds = input.timeoutSeconds === undefined ? 30 : Number(input.timeoutSeconds);
         try {
           const result = await runWorkspaceFile({
-            root,
+            root: getRoot(),
             file: str(input.path),
+            restrictToRoot: isRestricted(),
             args,
             timeoutMs: timeoutSeconds * 1000,
             allowNative: options.allowNativeExecution,

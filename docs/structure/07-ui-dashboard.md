@@ -1,47 +1,15 @@
-# 07 — packages/ui (Web Dashboard)
+# UI Dashboard
 
-Operator-facing single-session Chat UI and management dashboard.
+The Web UI architecture is:
 
-```
-packages/ui/
-├── README.md
-├── appearance.css
-├── miki-backend                 # Built Go backend binary (platform specific)
-├── backend/                     # Go backend sources
-│   ├── api/
-│   ├── dashboardauth/           # Dashboard authentication (password 12345678 default)
-│   ├── launcherconfig/
-│   ├── middleware/
-│   ├── model/
-│   ├── utils/
-│   └── winres/                  # Windows resource embedding
-└── frontend/                    # React + Vite application
-    ├── package.json             # Miki-web — Vite, Tailwind, Radix, Tabler icons
-    ├── public/
-    ├── scripts/
-    ├── src/
-    │   ├── main.tsx             # Application entry
-    │   ├── index.css
-    │   ├── app/                 # App shell / providers
-    │   ├── pages/               # Page components (Chat, Models, Skills, Memory, Logs, …)
-    │   ├── features/            # Feature modules
-    │   ├── routes/              # Route definitions
-    │   ├── routeTree.gen.ts     # Generated route tree
-    │   ├── api/                 # API client layer talking to gateway
-    │   ├── store/               # Client state management
-    │   ├── hooks/
-    │   ├── shared/
-    │   ├── lib/
-    │   ├── theme/               # Material / design tokens, CSS
-    │   ├── i18n/                # Internationalization
-    │   └── assets/
-    ├── vite.config.ts
-    └── tsconfig*.json
+```text
+React frontend → Node Gateway → Core / Agent / Memory / Providers
 ```
 
-**Comments**
-- Frontend is a modern React SPA (Vite + TypeScript + Tailwind).
-- Backend (Go) handles launcher, auth, and some model/dashboard concerns; the main agent logic remains in core.
-- Default dashboard password is documented as 12345678 (configuration-driven).
-- Maintains a single-session Chat UI as the primary interaction surface.
-- Screenshots of Chat UI actions are expected during end-to-end evaluation.
+`packages/gateway` is the primary Web UI backend. It owns the dashboard REST API, authentication session, gateway lifecycle contract, static frontend serving, and `/miki/ws`.
+
+`packages/ui/backend/stub_main.go` is a compatibility/static-serving stub only. It is not the primary dashboard backend and must not be launched as the Web UI API server.
+
+The legacy Go routes under `packages/ui/backend/api/` are compatibility code behind the `legacy_backend` build tag and are not part of the primary runtime.
+
+In development, Vite proxies `/api`, `/gateway`, and `/miki/ws` to the active Node Gateway.

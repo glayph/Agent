@@ -123,7 +123,7 @@ self_improvement:
     max_prompt_drift_percent: 20
   behavior_learning:
     enabled: true
-    mode: draft
+    mode: observe
     exploration_rate: 0.1
     min_samples: 3
     max_draft_notes: 3
@@ -139,39 +139,46 @@ concurrency:
   recoveryStaleAfterMs: 300000
 heartbeat:
   enabled: true
-  interval_seconds: 1800
+  interval_seconds: 30
   checklist_path: identity/HEARTBEAT.md
   skip_when_main_busy: true
   auto_actions:
-    enabled: false
-    max_actions_per_cycle: 0
+    enabled: true
+    max_actions_per_cycle: 1
   resource_limits:
     max_tokens_per_cycle: 8192
     max_idle_minutes: 5
 autonomy:
   enabled: true
   mode: standard
-  planning:
-    enabled: true
-  background_tasks:
-    enabled: true
-  memory_maintenance:
-    enabled: true
-  research:
-    enabled: true
-  project_maintenance:
-    enabled: true
-  self_evaluation:
-    enabled: true
-  auto_mode_switch:
-    enabled: true
-    escalate_unfinished_objectives_at_least: 3
-    escalate_idle_mins_at_least: 15
-    de_escalate_idle_mins_in_turbo: 30
-  hints:
-    projects: []
-    researchTopics: []
-    knowledgeTopics: []
+  tool_policy:
+    mode: safe
+    max_retries: 2
+    retry_backoff_seconds: 60
+    require_acceptance_contract: true
+    allow_browser: false
+    browser_allowed_domains: []
+    allow_computer_use: false
+    capability_profile: safe
+    allowed_tools: []
+    allowed_external_side_effect_tools: []
+    safe_write_roots:
+      - autonomy
+      - identity/memory
+  event_triggers:
+    max_per_minute: 30
+    cooldown_seconds: 5
+messaging:
+  adaptive: true
+  maxMessagesPerResponse: 3
+  enableChunking: true
+  enableStreaming: true
+  enableProgressMessages: true
+  maxChunkLength: 4000
+  avoidUnnecessaryMessages: true
+  streamingMinLength: 1200
+  multiMessageMinLength: 800
+  progressIntervalMs: 1800
 skill_governance:
   enabled: true
   validator:
@@ -183,7 +190,7 @@ agents:
     workspace: /home/ubuntu/miki
     restrict_to_workspace: false
     split_on_marker: false
-    max_tokens: 16384
+    max_completion_tokens: 16384
     context_window: 0
     max_tool_iterations: 12
     summarize_message_threshold: 20

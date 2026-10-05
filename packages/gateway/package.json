@@ -25,13 +25,16 @@
     "express": "^4.19.0",
     "http-proxy-middleware": "3.0.7",
     "ws": "^8.17.0",
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "@miki/memory": "file:../memory",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.5.10",
-    "@types/better-sqlite3": "^7.6.9"
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/qrcode": "^1.5.6"
   },
   "engines": {
     "node": "^20.19.0 || ^22.13.0 || >=24"

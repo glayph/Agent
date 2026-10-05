@@ -45,16 +45,26 @@ export class RouteErrorBoundary extends Component<Props, State> {
           <h2 className="text-foreground text-lg font-bold tracking-tight">
             Something went wrong on this page
           </h2>
-          <p className="text-muted-foreground mt-1.5 max-w-md font-mono text-xs">
-            {this.state.error?.message || "An unexpected error occurred."}
-          </p>
-          <div className="mt-6 flex items-center gap-3">
+          <div className="mt-4 w-full max-w-md">
+            <details className="group rounded-lg border border-border/70 bg-muted/30 text-left">
+              <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center justify-between gap-3">
+                  <span>Technical details</span>
+                  <span className="transition-transform group-open:rotate-180">⌄</span>
+                </span>
+              </summary>
+              <div className="border-t border-border/60 px-3 py-2.5 font-mono text-[11px] leading-5 break-words text-muted-foreground">
+                {this.state.error?.message || "An unexpected error occurred."}
+              </div>
+            </details>
+          </div>
+          <div className="mt-5 flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={this.handleReset}>
               <IconRefresh className="mr-1.5 size-4" />
-              Try Again
+              Retry
             </Button>
             <Button size="sm" onClick={() => window.location.reload()}>
-              Reload Page
+              Reload
             </Button>
           </div>
         </div>

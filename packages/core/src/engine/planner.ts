@@ -48,7 +48,7 @@ function buildPlan(
   goal: string,
   source: AgentPlan["source"],
   complexity: AgentPlan["complexity"],
-  steps: Array<{ title: string; tool?: string }>,
+  steps: Array<{ title: string; tool?: string; dependsOn?: number[] }>,
 ): AgentPlan {
   return {
     id: newPlanId(),
@@ -60,6 +60,13 @@ function buildPlan(
       id: `s${index + 1}`,
       title: step.title,
       ...(step.tool ? { tool: step.tool } : {}),
+      ...(step.dependsOn?.length
+        ? {
+            dependsOn: step.dependsOn
+              .filter((dep) => Number.isInteger(dep) && dep >= 1 && dep <= index)
+              .map((dep) => `s${dep}`),
+          }
+        : {}),
       status: "pending" as const,
     })),
   };
@@ -81,7 +88,10 @@ export function heuristicPlan(goal: string, analysis = analyzeGoal(goal)): Agent
     goal,
     "heuristic",
     analysis.complexity,
-    titles.map((title) => ({ title: title.slice(0, 160) })),
+    titles.map((title, index) => ({
+      title: title.slice(0, 160),
+      ...(index > 0 ? { dependsOn: [index] } : {}),
+    })),
   );
 }
 
@@ -90,7 +100,7 @@ export function parsePlanJson(
   text: string,
   knownTools: ReadonlySet<string>,
   maxSteps = 6,
-): Array<{ title: string; tool?: string }> | null {
+): Array<{ title: string; tool?: string; dependsOn?: number[] }> | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
@@ -102,9 +112,9 @@ export function parsePlanJson(
   }
   const rawSteps = (parsed as { steps?: unknown })?.steps;
   if (!Array.isArray(rawSteps)) return null;
-  const steps: Array<{ title: string; tool?: string }> = [];
+  const steps: Array<{ title: string; tool?: string; dependsOn?: number[] }> = [];
   for (const item of rawSteps) {
-    const entry = item as { title?: unknown; tool?: unknown } | string;
+    const entry = item as { title?: unknown; tool?: unknown; depends_on?: unknown } | string;
     const title =
       typeof entry === "string"
         ? entry
@@ -118,7 +128,15 @@ export function parsePlanJson(
       knownTools.has(entry.tool)
         ? entry.tool
         : undefined;
-    steps.push({ title: title.trim().slice(0, 160), ...(tool ? { tool } : {}) });
+    const dependsOn =
+      typeof entry === "object" && Array.isArray(entry.depends_on)
+        ? entry.depends_on.filter((value): value is number => Number.isInteger(value))
+        : undefined;
+    steps.push({
+      title: title.trim().slice(0, 160),
+      ...(tool ? { tool } : {}),
+      ...(dependsOn?.length ? { dependsOn } : {}),
+    });
     if (steps.length >= maxSteps) break;
   }
   return steps.length ? steps : null;
@@ -150,8 +168,9 @@ export async function createPlan(input: CreatePlanInput): Promise<AgentPlan> {
         {
           role: "system",
           content:
-            `You are the planning module of an autonomous agent. Break the user's goal into 2-${maxSteps} concrete, ordered steps. ` +
-            `Reply with ONLY a JSON object: {"steps":[{"title":"short imperative step","tool":"tool name or null"}]}. ` +
+            `You are the planning module of an autonomous agent. Break the user's goal into 2-${maxSteps} concrete steps and identify dependencies so independent work can run in parallel. ` +
+            `Reply with ONLY a JSON object: {"steps":[{"title":"short imperative step","tool":"tool name or null","depends_on":[1,2]}]}. ` +
+            `depends_on uses 1-based step numbers and may be [] for an independent step. Do not invent dependencies; add one when the step needs another step's result. ` +
             `Available tools: ${input.toolNames.join(", ") || "none"}. Use null when no tool is needed.`,
         },
         { role: "user", content: input.goal },
@@ -164,8 +183,20 @@ export async function createPlan(input: CreatePlanInput): Promise<AgentPlan> {
       new Set(input.toolNames),
       maxSteps,
     );
-    if (steps && steps.length >= 1)
-      return buildPlan(input.goal, "llm", analysis.complexity, steps);
+    if (steps && steps.length >= 1) {
+      // If the model ignores depends_on entirely, prefer a safe sequential DAG
+      // over accidentally parallelizing data-dependent work. Explicit [] still
+      // means the step is independent and may run in parallel.
+      const hasDependencyMetadata = steps.some((step) => step.dependsOn !== undefined);
+      const normalizedSteps =
+        !hasDependencyMetadata && steps.length > 1
+          ? steps.map((step, index) => ({
+              ...step,
+              ...(index > 0 ? { dependsOn: [index] } : {}),
+            }))
+          : steps;
+      return buildPlan(input.goal, "llm", analysis.complexity, normalizedSteps);
+    }
     input.onFallback?.("The planner reply did not contain valid steps.");
   } catch (error) {
     if (input.signal?.aborted) throw error;
@@ -178,7 +209,7 @@ export function describePlan(plan: AgentPlan): string {
   return plan.steps
     .map(
       (step, index) =>
-        `${index + 1}. ${step.title}${step.tool ? ` (tool: ${step.tool})` : ""}`,
+        `${index + 1}. ${step.title}${step.tool ? ` (tool: ${step.tool})` : ""}${step.dependsOn?.length ? ` [after: ${step.dependsOn.join(", ")}]` : ""}`,
     )
     .join("\n");
 }

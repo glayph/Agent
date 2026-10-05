@@ -8,6 +8,7 @@ export const TemporaryMemory: any;
 export const MultiHopRetriever: any;
 export const GraphCognitiveMemory: any;
 export const SelectiveMemoryEngine: any;
+export const LearningStore: any;
 
 export const REGIONS: Readonly<{
   LONG_TERM: "long_term";
@@ -28,5 +29,6 @@ export function canonicalRegion(region: string, fallback?: string): string;
 
 export const HashEmbeddingProvider: any;
 export const NoopEmbeddingProvider: any;
+export const OnnxEmbeddingProvider: any;
 export const createEmbeddingProvider: any;
 export const cosineSimilarity: any;

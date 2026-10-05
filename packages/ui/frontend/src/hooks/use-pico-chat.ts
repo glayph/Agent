@@ -11,7 +11,7 @@ import {
   stopChatGeneration,
   switchChatSession,
 } from "@/features/chat/controller"
-import { chatAtom } from "@/store/chat"
+import { chatAtom, thinkingModeAtom } from "@/store/chat"
 
 const UNIX_MS_THRESHOLD = 1e12
 
@@ -60,6 +60,7 @@ export function formatMessageTime(dateRaw: number | string | Date): string {
 }
 
 export function useMikiChat() {
+  const thinkingMode = useAtomValue(thinkingModeAtom)
   const {
     messages,
     connectionState,
@@ -73,6 +74,7 @@ export function useMikiChat() {
 
   return {
     messages,
+    thinkingMode,
     connectionState,
     isTyping,
     activeSessionId,
@@ -80,7 +82,8 @@ export function useMikiChat() {
     contextUsage,
     activeRunModel,
     activeRunProvider,
-    sendMessage: sendChatMessage,
+    sendMessage: (input: Parameters<typeof sendChatMessage>[0]) =>
+      sendChatMessage({ ...input, thinkingMode }),
     deleteMessage: deleteChatMessage,
     editMessage: editChatMessage,
     forkFromMessage: forkChatSessionFromMessage,

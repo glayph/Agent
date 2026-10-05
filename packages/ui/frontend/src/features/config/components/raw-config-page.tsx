@@ -124,6 +124,49 @@ export function RawConfigPage() {
     },
   })
 
+  const rollbackMutation = useMutation({
+    mutationFn: async () => {
+      const res = await launcherFetch("/api/config/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      })
+      if (!res.ok) {
+        throw new Error(await readConfigSaveError(res, "Configuration rollback failed."))
+      }
+      return (await res.json()) as {
+        config?: Record<string, unknown>
+        gateway_restart_required?: boolean
+        runtime_apply_status?: "applied" | "pending_restart" | "failed"
+        runtime_apply_error?: string
+      }
+    },
+    onSuccess: (result) => {
+      if (result.config) {
+        setEditorValue(JSON.stringify(result.config, null, 2))
+        setLastSavedConfig(result.config)
+      }
+      setIsDirty(false)
+      queryClient.invalidateQueries({ queryKey: ["config"] })
+      setStatusMessage({ kind: "success", text: "Configuration rolled back to the latest saved backup." })
+      void refreshGatewayState({ force: true }).then((gateway) => {
+        showSaveSuccessOrRestartToast(
+          t,
+          "Configuration rollback completed.",
+          t("navigation.config"),
+          result.gateway_restart_required ?? gateway?.restartRequired === true,
+          result.runtime_apply_status,
+          result.runtime_apply_error,
+        )
+      })
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Configuration rollback failed."
+      setStatusMessage({ kind: "error", text: message })
+      toast.error(message)
+    },
+  })
+
   const [editorValue, setEditorValue] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
   const [lastSavedConfig, setLastSavedConfig] = useState<Record<
@@ -255,9 +298,16 @@ export function RawConfigPage() {
                 <Button
                   variant="outline"
                   onClick={handleFormat}
-                  disabled={mutation.isPending}
+                  disabled={mutation.isPending || rollbackMutation.isPending}
                 >
                   {t("pages.config.format")}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => rollbackMutation.mutate()}
+                  disabled={mutation.isPending || rollbackMutation.isPending}
+                >
+                  Rollback last save
                 </Button>
                 <AlertDialog
                   open={showResetDialog}

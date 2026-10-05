@@ -23,6 +23,7 @@ const runtimeRoot = path.resolve(process.env.MIKI_RUNTIME_ROOT || workspaceDir);
 const dataDir = path.join(workspaceDir, "data");
 const statePath = path.join(dataDir, "24-7-supervisor.json");
 const lockPath = path.join(dataDir, "24-7-supervisor.lock");
+const gatewayStopRequestPath = path.join(dataDir, "24-7-gateway-stop.request");
 const gatewayEntry = path.resolve(
   process.env.MIKI_GATEWAY_ENTRY ||
     path.join(sourceRoot, "packages", "gateway", "dist", "index.js"),
@@ -217,6 +218,7 @@ async function spawnGateway() {
     );
   }
   persist("starting");
+  try { fs.unlinkSync(gatewayStopRequestPath); } catch {}
   const child = childProcess.spawn(process.execPath, [gatewayEntry], {
     cwd: sourceRoot,
     env: {
@@ -224,7 +226,11 @@ async function spawnGateway() {
       MIKI_SOURCE_ROOT: sourceRoot,
       MIKI_RUNTIME_ROOT: runtimeRoot,
       MIKI_WORKSPACE_DIR: workspaceDir,
+      MIKI_DATA_DIR: dataDir,
+      MIKI_CONFIG_DIR: path.join(workspaceDir, "config"),
+      MIKI_GATEWAY_STOP_FILE: gatewayStopRequestPath,
       MIKI_24_7_RUNTIME: "1",
+      MIKI_24_7_STOP_FILE: gatewayStopRequestPath,
     },
     stdio: "inherit",
   });
@@ -235,6 +241,11 @@ async function spawnGateway() {
   });
   child.once("exit", (code, signal) => {
     if (gateway === child) gateway = null;
+    if (!stopping && fs.existsSync(gatewayStopRequestPath)) {
+      try { fs.unlinkSync(gatewayStopRequestPath); } catch {}
+      void shutdown("gateway_shutdown").finally(() => persist("stopped", { exitCode: code, signal, shutdownRequested: true }));
+      return;
+    }
     if (stopping) {
       persist("stopped", { exitCode: code, signal });
       return;

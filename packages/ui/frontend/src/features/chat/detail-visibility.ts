@@ -1,6 +1,61 @@
 export type AssistantDetailVisibility =
   "none" | "thought" | "tool_calls" | "all"
 
+export type ThinkingMode = "auto" | "off" | "low" | "medium" | "high"
+
+export const THINKING_MODE_STORAGE_KEY = "Miki:chat-thinking-mode"
+export const DEFAULT_THINKING_MODE: ThinkingMode = "auto"
+
+interface ThinkingStorageLike {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  removeItem(key: string): void
+}
+
+function parseThinkingMode(raw: string | null): ThinkingMode {
+  const value = (raw ?? "").trim().toLowerCase()
+  return value === "auto" || value === "off" || value === "low" || value === "medium" || value === "high"
+    ? value
+    : DEFAULT_THINKING_MODE
+}
+
+function getThinkingStorage(): ThinkingStorageLike | undefined {
+  try {
+    return globalThis.localStorage
+  } catch {
+    return undefined
+  }
+}
+
+export const thinkingModeStorage = {
+  getItem(): ThinkingMode {
+    return parseThinkingMode(getThinkingStorage()?.getItem(THINKING_MODE_STORAGE_KEY) ?? null)
+  },
+  setItem(key: string, value: ThinkingMode) {
+    try {
+      getThinkingStorage()?.setItem(key, JSON.stringify(value))
+    } catch {
+      // Ignore local storage failures.
+    }
+  },
+  removeItem(key: string) {
+    try {
+      getThinkingStorage()?.removeItem(key)
+    } catch {
+      // Ignore local storage failures.
+    }
+  },
+  subscribe(key: string, callback: (value: ThinkingMode) => void) {
+    if (typeof window === "undefined") return undefined
+    const handler = (event: StorageEvent) => {
+      if (event.storageArea !== getThinkingStorage() || event.key !== key) return
+      callback(parseThinkingMode(event.newValue))
+    }
+    window.addEventListener("storage", handler)
+    return () => window.removeEventListener("storage", handler)
+  },
+}
+
 export type AssistantDetailMessageKind =
   "normal" | "thought" | "tool_calls" | "action_update" | "error" | undefined
 
