@@ -6,15 +6,14 @@ import { getLauncherAuthStatus } from "@/api/launcher-auth"
 import { AppLayout } from "@/app/layout/app-layout"
 import { initializeChatStore } from "@/features/chat/controller"
 import { isLauncherAuthPathname } from "@/lib/launcher-login-path"
+import {
+  SESSION_WARNING_THRESHOLD_MS,
+  formatSessionRemaining,
+  setSessionExpiresAt,
+  useSessionRemainingMs,
+} from "@/lib/session-expiry"
 
 type AuthGateState = "checking" | "authenticated" | "redirecting" | "degraded"
-
-function formatCountdown(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${String(seconds).padStart(2, "0")}`
-}
 
 function AuthGateFallback() {
   return (
@@ -63,10 +62,7 @@ const RootLayout = () => {
 
   const [authError, setAuthError] = useState<string | null>(null)
   const [authGateState, setAuthGateState] = useState<AuthGateState>("checking")
-  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null)
-  const [sessionRemainingMs, setSessionRemainingMs] = useState<number | null>(
-    null,
-  )
+  const sessionRemainingMs = useSessionRemainingMs()
 
   useEffect(() => {
     if (isAuthPage) return
@@ -116,21 +112,10 @@ const RootLayout = () => {
   }, [isAuthPage])
 
   useEffect(() => {
-    if (sessionExpiresAt === null) {
-      setSessionRemainingMs(null)
-      return
+    if (sessionRemainingMs !== null && sessionRemainingMs <= 0) {
+      globalThis.location.assign("/launcher-login")
     }
-    const update = () => {
-      const remaining = sessionExpiresAt - Date.now()
-      setSessionRemainingMs(remaining)
-      if (remaining <= 0) {
-        globalThis.location.assign("/launcher-login")
-      }
-    }
-    update()
-    const timer = globalThis.setInterval(update, 1000)
-    return () => globalThis.clearInterval(timer)
-  }, [sessionExpiresAt])
+  }, [sessionRemainingMs])
 
   useEffect(() => {
     if (isAuthPage || authGateState !== "authenticated") {
@@ -161,13 +146,14 @@ const RootLayout = () => {
   const showSessionCountdown =
     authGateState === "authenticated" &&
     sessionRemainingMs !== null &&
-    sessionRemainingMs > 0
+    sessionRemainingMs > 0 &&
+    sessionRemainingMs <= SESSION_WARNING_THRESHOLD_MS
 
   return (
     <div className="h-dvh overflow-hidden">
       {showSessionCountdown && (
         <div className="border-primary/30 bg-card/95 text-foreground fixed inset-x-0 top-0 z-[100] border-b px-4 py-2 text-center text-sm backdrop-blur">
-          Session expires in {formatCountdown(sessionRemainingMs)}
+          Session expires in {formatSessionRemaining(sessionRemainingMs)}
         </div>
       )}
       {authError && (

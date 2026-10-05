@@ -1,6 +1,7 @@
 import {
   IconAlertTriangle,
   IconCheck,
+  IconClock,
   IconLoader2,
   IconLogout,
   IconMenu2,
@@ -17,6 +18,10 @@ import { useTranslation } from "react-i18next"
 import { postLauncherDashboardLogout } from "@/api/launcher-auth"
 import { useGateway } from "@/hooks/use-gateway.ts"
 import { type ThemePreference, useTheme } from "@/hooks/use-theme.ts"
+import {
+  formatSessionRemaining,
+  useSessionRemainingMs,
+} from "@/lib/session-expiry"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,6 +49,11 @@ type ThemeOption = {
 export function GlobalHeaderActions() {
   const { t } = useTranslation()
   const { theme, preference, setTheme } = useTheme()
+  const sessionRemainingMs = useSessionRemainingMs()
+  const sessionLabel =
+    sessionRemainingMs !== null && sessionRemainingMs > 0
+      ? `Session expires in ${formatSessionRemaining(sessionRemainingMs)}`
+      : null
   const {
     state: gwState,
     loading: gwLoading,
@@ -209,6 +219,16 @@ export function GlobalHeaderActions() {
           />
         )}
 
+        {sessionLabel && (
+          <span
+            className="text-muted-foreground inline-flex size-8 items-center justify-center"
+            title={sessionLabel}
+            aria-label={sessionLabel}
+          >
+            <IconClock className="size-4" />
+          </span>
+        )}
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -317,6 +337,18 @@ export function GlobalHeaderActions() {
                 )
               })}
             </div>
+
+            {sessionLabel && (
+              <>
+                <div className="bg-border/70 my-1 h-px" />
+                <div className="text-muted-foreground flex h-7 items-center gap-2 px-2 text-xs">
+                  <IconClock className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {sessionLabel}
+                  </span>
+                </div>
+              </>
+            )}
 
             <div className="bg-border/70 my-1 h-px" />
 
