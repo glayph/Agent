@@ -42,8 +42,8 @@ import type { ChatAttachment, ChatMessage } from "@/store/chat"
 import { assistantDetailVisibilityAtom, thinkingModeAtom } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
 
-const MAX_IMAGE_SIZE_BYTES = 7 * 1024 * 1024
-const MAX_IMAGE_SIZE_LABEL = "7 MB"
+const MAX_FILE_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024
+const MAX_FILE_ATTACHMENT_SIZE_LABEL = "10 MB"
 const MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
 const MAX_AUDIO_SIZE_LABEL = "25 MB"
 const MAX_AUDIO_DURATION_MS = 5 * 60 * 1000
@@ -863,9 +863,7 @@ export function ChatPage() {
       setEditingMessageId(message.id)
       setInput(message.content)
       setAttachments(
-        message.attachments?.filter(
-          (attachment) => attachment.type === "image" && attachment.url,
-        ) ?? [],
+        message.attachments?.filter((attachment) => attachment.url) ?? [],
       )
       focusComposer()
     },
@@ -921,7 +919,7 @@ export function ChatPage() {
     [retryMessage, t],
   )
 
-  const handleImageSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelection = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []).slice(0, 1)
     event.target.value = ""
 
@@ -931,20 +929,11 @@ export function ChatPage() {
 
     const nextAttachments: ChatAttachment[] = []
     for (const file of files) {
-      if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-        toast.error(
-          t("chat.invalidImage", {
-            name: file.name,
-          }),
-        )
-        continue
-      }
-
-      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      if (file.size > MAX_FILE_ATTACHMENT_SIZE_BYTES) {
         toast.error(
           t("chat.imageTooLarge", {
             name: file.name,
-            size: MAX_IMAGE_SIZE_LABEL,
+            size: MAX_FILE_ATTACHMENT_SIZE_LABEL,
           }),
         )
         continue
@@ -952,9 +941,16 @@ export function ChatPage() {
 
       try {
         nextAttachments.push({
-          type: "image",
+          type: file.type.startsWith("image/") || ALLOWED_IMAGE_TYPES.has(file.type)
+            ? "image"
+            : file.type.startsWith("video/")
+              ? "video"
+              : file.type.startsWith("audio/")
+                ? "audio"
+                : "file",
           filename: file.name,
           url: await readFileAsDataUrl(file),
+          ...(file.type ? { contentType: file.type } : {}),
         })
       } catch {
         toast.error(
@@ -1174,9 +1170,9 @@ export function ChatPage() {
         ref={fileInputRef}
         type="file"
         aria-label={t("chat.attachImage")}
-        accept="image/jpeg,image/png,image/gif,image/webp,image/bmp"
+        accept="image/*,video/*,application/pdf,text/plain,text/csv,application/json,.md,.doc,.docx,.xls,.xlsx,.zip"
         className="hidden"
-        onChange={handleImageSelection}
+        onChange={handleFileSelection}
       />
       <input
         ref={audioInputRef}

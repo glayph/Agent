@@ -268,6 +268,19 @@ export async function connectChat() {
           checkpoint_id?: unknown
           sequence?: unknown
         }
+        if (message.type === "proactive.message") {
+          const payload = message.payload || {}
+          const content = typeof payload.content === "string" ? payload.content.trim() : ""
+          const messageId = typeof payload.message_id === "string" ? payload.message_id : `proactive-${Date.now()}`
+          if (content) {
+            updateChatStore((prev) => ({
+              messages: prev.messages.some((candidate) => candidate.id === messageId)
+                ? prev.messages
+                : [...prev.messages, { id: messageId, role: "assistant" as const, content, kind: "normal" as const, ...(typeof payload.run_id === "string" ? { runId: payload.run_id } : {}), timestamp: message.timestamp ?? Date.now() }],
+            }))
+          }
+          return
+        }
         if (message.type === "auth.ok") {
           return
         }
@@ -508,7 +521,8 @@ function normalizeOutgoingAttachments(
   attachments: ChatAttachment[] = [],
 ): ChatAttachment[] {
   return attachments
-    .filter((attachment) => attachment.type === "image" && attachment.url)
+    .filter((attachment) => Boolean(attachment.url))
+    .slice(0, 16)
     .map((attachment) => ({ ...attachment }))
 }
 
@@ -529,6 +543,18 @@ function sendmikiMessage(
       payload: {
         content,
         media: attachments.map((attachment) => attachment.url),
+        ...(attachments.length > 0
+          ? {
+              attachments: attachments.map((attachment) => ({
+                type: attachment.type,
+                url: attachment.url,
+                ...(attachment.filename ? { filename: attachment.filename } : {}),
+                ...(attachment.contentType
+                  ? { content_type: attachment.contentType }
+                  : {}),
+              })),
+            }
+          : {}),
         ...(requestedModel?.trim()
           ? { requested_model: requestedModel.trim() }
           : {}),
@@ -632,6 +658,14 @@ export async function editChatMessage({
     await updateSessionMessage(activeSessionIdRef, messageId, {
       content: normalizedContent,
       media: normalizedAttachments.map((attachment) => attachment.url),
+      attachments: normalizedAttachments.map((attachment) => ({
+        type: attachment.type,
+        url: attachment.url,
+        ...(attachment.filename ? { filename: attachment.filename } : {}),
+        ...(attachment.contentType
+          ? { content_type: attachment.contentType }
+          : {}),
+      })),
     })
     updateChatStore((prev) => ({
       messages: prev.messages.map((message) =>

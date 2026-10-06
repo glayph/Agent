@@ -130,7 +130,16 @@ export async function updateSessionMetadata(
 export async function updateSessionMessage(
   sessionId: string,
   messageId: string,
-  patch: { content?: string; media?: string[] },
+  patch: {
+    content?: string
+    media?: string[]
+    attachments?: Array<{
+      type: "image" | "audio" | "video" | "file"
+      url: string
+      filename?: string
+      content_type?: string
+    }>
+  },
 ): Promise<{ session_id: string; message: SessionDetail["messages"][number] }> {
   const res = await launcherFetch(
     `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,

@@ -295,18 +295,16 @@ export function shouldShowAssistantMessage(
     return false
   }
 
-  // The backend marks some reasoning/tool-call traces as inspector_only.
-  // Those must only ever appear in the Inspector panel, never in the main
-  // chat bubble UI — this is independent of the user's visibility
-  // preference below, which only controls *chat-eligible* thought/tool
-  // messages (ones the backend did not restrict to the Inspector).
-  if (inspectorOnly) {
-    return false
-  }
-
   if (kind !== "thought" && kind !== "tool_calls") {
     return true
   }
+
+  // `inspector_only` is a backend classification, not a user-facing
+  // visibility override. The backend only sends redacted/progress details
+  // here (raw chain-of-thought is never streamed), so the Response details
+  // menu must still be able to reveal them when explicitly selected.
+  // Keep the parameter in the signature to preserve the protocol contract.
+  void inspectorOnly
 
   if (visibility === "all") {
     return true

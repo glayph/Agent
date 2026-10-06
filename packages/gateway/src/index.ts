@@ -13,7 +13,6 @@ import { createFileManagerRouter, FileManagerError } from "@miki/core/file-manag
 import { FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine"
 import { normalizeRuntimePaths } from "@miki/core/paths"
 import { createSkillsRouter, createSkillsService } from "@miki/core/skills"
-import { LayeredOrchestrator, type LayeredRunSnapshot } from "@miki/core/engine"
 import { createEmbeddingProvider, cosineSimilarity } from "@miki/memory"
 import { LearningStore } from "@miki/memory"
 import { getLifecycleBus } from "@miki/core/hooks"
@@ -46,7 +45,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS file_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_at TEXT NOT NULL, file TEXT NOT NULL, args TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, exit_code INTEGER, duration_ms INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS skill_events (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}');
   CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0);
-  CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'normal', model_name TEXT, context_id TEXT, FOREIGN KEY(session_id) REFERENCES chat_sessions(id));
+  CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'normal', model_name TEXT, context_id TEXT, image_urls TEXT, attachments_json TEXT, FOREIGN KEY(session_id) REFERENCES chat_sessions(id));
   CREATE TABLE IF NOT EXISTS model_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS model_catalogs (id TEXT PRIMARY KEY, provider TEXT NOT NULL, api_base TEXT NOT NULL, api_key_mask TEXT NOT NULL DEFAULT '', models_json TEXT NOT NULL, fetched_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS memory_chunks (id TEXT PRIMARY KEY, region TEXT NOT NULL, content TEXT NOT NULL, summary TEXT NOT NULL, provenance TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1, importance REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -65,6 +64,8 @@ ensureColumn("orchestrator_runs", "error", "TEXT")
 ensureColumn("orchestrator_runs", "started_at", "TEXT")
 ensureColumn("orchestrator_runs", "finished_at", "TEXT")
 ensureColumn("chat_messages", "context_id", "TEXT")
+ensureColumn("chat_messages", "image_urls", "TEXT")
+ensureColumn("chat_messages", "attachments_json", "TEXT")
 db.prepare("UPDATE chat_messages SET context_id='channel:default-channel:peer:' || session_id WHERE context_id IS NULL").run()
 db.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_context_created ON chat_messages(context_id, created_at)")
 // A process restart cannot safely resume a partially executed DAG because transient
@@ -327,7 +328,7 @@ app.post("/api/gateway/shutdown", (_req, res) => {
 app.post("/api/gateway/logs/clear", (_req, res) => { gatewayLogs.splice(0, gatewayLogs.length); gatewayRunId += 1; appendGatewayLog("Gateway log buffer cleared."); res.json({ status: "ok", log_run_id: gatewayRunId, log_total: gatewayLogs.length }) })
 app.post("/api/runtime/reload", (_req, res) => {
   try {
-    configureHeartbeatTimer()
+    void configureRuntimeLoop()
     appendGatewayLog("Runtime configuration reloaded in-process.")
     return res.json({ status: "applied", applied: true, pending_restart: false, gateway_restart_required: false, runtime_apply_status: "applied", reloaded_at: now() })
   } catch (error) {
@@ -344,7 +345,15 @@ app.get("/api/sessions", (_req, res) => {
 app.get("/api/sessions/:id", (req, res) => {
   const id = req.params.id; ensureSession(id)
   const summary = sessionSummary(id)
-  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? ORDER BY created_at ASC").all(id)
+  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json FROM chat_messages WHERE session_id=? ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
+    let attachments: unknown
+    try { attachments = message.attachments_json ? JSON.parse(String(message.attachments_json)) : undefined } catch { attachments = undefined }
+    const { attachments_json: _attachmentsJson, ...rest } = message
+    return {
+      ...rest,
+      ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
+    }
+  })
   res.json({ ...summary, messages, summary: "" })
 })
 app.patch("/api/sessions/:id", (req, res) => { ensureSession(req.params.id); if (typeof req.body?.title === "string") db.prepare("UPDATE chat_sessions SET title=?,updated_at=? WHERE id=?").run(req.body.title, now(), req.params.id); res.json(sessionSummary(req.params.id)) })
@@ -354,7 +363,10 @@ app.patch("/api/sessions/:id/messages/:messageId", (req, res) => {
   const sessionId = req.params.id
   const messageId = req.params.messageId
   if (!sessionMessage(sessionId, messageId)) return res.status(404).json({ error: "Message not found" })
-  if (typeof req.body?.content === "string") db.prepare("UPDATE chat_messages SET content=? WHERE session_id=? AND id=?").run(req.body.content, sessionId, messageId)
+  const rawAttachments = Array.isArray(req.body?.attachments) ? req.body.attachments : []
+  const attachments = rawAttachments.filter((item: unknown): item is Record<string, unknown> => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).url === "string"))
+  const imageUrls = attachments.filter((item) => item.type === "image").map((item) => String(item.url))
+  if (typeof req.body?.content === "string") db.prepare("UPDATE chat_messages SET content=?,image_urls=?,attachments_json=? WHERE session_id=? AND id=?").run(req.body.content, imageUrls.length > 0 ? JSON.stringify(imageUrls) : null, attachments.length > 0 ? JSON.stringify(attachments.slice(0, 16)) : null, sessionId, messageId)
   db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
   return res.json({ session_id: sessionId, message: sessionMessage(sessionId, messageId) })
 })
@@ -616,7 +628,7 @@ app.put("/api/config", requireAuth, (req, res) => {
   const backupFile = path.join(backupDir, `config-before-save-${Date.now()}.json`)
   try { writeFileSync(backupFile, JSON.stringify({ createdAt: now(), config: getAppConfig() }, null, 2), { mode: 0o600 }) } catch {}
   putSetting("app_config", JSON.stringify(normalized))
-  configureHeartbeatTimer()
+  void configureRuntimeLoop()
   res.json({ status: "ok", config: normalized, warnings: result.warnings, backup_file: backupFile, runtime_apply_status: "applied", gateway_restart_required: false })
 })
 app.post("/api/config/rollback", requireAuth, (_req, res) => {
@@ -646,7 +658,7 @@ app.patch("/api/config", requireAuth, (req, res) => {
   makeDirSync(backupDir, { recursive: true })
   try { writeFileSync(path.join(backupDir, `config-before-patch-${Date.now()}.json`), JSON.stringify({ createdAt: now(), config: getAppConfig() }, null, 2), { mode: 0o600 }) } catch {}
   putSetting("app_config", JSON.stringify(normalized))
-  configureHeartbeatTimer()
+  void configureRuntimeLoop()
   res.json({ status: "ok", config: normalized, warnings: result.warnings, runtime_apply_status: "applied", gateway_restart_required: false })
 })
 app.post("/api/config/test-command-patterns", requireAuth, (req, res) => {
@@ -690,7 +702,6 @@ app.post("/api/config/reset", requireAuth, (_req, res) => {
   db.prepare("DELETE FROM settings WHERE key IN ('app_config','launcher_config','autostart_enabled','safe_mode')").run()
   res.json({ status: "ok", config: {}, reset: { factory_defaults_applied: true, preserved: ["dashboard_password", "model_configs", "api_keys", "security_credentials"], backup_file: backupFile } })
 })
-let layered: LayeredOrchestrator | undefined
 let gatewayRunId = Math.floor(Date.now() / 1000)
 const gatewayLogs: Array<{ runId: number; message: string; at: string }> = []
 const appendGatewayLog = (message: string) => { gatewayLogs.push({ runId: gatewayRunId, message, at: now() }); if (gatewayLogs.length > 500) gatewayLogs.splice(0, gatewayLogs.length - 500) }
@@ -706,64 +717,44 @@ const agent = createAgentRuntime({
   fileExecutionEnabled,
   recordFileRun,
   skills,
-  externalRunActive: (runId) => Boolean(layered?.isRunActive(runId)),
-  externalCancelRun: (runId) => Boolean(layered?.cancelRun(runId)),
   log: (message, details) => console.warn(`[miki] ${message}`, details ?? {}),
 })
-const layeredStateStore = {
-  save: (snapshot: LayeredRunSnapshot) => {
-    db.prepare(`INSERT INTO orchestrator_runs(run_id,session_id,phase,route_json,plan_json,node_status_json,updated_at,status,error,started_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(run_id) DO UPDATE SET session_id=excluded.session_id,phase=excluded.phase,route_json=excluded.route_json,plan_json=excluded.plan_json,node_status_json=excluded.node_status_json,updated_at=excluded.updated_at,status=excluded.status,error=excluded.error,started_at=COALESCE(orchestrator_runs.started_at, excluded.started_at),finished_at=excluded.finished_at`)
-      .run(snapshot.runId, snapshot.sessionId || null, snapshot.phase, snapshot.route ? JSON.stringify(snapshot.route) : null, snapshot.plan ? JSON.stringify(snapshot.plan) : null, JSON.stringify(snapshot.nodeStatus), snapshot.updatedAt, snapshot.status || "running", snapshot.error || null, snapshot.startedAt || snapshot.updatedAt, snapshot.finishedAt || null)
-  },
-  load: (runId: string): LayeredRunSnapshot | undefined => {
-    const row = db.prepare("SELECT run_id,session_id,phase,route_json,plan_json,node_status_json,updated_at,status,error,started_at,finished_at FROM orchestrator_runs WHERE run_id=?").get(runId) as Record<string, unknown> | undefined
-    if (!row) return undefined
-    return {
-      runId: String(row.run_id),
-      sessionId: row.session_id ? String(row.session_id) : undefined,
-      phase: String(row.phase) as LayeredRunSnapshot["phase"],
-      route: row.route_json ? JSON.parse(String(row.route_json)) : undefined,
-      plan: row.plan_json ? JSON.parse(String(row.plan_json)) : undefined,
-      nodeStatus: row.node_status_json ? JSON.parse(String(row.node_status_json)) : {},
-      updatedAt: String(row.updated_at),
-      status: row.status ? String(row.status) as LayeredRunSnapshot["status"] : undefined,
-      error: row.error ? String(row.error) : undefined,
-      startedAt: row.started_at ? String(row.started_at) : undefined,
-      finishedAt: row.finished_at ? String(row.finished_at) : undefined,
-    }
-  },
+const proactiveSockets = new Set<WebSocket>()
+const broadcastProactive = async (input: { text: string; runId?: string; goalId?: number; kind?: string }) => {
+  const text = input.text.trim()
+  if (!text) return
+  const createdAt = now()
+  const messageId = `proactive-${randomUUID()}`
+  const sessionId = "miki-main-chat"
+  ensureSession(sessionId)
+  db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,kind,model_name,context_id) VALUES(?,?,?,?,?,?,?,?)").run(
+    messageId, sessionId, "assistant", text, createdAt, "normal", null, `proactive:${input.runId || messageId}`,
+  )
+  db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(createdAt, sessionId)
+  const payload = {
+    message_id: messageId,
+    content: text,
+    kind: "normal",
+    proactive: true,
+    source: "full_agent_autonomy",
+    ...(input.runId ? { run_id: input.runId } : {}),
+    ...(input.goalId !== undefined ? { goal_id: input.goalId } : {}),
+    ...(input.kind ? { notification_kind: input.kind } : {}),
+  }
+  for (const socket of proactiveSockets) {
+    if (socket.readyState !== socket.OPEN) continue
+    try { socket.send(JSON.stringify({ type: "proactive.message", timestamp: Date.now(), payload })) } catch {}
+  }
 }
-layered = new LayeredOrchestrator({
-  engine: agent.engine,
-  tools: agent.registry,
-  llmFor: (requested) => agent.llmFor(requested),
-  workspaceRoot,
-  state: layeredStateStore,
-  memory: {
-    search: (query, limit) => memoryRows().filter((row) => String(row.content).toLowerCase().includes(query.toLowerCase())).slice(0, limit).map((row) => ({ id: String(row.id), text: String(row.content), summary: String(row.summary), region: String(row.region), score: 1 })),
-    searchVector: vectorMemorySearch,
-    add: async (entry) => {
-      const id = randomUUID()
-      const timestamp = now()
-      db.prepare("INSERT INTO memory_chunks(id,region,content,summary,provenance,confidence,importance,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(id, entry.region || "long_term", entry.content, entry.summary || entry.content.slice(0, 160), "orchestrator", 1, 0.5, timestamp, timestamp)
-      await ensureStoredEmbedding({ id, content: entry.content, summary: entry.summary || entry.content.slice(0, 160) })
-      return { id }
-    },
-  },
-  maxSubtasks: Number(process.env.MIKI_ORCHESTRATOR_MAX_SUBTASKS || 6),
-  maxAttempts: Number(process.env.MIKI_ORCHESTRATOR_MAX_ATTEMPTS || 2),
-  maxParallel: Number(process.env.MIKI_ORCHESTRATOR_MAX_PARALLEL || 2),
-  recentHistoryLimit: 3,
-})
-const orchestrator = layered
-if (!orchestrator) throw new Error("Layered orchestrator failed to initialize.")
 const autonomy = new AutonomousSupervisor({
   db,
-  orchestrator,
+  agent: agent.engine,
+  tools: agent.registry,
+  activeRunCount: agent.activeRunCount,
   getConfig: getAppConfig,
   log: appendGatewayLog,
   workspaceRoot,
+  notify: broadcastProactive,
   heartbeatProbe: () => {
     const model = agent.llmFor()
     return model
@@ -785,9 +776,9 @@ const autonomy = new AutonomousSupervisor({
     })
   },
 })
-getLifecycleBus().on("gateway:startup", (payload) => void autonomy.triggerEvent("gateway:startup", payload))
-getLifecycleBus().on("message:received", (payload) => void autonomy.triggerEvent("message:received", payload))
-getLifecycleBus().on("message:sent", (payload) => void autonomy.triggerEvent("message:sent", payload))
+getLifecycleBus().on("gateway:startup", (payload) => { autonomy.wake(); void autonomy.triggerEvent("gateway:startup", payload) })
+getLifecycleBus().on("message:received", (payload) => { autonomy.wake(); void autonomy.triggerEvent("message:received", payload) })
+getLifecycleBus().on("message:sent", (payload) => { autonomy.wake(); void autonomy.triggerEvent("message:sent", payload) })
 getLifecycleBus().emit("gateway:startup", { pid: process.pid, reason: "gateway_initialized" })
 agent.mount(app)
 
@@ -825,7 +816,8 @@ app.post("/api/autonomy/tasks", requireAuth, (req, res) => {
       idempotencyKey: typeof body.idempotency_key === "string" ? body.idempotency_key : undefined,
       acceptance: body.acceptance && typeof body.acceptance === "object" && !Array.isArray(body.acceptance) ? body.acceptance as never : null,
     })
-    return res.status(201).json({ task })
+    autonomy.wake()
+  return res.status(201).json({ task })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return res.status(400).json({ error: message })
@@ -865,25 +857,29 @@ app.delete("/api/autonomy/tasks/:id", requireAuth, (req, res) => {
 })
 
 app.get("/api/orchestrator/status", requireAuth, (_req, res) => {
-  const row = db.prepare("SELECT COUNT(*) AS count FROM orchestrator_runs WHERE COALESCE(status, CASE WHEN phase='DONE' THEN 'completed' ELSE 'failed' END)='running'").get() as { count: number }
-  res.json({ active_runs: orchestrator.activeRunCount(), persisted_non_done_runs: Number(row?.count || 0), max_subtasks: Number(process.env.MIKI_ORCHESTRATOR_MAX_SUBTASKS || 6), max_attempts: Number(process.env.MIKI_ORCHESTRATOR_MAX_ATTEMPTS || 2), max_parallel: Number(process.env.MIKI_ORCHESTRATOR_MAX_PARALLEL || 2), embedding_provider: embeddingProvider.constructor.name })
+  res.json({ engine: "FULL_AGENT", router: null, active_runs: agent.activeRunCount(), autonomous: autonomy.status(), embedding_provider: embeddingProvider.constructor.name })
+})
+
+app.get("/api/runtime/status", requireAuth, (_req, res) => {
+  res.json({ engine: "FULL_AGENT", active_runs: agent.activeRunCount(), autonomous: autonomy.status() })
 })
 
 app.get("/api/orchestrator/runs/:id", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT run_id,session_id,phase,route_json,plan_json,node_status_json,updated_at,status,error,started_at,finished_at FROM orchestrator_runs WHERE run_id=?").get(req.params.id) as Record<string, unknown> | undefined
-  if (!row) return res.status(404).json({ error: "Orchestrator run not found." })
+  const row = db.prepare("SELECT run_id,goal_id,status,started_at,finished_at,result,error,attempt,next_retry_at,plan_digest,acceptance_result FROM autonomy_goal_runs WHERE run_id=?").get(req.params.id) as Record<string, unknown> | undefined
+  if (!row) return res.status(404).json({ error: "FULL_AGENT runtime run not found." })
   return res.json({
     run_id: row.run_id,
-    session_id: row.session_id,
-    phase: row.phase,
-    route: row.route_json ? JSON.parse(String(row.route_json)) : null,
-    plan: row.plan_json ? JSON.parse(String(row.plan_json)) : null,
-    node_status: row.node_status_json ? JSON.parse(String(row.node_status_json)) : {},
-    updated_at: row.updated_at,
-    status: row.status || null,
-    error: row.error || null,
+    engine: "FULL_AGENT",
+    goal_id: row.goal_id,
+    status: row.status,
     started_at: row.started_at || null,
     finished_at: row.finished_at || null,
+    result: row.result || null,
+    error: row.error || null,
+    attempt: row.attempt,
+    next_retry_at: row.next_retry_at || null,
+    plan_digest: row.plan_digest || null,
+    acceptance_result: row.acceptance_result ? JSON.parse(String(row.acceptance_result)) : null,
   })
 })
 
@@ -1196,7 +1192,7 @@ const emitStreamEvent = (run: ActiveRunState, type: string, payload: Record<stri
   if (run.events.length > 500) run.events.splice(0, run.events.length - 500)
   if (run.socket?.readyState === run.socket.OPEN) run.socket.send(message)
 }
-const emitStreamDone = (run: ActiveRunState, status: "completed" | "failed" | "cancelled", error?: string) => {
+const emitStreamDone = (run: ActiveRunState, status: "completed" | "completed_with_warning" | "failed" | "cancelled", error?: string) => {
   if (run.done) return
   emitStreamEvent(run, "stream_done", { status, ...(error ? { error } : {}) })
   run.done = true
@@ -1259,8 +1255,10 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
   ensureSession(sessionId)
   let authenticatedMessage = false
   const socketRuns = new Set<string>()
+  if (!setting("dashboard_password")) proactiveSockets.add(ws)
   sendRawEvent(ws, "connection.ready", sessionId, { session_id: sessionId, backend: "persistent-node", protocol: "miki.ws.v1", authenticated: !Boolean(setting("dashboard_password")) })
   ws.on("close", () => {
+    proactiveSockets.delete(ws)
     for (const runId of socketRuns) {
       const run = activeRuns.get(runId)
       if (run && !run.done && run.socket === ws) {
@@ -1293,6 +1291,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
         return
       }
       sendRawEvent(ws, "auth.ok", sessionId, { session_id: sessionId, authenticated: true })
+      proactiveSockets.add(ws)
       return
     }
     if (!authenticatedMessage) {
@@ -1320,7 +1319,6 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
     if (message.type === "cancel_task") {
       if (message.task_id) {
-        orchestrator.cancelRun(message.task_id)
         agent.cancelRun(message.task_id)
         const run = activeRuns.get(message.task_id)
         if (run) emitStreamDone(run, "cancelled")
@@ -1337,6 +1335,22 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     const sessionScope = normalizeSessionScope((getAppConfig() as any)?.session?.dm_scope)
     const contextId = resolveSessionContextId(sessionScope, channelId, peerId)
     let content = String(message.payload?.content || "").trim()
+    const rawAttachments = Array.isArray(message.payload?.attachments) ? message.payload.attachments : []
+    const incomingAttachments = rawAttachments
+      .filter((item: unknown): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      .map((item) => {
+        const type = item.type === "image" || item.type === "audio" || item.type === "video" || item.type === "file" ? item.type : "file"
+        const url = typeof item.url === "string" ? item.url.trim() : ""
+        return {
+          type,
+          url,
+          ...(typeof item.filename === "string" && item.filename.trim() ? { filename: item.filename.trim().slice(0, 255) } : {}),
+          ...(typeof item.content_type === "string" && item.content_type.trim() ? { content_type: item.content_type.trim().slice(0, 160) } : {}),
+        }
+      })
+      .filter((item) => item.url.length > 0)
+      .slice(0, 16)
+    const imageUrls = incomingAttachments.filter((item) => item.type === "image").map((item) => item.url)
     if (isRetry) {
       const targetId = String(message.payload?.message_id || "")
       const target = targetId
@@ -1355,7 +1369,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
         content = target.content.trim()
       }
     }
-    if (!content) return
+    if (!content && incomingAttachments.length === 0) return
     const runId = `run_${randomUUID()}`
     const requested = message.payload?.requested_model?.trim() || undefined
     const stream: ActiveRunState = {
@@ -1374,12 +1388,20 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     const thinkingMode = message.payload?.thinking_mode || "auto"
     const thinkingLevel = thinkingMode !== "auto" ? thinkingMode : undefined
     if (!isRetry) {
-      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id) VALUES(?,?,?,?,?,?)").run(randomUUID(), sessionId, "user", content, now(), contextId)
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,image_urls,attachments_json) VALUES(?,?,?,?,?,?,?,?)").run(randomUUID(), sessionId, "user", content, now(), contextId, imageUrls.length > 0 ? JSON.stringify(imageUrls) : null, incomingAttachments.length > 0 ? JSON.stringify(incomingAttachments) : null)
       db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
     }
     // Conversation history for the model: persisted normal messages only (thoughts/tool traces stay out).
-    const storedHistory = (db.prepare("SELECT role,content FROM chat_messages WHERE context_id=? AND kind='normal' ORDER BY created_at DESC LIMIT 50").all(contextId) as { role: string; content: string }[])
-      .reverse().filter((row) => row.role === "user" || row.role === "assistant").map((row) => ({ role: row.role as "user" | "assistant", content: row.content }))
+    const storedHistory = (db.prepare("SELECT role,content,image_urls,attachments_json FROM chat_messages WHERE context_id=? AND kind='normal' ORDER BY created_at DESC LIMIT 50").all(contextId) as Array<{ role: string; content: string; image_urls?: string | null; attachments_json?: string | null }>)
+      .reverse().filter((row) => row.role === "user" || row.role === "assistant").map((row) => {
+        let parsedImages: unknown
+        try { parsedImages = row.image_urls ? JSON.parse(row.image_urls) : undefined } catch { parsedImages = undefined }
+        return {
+          role: row.role as "user" | "assistant",
+          content: row.content,
+          ...(Array.isArray(parsedImages) && parsedImages.length > 0 ? { image_urls: parsedImages.filter((url): url is string => typeof url === "string") } : {}),
+        }
+      })
     const defaults = ((getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>
     const memoryConfig = (getAppConfig() as any)?.agent?.memory
     fileMemory.updateConfig(memoryConfig, {
@@ -1460,37 +1482,34 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
 
     try {
-      const routeDecision = await orchestrator.routeMessage(history, requested)
-      if (routeDecision.mode === "FAST_CHAT") {
-        emitStreamEvent(stream, "node.run_start", { run_id: runId, status: "running", lane: "interactive" })
-        emitStreamEvent(stream, "typing.start", { run_id: runId })
-        const fast = await orchestrator.fastChat(history, requested)
-        if (!fast.requiresFullAgent && fast.answer) {
-          mapper.handle({ type: "message.final", runId, content: fast.answer })
-          emitStreamEvent(stream, "typing.stop", { run_id: runId })
-          emitStreamEvent(stream, "node.run_end", { run_id: runId, status: "completed" })
-          persistAdaptiveReply(fast.answer, requested)
-          emitStreamDone(stream, "completed")
-          socketRuns.delete(runId)
-          return
-        }
-        emitStreamEvent(stream, "typing.stop", { run_id: runId })
-      }
-
-      const result = await orchestrator.run({
+      const result = await agent.startRun({
         runId,
         sessionId: contextId,
         executionLaneId: `chat:${runId}`,
-        routeDecision,
         history,
         model: requested,
         allowTools: turnPolicy.allowTools,
         toolAllowlist: turnPolicy.toolAllowlist,
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        source: "webchat",
         onEvent: mapper.handle,
       })
-      if (result.finalText) persistAdaptiveReply(result.finalText, result.model)
-      emitStreamDone(stream, result.status === "cancelled" ? "cancelled" : result.finalText ? "completed" : "failed", result.error)
+      const recoverableLimit = result.status === "failed" && /limit|budget|step|empty response|could not make progress/i.test(result.error || "")
+      const resultText = result.finalText?.trim() || (recoverableLimit
+        ? "I reached the current execution limit before finishing. The work completed so far is preserved; please continue and I will resume from the latest state."
+        : result.error?.trim() || "I could not complete this run.")
+      if (!result.finalText?.trim() && resultText) {
+        mapper.handle({ type: "message.final", runId, content: resultText })
+      }
+      if (resultText) persistAdaptiveReply(resultText, result.model)
+      const streamStatus = result.status === "cancelled"
+        ? "cancelled"
+        : recoverableLimit
+          ? "completed_with_warning"
+          : result.finalText
+            ? "completed"
+            : "failed"
+      emitStreamDone(stream, streamStatus, result.error)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       const category = error instanceof ProviderRequestError ? error.category : undefined
@@ -1526,25 +1545,10 @@ app.use("/api", createDashboardExtendedRouter({
 app.use("/api", (_req, res) => res.status(404).json({ error: "API endpoint is not implemented in this backend yet." }))
 app.use(express.static(dashboardRoot))
 app.get("*", (_req, res) => res.sendFile(path.join(dashboardRoot, "index.html")))
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-let lastHeartbeatAt: string | null = null
-function configureHeartbeatTimer() {
-  if (heartbeatTimer) clearInterval(heartbeatTimer)
-  const heartbeat = isRecord(getAppConfig().heartbeat) ? getAppConfig().heartbeat as Record<string, unknown> : {}
-  if (heartbeat.enabled === false) { heartbeatTimer = null; return }
-  const seconds = Math.max(5, Number(heartbeat.interval_seconds ?? heartbeat.interval ?? 30) || 30)
-  const pulse = () => {
-    lastHeartbeatAt = now()
-    putSetting("heartbeat_last_at", lastHeartbeatAt)
-    appendGatewayLog(`Heartbeat pulse: ${lastHeartbeatAt}`)
-    void autonomy.tick("heartbeat").catch((error) => {
-      appendGatewayLog(`Autonomy heartbeat failed: ${error instanceof Error ? error.message : String(error)}`)
-    })
-  }
-  pulse()
-  heartbeatTimer = setInterval(pulse, seconds * 1000)
-  const timerWithUnref = heartbeatTimer as unknown as { unref?: () => void }
-  timerWithUnref.unref?.()
+async function configureRuntimeLoop() {
+  await autonomy.stop()
+  autonomy.start()
+  appendGatewayLog("24/7 FULL_AGENT autonomy loop started.")
 }
 
 async function rebindServer(nextPort: number, nextPublic: boolean): Promise<void> {
@@ -1561,8 +1565,8 @@ async function rebindServer(nextPort: number, nextPublic: boolean): Promise<void
   appendGatewayLog(`Gateway listener rebound to http://${currentHost}:${currentPort}`)
 }
 
-configureHeartbeatTimer()
+void configureRuntimeLoop()
 server.listen(currentPort, currentHost, () => { appendGatewayLog(`Persistent backend listening at http://${currentHost}:${currentPort}`); console.log(`[miki] persistent backend listening at http://${currentHost}:${currentPort}`) })
-function shutdown() { if (heartbeatTimer) clearInterval(heartbeatTimer); try { db.close() } finally { server.close(() => process.exit(0)) } }
+async function shutdown() { await autonomy.stop(); try { db.close() } finally { server.close(() => process.exit(0)) } }
 process.once("SIGINT", shutdown)
 process.once("SIGTERM", shutdown)

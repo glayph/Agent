@@ -6,10 +6,11 @@ agent:
     You are Miki, বাংলা-only RULEPLAY .
 
     You operate as a systemwide computer-based agent: your files, tools, and
-    reach are not confined to any single workspace folder. Keep actions
-    auditable and always verify your results. Destructive or external side
-    effects require explicit approval and must never be assumed from a default
-    setting.
+    reach are not confined to any single workspace folder. Miki is the single
+    FULL_AGENT for interactive and autonomous work. It may execute authorized
+    terminal, file, skill, and research operations without HITL prompts inside
+    the isolated VirtualBox Ubuntu environment. Keep actions auditable and
+    verify meaningful results.
 
     When the active local answer model is missing or unavailable, you may use
     the bounded model-runtime workflow: inspect the allow-listed catalog with
@@ -141,26 +142,49 @@ heartbeat:
   enabled: true
   interval_seconds: 30
   checklist_path: identity/HEARTBEAT.md
-  skip_when_main_busy: true
+  proactive:
+    enabled: true
+    startup_decision: true
+    min_poll_seconds: 15
+    max_poll_seconds: 300
+    idle_backoff_multiplier: 2
+    decision_interval_seconds: 900
+    # Adaptive LLM gating: after each NO_ACTION the next paid decision waits
+    # base * multiplier^streak (capped) unless chat/goals/tasks/memory changed.
+    max_decision_interval_seconds: 21600
+    decision_backoff_multiplier: 2
   auto_actions:
     enabled: true
-    max_actions_per_cycle: 1
+    max_actions_per_cycle: 3
   resource_limits:
-    max_tokens_per_cycle: 8192
+    max_tokens_per_cycle: 16384
     max_idle_minutes: 5
 autonomy:
   enabled: true
-  mode: standard
+  mode: operator
   tool_policy:
-    mode: safe
+    mode: operator
     max_retries: 2
     retry_backoff_seconds: 60
     require_acceptance_contract: true
     allow_browser: false
     browser_allowed_domains: []
     allow_computer_use: false
-    capability_profile: safe
-    allowed_tools: []
+    capability_profile: operator
+    allowed_tools:
+      - terminal_run
+      - file_write
+      - file_mkdir
+      - file_copy
+      - file_delete
+      - file_move
+      - file_rename
+      - file_run
+      - skill_install
+      - skill_delete
+      - skill_run
+      - goal_create
+      - goal_update
     allowed_external_side_effect_tools: []
     safe_write_roots:
       - autonomy
@@ -210,162 +234,6 @@ agents:
       tools:
         mode: default
     system_access: full
-  router:
-    enabled: true
-    default_agent: Miki
-    min_score: 2
-  specialists:
-    general:
-      name: General Coordinator
-      description: Coordinates ordinary requests and preserves conversational context.
-      persona: >-
-        Choose the lightest reliable path and escalate only when specialist
-        evidence is strong.
-      capabilities:
-        - coordination
-        - triage
-      signals:
-        - low_complexity
-      complexities:
-        - simple
-        - standard
-        - complex
-      priority: 0
-    engineer:
-      name: Software Engineer
-      description: Implements, debugs, tests, and verifies code or runtime changes.
-      persona: >-
-        Prefer scoped implementation, type safety, tests, and concrete
-        verification evidence.
-      capabilities:
-        - code
-        - debug
-        - test
-        - integration
-      keywords:
-        - code
-        - fix
-        - implement
-        - refactor
-        - runtime
-        - test
-      signals:
-        - implementation_intent
-        - technical_syntax
-        - verification_needed
-      complexities:
-        - standard
-        - complex
-      tools:
-        - shell_execute
-        - file_read
-        - file_write
-      priority: 8
-    researcher:
-      name: Research Analyst
-      description: Gathers evidence, compares options, and separates facts from inference.
-      persona: Prioritize source quality, cite evidence, and avoid stale assumptions.
-      capabilities:
-        - research
-        - compare
-        - audit
-      keywords:
-        - latest
-        - current
-        - compare
-        - research
-        - audit
-      signals:
-        - verification_needed
-      complexities:
-        - standard
-        - complex
-      tools:
-        - web_search
-        - scrape_page
-      priority: 4
-    planner:
-      name: Workflow Planner
-      description: Breaks complex ecosystem goals into sequenced work with checkpoints.
-      persona: >-
-        Decompose complex work into explicit phases and keep verification tied
-        to milestones.
-      capabilities:
-        - planning
-        - workflow
-        - architecture
-      keywords:
-        - architecture
-        - goal
-        - plan
-        - roadmap
-        - workflow
-        - ecosystem
-        - production
-      signals:
-        - complexity_terms
-        - multi_step_language
-      complexities:
-        - complex
-      tools:
-        - project_workflow_create
-      priority: 6
-    miki:
-      name: Miki
-      description: Routes every task through Miki's single-agent runtime profile.
-      persona: >-
-        Choose the lightest reliable path, gather only relevant context, apply
-        scoped changes, and verify meaningful results before final output.
-      capabilities:
-        - coordination
-        - triage
-        - code
-        - debug
-        - test
-        - integration
-        - research
-        - compare
-        - audit
-        - planning
-        - workflow
-        - architecture
-      keywords:
-        - architecture
-        - audit
-        - code
-        - compare
-        - current
-        - fix
-        - goal
-        - implement
-        - latest
-        - plan
-        - production
-        - refactor
-        - research
-        - roadmap
-        - runtime
-        - test
-        - workflow
-      signals:
-        - low_complexity
-        - implementation_intent
-        - technical_syntax
-        - verification_needed
-        - complexity_terms
-        - multi_step_language
-      complexities:
-        - simple
-        - standard
-        - complex
-      tools:
-        - shell_execute
-        - file_read
-        - file_write
-        - web_search
-        - scrape_page
-        - project_workflow_create
-      priority: 10
 session:
   dm_scope: per-channel
 evolution:

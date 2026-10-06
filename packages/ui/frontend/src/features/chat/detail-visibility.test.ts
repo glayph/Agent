@@ -78,33 +78,25 @@ describe("shouldShowAssistantMessage", () => {
     })
   })
 
-  describe("inspector_only regression coverage", () => {
-    // Regression test: the backend marks certain thought/tool_calls messages
-    // as inspector_only (see packages/core/src/api/index.ts,
-    // _sendInspectorThought). These must NEVER render in the chat bubble UI,
-    // no matter what the user's visibility preference is set to — they
-    // should only ever be visible in the Inspector panel. Previously,
-    // shouldShowAssistantMessage ignored this flag entirely and only
-    // consulted `kind`, so enabling "Show both" would have leaked
-    // inspector-only reasoning traces into the main chat UI.
-    it("hides an inspector_only thought message even when visibility is 'all'", () => {
-      expect(shouldShowAssistantMessage("all", "thought", true)).toBe(false)
+  describe("inspector_only messages", () => {
+    // Inspector-only messages are redacted/progress details rather than raw
+    // chain-of-thought. They still need to obey the user's Response details
+    // selection so every menu option has an observable effect.
+    it("hides an inspector_only thought message under 'none'", () => {
+      expect(shouldShowAssistantMessage("none", "thought", true)).toBe(false)
     })
 
-    it("hides an inspector_only thought message even when visibility is 'thought'", () => {
-      expect(shouldShowAssistantMessage("thought", "thought", true)).toBe(false)
+    it("shows an inspector_only thought message under 'thought'", () => {
+      expect(shouldShowAssistantMessage("thought", "thought", true)).toBe(true)
     })
 
-    it("hides an inspector_only tool_calls message even when visibility is 'all'", () => {
-      expect(shouldShowAssistantMessage("all", "tool_calls", true)).toBe(false)
+    it("shows an inspector_only tool_calls message under 'tool_calls'", () => {
+      expect(shouldShowAssistantMessage("tool_calls", "tool_calls", true)).toBe(true)
     })
 
-    it("still hides a non-inspector_only thought message under 'none' (baseline, unaffected by the fix)", () => {
-      expect(shouldShowAssistantMessage("none", "thought", false)).toBe(false)
-    })
-
-    it("still shows a non-inspector_only thought message under 'all' (baseline, unaffected by the fix)", () => {
-      expect(shouldShowAssistantMessage("all", "thought", false)).toBe(true)
+    it("shows both inspector_only detail types under 'all'", () => {
+      expect(shouldShowAssistantMessage("all", "thought", true)).toBe(true)
+      expect(shouldShowAssistantMessage("all", "tool_calls", true)).toBe(true)
     })
 
     it("treats an undefined inspectorOnly the same as false", () => {

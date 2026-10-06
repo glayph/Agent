@@ -6,9 +6,9 @@ import { GoalStore } from "../api/goals-router.js";
 import { AutonomyPolicy } from "./autonomy-policy.js";
 import { AutonomyReplanner, type ReplanContext } from "./autonomy-replanner.js";
 import { verifyGoalAcceptance, type GoalAcceptanceContract } from "./goal-acceptance.js";
-import type {
-  LayeredOrchestrator,
-} from "../orchestration/layered-orchestrator.js";
+import type { EngineEvent } from "../engine/types.js";
+import type { AgentEngine } from "../engine/agent-engine.js";
+import { ToolRegistry } from "../engine/tool-registry.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -25,8 +25,17 @@ const SAFE_AUTONOMOUS_TOOLS = [
 ] as const;
 
 const PHASE2_CAPABILITY_TOOLS = [
-  "shell_execute",
-  "runtime_ensure",
+  "terminal_run",
+  "file_copy",
+  "file_delete",
+  "file_move",
+  "file_rename",
+  "file_run",
+  "skill_install",
+  "skill_delete",
+  "skill_run",
+  "goal_create",
+  "goal_update",
 ] as const;
 
 const AUTONOMOUS_BROWSER_TOOLS = [
@@ -69,10 +78,13 @@ function truncate(value: string, max = 12_000): string {
 
 export interface AutonomousSupervisorOptions {
   db: Database.Database;
-  orchestrator: Pick<LayeredOrchestrator, "run" | "activeRunCount"> & Partial<Pick<LayeredOrchestrator, "availableToolNames">>;
+  agent: Pick<AgentEngine, "run">;
+  tools: ToolRegistry;
+  activeRunCount?: () => number;
   getConfig(): JsonRecord;
   log(message: string): void;
   workspaceRoot?: string;
+  notify?: (input: { text: string; runId?: string; goalId?: number; kind?: "progress" | "result" | "warning" }) => void | Promise<void>;
   recordExperience?: (input: {
     runId: string;
     goalId: number;
@@ -96,9 +108,9 @@ export interface AutonomyTickResult {
 }
 
 /**
- * Bounded heartbeat-driven goal executor. Tool capability is derived from the
- * autonomous policy, while completion is independently gated by deterministic
- * acceptance evidence.
+ * Persistent FULL_AGENT-driven supervisor for foreground-safe 24/7 autonomous execution.
+ * Tool capability is derived from the autonomous policy, while completion is independently
+ * gated by deterministic acceptance evidence.
  */
 export class AutonomousSupervisor {
   private readonly goals: GoalStore;
@@ -106,6 +118,17 @@ export class AutonomousSupervisor {
   private readonly replanner = new AutonomyReplanner();
   private inFlight = false;
   private lastTickAt: string | null = null;
+  private running = false;
+  private loopPromise: Promise<void> | null = null;
+  private loopAbort: AbortController | null = null;
+  private ambientLastAt = 0;
+  private ambientBackoffSeconds = 15;
+  // Adaptive LLM-decision gating: consecutive NO_ACTION results stretch the
+  // interval between paid ambient decisions until the world state changes.
+  private ambientNoActionStreak = 0;
+  private ambientStateKey: string | null = null;
+  private wakeRequested = false;
+  private wakeResolver: (() => void) | null = null;
   private lastOutcome: AutonomyTickResult = { status: "idle", reason: "Not run yet." };
 
   constructor(private readonly options: AutonomousSupervisorOptions) {
@@ -234,7 +257,17 @@ export class AutonomousSupervisor {
     const heartbeat = record(root.heartbeat);
     const autoActions = record(heartbeat.auto_actions);
     const enabled = autonomy.enabled !== false && heartbeat.enabled !== false && autoActions.enabled !== false;
-    const skipWhenBusy = heartbeat.skip_when_main_busy !== false;
+    // Background autonomy has its own execution lane. A foreground chat
+    // question must never cancel or starve an autonomous goal.
+    const proactive = record(heartbeat.proactive);
+    const proactiveEnabled = proactive.enabled !== false;
+    const startupDecision = proactive.startup_decision !== false;
+    const minPollSeconds = Math.max(5, Math.min(300, Number(proactive.min_poll_seconds ?? 15) || 15));
+    const maxPollSeconds = Math.max(minPollSeconds, Math.min(3600, Number(proactive.max_poll_seconds ?? 300) || 300));
+    const idleBackoffMultiplier = Math.max(1.25, Math.min(4, Number(proactive.idle_backoff_multiplier ?? 2) || 2));
+    const decisionIntervalSeconds = Math.max(15, Math.min(86400, Number(proactive.decision_interval_seconds ?? 900) || 900));
+    const maxDecisionIntervalSeconds = Math.max(decisionIntervalSeconds, Math.min(86400, Number(proactive.max_decision_interval_seconds ?? 21600) || 21600));
+    const decisionBackoffMultiplier = Math.max(1.25, Math.min(4, Number(proactive.decision_backoff_multiplier ?? 2) || 2));
     const maxActions = Math.max(1, Math.min(3, Number(autoActions.max_actions_per_cycle ?? 1) || 1));
     const resourceLimits = record(heartbeat.resource_limits);
     const maxTokensPerCycle = Math.max(1024, Math.min(100_000, Number(resourceLimits.max_tokens_per_cycle ?? 8192) || 8192));
@@ -264,7 +297,6 @@ export class AutonomousSupervisor {
     const eventCooldownSeconds = Math.max(0, Math.min(3600, Number(eventPolicy.cooldown_seconds ?? 5) || 0));
     return {
       enabled,
-      skipWhenBusy,
       maxActions,
       maxTokensPerCycle,
       maxIdleMinutes,
@@ -280,6 +312,14 @@ export class AutonomousSupervisor {
       eventMaxPerMinute,
       eventCooldownSeconds,
       allowedTools,
+      proactiveEnabled,
+      startupDecision,
+      minPollSeconds,
+      maxPollSeconds,
+      idleBackoffMultiplier,
+      decisionIntervalSeconds,
+      maxDecisionIntervalSeconds,
+      decisionBackoffMultiplier,
       allowedExternalSideEffectTools,
     };
   }
@@ -294,8 +334,9 @@ export class AutonomousSupervisor {
       .get() as Record<string, unknown> | undefined;
     return {
       enabled: config.enabled,
-      mode: "bounded-autonomous",
+      mode: "FULL_AGENT-24/7",
       in_flight: this.inFlight,
+      running: this.running,
       last_tick_at: this.lastTickAt,
       last_outcome: this.lastOutcome,
       active_goal: active
@@ -328,6 +369,7 @@ export class AutonomousSupervisor {
       allowed_external_side_effect_tools: config.allowedExternalSideEffectTools,
       retry: { max_retries: config.maxRetries, retry_backoff_seconds: config.retryBackoffSeconds },
       resource_limits: { max_tokens_per_cycle: config.maxTokensPerCycle, max_idle_minutes: config.maxIdleMinutes },
+      proactive_loop: { enabled: config.proactiveEnabled, startup_decision: config.startupDecision, min_poll_seconds: config.minPollSeconds, max_poll_seconds: config.maxPollSeconds, idle_backoff_multiplier: config.idleBackoffMultiplier, decision_interval_seconds: config.decisionIntervalSeconds, max_decision_interval_seconds: config.maxDecisionIntervalSeconds, no_action_streak: this.ambientNoActionStreak, next_decision_in_seconds: Math.ceil(this.ambientDueInMs(config) / 1000) },
       heartbeat_checklist: config.checklistPath,
       event_triggers: { max_per_minute: config.eventMaxPerMinute, cooldown_seconds: config.eventCooldownSeconds },
       policy: {
@@ -674,7 +716,7 @@ export class AutonomousSupervisor {
     this.recoverStaleGoalClaims();
     const recoveredTasks = this.recoverStaleQueueLeases();
     const checklist = this.heartbeatChecklist(config.checklistPath);
-    const activeRuns = this.options.orchestrator.activeRunCount();
+    const activeRuns = (this.options.activeRunCount?.() ?? 0) + (this.inFlight ? 1 : 0);
     const queuedTasks = Number((this.options.db.prepare("SELECT COUNT(*) AS count FROM autonomy_task_queue WHERE status IN ('scheduled','queued','running')").get() as { count: number }).count);
     const blockedGoals = Number((this.options.db.prepare("SELECT COUNT(*) AS count FROM pursue_goals WHERE status='blocked'").get() as { count: number }).count);
     const verifierFlags = Number((this.options.db.prepare("SELECT COUNT(*) AS count FROM autonomy_goal_runs WHERE acceptance_result IS NOT NULL AND status IN ('retry_wait','blocked')").get() as { count: number }).count);
@@ -708,6 +750,183 @@ export class AutonomousSupervisor {
     };
   }
 
+  /**
+   * Cheap fingerprint of everything the ambient decision prompt depends on.
+   * Pure SQLite reads: no LLM call. If this is unchanged since the last
+   * NO_ACTION decision, asking the model again would be redundant.
+   */
+  private ambientStateFingerprint(config: ReturnType<AutonomousSupervisor["config"]>): string {
+    const db = this.options.db;
+    const one = (sql: string) => JSON.stringify(db.prepare(sql).get() ?? null);
+    const parts = [
+      one("SELECT COUNT(*) AS c, COALESCE(MAX(created_at),'') AS m FROM chat_messages WHERE session_id = 'miki-main-chat'"),
+      one("SELECT COUNT(*) AS c, COALESCE(MAX(id),0) AS m, COALESCE(SUM(status='pending'),0) AS p, COALESCE(SUM(status='active'),0) AS a, COALESCE(SUM(status='blocked'),0) AS b FROM pursue_goals"),
+      one("SELECT COUNT(*) AS c, COALESCE(MAX(task_id),0) AS m FROM autonomy_task_queue WHERE status IN ('scheduled','queued','running')"),
+      one("SELECT COUNT(*) AS c, COALESCE(MAX(updated_at),'') AS m FROM memory_chunks"),
+      crypto.createHash("sha1").update(this.heartbeatChecklist(config.checklistPath) ?? "").digest("hex"),
+    ];
+    return parts.join("|");
+  }
+
+  /** Milliseconds until the next LLM-backed ambient decision is allowed (0 = due now). */
+  private ambientDueInMs(config: ReturnType<AutonomousSupervisor["config"]>): number {
+    if (this.ambientLastAt === 0) return 0;
+    const changed = this.ambientStateKey === null || this.ambientStateFingerprint(config) !== this.ambientStateKey;
+    const grown = config.decisionIntervalSeconds * Math.pow(config.decisionBackoffMultiplier, this.ambientNoActionStreak);
+    const intervalSeconds = changed || this.ambientNoActionStreak === 0
+      ? config.decisionIntervalSeconds
+      : Math.min(config.maxDecisionIntervalSeconds, grown);
+    return Math.max(0, this.ambientLastAt + intervalSeconds * 1000 - Date.now());
+  }
+
+  private async runAmbientDecision(trigger: "startup" | "idle"): Promise<boolean> {
+    const config = this.config();
+    if (!config.proactiveEnabled) return false;
+    const nowMs = Date.now();
+    if (trigger !== "startup" && this.ambientDueInMs(config) > 0) return false;
+    if (this.inFlight) return false;
+    this.ambientLastAt = nowMs;
+    const stateKeyBefore = this.ambientStateFingerprint(config);
+
+    const pending = this.listScheduledTasks(10);
+    const active = this.goals.active();
+    const checklist = this.heartbeatChecklist(config.checklistPath);
+    const memoryRows = this.options.db.prepare(`SELECT region,summary,content FROM memory_chunks ORDER BY importance DESC,updated_at DESC LIMIT 8`).all() as Array<{ region: string; summary: string; content: string }>;
+    const recentChat = this.options.db.prepare(`SELECT role,content FROM chat_messages WHERE session_id = 'miki-main-chat' ORDER BY created_at DESC LIMIT 8`).all() as Array<{ role: string; content: string }>;
+    recentChat.reverse();
+    const prompt = [
+      "You are Miki's main FULL_AGENT running the background autonomous loop. There is no router and no specialist agent. You are the same agent that serves interactive chat.",
+      `Trigger: ${trigger}. Decide whether any useful proactive action should be taken now.`,
+      active ? `ACTIVE GOAL: #${active.id} ${active.title} [${active.status}] progress=${active.progress}` : "ACTIVE GOAL: none",
+      pending.length ? `PENDING TASKS:
+${pending.map((task) => `- #${task.task_id} ${task.title} [${task.status}] due=${task.due_at}`).join("\n")}` : "PENDING TASKS: none",
+      checklist ? `HEARTBEAT CHECKLIST:
+${checklist.slice(0, 6000)}` : "HEARTBEAT CHECKLIST: unavailable",
+      memoryRows.length ? `RECENT LONG-TERM MEMORY:
+${memoryRows.map((row) => `- [${row.region}] ${row.summary || row.content.slice(0, 220)}`).join("\n")}` : "RECENT LONG-TERM MEMORY: none",
+      recentChat.length ? `RECENT INTERACTIVE CONTEXT:
+${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n")}` : "RECENT INTERACTIVE CONTEXT: none",
+      "First decide internally. If nothing is worth doing, return exactly NO_ACTION as the first line and do not call tools. If useful work exists, take it with the available tools. You may create or update an autonomous goal when that is the right next action; when creating a goal, include deterministic acceptance checks whenever the goal type supports them.",
+      "Do not generate routine chatter. Only send a proactive user notification when there is a concrete result, milestone, blocker, or materially useful discovery.",
+    ].join("\n\n");
+
+    const allow = [...new Set([
+      ...SAFE_AUTONOMOUS_TOOLS,
+      ...config.allowedTools,
+      ...config.allowedExternalSideEffectTools,
+      ...(config.capabilityProfile !== "safe" ? PHASE2_CAPABILITY_TOOLS : []),
+    ])].filter((name) => this.options.tools.has(name));
+    const tools = new ToolRegistry();
+    for (const name of allow) { const tool = this.options.tools.get(name); if (tool) tools.register(tool); }
+    const runId = `autonomy-ambient-${Date.now()}`;
+    try {
+      const result = await this.options.agent.run({
+        runId,
+        history: [{ role: "user", content: prompt }],
+        goal: prompt,
+        plan: false,
+        allowTools: true,
+        tools,
+        maxToolCalls: config.maxActions,
+        maxCompletionTokens: Math.min(config.maxTokensPerCycle, 4096),
+        approvalPolicy: new AutonomyPolicy({
+          safeWriteRoots: config.safeWriteRoots,
+          allowBrowser: config.allowBrowser,
+          browserAllowedDomains: config.browserAllowedDomains,
+          allowComputerUse: config.allowComputerUse,
+          capabilityProfile: config.capabilityProfile,
+          allowedTools: config.allowedTools,
+          allowedExternalSideEffectTools: config.allowedExternalSideEffectTools,
+        }),
+        signal: this.loopAbort?.signal,
+      });
+      const text = result.finalText.trim();
+      const noAction = /^NO_ACTION\b/i.test(text) || !text;
+      const actionable = !noAction && result.status === "completed";
+      if (actionable) {
+        await this.options.notify?.({ text: truncate(text, 3000), runId, kind: "result" });
+        this.ambientBackoffSeconds = config.minPollSeconds;
+        this.ambientNoActionStreak = 0;
+        this.ambientStateKey = null;
+        this.wakeRequested = true;
+        this.options.log(`Proactive FULL_AGENT decision produced actionable work (${trigger}).`);
+        return true;
+      }
+      this.ambientBackoffSeconds = Math.min(config.maxPollSeconds, Math.max(config.minPollSeconds, Math.ceil(this.ambientBackoffSeconds * config.idleBackoffMultiplier)));
+      this.ambientNoActionStreak += 1;
+      this.ambientStateKey = stateKeyBefore;
+      return false;
+    } catch (error) {
+      if (this.loopAbort?.signal.aborted) return false;
+      this.options.log(`Proactive FULL_AGENT decision failed: ${errorText(error)}`);
+      this.ambientBackoffSeconds = Math.min(config.maxPollSeconds, Math.max(config.minPollSeconds, Math.ceil(this.ambientBackoffSeconds * config.idleBackoffMultiplier)));
+      return false;
+    }
+  }
+
+  start(): void {
+    if (this.running) return;
+    const config = this.config();
+    if (!config.enabled) return;
+    this.running = true;
+    this.wakeRequested = true;
+    this.loopAbort = new AbortController();
+    this.loopPromise = this.runLoop();
+    void this.loopPromise.catch((error) => this.options.log(`Autonomy loop stopped unexpectedly: ${errorText(error)}`));
+  }
+
+  wake(): void {
+    this.wakeRequested = true;
+    this.wakeResolver?.();
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+    this.loopAbort?.abort();
+    this.loopAbort = null;
+    const loop = this.loopPromise;
+    this.loopPromise = null;
+    if (loop) await loop.catch(() => undefined);
+  }
+
+  private async runLoop(): Promise<void> {
+    let startup = true;
+    while (this.running && !this.loopAbort?.signal.aborted) {
+      const config = this.config();
+      const tickTrigger = startup ? "startup" : "heartbeat";
+      startup = false;
+      try {
+        await this.tick(tickTrigger);
+        const hasGoal = Boolean(this.goals.active()) || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)));
+        if (!hasGoal && (
+          (this.ambientLastAt === 0 && config.startupDecision)
+          || this.wakeRequested
+          || this.ambientDueInMs(config) === 0
+        )) {
+          await this.runAmbientDecision(this.ambientLastAt === 0 ? "startup" : "idle");
+        }
+      } catch (error) {
+        this.options.log(`Autonomy loop iteration failed: ${errorText(error)}`);
+      }
+      this.wakeRequested = false;
+      const sleepMs = this.inFlight || this.goals.active() || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)))
+        ? config.minPollSeconds * 1000
+        : Math.max(config.minPollSeconds * 1000, Math.min(config.maxPollSeconds * 1000, this.ambientBackoffSeconds * 1000));
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          if (this.wakeResolver) this.wakeResolver = null;
+          resolve();
+        }, sleepMs);
+        const signal = this.loopAbort?.signal;
+        const finish = () => { clearTimeout(timer); if (this.wakeResolver) this.wakeResolver = null; resolve(); };
+        this.wakeResolver = finish;
+        signal?.addEventListener("abort", finish, { once: true });
+        const unrefTimer = timer as unknown as { unref?: () => void };
+        unrefTimer.unref?.();
+      });
+    }
+  }
+
   async tick(trigger = "heartbeat"): Promise<AutonomyTickResult> {
     this.lastTickAt = this.now();
     const config = this.config();
@@ -717,16 +936,6 @@ export class AutonomousSupervisor {
     if (this.inFlight) {
       return { status: "busy", reason: "An autonomous cycle is already running." };
     }
-    if (config.skipWhenBusy && this.options.orchestrator.activeRunCount() > 0) {
-      if (trigger === "heartbeat") {
-        await this.recordHeartbeatCycle(config);
-        // Materialize due schedules even while the foreground lane is busy.
-        // Execution remains blocked, but queued work is no longer invisible/starved.
-        this.materializeDueTasks();
-      }
-      return (this.lastOutcome = { status: "busy", reason: "A foreground agent run is active." });
-    }
-
     if (trigger === "heartbeat") {
       await this.recordHeartbeatCycle(config);
     }
@@ -803,14 +1012,18 @@ export class AutonomousSupervisor {
         ...config.allowedExternalSideEffectTools,
       ];
       const configuredTools = [...new Set(optionalTools)];
-      const registeredNames = this.options.orchestrator.availableToolNames?.();
-      const registeredTools = new Set(registeredNames ?? [...SAFE_AUTONOMOUS_TOOLS, ...configuredTools]);
+      const registeredTools = new Set(this.options.tools.names());
       const unavailableConfiguredTools = configuredTools.filter((toolName) => !registeredTools.has(toolName));
       const uniqueOptionalTools = configuredTools.filter((toolName) => registeredTools.has(toolName));
       if (unavailableConfiguredTools.length) {
         this.options.log(`Autonomy skipped unavailable configured tools: ${unavailableConfiguredTools.join(", ")}`);
       }
-      const autonomousToolAllowlist = SAFE_AUTONOMOUS_TOOLS.filter((toolName) => registeredTools.has(toolName)).concat(uniqueOptionalTools as typeof SAFE_AUTONOMOUS_TOOLS[number][]);
+      const autonomousToolAllowlist = [...new Set((SAFE_AUTONOMOUS_TOOLS as readonly string[]).filter((toolName) => registeredTools.has(toolName)).concat(uniqueOptionalTools))];
+      const autonomousTools = new ToolRegistry();
+      for (const toolName of autonomousToolAllowlist) {
+        const tool = this.options.tools.get(toolName);
+        if (tool) autonomousTools.register(tool);
+      }
       const goalPrompt = [
         `AUTONOMOUS GOAL #${goal.id}: ${goal.title}`,
         goal.description ? `DESCRIPTION:\n${goal.description}` : "",
@@ -830,13 +1043,14 @@ export class AutonomousSupervisor {
         .join("\n\n");
 
       const toolEvidence: Array<{ name: string; status?: string }> = [];
-      const result = await this.options.orchestrator.run({
+      const result = await this.options.agent.run({
         runId,
         history: [{ role: "user", content: goalPrompt }],
+        goal: goalPrompt,
+        plan: false,
         allowTools: true,
-        toolAllowlist: autonomousToolAllowlist,
+        tools: autonomousTools,
         maxToolCalls: config.maxActions,
-        maxTotalTokens: config.maxTokensPerCycle,
         maxCompletionTokens: config.maxTokensPerCycle,
         approvalPolicy: new AutonomyPolicy({
           safeWriteRoots: config.safeWriteRoots,
@@ -850,8 +1064,12 @@ export class AutonomousSupervisor {
         onEvent: (event) => {
           this.renewGoalClaim(goal.id, runId);
           this.renewTaskLease(goal.id);
-          if (event.type === "orchestrator.subtask.event" && event.event.type === "tool.call") {
-            toolEvidence.push({ name: event.event.call.name, status: event.event.call.status });
+          const engineEvent = event as EngineEvent;
+          if (engineEvent.type === "tool.call") {
+            toolEvidence.push({ name: engineEvent.call.name, status: engineEvent.call.status });
+          }
+          if (engineEvent.type === "run.finished" && engineEvent.status !== "completed") {
+            void this.options.notify?.({ text: `Autonomous goal #${goal.id} ${engineEvent.status}: ${engineEvent.error || "execution did not complete"}`, runId, goalId: goal.id, kind: "warning" });
           }
         },
       });
@@ -920,6 +1138,17 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
         this.markTaskForGoal(goal.id, "queued", { error: reason, result: truncate(result.finalText || "", 12_000), retryAt: nextRetryAt });
       }
       this.options.log(`Autonomy cycle ${finalStatus} for goal #${goal.id} (run ${runId}, attempt ${attempt}).`);
+      if (succeeded) {
+        await this.options.notify?.({
+          text: `Autonomous goal completed: ${goal.title}. ${truncate(result.finalText || acceptance.reason, 2200)}`,
+          runId, goalId: goal.id, kind: "result",
+        });
+      } else if (exhausted) {
+        await this.options.notify?.({
+          text: `Autonomous goal blocked after ${attempt} attempt(s): ${goal.title}. ${reason}`,
+          runId, goalId: goal.id, kind: "warning",
+        });
+      }
       await this.options.recordExperience?.({
         runId,
         goalId: goal.id,

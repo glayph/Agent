@@ -363,10 +363,16 @@ export class AgentEngine {
     const tools = request.tools ?? this.tools;
     const toolsEnabled = request.allowTools !== false && tools.size > 0;
     const maxTurns = Math.max(1, Math.floor(typeof this.maxTurns === "function" ? this.maxTurns() : this.maxTurns));
-    const maxToolCalls = Math.max(1, Math.floor(typeof this.maxToolCalls === "function" ? this.maxToolCalls() : this.maxToolCalls));
+    const configuredMaxToolCalls = typeof this.maxToolCalls === "function" ? this.maxToolCalls() : this.maxToolCalls;
+    const maxToolCalls = Math.max(1, Math.floor(request.maxToolCalls ?? configuredMaxToolCalls));
     const maxToolIterations = Math.max(1, Math.floor(typeof this.maxToolIterations === "function" ? this.maxToolIterations() : this.maxToolIterations));
     const contextWindowTokens = this.contextWindowTokens === undefined ? undefined : Math.max(128, Math.floor(typeof this.contextWindowTokens === "function" ? this.contextWindowTokens() : this.contextWindowTokens));
-    const maxCompletionTokens = this.maxCompletionTokens === undefined ? undefined : Math.max(1, Math.floor(typeof this.maxCompletionTokens === "function" ? this.maxCompletionTokens() : this.maxCompletionTokens));
+    const configuredMaxCompletionTokens = this.maxCompletionTokens === undefined
+      ? undefined
+      : Math.max(1, Math.floor(typeof this.maxCompletionTokens === "function" ? this.maxCompletionTokens() : this.maxCompletionTokens));
+    const maxCompletionTokens = request.maxCompletionTokens === undefined
+      ? configuredMaxCompletionTokens
+      : Math.max(1, Math.floor(request.maxCompletionTokens));
 
     // Tool schemas are part of the model's input context. If the schemas alone
     // exceed the configured window, disable tool advertisement/execution for
@@ -383,7 +389,7 @@ export class AgentEngine {
       });
     }
 
-    // 1. Plan only when the caller supplies one (the orchestrator plans with the LLM).
+    // 1. Planning is explicit per run; no classifier or message router selects an execution path.
     // No wording-based gate decides this: the model's own tool loop handles the rest.
     if (request.plan === false) {
       // Planning explicitly disabled for this run.

@@ -25,11 +25,12 @@ import {
   describePlan,
   DEFAULT_SYSTEM_PROMPT,
   type EngineEvent,
-  type LayeredEvent,
   type EngineLLMClient,
   type EngineMessage,
   type EngineTool,
   type RunResult,
+  type AgentPlan,
+  type ToolApprovalPolicy,
 } from "@miki/core/engine"
 import type { SkillRegistryClient, SkillStore } from "@miki/core/skills"
 import { searchWeb } from "@miki/core/web-search-service"
@@ -529,6 +530,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     source: string
     runId?: string
     executionLaneId?: string
+    goal?: string
+    plan?: AgentPlan | false
+    toolAllowlist?: string[]
+    tools?: ToolRegistry
+    approvalPolicy?: ToolApprovalPolicy
     onEvent?: (event: EngineEvent) => void
     signal?: AbortSignal
   }): Promise<RunResult> {
@@ -548,12 +554,24 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         text: input.history.at(-1)?.content,
         surface: input.source,
       })
+      let runTools = input.tools
+      if (!runTools && input.toolAllowlist) {
+        runTools = new ToolRegistry()
+        for (const name of input.toolAllowlist) {
+          const tool = registry.get(name)
+          if (tool) runTools.register(tool)
+        }
+      }
       const result = await engine.run({
         runId,
         sessionId: input.sessionId,
         history: input.history,
+        goal: input.goal,
+        plan: input.plan,
         model: input.model,
         allowTools: input.allowTools,
+        tools: runTools,
+        approvalPolicy: input.approvalPolicy,
         signal: controller.signal,
         onEvent: input.onEvent,
       })
@@ -752,83 +770,9 @@ export function createWsEventMapper(
     })
   }
 
-  const handle = (event: EngineEvent | LayeredEvent) => {
+  const handle = (event: EngineEvent) => {
     const runId = event.runId
     switch (event.type) {
-      case "orchestrator.started":
-        send("node.run_start", { run_id: runId, status: "running", objective: event.goal });
-        send("typing.start", { run_id: runId });
-        break;
-      case "orchestrator.route":
-        send("message.create", {
-          message_id: `router-${runId}`,
-          content: `Router → ${event.decision.mode} (${Math.round(event.decision.confidence * 100)}%)${event.decision.reason ? ` — ${event.decision.reason}` : ""}`,
-          kind: "thought",
-          thought_category: "Router",
-          run_id: runId,
-        });
-        break;
-      case "orchestrator.state":
-        emitProgress(runId, `state-${runId}-${++stateSeq}`, `${event.phase}: ${event.detail || ""}`.trim(), "Progress")
-        break;
-      case "orchestrator.plan":
-        send("message.create", {
-          message_id: `plan-${event.plan.id}`,
-          content: describePlan(event.plan),
-          kind: "thought",
-          thought_category: "Plan",
-          run_id: runId,
-        });
-        break;
-      case "orchestrator.subtask.started":
-        emitProgress(runId, `subtask-${runId}-${event.nodeId}`, `Working on ${event.nodeId}: ${event.title} (attempt ${event.attempt}).`)
-        break;
-      case "orchestrator.subtask.event": {
-        const child = event.event;
-        if (child.type === "thought") {
-          // Never stream raw chain-of-thought text to the client. Expose a
-          // progress signal instead; the final answer and tool status remain visible.
-          emitProgress(runId, `thought-${runId}-${event.nodeId}-${child.turn}-${++thoughtSeq}`, `Working on sub-task ${event.nodeId}.`)
-        } else {
-          const cfg = getToolFeedbackConfig();
-          if (cfg.enabled) {
-            const call = child.call;
-            const rawArgs = typeof call.arguments === "string" ? call.arguments : "{}";
-            const max = Math.max(0, Math.floor(cfg.maxArgsLength || 0));
-            const argumentsText = max > 0 && rawArgs.length > max ? `${rawArgs.slice(0, Math.max(0, max - 1))}…` : rawArgs;
-            const id = cfg.separateMessages ? `tool-${call.id}-${call.status}-${++toolFeedbackSeq}` : toolMessageId(call.id);
-            send(cfg.separateMessages || !created.has(id) ? "message.create" : "message.update", {
-              message_id: id,
-              content: `Sub-task ${event.nodeId}: ${call.name} ${call.status}`,
-              kind: "tool_calls",
-              run_id: runId,
-              tool_calls: [{ id: call.id, type: "function", function: { name: call.name, arguments: argumentsText }, extra_content: { tool_feedback_explanation: call.error ? `${call.status}: ${call.error}` : call.status } }],
-            });
-            created.add(id);
-          }
-        }
-        break;
-      }
-      case "orchestrator.subtask.finished":
-        emitProgress(runId, `subtask-finished-${runId}-${event.nodeId}-${event.attempt}`, `${event.nodeId}: ${event.ok ? "completed" : "failed"}${event.error ? ` — ${event.error}` : ""}`)
-        break;
-      case "orchestrator.evaluation":
-        emitProgress(runId, `eval-${runId}-${event.nodeId}-${event.attempt}`, `${event.nodeId}: ${event.pass ? "PASS" : "RETRY/FAIL"} — ${event.reason}`, "Verification")
-        break;
-      case "orchestrator.memory_sync":
-        emitProgress(runId, `memory-sync-${runId}`, `Memory sync: ${event.detail}`)
-        break;
-      case "orchestrator.finished":
-        send("typing.stop", { run_id: runId });
-        send("node.run_end", {
-          run_id: runId,
-          status: event.status === "completed" ? "completed" : event.status === "cancelled" ? "cancelled" : "failed",
-          ...(event.error ? { error: event.error } : {}),
-        });
-        break;
-      case "message.final":
-        emitAdaptiveResponse(runId, event.content, model)
-        break;
       case "run.started":
         send("node.run_start", { run_id: runId, status: "running" })
         send("typing.start", { run_id: runId })
@@ -842,19 +786,30 @@ export function createWsEventMapper(
           run_id: runId,
         })
         break
+      case "plan.updated":
+        send("message.create", {
+          message_id: `plan-update-${event.plan.id}-${Date.now()}`,
+          content: describePlan(event.plan),
+          kind: "thought",
+          thought_category: "Plan",
+          run_id: runId,
+        })
+        break
       case "thought":
         // Raw chain-of-thought is intentionally not sent to clients.
         emitProgress(runId, `thought-${runId}-${event.turn}`, `Working on the task (turn ${event.turn}).`)
         break
-      case "tool.call": {
+      case "tool.call":
         toolFeedbackPayload(event.call, runId)
         break
-      }
+      case "message.final":
+        emitAdaptiveResponse(runId, event.content, model)
+        break
       case "run.finished":
         send("typing.stop", { run_id: runId })
         send("node.run_end", {
           run_id: runId,
-          status: event.status === "completed" ? "completed" : event.status === "cancelled" ? "cancelled" : "failed",
+          status: event.status === "completed" ? "completed" : event.status === "cancelled" ? "cancelled" : event.status === "limit_reached" ? "completed_with_warning" : "failed",
           ...(event.error ? { error: event.error } : {}),
         })
         break

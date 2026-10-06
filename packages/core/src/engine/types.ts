@@ -221,8 +221,12 @@ export interface RunRequest {
   allowTools?: boolean;
   /** Optional provider-compatible thinking level for this run. */
   thinkingLevel?: string;
-  /** Optional per-run tool registry used by the layered orchestrator. */
+  /** Optional per-run tool registry, useful for scoped foreground/background execution. */
   tools?: ToolRegistry;
+  /** Optional per-run tool-call budget override. */
+  maxToolCalls?: number;
+  /** Optional per-run completion-token budget override. */
+  maxCompletionTokens?: number;
   signal?: AbortSignal;
   /** Optional per-run approval policy (used by bounded autonomous execution). */
   approvalPolicy?: ToolApprovalPolicy;

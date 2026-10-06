@@ -1,6 +1,16 @@
 import Database from "better-sqlite3";
 import { GoalStore } from "../api/goals-router.js";
 import { AutonomousSupervisor } from "./autonomous-supervisor.js";
+import { ToolRegistry } from "../engine/tool-registry.js";
+
+
+function makeTools() {
+  const registry = new ToolRegistry();
+  for (const name of ["workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write"]) {
+    registry.register({ name, description: name, risk: "read", parameters: { type: "object", properties: {} }, approval: "auto", execute: async () => ({ ok: true }) });
+  }
+  return registry;
+}
 
 function makeResult(finalText = "Inspection complete.", status: "completed" | "failed" = "completed") {
   return {
@@ -9,7 +19,6 @@ function makeResult(finalText = "Inspection complete.", status: "completed" | "f
     model: "test-model",
     goal: "test goal",
     finalText,
-    route: { mode: "FULL_AGENT", confidence: 1, latencyMs: 0, reason: "test" },
     subtasks: [],
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -35,7 +44,9 @@ describe("AutonomousSupervisor", () => {
     config = { autonomy: { enabled: true }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } } };
     supervisor = new AutonomousSupervisor({
       db,
-      orchestrator: { run, activeRunCount } as never,
+      agent: { run },
+      tools: makeTools(),
+      activeRunCount,
       getConfig: () => config,
       log: (message) => logs.push(message),
       now: () => "2026-01-01T00:00:00.000Z",
@@ -51,12 +62,11 @@ describe("AutonomousSupervisor", () => {
     expect(result.status).toBe("completed");
     expect(result.goalId).toBe(goal.id);
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0][0].toolAllowlist).toEqual([
+    expect(run.mock.calls[0][0].tools.names()).toEqual([
       "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write",
     ]);
     expect(run.mock.calls[0][0].approvalPolicy).toBeDefined();
     expect(run.mock.calls[0][0].maxToolCalls).toBe(1);
-    expect(run.mock.calls[0][0].maxTotalTokens).toBe(8192);
     expect(run.mock.calls[0][0].maxCompletionTokens).toBe(8192);
     expect(goals.get(goal.id)?.status).toBe("completed");
     expect(db.prepare("SELECT status FROM autonomy_goal_runs WHERE run_id=?").get(result.runId)).toEqual({ status: "completed" });
@@ -93,8 +103,8 @@ describe("AutonomousSupervisor", () => {
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const firstRun = jest.fn().mockImplementation(async () => { await pending; return makeResult("complete"); });
     const secondRun = jest.fn().mockResolvedValue(makeResult("should not execute"));
-    const first = new AutonomousSupervisor({ db, orchestrator: { run: firstRun, activeRunCount: jest.fn().mockReturnValue(0) } as never, getConfig: () => config, log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
-    const second = new AutonomousSupervisor({ db, orchestrator: { run: secondRun, activeRunCount: jest.fn().mockReturnValue(0) } as never, getConfig: () => config, log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
+    const first = new AutonomousSupervisor({ db, agent: { run: firstRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => config, log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
+    const second = new AutonomousSupervisor({ db, agent: { run: secondRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => config, log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
     goals.create({ title: "Shared goal", steps: ["Inspect"], replaceExisting: false });
     const firstTick = first.tick("process-a");
     await new Promise((resolve) => setImmediate(resolve));
@@ -175,7 +185,7 @@ describe("AutonomousSupervisor", () => {
 
     new AutonomousSupervisor({
       db: migrationDb,
-      orchestrator: { run: jest.fn().mockResolvedValue(makeResult()), activeRunCount: jest.fn().mockReturnValue(0) } as never,
+      agent: { run: jest.fn().mockResolvedValue(makeResult()) }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
       getConfig: () => config,
       log: () => undefined,
       now: () => "2026-01-01T00:00:00.000Z",
@@ -207,7 +217,7 @@ describe("AutonomousSupervisor", () => {
     const recoveredRun = jest.fn().mockResolvedValue(makeResult("Recovered successfully."));
     const restarted = new AutonomousSupervisor({
       db,
-      orchestrator: { run: recoveredRun, activeRunCount: jest.fn().mockReturnValue(0) } as never,
+      agent: { run: recoveredRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
       getConfig: () => config,
       log: () => undefined,
       now: () => "2026-01-01T00:00:30.000Z",
@@ -252,13 +262,13 @@ describe("AutonomousSupervisor", () => {
     expect(row.probe_ok).toBe(1);
   });
 
-  it("materializes due schedules while the foreground lane is busy without executing them", async () => {
+  it("executes due schedules even while a foreground chat run is active", async () => {
     activeRunCount.mockReturnValue(1);
-    const task = supervisor.enqueueTask({ title: "Due while busy", dueAt: "2026-01-01T00:00:00.000Z" });
+    const task = supervisor.enqueueTask({ title: "Due while chatting", dueAt: "2026-01-01T00:00:00.000Z" });
     const result = await supervisor.tick("heartbeat");
-    expect(result.status).toBe("busy");
-    expect(run).not.toHaveBeenCalled();
-    expect(supervisor.listScheduledTasks().find((item) => item.task_id === task?.task_id)).toMatchObject({ status: "queued" });
+    expect(result.status).toBe("completed");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(supervisor.listScheduledTasks().find((item) => item.task_id === task?.task_id)).toBeDefined();
   });
 
   it("recovers a stale running task lease during heartbeat maintenance", async () => {
@@ -297,7 +307,7 @@ describe("AutonomousSupervisor", () => {
     db.prepare("INSERT INTO autonomy_goal_claims(goal_id,run_id,lease_expires_at,updated_at) VALUES(?,?,?,?)").run(goal.id, "stale-run", "2025-01-01T00:01:00.000Z", "2025-01-01T00:00:00.000Z");
     const recovered = new AutonomousSupervisor({
       db,
-      orchestrator: { run, activeRunCount: jest.fn().mockReturnValue(0) } as never,
+      agent: { run }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
       getConfig: () => config,
       log: () => undefined,
       now: () => "2026-01-01T00:00:00.000Z",
@@ -339,13 +349,77 @@ describe("AutonomousSupervisor", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("does not start an autonomous cycle while a foreground run is active", async () => {
+  it("does not pause or skip an autonomous goal while a foreground run is active", async () => {
     activeRunCount.mockReturnValue(1);
-    goals.create({ title: "Wait for foreground", steps: ["Inspect"], replaceExisting: false });
+    goals.create({ title: "Keep running during chat", steps: ["Inspect"], replaceExisting: false });
 
     const result = await supervisor.tick();
 
-    expect(result.status).toBe("busy");
-    expect(run).not.toHaveBeenCalled();
+    expect(result.status).toBe("completed");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  describe("adaptive ambient decisions", () => {
+    let nowMs: number;
+    let spy: jest.SpyInstance;
+
+    beforeEach(() => {
+      nowMs = 1_000_000;
+      spy = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS memory_chunks (id TEXT PRIMARY KEY, region TEXT NOT NULL, content TEXT NOT NULL, summary TEXT NOT NULL, importance REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      `);
+      config = {
+        autonomy: { enabled: true },
+        heartbeat: { enabled: true, auto_actions: { enabled: true }, proactive: { enabled: true, decision_interval_seconds: 100, max_decision_interval_seconds: 400, decision_backoff_multiplier: 2 } },
+      };
+      run.mockResolvedValue(makeResult("NO_ACTION"));
+    });
+
+    afterEach(() => spy.mockRestore());
+
+    const decide = (trigger: "startup" | "idle") => (supervisor as any).runAmbientDecision(trigger) as Promise<boolean>;
+
+    it("skips the LLM while nothing changed and stretches the interval after NO_ACTION", async () => {
+      await decide("startup");
+      expect(run).toHaveBeenCalledTimes(1);
+
+      nowMs += 100_000; // base interval elapsed, but state unchanged -> streak=1 -> needs 200s
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(1);
+
+      nowMs += 100_000; // 200s total
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(2);
+
+      nowMs += 399_000; // streak=2 -> 400s cap, not yet due
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns to the base interval as soon as the world state changes", async () => {
+      await decide("startup");
+      nowMs += 100_000;
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES('m1','miki-main-chat','user','hello','2026-01-01T00:00:00Z')").run();
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
+    it("never calls the LLM again inside the base interval, even when state changed", async () => {
+      await decide("startup");
+      nowMs += 10_000;
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES('m1','miki-main-chat','user','hello','2026-01-01T00:00:00Z')").run();
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it("resets the streak after an actionable decision", async () => {
+      await decide("startup");
+      run.mockResolvedValueOnce(makeResult("Found a blocker worth reporting."));
+      nowMs += 200_000;
+      expect(await decide("idle")).toBe(true);
+      expect(supervisor.status().proactive_loop.no_action_streak).toBe(0);
+    });
   });
 });

@@ -229,6 +229,11 @@ describe("chat controller message editing", () => {
           url: "data:image/png;base64,abc",
           filename: "edited.png",
         },
+        {
+          type: "file",
+          url: "/ignored.txt",
+          filename: "ignored.txt",
+        },
       ],
     })
     expect(state.messages[1]).toMatchObject({
@@ -302,8 +307,11 @@ describe("chat controller WebSocket dependency injection", () => {
     })
 
     expect(sent).toBe(true)
-    expect(createdSockets[0].sentData).toHaveLength(1)
-    expect(JSON.parse(createdSockets[0].sentData[0])).toMatchObject({
+    const messageFrame = createdSockets[0].sentData
+      .map((data) => JSON.parse(data))
+      .find((frame) => frame.type === "message.send")
+    expect(messageFrame).toBeDefined()
+    expect(messageFrame).toMatchObject({
       type: "message.send",
       payload: {
         content: "Hello from the test",
