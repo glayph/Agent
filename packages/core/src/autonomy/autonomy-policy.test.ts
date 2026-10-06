@@ -91,4 +91,17 @@ describe("AutonomyPolicy", () => {
     expect(policy.decide(tool("browser_screenshot", "read"), {}).mode).toBe("block");
   });
 
+  it("gates terminal_run exactly like shell_execute", () => {
+    const safe = new AutonomyPolicy({ capabilityProfile: "safe", allowedTools: ["terminal_run"] });
+    expect(safe.decide(tool("terminal_run", "destructive"), { command: "ls" }).mode).toBe("block");
+    const ungranted = new AutonomyPolicy({ capabilityProfile: "operator" });
+    expect(ungranted.decide(tool("terminal_run", "destructive"), { command: "ls" }).mode).toBe("block");
+    const granted = new AutonomyPolicy({ capabilityProfile: "operator", allowedTools: ["terminal_run"] });
+    expect(granted.decide(tool("terminal_run", "destructive"), { command: "ls" }).mode).toBe("auto");
+  });
+
+  it("auto-allows read-only web_search", () => {
+    expect(policy.decide(tool("web_search", "read"), { query: "node 22 release" }).mode).toBe("auto");
+  });
+
 });

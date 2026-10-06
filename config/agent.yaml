@@ -155,6 +155,8 @@ autonomy:
     mode: safe
     max_retries: 2
     retry_backoff_seconds: 60
+    # Per-cycle tool-call budget (circuit breaker; default 40, ceiling 500).
+    max_tool_calls_per_cycle: 40
     require_acceptance_contract: true
     allow_browser: false
     browser_allowed_domains: []

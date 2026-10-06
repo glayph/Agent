@@ -22,12 +22,30 @@ const SAFE_AUTONOMOUS_TOOLS = [
   "goal_status",
   "file_mkdir",
   "file_write",
+  "web_search",
 ] as const;
 
 const PHASE2_CAPABILITY_TOOLS = [
   "shell_execute",
+  "terminal_run",
   "runtime_ensure",
 ] as const;
+
+/** Default per-cycle tool-call budget; matches the engine's own default. */
+const DEFAULT_MAX_TOOL_CALLS_PER_CYCLE = 40;
+const MAX_TOOL_CALLS_PER_CYCLE_CEILING = 500;
+
+/**
+ * Resolve the per-cycle tool-call budget. `autonomy.tool_policy.max_tool_calls_per_cycle`
+ * wins; the legacy `heartbeat.auto_actions.max_actions_per_cycle` is only a
+ * fallback when it is a positive number. The old hard 1-3 clamp is gone: the
+ * ceiling now exists only as a runaway/cost circuit breaker.
+ */
+export function resolveMaxToolCallsPerCycle(policyValue: unknown, legacyValue: unknown): number {
+  const candidates = [policyValue, legacyValue].map((v) => Math.floor(Number(v)));
+  const chosen = candidates.find((n) => Number.isFinite(n) && n > 0) ?? DEFAULT_MAX_TOOL_CALLS_PER_CYCLE;
+  return Math.max(1, Math.min(MAX_TOOL_CALLS_PER_CYCLE_CEILING, chosen));
+}
 
 const AUTONOMOUS_BROWSER_TOOLS = [
   "browser_navigate",
@@ -235,12 +253,12 @@ export class AutonomousSupervisor {
     const autoActions = record(heartbeat.auto_actions);
     const enabled = autonomy.enabled !== false && heartbeat.enabled !== false && autoActions.enabled !== false;
     const skipWhenBusy = heartbeat.skip_when_main_busy !== false;
-    const maxActions = Math.max(1, Math.min(3, Number(autoActions.max_actions_per_cycle ?? 1) || 1));
     const resourceLimits = record(heartbeat.resource_limits);
     const maxTokensPerCycle = Math.max(1024, Math.min(100_000, Number(resourceLimits.max_tokens_per_cycle ?? 8192) || 8192));
     const maxIdleMinutes = Math.max(1, Math.min(1440, Number(resourceLimits.max_idle_minutes ?? 5) || 5));
     const checklistPath = typeof heartbeat.checklist_path === "string" && heartbeat.checklist_path.trim() ? heartbeat.checklist_path.trim() : "identity/HEARTBEAT.md";
     const policy = record(autonomy.tool_policy);
+    const maxActions = resolveMaxToolCallsPerCycle(policy.max_tool_calls_per_cycle, autoActions.max_actions_per_cycle);
     const maxRetries = Math.max(0, Math.min(3, Number(policy.max_retries ?? 2) || 0));
     const retryBackoffSeconds = Math.max(5, Math.min(3600, Number(policy.retry_backoff_seconds ?? 60) || 60));
     const safeWriteRoots = Array.isArray(policy.safe_write_roots)

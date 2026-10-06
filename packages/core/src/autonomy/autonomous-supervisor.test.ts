@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { GoalStore } from "../api/goals-router.js";
-import { AutonomousSupervisor } from "./autonomous-supervisor.js";
+import { AutonomousSupervisor, resolveMaxToolCallsPerCycle } from "./autonomous-supervisor.js";
 
 function makeResult(finalText = "Inspection complete.", status: "completed" | "failed" = "completed") {
   return {
@@ -52,7 +52,7 @@ describe("AutonomousSupervisor", () => {
     expect(result.goalId).toBe(goal.id);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0][0].toolAllowlist).toEqual([
-      "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write",
+      "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write", "web_search",
     ]);
     expect(run.mock.calls[0][0].approvalPolicy).toBeDefined();
     expect(run.mock.calls[0][0].maxToolCalls).toBe(1);
@@ -347,5 +347,26 @@ describe("AutonomousSupervisor", () => {
 
     expect(result.status).toBe("busy");
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMaxToolCallsPerCycle", () => {
+  it("is no longer clamped to 1-3", () => {
+    expect(resolveMaxToolCallsPerCycle(25, undefined)).toBe(25);
+    expect(resolveMaxToolCallsPerCycle(undefined, 10)).toBe(10);
+  });
+
+  it("prefers the tool_policy value over the legacy heartbeat counter", () => {
+    expect(resolveMaxToolCallsPerCycle(40, 1)).toBe(40);
+  });
+
+  it("ignores zero/invalid values and falls back to the default budget", () => {
+    expect(resolveMaxToolCallsPerCycle(undefined, 0)).toBe(40);
+    expect(resolveMaxToolCallsPerCycle("many", undefined)).toBe(40);
+    expect(resolveMaxToolCallsPerCycle(-5, 0)).toBe(40);
+  });
+
+  it("still enforces a runaway ceiling", () => {
+    expect(resolveMaxToolCallsPerCycle(100000, undefined)).toBe(500);
   });
 });

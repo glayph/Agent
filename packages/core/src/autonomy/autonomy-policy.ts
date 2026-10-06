@@ -93,7 +93,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
 
     // High-impact local execution is never made safe merely by appearing in
     // a generic allowlist. It must first pass the capability-profile gate.
-    if (tool.name === "shell_execute") {
+    if (tool.name === "shell_execute" || tool.name === "terminal_run") {
       if (this.capabilityProfile === "safe") return { mode: "block", reason: "Shell execution is disabled in the safe autonomous profile." };
       if (!this.allowedTools.has(tool.name)) return { mode: "block", reason: "Shell execution requires an explicit autonomous tool grant." };
       return { mode: "auto", reason: `${this.capabilityProfile} autonomous profile permits policy-governed shell execution after explicit grant.` };
