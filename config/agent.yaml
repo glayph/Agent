@@ -151,6 +151,12 @@ heartbeat:
 autonomy:
   enabled: true
   mode: standard
+  # Heartbeat turns identity/HEARTBEAT.md bullets into real goals when idle,
+  # so Miki starts work by itself without a user goal, schedule or event.
+  heartbeat_goals:
+    enabled: true
+    cooldown_minutes: 60
+    max_new_per_tick: 1
   tool_policy:
     mode: open
     # Behavior/safety rules for the open profile live in this editable prompt.

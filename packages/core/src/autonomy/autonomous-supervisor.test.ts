@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { GoalStore } from "../api/goals-router.js";
-import { AutonomousSupervisor, resolveMaxToolCallsPerCycle } from "./autonomous-supervisor.js";
+import { AutonomousSupervisor, parseHeartbeatChecklist, resolveMaxToolCallsPerCycle } from "./autonomous-supervisor.js";
 
 function makeResult(finalText = "Inspection complete.", status: "completed" | "failed" = "completed") {
   return {
@@ -461,5 +461,75 @@ describe("acceptance contract is optional by default", () => {
     await supervisor.tick("strict");
     expect(goals.get(goal.id)?.status).not.toBe("completed");
     db.close();
+  });
+});
+
+describe("heartbeat-driven work", () => {
+  it("parses only actionable bullets and keeps tags as hints", () => {
+    const items = parseHeartbeatChecklist([
+      "# comment line",
+      "",
+      "- [notify] Check stuck tasks",
+      "* [tool] Probe gateway health",
+      "- [noop] Do nothing here",
+      "- Check stuck tasks",
+      "plain text is ignored",
+      "- Review flags",
+    ].join("\n"));
+    expect(items.map((i) => i.text)).toEqual(["Check stuck tasks", "Probe gateway health", "Review flags"]);
+    expect(items[0]!.hint).toBe("notify");
+    expect(items[1]!.hint).toBe("tool");
+    expect(items[2]!.hint).toBeNull();
+  });
+
+  async function build(enabled: boolean) {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "miki-hb-"));
+    fs.mkdirSync(path.join(root, "identity"));
+    fs.writeFileSync(path.join(root, "identity", "HEARTBEAT.md"), "# list\n- [tool] Probe gateway health\n- Review flags\n");
+    const db = new Database(":memory:");
+    const run = jest.fn().mockResolvedValue(makeResult("Checked and reported."));
+    const supervisor = new AutonomousSupervisor({
+      db,
+      workspaceRoot: root,
+      orchestrator: { run, activeRunCount: jest.fn().mockReturnValue(0) } as never,
+      getConfig: () => ({
+        autonomy: { enabled: true, heartbeat_goals: { enabled, cooldown_minutes: 60 }, tool_policy: { max_retries: 0 } },
+        heartbeat: { enabled: true, auto_actions: { enabled: true } },
+      }),
+      log: () => undefined,
+      now: () => "2026-01-01T00:00:00.000Z",
+    });
+    return { supervisor, run, db, root, fs };
+  }
+
+  it("starts work on its own from HEARTBEAT.md when no goal, schedule or event exists", async () => {
+    const { supervisor, run, db, root, fs } = await build(true);
+    const first = await supervisor.tick("heartbeat");
+    expect(first.status).toBe("completed");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][0].history[0].content).toContain("Probe gateway health");
+
+    const second = await supervisor.tick("heartbeat");
+    expect(second.status).toBe("completed");
+    expect(run.mock.calls[1][0].history[0].content).toContain("Review flags");
+
+    // Both items are now on cooldown, so nothing new is invented.
+    const third = await supervisor.tick("heartbeat");
+    expect(third.status).toBe("idle");
+    expect(run).toHaveBeenCalledTimes(2);
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("stays idle when heartbeat goals are not enabled", async () => {
+    const { supervisor, run, db, root, fs } = await build(false);
+    const result = await supervisor.tick("heartbeat");
+    expect(result.status).toBe("idle");
+    expect(run).not.toHaveBeenCalled();
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });

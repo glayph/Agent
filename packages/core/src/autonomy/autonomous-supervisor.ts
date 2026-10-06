@@ -31,6 +31,41 @@ const PHASE2_CAPABILITY_TOOLS = [
   "runtime_ensure",
 ] as const;
 
+export interface HeartbeatItem {
+  key: string;
+  text: string;
+  hint: "notify" | "tool" | "memory" | null;
+}
+
+/**
+ * Parse identity/HEARTBEAT.md into actionable checklist items. Bullet lines
+ * (`- ` or `* `) are items; `#` lines and blanks are ignored. An optional
+ * leading [notify]/[tool]/[memory] tag is kept as a hint and `[noop]` items
+ * are skipped.
+ */
+export function parseHeartbeatChecklist(text: string): HeartbeatItem[] {
+  const items: HeartbeatItem[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of text.split(/\r?\n/)) {
+    const bullet = /^\s*[-*]\s+(.*\S)\s*$/.exec(rawLine);
+    if (!bullet) continue;
+    let body = bullet[1]!.trim();
+    let hint: HeartbeatItem["hint"] = null;
+    const tag = /^\[(notify|tool|memory|noop)\]\s*(.*)$/i.exec(body);
+    if (tag) {
+      if (tag[1]!.toLowerCase() === "noop") continue;
+      hint = tag[1]!.toLowerCase() as HeartbeatItem["hint"];
+      body = tag[2]!.trim();
+    }
+    if (!body) continue;
+    const key = crypto.createHash("sha256").update(body.toLowerCase()).digest("hex").slice(0, 24);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({ key, text: body, hint });
+  }
+  return items;
+}
+
 /** Used only when identity/AUTONOMY.md is missing or empty. */
 const DEFAULT_OPEN_AUTONOMY_PROMPT =
   "Work autonomously with the tools available. Prefer reversible actions, verify results, never exfiltrate secrets or harm third parties, and begin the final answer with `BLOCKED:` when a human decision is required.";
@@ -245,6 +280,7 @@ export class AutonomousSupervisor {
     const runColumns = new Set((this.options.db.prepare("PRAGMA table_info(autonomy_goal_runs)").all() as Array<{ name: string }>).map((row) => row.name));
     if (!runColumns.has("plan_digest")) this.options.db.exec("ALTER TABLE autonomy_goal_runs ADD COLUMN plan_digest TEXT");
     if (!runColumns.has("acceptance_result")) this.options.db.exec("ALTER TABLE autonomy_goal_runs ADD COLUMN acceptance_result TEXT");
+    this.options.db.exec("CREATE TABLE IF NOT EXISTS autonomy_heartbeat_items (item_key TEXT PRIMARY KEY, title TEXT NOT NULL, last_created_at TEXT NOT NULL)");
     this.options.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_task_idempotency ON autonomy_task_queue(idempotency_key) WHERE idempotency_key IS NOT NULL");
     this.recoverStaleGoalClaims();
     this.recoverPersistentTasks();
@@ -284,6 +320,12 @@ export class AutonomousSupervisor {
     const allowedTools = Array.isArray(policy.allowed_tools) ? policy.allowed_tools.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
     const allowedExternalSideEffectTools = Array.isArray(policy.allowed_external_side_effect_tools) ? policy.allowed_external_side_effect_tools.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
     const requireAcceptanceContract = policy.require_acceptance_contract === true;
+    const heartbeatGoalsRaw = record(autonomy.heartbeat_goals);
+    const heartbeatGoals = {
+      enabled: heartbeatGoalsRaw.enabled === true,
+      cooldownMinutes: Math.max(1, Math.min(10_080, Number(heartbeatGoalsRaw.cooldown_minutes ?? 60) || 60)),
+      maxNewPerTick: Math.max(1, Math.min(10, Math.floor(Number(heartbeatGoalsRaw.max_new_per_tick ?? 1)) || 1)),
+    };
     const eventPolicy = record(autonomy.event_triggers);
     const eventMaxPerMinute = Math.max(1, Math.min(1000, Number(eventPolicy.max_per_minute ?? 30) || 30));
     const eventCooldownSeconds = Math.max(0, Math.min(3600, Number(eventPolicy.cooldown_seconds ?? 5) || 0));
@@ -303,6 +345,7 @@ export class AutonomousSupervisor {
       requireAcceptanceContract,
       capabilityProfile,
       promptPath,
+      heartbeatGoals,
       eventMaxPerMinute,
       eventCooldownSeconds,
       allowedTools,
@@ -706,6 +749,40 @@ export class AutonomousSupervisor {
     }
   }
 
+  /**
+   * Turn due HEARTBEAT.md items into real goals so the agent starts work on
+   * its own when nothing else is queued. Each item has a cooldown so the same
+   * check is not recreated every tick, and an item that already has an open
+   * goal is never duplicated.
+   */
+  private generateHeartbeatGoals(config: ReturnType<AutonomousSupervisor["config"]>): number {
+    const items = parseHeartbeatChecklist(this.heartbeatChecklist(config.checklistPath));
+    if (!items.length) return 0;
+    const nowMs = Date.parse(this.now());
+    const cooldownMs = config.heartbeatGoals.cooldownMinutes * 60_000;
+    let created = 0;
+    for (const item of items) {
+      if (created >= config.heartbeatGoals.maxNewPerTick) break;
+      const title = truncate(`Heartbeat: ${item.text}`, 140);
+      const last = this.options.db.prepare("SELECT last_created_at FROM autonomy_heartbeat_items WHERE item_key=?").get(item.key) as { last_created_at: string } | undefined;
+      if (last && nowMs - Date.parse(last.last_created_at) < cooldownMs) continue;
+      const open = this.options.db.prepare("SELECT 1 AS found FROM pursue_goals WHERE title=? AND status IN ('pending','active')").get(title);
+      if (open) continue;
+      this.goals.create({
+        title,
+        description: `Proactive heartbeat check from ${config.checklistPath}${item.hint ? ` (hint: ${item.hint})` : ""}. Do this check now with your tools and report what you found or did.`,
+        priority: 8,
+        source: "heartbeat",
+        steps: [item.text],
+        replaceExisting: false,
+      });
+      this.options.db.prepare("INSERT INTO autonomy_heartbeat_items (item_key,title,last_created_at) VALUES(?,?,?) ON CONFLICT(item_key) DO UPDATE SET title=excluded.title,last_created_at=excluded.last_created_at").run(item.key, title, this.now());
+      created += 1;
+    }
+    if (created) this.options.log(`Heartbeat created ${created} goal(s) from ${config.checklistPath}.`);
+    return created;
+  }
+
   private async recordHeartbeatCycle(config: ReturnType<AutonomousSupervisor["config"]>): Promise<void> {
     this.recoverStaleGoalClaims();
     const recoveredTasks = this.recoverStaleQueueLeases();
@@ -777,6 +854,18 @@ export class AutonomousSupervisor {
       if (pending) {
         this.goals.update(pending.id, { status: "active", statusReason: "Queued goal picked up by autonomous supervisor." });
         goal = this.goals.get(pending.id);
+      }
+    }
+    if (!goal && trigger === "heartbeat" && config.heartbeatGoals.enabled && this.generateHeartbeatGoals(config) > 0) {
+      goal = this.goals.active();
+      if (!goal) {
+        const pending = this.options.db
+          .prepare("SELECT id FROM pursue_goals WHERE status = 'pending' ORDER BY priority ASC, id ASC LIMIT 1")
+          .get() as { id: number } | undefined;
+        if (pending) {
+          this.goals.update(pending.id, { status: "active", statusReason: "Heartbeat-generated goal picked up by autonomous supervisor." });
+          goal = this.goals.get(pending.id);
+        }
       }
     }
     if (!goal) {
