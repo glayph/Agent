@@ -159,7 +159,9 @@ autonomy:
     retry_backoff_seconds: 60
     # Per-cycle tool-call budget (circuit breaker; default 40, ceiling 500).
     max_tool_calls_per_cycle: 40
-    require_acceptance_contract: true
+    # false: a goal without an acceptance contract still completes on a
+    # successful result. Set true only to force contract-verified completion.
+    require_acceptance_contract: false
     allow_browser: false
     browser_allowed_domains: []
     allow_computer_use: false

@@ -407,3 +407,59 @@ describe("AutonomousSupervisor open profile", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe("acceptance contract is optional by default", () => {
+  it("ships agent.yaml with require_acceptance_contract disabled", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const yaml = fs.readFileSync(path.resolve(process.cwd(), "config/agent.yaml"), "utf8");
+    expect(yaml).toMatch(/require_acceptance_contract:\s*false/);
+    expect(yaml).not.toMatch(/require_acceptance_contract:\s*true/);
+  });
+
+  it("completes a contract-less goal and says so honestly", async () => {
+    const db = new Database(":memory:");
+    const goals = new GoalStore(db);
+    const run = jest.fn().mockResolvedValue(makeResult("Created the report and verified it exists."));
+    const supervisor = new AutonomousSupervisor({
+      db,
+      orchestrator: { run, activeRunCount: jest.fn().mockReturnValue(0) } as never,
+      getConfig: () => ({
+        autonomy: { enabled: true, tool_policy: { require_acceptance_contract: false } },
+        heartbeat: { enabled: true, auto_actions: { enabled: true } },
+      }),
+      log: () => undefined,
+      now: () => "2026-01-01T00:00:00.000Z",
+    });
+    const goal = goals.create({ title: "No contract goal", steps: ["Do it"], replaceExisting: false });
+    const result = await supervisor.tick("no-contract");
+
+    expect(result.status).toBe("completed");
+    expect(goals.get(goal.id)?.status).toBe("completed");
+    const reason = String((goals.get(goal.id) as unknown as { statusReason?: string; status_reason?: string })?.statusReason
+      ?? (goals.get(goal.id) as unknown as { status_reason?: string })?.status_reason);
+    expect(reason).toContain("no acceptance contract was set");
+    expect(reason).not.toContain("acceptance-verified");
+    db.close();
+  });
+
+  it("still blocks a contract-less goal when the contract is explicitly required", async () => {
+    const db = new Database(":memory:");
+    const goals = new GoalStore(db);
+    const run = jest.fn().mockResolvedValue(makeResult());
+    const supervisor = new AutonomousSupervisor({
+      db,
+      orchestrator: { run, activeRunCount: jest.fn().mockReturnValue(0) } as never,
+      getConfig: () => ({
+        autonomy: { enabled: true, tool_policy: { require_acceptance_contract: true, max_retries: 0 } },
+        heartbeat: { enabled: true, auto_actions: { enabled: true } },
+      }),
+      log: () => undefined,
+      now: () => "2026-01-01T00:00:00.000Z",
+    });
+    const goal = goals.create({ title: "Strict goal", steps: ["Do it"], replaceExisting: false });
+    await supervisor.tick("strict");
+    expect(goals.get(goal.id)?.status).not.toBe("completed");
+    db.close();
+  });
+});
