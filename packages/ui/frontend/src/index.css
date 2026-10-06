@@ -1695,7 +1695,7 @@ body,
   padding-inline: var(--app-content-gutter);
 }
 
-[data-layout="route-content"] :is(input, textarea, select, button) {
+[data-layout="route-content"] :is(input, textarea, select) {
   min-height: var(--app-control-height);
 }
 
@@ -2134,7 +2134,7 @@ body {
 }
 
 [data-slot="button"] {
-  min-height: 2rem;
+  min-height: 0;
   border-radius: 0.5rem;
   font-size: 0.8125rem;
   font-weight: 550;
@@ -2253,7 +2253,20 @@ pre {
     padding-inline: 1rem !important;
   }
 
+  [data-slot="sheet-content"][data-mobile="true"] {
+    width: min(17rem, calc(100vw - 1rem)) !important;
+    max-width: calc(100vw - 1rem) !important;
+    height: 100svh;
+  }
+
+  [data-slot="sheet-content"][data-mobile="true"] [data-slot="sidebar-content"] {
+    min-width: 0;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
   .miki-sidebar__nav-item {
+    width: 100%;
     min-height: 2.5rem;
   }
 

@@ -22,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "260px"
-const SIDEBAR_WIDTH_MOBILE = "60px"
+const SIDEBAR_WIDTH_MOBILE = "min(17rem, calc(100vw - 1rem))"
 const SIDEBAR_WIDTH_ICON = "60px"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
@@ -181,7 +181,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground !w-[var(--sidebar-width)] !max-w-none p-0 [&>button]:hidden"
+          className="bg-sidebar text-sidebar-foreground !w-[var(--sidebar-width)] !max-w-[calc(100vw-1rem)] overflow-hidden p-0 [&>button]:hidden"
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,

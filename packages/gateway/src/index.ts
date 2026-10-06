@@ -522,7 +522,7 @@ const effectiveModel = () => {
 }
 app.get("/api/models", (_req, res) => {
   const rows = storedModels()
-  const models = rows.length ? rows.map(modelPayload) : (effectiveModel() ? [effectiveModel()] : [])
+  const models = rows.map(modelPayload)
   res.json({ models, total: models.length, default_model: (models.find((item) => item.is_default) as { model?: string } | undefined)?.model || "", provider_options: providerOptions() })
 })
 app.post("/api/models", (req, res) => {
@@ -598,7 +598,9 @@ const validateStoredConfig = (candidate: Record<string, unknown>) => {
   }
 }
 
-app.get("/api/config", (_req, res) => res.json(getAppConfig()))
+app.get("/api/config", (_req, res) =>
+  res.json({ ...getAppConfig(), workspace: workspaceRoot }),
+)
 app.post("/api/config/validate", requireAuth, (req, res) => {
   const candidate = isRecord(req.body) ? req.body : {}
   const result = validateStoredConfig(candidate)
@@ -976,8 +978,15 @@ const browserReady = async (): Promise<boolean> => {
   try {
     const moduleName = "playwright"
     const pw = (await import(moduleName)) as { chromium?: { executablePath(): string } }
-    const executable = pw.chromium?.executablePath()
-    ready = Boolean(executable && existsSync(executable))
+    const candidates = [
+      process.env.MIKI_BROWSER_CHROME_PATH,
+      pw.chromium?.executablePath(),
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/google-chrome",
+      "/opt/google/chrome/chrome",
+    ].filter((value): value is string => Boolean(value))
+    ready = candidates.some((executable) => existsSync(executable))
   } catch {
     ready = false
   }

@@ -321,7 +321,8 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const toolFeedback = asRecord(defaults.tool_feedback)
 
   return {
-    workspace: asString(defaults.workspace) || EMPTY_FORM.workspace,
+    workspace:
+      asString(defaults.workspace) || asString(root.workspace) || EMPTY_FORM.workspace,
     restrictToWorkspace:
       defaults.restrict_to_workspace === undefined
         ? EMPTY_FORM.restrictToWorkspace

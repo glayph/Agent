@@ -946,6 +946,16 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     }
     return res.status(runtimeApplyStatus === "failed" ? 500 : 200).json({ ...value, runtime_apply_status: runtimeApplyStatus, runtime_apply_error: runtimeApplyError, gateway_restart_required: runtimeApplyStatus !== "applied", pending_restart_fields: runtimeApplyStatus === "applied" ? [] : ["launcher_config"] })
   })
+  async function hasUserSystemd(): Promise<boolean> {
+    if (process.platform !== "linux") return false
+    try {
+      await execFileAsync("systemctl", ["--user", "show-environment"])
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async function applyAutostart(enabled: boolean): Promise<{ supported: boolean; active: boolean; message: string }> {
     if (process.platform === "linux") {
       const serviceDir = path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || deps.dataRoot, ".config"), "systemd", "user")
@@ -954,6 +964,9 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
         await execFileAsync("systemctl", ["--user", "disable", "--now", "miki-gateway.service"]).catch(() => undefined)
         await fsp.rm(servicePath, { force: true })
         return { supported: true, active: false, message: "User systemd autostart disabled." }
+      }
+      if (!(await hasUserSystemd())) {
+        return { supported: false, active: false, message: "Launch at login is unavailable because this session has no user systemd service manager." }
       }
       await fsp.mkdir(serviceDir, { recursive: true })
       const node = process.execPath.replace(/\\/g, "/")
@@ -982,8 +995,9 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const enabled = req.body?.enabled === true
     try {
       const result = await applyAutostart(enabled)
-      deps.db.prepare("INSERT INTO settings(key,value) VALUES('autostart_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(enabled ? "true" : "false")
-      res.json({ enabled, platform: process.platform, ...result })
+      const persistedEnabled = result.supported ? enabled : false
+      deps.db.prepare("INSERT INTO settings(key,value) VALUES('autostart_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(persistedEnabled ? "true" : "false")
+      res.json({ enabled: persistedEnabled, platform: process.platform, ...result })
     } catch (error) {
       res.status(500).json({ enabled, supported: process.platform === "linux" || process.platform === "win32", active: false, error: error instanceof Error ? error.message : String(error) })
     }
@@ -991,7 +1005,8 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   router.get("/system/autostart", async (_req, res) => {
     const row = deps.db.prepare("SELECT value FROM settings WHERE key='autostart_enabled'").get() as { value?: string } | undefined
     const enabled = row?.value === "true"
-    res.json({ enabled, supported: process.platform === "linux" || process.platform === "win32", active: enabled, platform: process.platform })
+    const supported = process.platform === "win32" || (process.platform === "linux" && await hasUserSystemd())
+    res.json({ enabled: supported && enabled, supported, active: supported && enabled, platform: process.platform, message: supported ? undefined : "Launch at login requires a user systemd session on Linux." })
   })
 
   router.get("/system/flow", deps.requireAuth, (_req, res) => {

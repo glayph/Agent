@@ -11,7 +11,7 @@ export interface AutonomyPolicyConfig {
   browserAllowedDomains?: string[];
   allowComputerUse?: boolean;
   /** Phase-2 capability profile. Higher profiles opt into progressively riskier local actions. */
-  capabilityProfile?: "safe" | "developer" | "operator" | "open";
+  capabilityProfile?: "safe" | "developer" | "operator";
   /** Explicit tool grants for capabilities not covered by the built-in profile. */
   allowedTools?: string[];
   /** Explicitly permitted high-impact tools; never inferred from a generic risk label. */
@@ -54,7 +54,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
   private readonly allowBrowser: boolean;
   private readonly browserAllowedDomains: string[];
   private readonly allowComputerUse: boolean;
-  private readonly capabilityProfile: "safe" | "developer" | "operator" | "open";
+  private readonly capabilityProfile: "safe" | "developer" | "operator";
   private readonly allowedTools: Set<string>;
   private readonly allowedExternalSideEffectTools: Set<string>;
 
@@ -84,12 +84,6 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
   }
 
   decide(tool: EngineTool, input: Record<string, unknown>): ToolApprovalDecision {
-    // `open` is an explicit opt-in profile: no code-level capability gates.
-    // Behavior and safety rules are supplied by the agent prompt
-    // (identity/AUTONOMY.md); the per-cycle tool-call budget still applies.
-    if (this.capabilityProfile === "open") {
-      return { mode: "auto", reason: "Open autonomous profile: behavior is governed by the agent prompt, not code gates." };
-    }
     if (this.allowedExternalSideEffectTools.has(tool.name)) {
       if (this.capabilityProfile !== "operator") {
         return { mode: "block", reason: `External side effect tool "${tool.name}" requires the operator capability profile.` };
@@ -99,7 +93,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
 
     // High-impact local execution is never made safe merely by appearing in
     // a generic allowlist. It must first pass the capability-profile gate.
-    if (tool.name === "shell_execute" || tool.name === "terminal_run") {
+    if (tool.name === "shell_execute") {
       if (this.capabilityProfile === "safe") return { mode: "block", reason: "Shell execution is disabled in the safe autonomous profile." };
       if (!this.allowedTools.has(tool.name)) return { mode: "block", reason: "Shell execution requires an explicit autonomous tool grant." };
       return { mode: "auto", reason: `${this.capabilityProfile} autonomous profile permits policy-governed shell execution after explicit grant.` };

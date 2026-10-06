@@ -104,6 +104,12 @@ describe("config page form model", () => {
     expect(customForm.contextWindow).toBe("131072")
   })
 
+  it("falls back to the runtime workspace when defaults do not contain a path", () => {
+    const form = buildFormFromConfig({ workspace: "/runtime/workspace" })
+
+    expect(form.workspace).toBe("/runtime/workspace")
+  })
+
   it("parses and rejects config field inputs with actionable errors", () => {
     expect(parseIntField("12", "Port", { min: 1, max: 65535 })).toBe(12)
     expect(() => parseIntField("12.5", "Port")).toThrow(

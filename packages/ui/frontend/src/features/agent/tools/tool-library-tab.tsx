@@ -18,7 +18,6 @@ import {
 import { Skeleton } from "@/shared/ui/skeleton"
 import { Switch } from "@/shared/ui/switch"
 
-import { ToolStatusBadge } from "./tool-status-badge"
 import type { GroupedTools, ToolStatusFilter } from "./types"
 
 const TOOL_LIST_PAGE_SIZE = 80
@@ -252,7 +251,6 @@ function ToolCard({
             <h4 className="text-foreground/90 min-w-0 font-mono text-sm font-semibold tracking-tight break-all">
               {tool.name}
             </h4>
-            <ToolStatusBadge status={tool.status} />
             {tool.risk && (
               <Badge
                 variant={tool.risk.level === "high" ? "destructive" : "outline"}

@@ -25,7 +25,7 @@ export function CredentialCard({
   footer,
 }: CredentialCardProps) {
   return (
-    <section className="bg-card flex h-full flex-col rounded-xl border p-4">
+    <section className="bg-card flex h-fit min-h-0 flex-col rounded-xl border p-4">
       <div className="min-h-16">
         <h3 className="text-base font-semibold">{title}</h3>
         <p className="text-muted-foreground mt-1 text-xs">{description}</p>
@@ -36,10 +36,12 @@ export function CredentialCard({
         {details}
       </div>
 
-      <div className="mt-auto flex flex-col gap-4 pt-4">
-        <div className="min-h-[112px]">{actions}</div>
-        <div className="min-h-8">{footer}</div>
-      </div>
+      {(actions || footer) && (
+        <div className="mt-4 flex flex-col gap-4">
+          {actions && <div>{actions}</div>}
+          {footer && <div>{footer}</div>}
+        </div>
+      )}
     </section>
   )
 }
