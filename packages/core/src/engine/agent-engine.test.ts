@@ -83,7 +83,7 @@ describe("AgentEngine", () => {
     expect(statuses).toEqual(["requested", "running", "succeeded", "requested", "running", "succeeded"]);
   });
 
-  it("plans multi-step goals and settles the plan when the run completes", async () => {
+  it("settles an LLM-created plan when the run completes", async () => {
     const { engine } = setup(
       [
         { text: JSON.stringify({ steps: [{ title: "Read the file", tool: "ping" }, { title: "Summarize", tool: null }] }) },
@@ -93,8 +93,11 @@ describe("AgentEngine", () => {
       [tool({ name: "ping" })],
     );
     const events: EngineEvent[] = [];
+    const history = user("First read the config file and then summarize it, then check the setting");
+    const plan = await engine.plan("First read the config file and then summarize it, then check the setting");
     const result = await engine.run({
-      history: user("First read the config file and then summarize it, then check the setting"),
+      history,
+      plan,
       onEvent: (e) => events.push(e),
     });
     expect(result.plan?.source).toBe("llm");

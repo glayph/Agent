@@ -19,6 +19,18 @@ describe("MessageRouter", () => {
     expect(llm.complete).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ json: true, maxCompletionTokens: 160 }))
   })
 
+  it("always consults the LLM, with no wording-based shortcut", async () => {
+    for (const text of ["hi", "ফাইল পড়ো", "Search the repo, then fix it and run the tests"]) {
+      const llm = client(['{"mode":"FULL_AGENT","confidence":0.9,"reason":"model decided"}'])
+      const router = new MessageRouter({ llmFor: () => llm })
+      await expect(router.route([{ role: "user", content: text }])).resolves.toMatchObject({ mode: "FULL_AGENT", confidence: 0.9 })
+      expect(llm.complete).toHaveBeenCalledTimes(1)
+      const fast = client(['{"answer":"ok","requires_full_agent":false}'])
+      await new MessageRouter({ llmFor: () => fast }).fastChat([{ role: "user", content: text }])
+      expect(fast.complete).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it("fails closed to FULL_AGENT for invalid or unavailable classification", async () => {
     const invalid = new MessageRouter({ llmFor: () => client(["not-json"]) })
     await expect(invalid.route([{ role: "user", content: "ambiguous request" }])).resolves.toMatchObject({ mode: "FULL_AGENT", confidence: 0 })

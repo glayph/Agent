@@ -14,13 +14,10 @@ export {
 } from "./llm-client.js";
 export type { FetchLLMClientOptions, RegistryLike } from "./llm-client.js";
 export {
-  analyzeGoal,
   createPlan,
   describePlan,
-  heuristicPlan,
   parsePlanJson,
 } from "./planner.js";
-export type { GoalAnalysis } from "./planner.js";
 export { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt } from "./prompt.js";
 export {
   createControlTools,

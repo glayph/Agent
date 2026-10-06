@@ -1,24 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { errorMessage } from "./util.js";
-const ACTION_EN = /\b(file|folder|directory|workspace|read|write|create|edit|delete|rename|move|copy|list|find|search|grep|run|execute|check|inspect|analy[sz]e|investigate|debug|fix|install|configure|config|setting|enable|disable|model|tool|memory|remember|summari[sz]e|compare|diagnos\w*|verify|audit|refactor|implement|build|test)\b/gi;
-const ACTION_BN = /(ফাইল|ফোল্ডার|পড়|লিখ|তৈরি|খুঁজ|অনুসন্ধান|চালা|চেক|যাচাই|বিশ্লেষণ|সমস্যা|সমাধান|ঠিক কর|কনফিগার|সেটিং|চালু|বন্ধ|মডেল|টুল|মনে রাখ|তুলনা|ধাপ|পরিকল্পনা)/g;
-const SEQUENCE = /\b(and then|then|after that|afterwards|first|next|finally)\b|তারপর|এরপর|প্রথমে|শেষে|অতঃপর/i;
-/** Cheap, offline classification used to decide whether a plan is worth an LLM call. */
-export function analyzeGoal(goal) {
-    const text = goal.trim();
-    const markers = [
-        ...new Set([...(text.match(ACTION_EN) ?? []), ...(text.match(ACTION_BN) ?? [])].map((item) => item.toLowerCase())),
-    ];
-    const words = text.split(/\s+/).filter(Boolean).length;
-    if (markers.length === 0 && words <= 12)
-        return { complexity: "trivial", markers };
-    const sequenced = SEQUENCE.test(text);
-    // Several marker words alone ("read the config file") are still one action;
-    // multi-step needs explicit sequencing, a very long request, or many distinct actions.
-    if ((sequenced && markers.length >= 2) || markers.length >= 6 || text.length > 300)
-        return { complexity: "multi_step", markers };
-    return { complexity: "simple", markers };
-}
 function newPlanId() {
     return `plan_${randomUUID().slice(0, 8)}`;
 }
@@ -44,20 +25,31 @@ function buildPlan(goal, source, complexity, steps) {
         })),
     };
 }
-/** Split the goal text on sequencing words; always yields at least one step. */
-export function heuristicPlan(goal, analysis = analyzeGoal(goal)) {
-    if (analysis.complexity === "trivial")
-        return buildPlan(goal, "none", "trivial", [{ title: "Answer directly" }]);
-    const parts = goal
-        .split(/\s*(?:\band then\b|\bthen\b|\bafter that\b|\bafterwards\b|,\s*(?=and\b)|;|\.\s+|তারপর|এরপর|অতঃপর)\s*/i)
-        .map((part) => part.trim().replace(/^(and|first|next|finally)\s+/i, ""))
-        .filter((part) => part.length > 2)
-        .slice(0, 6);
-    const titles = parts.length > 1 ? parts : [goal.trim().slice(0, 160)];
-    return buildPlan(goal, "heuristic", analysis.complexity, titles.map((title, index) => ({
-        title: title.slice(0, 160),
-        ...(index > 0 ? { dependsOn: [index] } : {}),
-    })));
+/**
+ * Internal error-state plan used only when the planning model is unavailable or
+ * returns an unusable reply. It never inspects the goal's wording: the whole
+ * goal becomes one step and the agent's own LLM loop decides what to do.
+ */
+export function fallbackPlan(goal) {
+    return buildPlan(goal, "heuristic", "simple", [
+        { title: goal.trim().slice(0, 160) || "Handle the request" },
+    ]);
+}
+function parseComplexity(text) {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start)
+        return undefined;
+    try {
+        const value = JSON.parse(text.slice(start, end + 1))
+            ?.complexity;
+        return value === "trivial" || value === "simple" || value === "multi_step"
+            ? value
+            : undefined;
+    }
+    catch {
+        return undefined;
+    }
 }
 /** Extract plan steps from a model reply; tolerant of code fences and prose around the JSON. */
 export function parsePlanJson(text, knownTools, maxSteps = 6) {
@@ -104,19 +96,19 @@ export function parsePlanJson(text, knownTools, maxSteps = 6) {
     return steps.length ? steps : null;
 }
 /**
- * Plans a goal. Multi-step goals are decomposed by the model; everything else,
- * and every planner failure, falls back to a deterministic heuristic plan.
+ * Plans a goal. The model alone decides how many steps the request needs
+ * (a single step for a simple request); only a planner failure falls back to
+ * the minimal internal fallback plan.
  */
 export async function createPlan(input) {
-    const analysis = analyzeGoal(input.goal);
-    if (analysis.complexity !== "multi_step" || !input.llm)
-        return heuristicPlan(input.goal, analysis);
+    if (!input.llm)
+        return fallbackPlan(input.goal);
     const maxSteps = input.maxSteps ?? 6;
     try {
         const response = await input.llm.complete([
             {
                 role: "system",
-                content: `You are the planning module of an autonomous agent. Break the user's goal into 2-${maxSteps} concrete steps and identify dependencies so independent work can run in parallel. ` +
+                content: `You are the planning module of an autonomous agent. Understand what the user actually wants, then break the goal into 1-${maxSteps} concrete steps and identify dependencies so independent work can run in parallel. Use a single step when the request needs only one action or a direct conversational answer. ` +
                     `Reply with ONLY a JSON object: {"steps":[{"title":"short imperative step","tool":"tool name or null","depends_on":[1,2]}]}. ` +
                     `depends_on uses 1-based step numbers and may be [] for an independent step. Do not invent dependencies; add one when the step needs another step's result. ` +
                     `Available tools: ${input.toolNames.join(", ") || "none"}. Use null when no tool is needed.`,
@@ -136,7 +128,9 @@ export async function createPlan(input) {
                     ...(index > 0 ? { dependsOn: [index] } : {}),
                 }))
                 : steps;
-            return buildPlan(input.goal, "llm", analysis.complexity, normalizedSteps);
+            const complexity = parseComplexity(typeof text === "string" ? text : "") ??
+                (normalizedSteps.length > 1 ? "multi_step" : "simple");
+            return buildPlan(input.goal, "llm", complexity, normalizedSteps);
         }
         input.onFallback?.("The planner reply did not contain valid steps.");
     }
@@ -145,7 +139,7 @@ export async function createPlan(input) {
             throw error;
         input.onFallback?.(errorMessage(error));
     }
-    return heuristicPlan(input.goal, analysis);
+    return fallbackPlan(input.goal);
 }
 export function describePlan(plan) {
     return plan.steps

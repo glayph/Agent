@@ -13,7 +13,7 @@ import type {
   ToolCallRecord,
 } from "./types.js";
 import { ToolRegistry } from "./tool-registry.js";
-import { analyzeGoal, createPlan } from "./planner.js";
+import { createPlan } from "./planner.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { TokenBudgetManager } from "../token-budget-manager.js";
 import {
@@ -383,24 +383,12 @@ export class AgentEngine {
       });
     }
 
-    // 1. Plan (only for multi-step work; planner failures never fail the run).
+    // 1. Plan only when the caller supplies one (the orchestrator plans with the LLM).
+    // No wording-based gate decides this: the model's own tool loop handles the rest.
     if (request.plan === false) {
       // Planning explicitly disabled for this run.
     } else if (request.plan) {
       state.plan = request.plan;
-    } else if (runToolsEnabled && analyzeGoal(goal).complexity === "multi_step") {
-      try {
-        state.plan = await createPlan({
-          goal,
-          llm,
-          toolNames: tools.names(),
-          signal,
-          onFallback: (reason) =>
-            this.options.logger?.("planner.fallback", { reason }),
-        });
-      } catch {
-        if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
-      }
     }
     if (state.plan && state.plan.source !== "none")
       emit({ type: "plan.created", runId, plan: structuredClone(state.plan) });

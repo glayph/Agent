@@ -1,5 +1,4 @@
 import type { EngineLLMClient, EngineMessage, LLMCompletionOptions } from "./engine/types.js"
-import { analyzeGoal } from "./engine/planner.js"
 
 export type MessageRouteMode = "FAST_CHAT" | "FULL_AGENT"
 
@@ -86,18 +85,6 @@ export class MessageRouter {
     signal?: AbortSignal,
   ): Promise<MessageRouteDecision> {
     const started = Date.now()
-    const goal = [...history].reverse().find((message) => message.role === "user")?.content?.trim() || ""
-    const local = analyzeGoal(goal)
-    if (local.complexity === "trivial") {
-      const decision = { mode: "FAST_CHAT" as const, confidence: 0.98, latencyMs: Date.now() - started, reason: "Local complexity classifier marked the request as conversational." }
-      this.options.log?.("message-router.local", { ...decision, markers: local.markers })
-      return decision
-    }
-    if (local.complexity === "multi_step") {
-      const decision = { mode: "FULL_AGENT" as const, confidence: 0.98, latencyMs: Date.now() - started, reason: "Local complexity classifier detected multi-step work." }
-      this.options.log?.("message-router.local", { ...decision, markers: local.markers })
-      return decision
-    }
     const llm = this.options.llmFor(model)
     if (!llm) {
       return { mode: "FULL_AGENT", confidence: 0, latencyMs: Date.now() - started, reason: "No model available for semantic routing." }
@@ -150,11 +137,6 @@ export class MessageRouter {
     signal?: AbortSignal,
   ): Promise<FastChatResult> {
     const started = Date.now()
-    const goal = [...history].reverse().find((message) => message.role === "user")?.content?.trim() || ""
-    const local = analyzeGoal(goal)
-    if (local.complexity === "multi_step") {
-      return { answer: "", requiresFullAgent: true, latencyMs: Date.now() - started }
-    }
     const llm = this.options.llmFor(model)
     if (!llm) throw new Error("No model is configured for fast chat.")
     const response = await llm.complete(
