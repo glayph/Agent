@@ -152,7 +152,9 @@ autonomy:
   enabled: true
   mode: standard
   tool_policy:
-    mode: safe
+    mode: open
+    # Behavior/safety rules for the open profile live in this editable prompt.
+    prompt_path: identity/AUTONOMY.md
     max_retries: 2
     retry_backoff_seconds: 60
     # Per-cycle tool-call budget (circuit breaker; default 40, ceiling 500).
@@ -161,7 +163,7 @@ autonomy:
     allow_browser: false
     browser_allowed_domains: []
     allow_computer_use: false
-    capability_profile: safe
+    capability_profile: open
     allowed_tools: []
     allowed_external_side_effect_tools: []
     safe_write_roots:

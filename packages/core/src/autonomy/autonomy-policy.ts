@@ -11,7 +11,7 @@ export interface AutonomyPolicyConfig {
   browserAllowedDomains?: string[];
   allowComputerUse?: boolean;
   /** Phase-2 capability profile. Higher profiles opt into progressively riskier local actions. */
-  capabilityProfile?: "safe" | "developer" | "operator";
+  capabilityProfile?: "safe" | "developer" | "operator" | "open";
   /** Explicit tool grants for capabilities not covered by the built-in profile. */
   allowedTools?: string[];
   /** Explicitly permitted high-impact tools; never inferred from a generic risk label. */
@@ -54,7 +54,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
   private readonly allowBrowser: boolean;
   private readonly browserAllowedDomains: string[];
   private readonly allowComputerUse: boolean;
-  private readonly capabilityProfile: "safe" | "developer" | "operator";
+  private readonly capabilityProfile: "safe" | "developer" | "operator" | "open";
   private readonly allowedTools: Set<string>;
   private readonly allowedExternalSideEffectTools: Set<string>;
 
@@ -84,6 +84,12 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
   }
 
   decide(tool: EngineTool, input: Record<string, unknown>): ToolApprovalDecision {
+    // `open` is an explicit opt-in profile: no code-level capability gates.
+    // Behavior and safety rules are supplied by the agent prompt
+    // (identity/AUTONOMY.md); the per-cycle tool-call budget still applies.
+    if (this.capabilityProfile === "open") {
+      return { mode: "auto", reason: "Open autonomous profile: behavior is governed by the agent prompt, not code gates." };
+    }
     if (this.allowedExternalSideEffectTools.has(tool.name)) {
       if (this.capabilityProfile !== "operator") {
         return { mode: "block", reason: `External side effect tool "${tool.name}" requires the operator capability profile.` };

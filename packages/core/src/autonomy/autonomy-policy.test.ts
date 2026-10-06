@@ -104,4 +104,13 @@ describe("AutonomyPolicy", () => {
     expect(policy.decide(tool("web_search", "read"), { query: "node 22 release" }).mode).toBe("auto");
   });
 
+  it("open profile removes code gates so the prompt governs behavior", () => {
+    const open = new AutonomyPolicy({ capabilityProfile: "open" });
+    for (const name of ["terminal_run", "shell_execute", "computer_hotkey", "browser_navigate", "file_write", "anything_new"]) {
+      expect(open.decide(tool(name, "destructive"), { path: "/etc/hosts", overwrite: true, url: "https://example.com" }).mode).toBe("auto");
+    }
+    // The default stays restrictive: open is opt-in only.
+    expect(new AutonomyPolicy().decide(tool("terminal_run", "destructive"), {}).mode).toBe("block");
+  });
+
 });

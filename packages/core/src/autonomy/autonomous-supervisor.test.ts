@@ -370,3 +370,40 @@ describe("resolveMaxToolCallsPerCycle", () => {
     expect(resolveMaxToolCallsPerCycle(100000, undefined)).toBe(500);
   });
 });
+
+describe("AutonomousSupervisor open profile", () => {
+  it("advertises every registered tool and takes its rules from the editable prompt file", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "miki-open-"));
+    fs.mkdirSync(path.join(root, "identity"));
+    fs.writeFileSync(path.join(root, "identity", "AUTONOMY.md"), "CUSTOM-RULE-ALPHA: only touch the scratch folder.");
+    const db = new Database(":memory:");
+    const goals = new GoalStore(db);
+    const run = jest.fn().mockResolvedValue(makeResult());
+    const registered = ["file_read", "terminal_run", "computer_hotkey", "browser_navigate", "web_search", "brand_new_tool"];
+    const supervisor = new AutonomousSupervisor({
+      db,
+      workspaceRoot: root,
+      orchestrator: { run, activeRunCount: jest.fn().mockReturnValue(0), availableToolNames: () => registered } as never,
+      getConfig: () => ({
+        autonomy: { enabled: true, tool_policy: { capability_profile: "open", max_tool_calls_per_cycle: 60 } },
+        heartbeat: { enabled: true, auto_actions: { enabled: true } },
+      }),
+      log: () => undefined,
+      now: () => "2026-01-01T00:00:00.000Z",
+    });
+    goals.create({ title: "Do work", steps: ["Go"], replaceExisting: false });
+    await supervisor.tick("open-test");
+
+    const request = run.mock.calls[0][0];
+    expect(request.toolAllowlist).toEqual(registered);
+    expect(request.maxToolCalls).toBe(60);
+    expect(request.history[0].content).toContain("CUSTOM-RULE-ALPHA");
+    expect(request.history[0].content).not.toContain("Browser interaction is blocked");
+    expect(request.approvalPolicy.decide({ name: "terminal_run", risk: "destructive" }, {}).mode).toBe("auto");
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
