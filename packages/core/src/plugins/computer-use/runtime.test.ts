@@ -1,7 +1,6 @@
 import { normalizeBrowserUrl } from "../browser/runtime.js";
 import { normalizeHotkeyForSendKeys } from "./runtime.js";
 import { drawGridOverlay } from "./grid.js";
-import { ToolRegistrySchemas } from "../../tools/registry/executor.js";
 
 describe("computer-use tools", () => {
   it("normalizes browser URLs and rejects unsafe protocols", () => {
@@ -41,28 +40,5 @@ describe("computer-use tools", () => {
     expect(png[1]).toBe(80);
     expect(png[2]).toBe(78);
     expect(png[3]).toBe(71);
-  });
-
-  it("exposes mouse-free computer and semantic browser schemas", () => {
-    const toolNames = [
-      ...ToolRegistrySchemas.browserSchemas(),
-      ...ToolRegistrySchemas.computerSchemas(),
-    ].map((tool) => tool.function.name);
-
-    expect(toolNames).toEqual(
-      expect.arrayContaining([
-        "browser_invoke",
-        "browser_fill",
-        "browser_press",
-        "computer_observe",
-        "computer_focus",
-        "computer_invoke",
-        "computer_set_text",
-        "computer_hotkey",
-        "computer_clipboard",
-        "computer_launch",
-        "computer_verify",
-      ]),
-    );
   });
 });

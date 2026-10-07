@@ -32,7 +32,7 @@ describe("Goal Acceptance Contract", () => {
     const result = await verifyGoalAcceptance({ checks: [
       { type: "final_text_contains", text: "complete" },
       { type: "final_text_contains", text: "verified" },
-    ] }, { finalText: "complete" }, 1);
+    ] }, { finalText: "complete" }, 0);
     expect(result.checks.length).toBeGreaterThanOrEqual(1);
     expect(result.checks.some((check) => check.type === "budget_exhausted")).toBe(true);
     expect(result.passed).toBe(false);

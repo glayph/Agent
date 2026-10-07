@@ -111,7 +111,7 @@ export class GoalStore {
     priority?: number;
     context?: Record<string, unknown> | null;
     source?: string | null;
-    steps: string[];
+    steps?: string[];
     acceptance?: GoalAcceptanceContract | null;
     replaceExisting: boolean;
   }): GoalDbRow {
@@ -136,8 +136,8 @@ export class GoalStore {
           input.description ?? null,
           Math.max(0, Math.min(10, Math.trunc(input.priority ?? 5))),
           hasActive ? "pending" : "active",
-          input.steps.length,
-          JSON.stringify(input.steps),
+          (input.steps ?? []).length,
+          JSON.stringify(input.steps ?? []),
           input.context ? JSON.stringify(input.context) : null,
           input.acceptance ? JSON.stringify(input.acceptance) : null,
           input.source ?? "dashboard",

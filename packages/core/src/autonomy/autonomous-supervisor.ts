@@ -891,7 +891,11 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
 
   private async runLoop(): Promise<void> {
     let startup = true;
-    while (this.running && !this.loopAbort?.signal.aborted) {
+    // Capture the signal once: stop() nulls this.loopAbort right after aborting,
+    // so re-reading it later would lose the abort and the sleep below would
+    // block shutdown for up to max_poll_seconds.
+    const loopSignal = this.loopAbort?.signal;
+    while (this.running && !loopSignal?.aborted) {
       const config = this.config();
       const tickTrigger = startup ? "startup" : "heartbeat";
       startup = false;
@@ -909,6 +913,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         this.options.log(`Autonomy loop iteration failed: ${errorText(error)}`);
       }
       this.wakeRequested = false;
+      if (loopSignal?.aborted) break;
       const sleepMs = this.inFlight || this.goals.active() || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)))
         ? config.minPollSeconds * 1000
         : Math.max(config.minPollSeconds * 1000, Math.min(config.maxPollSeconds * 1000, this.ambientBackoffSeconds * 1000));
@@ -917,10 +922,9 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
           if (this.wakeResolver) this.wakeResolver = null;
           resolve();
         }, sleepMs);
-        const signal = this.loopAbort?.signal;
         const finish = () => { clearTimeout(timer); if (this.wakeResolver) this.wakeResolver = null; resolve(); };
         this.wakeResolver = finish;
-        signal?.addEventListener("abort", finish, { once: true });
+        loopSignal?.addEventListener("abort", finish, { once: true });
         const unrefTimer = timer as unknown as { unref?: () => void };
         unrefTimer.unref?.();
       });

@@ -19,6 +19,8 @@ export interface AutonomyPolicyConfig {
 }
 
 const AUTO_READ_TOOLS = new Set([
+  "workspace_list",
+  "file_info",
   "file_read",
   "workspace_search",
   "memory_search",

@@ -15,6 +15,9 @@ describe("AutonomyPolicy", () => {
   it("auto-allows only explicitly allowlisted read tools", () => {
     expect(policy.decide(tool("file_read", "read"), { path: "README.md" }).mode).toBe("auto");
     expect(policy.decide(tool("workspace_search", "read"), { query: "hello" }).mode).toBe("auto");
+    // Tools the supervisor offers by default must not then be denied at execution time.
+    expect(policy.decide(tool("workspace_list", "read"), { path: "." }).mode).toBe("auto");
+    expect(policy.decide(tool("file_info", "read"), { path: "README.md" }).mode).toBe("auto");
     expect(policy.decide(tool("new_unreviewed_tool", "read"), {}).mode).toBe("block");
     expect(policy.decide({ ...tool("file_read", "read"), approval: "required" }, { path: "README.md" }).mode).toBe("block");
   });

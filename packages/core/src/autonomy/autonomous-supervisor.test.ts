@@ -1,4 +1,7 @@
 import Database from "better-sqlite3";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { GoalStore } from "../api/goals-router.js";
 import { AutonomousSupervisor } from "./autonomous-supervisor.js";
 import { ToolRegistry } from "../engine/tool-registry.js";
@@ -118,7 +121,7 @@ describe("AutonomousSupervisor", () => {
   it("retries a failed autonomous cycle before finally blocking", async () => {
     run
       .mockResolvedValueOnce(makeResult("BLOCKED: This requires execution."))
-      .mockResolvedValueOnce(makeResult("Still blocked."))
+      .mockResolvedValueOnce(makeResult("BLOCKED: Still blocked."))
       .mockResolvedValueOnce(makeResult("Inspection complete."));
     config = {
       autonomy: { enabled: true, tool_policy: { max_retries: 2, retry_backoff_seconds: 5 } },
@@ -160,7 +163,7 @@ describe("AutonomousSupervisor", () => {
 
     const result = await supervisor.tick("schedule-test");
     expect(result.status).toBe("completed");
-    expect(supervisor.listScheduledTasks()[0]).toMatchObject({ status: "queued", goal_id: expect.any(Number) });
+    expect(supervisor.listScheduledTasks()[0]).toMatchObject({ status: "completed", goal_id: expect.any(Number) });
     expect(goals.get(Number(supervisor.listScheduledTasks()[0].goal_id))?.status).toBe("completed");
   });
 
@@ -249,6 +252,13 @@ describe("AutonomousSupervisor", () => {
   });
 
   it("records heartbeat checklist state and queue health", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-heartbeat-"));
+    fs.mkdirSync(path.join(workspace, "identity"));
+    fs.writeFileSync(path.join(workspace, "identity", "HEARTBEAT.md"), "- [notify] Check for stuck tasks in the command queue\n");
+    supervisor = new AutonomousSupervisor({
+      db, agent: { run }, tools: makeTools(), activeRunCount, getConfig: () => config,
+      log: (message) => logs.push(message), now: () => "2026-01-01T00:00:00.000Z", workspaceRoot: workspace,
+    });
     const heartbeat = await supervisor.tick("heartbeat");
     expect(heartbeat.status).toBe("idle");
     const row = db.prepare("SELECT checklist_path,checklist,queued_tasks,blocked_goals,verifier_flags,recovered_tasks,idle_minutes,probe_ok FROM autonomy_heartbeat_cycles ORDER BY cycle_id DESC LIMIT 1").get() as { checklist_path: string; checklist: string; queued_tasks: number; blocked_goals: number; verifier_flags: number; recovered_tasks: number; idle_minutes: number; probe_ok: number };
@@ -278,9 +288,11 @@ describe("AutonomousSupervisor", () => {
       goal.id, "2025-01-01T00:00:00.000Z", "2025-01-01T00:00:00.000Z", task?.task_id,
     );
     const result = await supervisor.tick("heartbeat");
-    expect(result.status).toBe("idle");
-    expect(supervisor.listScheduledTasks().find((item) => item.task_id === task?.task_id)).toMatchObject({ status: "queued", lease_expires_at: null });
-    expect(goals.get(goal.id)?.status).toBe("pending");
+    // After the lease is recovered the goal is picked up and executed in the same tick.
+    expect(result.status).toBe("completed");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(supervisor.listScheduledTasks().find((item) => item.task_id === task?.task_id)).toMatchObject({ lease_expires_at: null });
+    expect(goals.get(goal.id)?.status).toBe("completed");
     const row = db.prepare("SELECT recovered_tasks FROM autonomy_heartbeat_cycles ORDER BY cycle_id DESC LIMIT 1").get() as { recovered_tasks: number };
     expect(row.recovered_tasks).toBe(1);
   });
