@@ -71,6 +71,26 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export type FailureKind = "no_provider" | "auth" | "rate_limit" | "network" | "timeout" | "provider_error" | "other";
+
+/** Best-effort classification of an LLM/provider failure from an Error or message text. */
+export function classifyFailure(input: unknown): FailureKind {
+  const status = typeof (input as { status?: unknown } | null)?.status === "number" ? (input as { status: number }).status : undefined;
+  const text = input instanceof Error ? input.message : typeof input === "string" ? input : String(input ?? "");
+  if (/no (model|llm|provider)|model.{0,20}not configured|NoModelConfigured|no .{0,20}provider is (currently )?ready/i.test(text)) return "no_provider";
+  if (status === 401 || status === 403 || /\b(401|403)\b|unauthori[sz]ed|invalid api key|incorrect api key|forbidden|authentication/i.test(text)) return "auth";
+  if (status === 429 || /\b429\b|rate.?limit|quota|too many requests|insufficient_quota/i.test(text)) return "rate_limit";
+  if (/ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|fetch failed|network|socket hang up|getaddrinfo/i.test(text)) return "network";
+  if (/ETIMEDOUT|timed? ?out|timeout|aborted due to timeout/i.test(text)) return "timeout";
+  if ((status !== undefined && status >= 500) || /\b5\d\d\b|overloaded|bad gateway|service unavailable|temporarily unavailable/i.test(text)) return "provider_error";
+  return "other";
+}
+
+/** Failures caused by the environment (provider/network), not by the goal being wrong. */
+function isInfraFailure(kind: FailureKind): boolean {
+  return kind === "no_provider" || kind === "auth" || kind === "rate_limit" || kind === "network" || kind === "provider_error";
+}
+
 function truncate(value: string, max = 12_000): string {
   const text = value.trim();
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -126,6 +146,10 @@ export class AutonomousSupervisor {
   // Adaptive LLM-decision gating: consecutive NO_ACTION results stretch the
   // interval between paid ambient decisions until the world state changes.
   private ambientNoActionStreak = 0;
+  // Provider health: consecutive failed decisions/runs and the circuit state.
+  private failureStreak = 0;
+  private circuitOpen = false;
+  private lastFailure: { kind: FailureKind; message: string; at: string } | null = null;
   private ambientStateKey: string | null = null;
   private wakeRequested = false;
   private wakeResolver: (() => void) | null = null;
@@ -267,6 +291,9 @@ export class AutonomousSupervisor {
     const idleBackoffMultiplier = Math.max(1.25, Math.min(4, Number(proactive.idle_backoff_multiplier ?? 2) || 2));
     const decisionIntervalSeconds = Math.max(15, Math.min(86400, Number(proactive.decision_interval_seconds ?? 900) || 900));
     const maxDecisionIntervalSeconds = Math.max(decisionIntervalSeconds, Math.min(86400, Number(proactive.max_decision_interval_seconds ?? 21600) || 21600));
+    const failureThreshold = Math.max(1, Math.min(20, Math.floor(Number(proactive.failure_threshold ?? 3)) || 3));
+    const failureBackoffBaseSeconds = Math.max(5, Math.min(3600, Number(proactive.failure_backoff_base_seconds ?? 30) || 30));
+    const failureBackoffMaxSeconds = Math.max(failureBackoffBaseSeconds, Math.min(86400, Number(proactive.failure_backoff_max_seconds ?? 1800) || 1800));
     const decisionBackoffMultiplier = Math.max(1.25, Math.min(4, Number(proactive.decision_backoff_multiplier ?? 2) || 2));
     const maxActions = Math.max(1, Math.min(3, Number(autoActions.max_actions_per_cycle ?? 1) || 1));
     const resourceLimits = record(heartbeat.resource_limits);
@@ -320,6 +347,9 @@ export class AutonomousSupervisor {
       decisionIntervalSeconds,
       maxDecisionIntervalSeconds,
       decisionBackoffMultiplier,
+      failureThreshold,
+      failureBackoffBaseSeconds,
+      failureBackoffMaxSeconds,
       allowedExternalSideEffectTools,
     };
   }
@@ -369,7 +399,7 @@ export class AutonomousSupervisor {
       allowed_external_side_effect_tools: config.allowedExternalSideEffectTools,
       retry: { max_retries: config.maxRetries, retry_backoff_seconds: config.retryBackoffSeconds },
       resource_limits: { max_tokens_per_cycle: config.maxTokensPerCycle, max_idle_minutes: config.maxIdleMinutes },
-      proactive_loop: { enabled: config.proactiveEnabled, startup_decision: config.startupDecision, min_poll_seconds: config.minPollSeconds, max_poll_seconds: config.maxPollSeconds, idle_backoff_multiplier: config.idleBackoffMultiplier, decision_interval_seconds: config.decisionIntervalSeconds, max_decision_interval_seconds: config.maxDecisionIntervalSeconds, no_action_streak: this.ambientNoActionStreak, next_decision_in_seconds: Math.ceil(this.ambientDueInMs(config) / 1000) },
+      proactive_loop: { enabled: config.proactiveEnabled, startup_decision: config.startupDecision, min_poll_seconds: config.minPollSeconds, max_poll_seconds: config.maxPollSeconds, idle_backoff_multiplier: config.idleBackoffMultiplier, decision_interval_seconds: config.decisionIntervalSeconds, max_decision_interval_seconds: config.maxDecisionIntervalSeconds, no_action_streak: this.ambientNoActionStreak, failure_streak: this.failureStreak, circuit_open: this.circuitOpen, last_failure: this.lastFailure, next_decision_in_seconds: Math.ceil(this.ambientDueInMs(config) / 1000) },
       heartbeat_checklist: config.checklistPath,
       event_triggers: { max_per_minute: config.eventMaxPerMinute, cooldown_seconds: config.eventCooldownSeconds },
       policy: {
@@ -750,6 +780,44 @@ export class AutonomousSupervisor {
     };
   }
 
+  /** Delivery of a notification must never break (or be mistaken for) the work it reports on. */
+  private async notifySafe(input: { text: string; runId?: string; goalId?: number; kind?: "progress" | "result" | "warning" }): Promise<void> {
+    try {
+      await this.options.notify?.(input);
+    } catch (error) {
+      this.options.log(`Autonomy notification failed (ignored): ${errorText(error)}`);
+    }
+  }
+
+  private recordProviderFailure(config: ReturnType<AutonomousSupervisor["config"]>, kind: FailureKind, message: string): void {
+    this.failureStreak += 1;
+    this.lastFailure = { kind, message: truncate(message, 400), at: this.now() };
+    this.options.log(`Autonomy provider failure #${this.failureStreak} (${kind}): ${truncate(message, 300)}`);
+    if (!this.circuitOpen && this.failureStreak >= config.failureThreshold) {
+      this.circuitOpen = true;
+      const waitSeconds = Math.min(config.failureBackoffMaxSeconds, config.failureBackoffBaseSeconds * Math.pow(2, this.failureStreak - 1));
+      void this.notifySafe({
+        text: `Background autonomy is degraded: ${this.failureStreak} consecutive model failures (${kind}): ${truncate(message, 300)}. Retrying with backoff (next attempt in about ${Math.round(waitSeconds)}s); interactive chat is unaffected.`,
+        kind: "warning",
+      });
+    }
+  }
+
+  private recordProviderSuccess(): void {
+    if (this.failureStreak === 0 && !this.circuitOpen) return;
+    const wasOpen = this.circuitOpen;
+    this.failureStreak = 0;
+    this.circuitOpen = false;
+    this.lastFailure = null;
+    this.options.log("Autonomy provider recovered.");
+    if (wasOpen) void this.notifySafe({ text: "Background autonomy recovered: model calls are succeeding again.", kind: "progress" });
+  }
+
+  /** Exponential delay before retrying a goal whose run failed for environmental reasons. */
+  private infraRetrySeconds(config: ReturnType<AutonomousSupervisor["config"]>): number {
+    return Math.min(config.failureBackoffMaxSeconds, Math.max(config.retryBackoffSeconds, config.failureBackoffBaseSeconds * Math.pow(2, Math.max(0, this.failureStreak - 1))));
+  }
+
   /**
    * Cheap fingerprint of everything the ambient decision prompt depends on.
    * Pure SQLite reads: no LLM call. If this is unchanged since the last
@@ -771,6 +839,10 @@ export class AutonomousSupervisor {
   /** Milliseconds until the next LLM-backed ambient decision is allowed (0 = due now). */
   private ambientDueInMs(config: ReturnType<AutonomousSupervisor["config"]>): number {
     if (this.ambientLastAt === 0) return 0;
+    if (this.failureStreak > 0) {
+      const waitSeconds = Math.min(config.failureBackoffMaxSeconds, config.failureBackoffBaseSeconds * Math.pow(2, this.failureStreak - 1));
+      return Math.max(0, this.ambientLastAt + waitSeconds * 1000 - Date.now());
+    }
     const changed = this.ambientStateKey === null || this.ambientStateFingerprint(config) !== this.ambientStateKey;
     const grown = config.decisionIntervalSeconds * Math.pow(config.decisionBackoffMultiplier, this.ambientNoActionStreak);
     const intervalSeconds = changed || this.ambientNoActionStreak === 0
@@ -840,11 +912,20 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         }),
         signal: this.loopAbort?.signal,
       });
+      if (result.status === "cancelled" || this.loopAbort?.signal.aborted) return false;
+      if (result.status !== "completed") {
+        const message = result.error || `Run ended with status ${result.status}.`;
+        const kind = classifyFailure(message);
+        this.recordProviderFailure(config, kind, message);
+        this.ambientStateKey = null;
+        return false;
+      }
+      this.recordProviderSuccess();
       const text = result.finalText.trim();
       const noAction = /^NO_ACTION\b/i.test(text) || !text;
       const actionable = !noAction && result.status === "completed";
       if (actionable) {
-        await this.options.notify?.({ text: truncate(text, 3000), runId, kind: "result" });
+        await this.notifySafe({ text: truncate(text, 3000), runId, kind: "result" });
         this.ambientBackoffSeconds = config.minPollSeconds;
         this.ambientNoActionStreak = 0;
         this.ambientStateKey = null;
@@ -859,6 +940,8 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     } catch (error) {
       if (this.loopAbort?.signal.aborted) return false;
       this.options.log(`Proactive FULL_AGENT decision failed: ${errorText(error)}`);
+      this.recordProviderFailure(config, classifyFailure(error), errorText(error));
+      this.ambientStateKey = null;
       this.ambientBackoffSeconds = Math.min(config.maxPollSeconds, Math.max(config.minPollSeconds, Math.ceil(this.ambientBackoffSeconds * config.idleBackoffMultiplier)));
       return false;
     }
@@ -866,8 +949,13 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
 
   start(): void {
     if (this.running) return;
-    const config = this.config();
-    if (!config.enabled) return;
+    try {
+      if (!this.config().enabled) return;
+    } catch (error) {
+      // An unreadable config at boot must not leave a 24/7 agent silently dead:
+      // start anyway; every loop iteration re-reads (and re-validates) the config.
+      this.options.log(`Autonomy config unreadable at start (starting anyway): ${errorText(error)}`);
+    }
     this.running = true;
     this.wakeRequested = true;
     this.loopAbort = new AbortController();
@@ -889,17 +977,34 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     if (loop) await loop.catch(() => undefined);
   }
 
+  /** Sleep that ends early on wake() or on shutdown. */
+  private sleepInterruptible(ms: number, signal: AbortSignal | undefined): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (signal?.aborted) return resolve();
+      const timer = setTimeout(() => {
+        if (this.wakeResolver) this.wakeResolver = null;
+        resolve();
+      }, ms);
+      const finish = () => { clearTimeout(timer); if (this.wakeResolver) this.wakeResolver = null; resolve(); };
+      this.wakeResolver = finish;
+      signal?.addEventListener("abort", finish, { once: true });
+      (timer as unknown as { unref?: () => void }).unref?.();
+    });
+  }
+
   private async runLoop(): Promise<void> {
     let startup = true;
+    let consecutiveLoopFailures = 0;
     // Capture the signal once: stop() nulls this.loopAbort right after aborting,
     // so re-reading it later would lose the abort and the sleep below would
     // block shutdown for up to max_poll_seconds.
     const loopSignal = this.loopAbort?.signal;
     while (this.running && !loopSignal?.aborted) {
-      const config = this.config();
-      const tickTrigger = startup ? "startup" : "heartbeat";
-      startup = false;
+      let sleepMs: number;
       try {
+        const config = this.config();
+        const tickTrigger = startup ? "startup" : "heartbeat";
+        startup = false;
         await this.tick(tickTrigger);
         const hasGoal = Boolean(this.goals.active()) || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)));
         if (!hasGoal && (
@@ -909,25 +1014,22 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         )) {
           await this.runAmbientDecision(this.ambientLastAt === 0 ? "startup" : "idle");
         }
+        consecutiveLoopFailures = 0;
+        const busy = this.inFlight || Boolean(this.goals.active()) || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)));
+        sleepMs = busy
+          ? config.minPollSeconds * 1000
+          : Math.max(config.minPollSeconds * 1000, Math.min(config.maxPollSeconds * 1000, this.ambientBackoffSeconds * 1000));
       } catch (error) {
-        this.options.log(`Autonomy loop iteration failed: ${errorText(error)}`);
+        // Never let a bad config read, a transient DB error, or a tick bug kill the 24/7 loop.
+        consecutiveLoopFailures += 1;
+        sleepMs = Math.min(300_000, 5_000 * Math.pow(2, Math.min(consecutiveLoopFailures, 6)));
+        try {
+          this.options.log(`Autonomy loop iteration failed (${consecutiveLoopFailures} in a row, retrying in ${Math.round(sleepMs / 1000)}s): ${errorText(error)}`);
+        } catch { /* logging must not kill the loop either */ }
       }
       this.wakeRequested = false;
       if (loopSignal?.aborted) break;
-      const sleepMs = this.inFlight || this.goals.active() || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)))
-        ? config.minPollSeconds * 1000
-        : Math.max(config.minPollSeconds * 1000, Math.min(config.maxPollSeconds * 1000, this.ambientBackoffSeconds * 1000));
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          if (this.wakeResolver) this.wakeResolver = null;
-          resolve();
-        }, sleepMs);
-        const finish = () => { clearTimeout(timer); if (this.wakeResolver) this.wakeResolver = null; resolve(); };
-        this.wakeResolver = finish;
-        loopSignal?.addEventListener("abort", finish, { once: true });
-        const unrefTimer = timer as unknown as { unref?: () => void };
-        unrefTimer.unref?.();
-      });
+      await this.sleepInterruptible(sleepMs, loopSignal);
     }
   }
 
@@ -1073,7 +1175,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
             toolEvidence.push({ name: engineEvent.call.name, status: engineEvent.call.status });
           }
           if (engineEvent.type === "run.finished" && engineEvent.status !== "completed") {
-            void this.options.notify?.({ text: `Autonomous goal #${goal.id} ${engineEvent.status}: ${engineEvent.error || "execution did not complete"}`, runId, goalId: goal.id, kind: "warning" });
+            void this.notifySafe({ text: `Autonomous goal #${goal.id} ${engineEvent.status}: ${engineEvent.error || "execution did not complete"}`, runId, goalId: goal.id, kind: "warning" });
           }
         },
       });
@@ -1097,10 +1199,15 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       const reason = succeeded
         ? `Autonomous cycle completed and acceptance-verified. ${truncate(acceptance.reason, 500)} ${truncate(result.finalText, 700)}`
         : truncate(`${result.error || result.finalText || "The autonomous cycle could not complete this goal with the currently allowed tools."}${samePlanAsPrevious ? " Re-plan did not materially change the prior plan." : ""}`, 900);
-      const exhausted = attempt >= retryLimit + 1;
+      // A provider/network outage says nothing about the goal: never burn its retry budget on it.
+      const failureKind: FailureKind | null = succeeded ? null : classifyFailure(result.error ?? "");
+      const infraFailure = !succeeded && result.status === "failed" && failureKind !== null && isInfraFailure(failureKind);
+      if (infraFailure) this.recordProviderFailure(config, failureKind!, result.error ?? "model run failed");
+      else if (result.status === "completed") this.recordProviderSuccess();
+      const exhausted = !infraFailure && attempt >= retryLimit + 1;
       const finalStatus = succeeded ? "completed" : exhausted ? "blocked" : "retry_wait";
       const nextRetryAt = !succeeded && !exhausted
-        ? new Date(Date.parse(this.now()) + config.retryBackoffSeconds * 1000).toISOString()
+        ? new Date(Date.parse(this.now()) + (infraFailure ? this.infraRetrySeconds(config) : config.retryBackoffSeconds) * 1000).toISOString()
         : null;
       let replanContext: ReplanContext | undefined;
       if (!succeeded) {
@@ -1134,6 +1241,9 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       this.options.db
         .prepare("UPDATE autonomy_goal_runs SET status=?,finished_at=?,result=?,error=?,next_retry_at=?,plan_digest=?,acceptance_result=? WHERE run_id=?")
         .run(finalStatus, this.now(), truncate(result.finalText || "", 12_000), result.error || (blockedByModel ? reason : null), nextRetryAt, planDigest ?? null, JSON.stringify(acceptance), runId);
+      if (infraFailure && attempt > 1) {
+        this.options.db.prepare("UPDATE autonomy_goal_runs SET attempt=? WHERE run_id=?").run(attempt - 1, runId);
+      }
       if (succeeded) {
         this.markTaskForGoal(goal.id, "completed", { result: truncate(result.finalText || reason, 12_000) });
       } else if (exhausted) {
@@ -1143,12 +1253,12 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       }
       this.options.log(`Autonomy cycle ${finalStatus} for goal #${goal.id} (run ${runId}, attempt ${attempt}).`);
       if (succeeded) {
-        await this.options.notify?.({
+        await this.notifySafe({
           text: `Autonomous goal completed: ${goal.title}. ${truncate(result.finalText || acceptance.reason, 2200)}`,
           runId, goalId: goal.id, kind: "result",
         });
       } else if (exhausted) {
-        await this.options.notify?.({
+        await this.notifySafe({
           text: `Autonomous goal blocked after ${attempt} attempt(s): ${goal.title}. ${reason}`,
           runId, goalId: goal.id, kind: "warning",
         });
@@ -1172,8 +1282,11 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       });
     } catch (error) {
       const reason = truncate(errorText(error), 900);
-      const exhausted = attempt >= retryLimit + 1;
-      const nextRetryAt = exhausted ? null : new Date(Date.parse(this.now()) + config.retryBackoffSeconds * 1000).toISOString();
+      const thrownKind = classifyFailure(error);
+      const infraFailure = isInfraFailure(thrownKind);
+      if (infraFailure) this.recordProviderFailure(config, thrownKind, reason);
+      const exhausted = !infraFailure && attempt >= retryLimit + 1;
+      const nextRetryAt = exhausted ? null : new Date(Date.now() + (infraFailure ? this.infraRetrySeconds(config) : config.retryBackoffSeconds) * 1000).toISOString();
       const replanContext = this.replanner.build({
         goalId: goal.id,
         goalTitle: goal.title,
@@ -1195,6 +1308,9 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       this.options.db
         .prepare("UPDATE autonomy_goal_runs SET status=?,finished_at=?,error=?,next_retry_at=? WHERE run_id=?")
         .run(exhausted ? "blocked" : "retry_wait", this.now(), reason, nextRetryAt, runId);
+      if (infraFailure && attempt > 1) {
+        this.options.db.prepare("UPDATE autonomy_goal_runs SET attempt=? WHERE run_id=?").run(attempt - 1, runId);
+      }
       if (exhausted) {
         this.markTaskForGoal(goal.id, "failed", { error: reason });
       } else {

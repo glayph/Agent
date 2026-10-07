@@ -25,7 +25,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 4000, stepMs = 10) 
   }
 }
 
-function setup(script: ScriptedReply[]) {
+function setup(script: ScriptedReply[], configGuard?: () => void) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "miki-e2e-"));
   fs.mkdirSync(path.join(workspace, "identity"));
   fs.writeFileSync(path.join(workspace, "identity", "HEARTBEAT.md"), "- [notify] Report workspace entries\n");
@@ -65,7 +65,7 @@ function setup(script: ScriptedReply[]) {
     db,
     agent: engine,
     tools: registry,
-    getConfig: () => config,
+    getConfig: () => { configGuard?.(); return config; },
     log: (message) => logs.push(message),
     notify: (n) => { notifications.push(n); },
     workspaceRoot: workspace,
@@ -160,5 +160,35 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     await ctx.supervisor.stop();
     expect(Date.now() - started).toBeLessThan(1000);
     expect(ctx.notifications).toHaveLength(0);
+  });
+
+  it("treats a failing model as an outage: no spam, no false 'nothing to do', no crash", async () => {
+    const ctx = track(setup([{ error: "Model provider returned HTTP 429" }]));
+
+    ctx.supervisor.start();
+    await waitFor(() => ctx.supervisor.status().proactive_loop.failure_streak === 1);
+    expect(ctx.supervisor.status().proactive_loop).toMatchObject({
+      no_action_streak: 0,
+      last_failure: expect.objectContaining({ kind: "rate_limit" }),
+    });
+
+    for (let i = 0; i < 5; i += 1) ctx.supervisor.wake();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(ctx.llm.requests).toHaveLength(1); // exponential backoff, not a retry storm
+    expect(ctx.notifications).toHaveLength(0); // below the circuit threshold
+  });
+
+  it("keeps the loop alive when the config reader throws, and resumes when it recovers", async () => {
+    let broken = true;
+    const ctx = track(setup([{ text: "NO_ACTION" }], () => { if (broken) throw new Error("agent.yaml is mid-write"); }));
+
+    ctx.supervisor.start(); // must not throw
+    await waitFor(() => ctx.logs.some((line) => line.includes("iteration failed")));
+    expect(ctx.llm.requests).toHaveLength(0);
+
+    broken = false;
+    ctx.supervisor.wake();
+    await waitFor(() => ctx.llm.requests.length === 1);
+    expect(ctx.logs.some((line) => line.includes("stopped unexpectedly"))).toBe(false);
   });
 });

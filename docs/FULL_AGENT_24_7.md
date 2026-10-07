@@ -46,6 +46,17 @@ The heartbeat performs cheap state checks on its configured interval. LLM-backed
 
 Current defaults in `config/agent.yaml` are 15 seconds minimum polling, 5 minutes maximum idle backoff, a 2x idle multiplier, and a 15-minute ambient decision interval.
 
+### Failure handling
+
+- **Provider outages are not "nothing to do".** A failed model run (no provider, 401/403, 429, network, 5xx) is classified, logged, and retried with exponential backoff (`failure_backoff_base_seconds` → `failure_backoff_max_seconds`), never counted as `NO_ACTION`.
+- **Circuit + self-healing.** After `failure_threshold` consecutive failures the user gets one warning in chat; when a call succeeds again a single recovery notice is sent. The loop keeps probing, so no manual restart is needed.
+- **Goals are not punished for outages.** Infrastructure failures do not consume a goal's retry budget or block it; genuine failures still do.
+- **Notifications can't break work.** Delivery errors are logged and ignored; they never mark a finished decision or goal as failed.
+- **The loop cannot die.** Config-read errors, DB errors and tick bugs are caught per iteration with escalating sleeps; a bad config at boot still starts the loop.
+- **Shutdown always terminates.** `stop()` aborts in-flight model calls; the gateway force-exits after 15 s if anything hangs.
+
+`GET /api/autonomy/status` exposes `failure_streak`, `circuit_open` and `last_failure`.
+
 ### State-aware LLM gating
 
 The paid ambient decision is not purely timer-driven. Before each decision the supervisor computes a cheap SQLite fingerprint (chat history, goals, task queue, memory, heartbeat checklist hash):

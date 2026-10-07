@@ -153,6 +153,11 @@ heartbeat:
     # base * multiplier^streak (capped) unless chat/goals/tasks/memory changed.
     max_decision_interval_seconds: 21600
     decision_backoff_multiplier: 2
+    # Provider failure handling: exponential retry delay, and one warning to the
+    # user after this many consecutive failed decisions (self-heals on success).
+    failure_threshold: 3
+    failure_backoff_base_seconds: 30
+    failure_backoff_max_seconds: 1800
   auto_actions:
     enabled: true
     max_actions_per_cycle: 3

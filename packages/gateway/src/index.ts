@@ -776,9 +776,18 @@ const autonomy = new AutonomousSupervisor({
     })
   },
 })
-getLifecycleBus().on("gateway:startup", (payload) => { autonomy.wake(); void autonomy.triggerEvent("gateway:startup", payload) })
-getLifecycleBus().on("message:received", (payload) => { autonomy.wake(); void autonomy.triggerEvent("message:received", payload) })
-getLifecycleBus().on("message:sent", (payload) => { autonomy.wake(); void autonomy.triggerEvent("message:sent", payload) })
+// Lifecycle handlers run inside the message path: an autonomy error must never propagate into it.
+const forwardToAutonomy = (eventName: string, payload: unknown) => {
+  try {
+    autonomy.wake()
+    autonomy.triggerEvent(eventName, payload)
+  } catch (error) {
+    appendGatewayLog(`Autonomy event "${eventName}" failed (ignored): ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+getLifecycleBus().on("gateway:startup", (payload) => forwardToAutonomy("gateway:startup", payload))
+getLifecycleBus().on("message:received", (payload) => forwardToAutonomy("message:received", payload))
+getLifecycleBus().on("message:sent", (payload) => forwardToAutonomy("message:sent", payload))
 getLifecycleBus().emit("gateway:startup", { pid: process.pid, reason: "gateway_initialized" })
 agent.mount(app)
 
@@ -1546,9 +1555,14 @@ app.use("/api", (_req, res) => res.status(404).json({ error: "API endpoint is no
 app.use(express.static(dashboardRoot))
 app.get("*", (_req, res) => res.sendFile(path.join(dashboardRoot, "index.html")))
 async function configureRuntimeLoop() {
-  await autonomy.stop()
-  autonomy.start()
-  appendGatewayLog("24/7 FULL_AGENT autonomy loop started.")
+  try {
+    await autonomy.stop()
+    autonomy.start()
+    appendGatewayLog("24/7 FULL_AGENT autonomy loop started.")
+  } catch (error) {
+    // Called fire-and-forget from several places: never let it become an unhandled rejection.
+    appendGatewayLog(`Autonomy loop (re)start failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 async function rebindServer(nextPort: number, nextPublic: boolean): Promise<void> {
@@ -1567,6 +1581,15 @@ async function rebindServer(nextPort: number, nextPublic: boolean): Promise<void
 
 void configureRuntimeLoop()
 server.listen(currentPort, currentHost, () => { appendGatewayLog(`Persistent backend listening at http://${currentHost}:${currentPort}`); console.log(`[miki] persistent backend listening at http://${currentHost}:${currentPort}`) })
-async function shutdown() { await autonomy.stop(); try { db.close() } finally { server.close(() => process.exit(0)) } }
+async function shutdown() {
+  // Always terminate: a failing stop(), a failing db.close() or lingering keep-alive/WebSocket
+  // connections must not leave a zombie process behind a supervisor that sent SIGTERM.
+  const forceExit = setTimeout(() => { appendGatewayLog("Graceful shutdown timed out; forcing exit."); process.exit(0) }, 15_000)
+  forceExit.unref()
+  try { await autonomy.stop() } catch (error) { appendGatewayLog(`Autonomy stop failed during shutdown: ${error instanceof Error ? error.message : String(error)}`) }
+  for (const socket of proactiveSockets) { try { socket.close() } catch {} }
+  try { db.close() } catch (error) { appendGatewayLog(`Database close failed during shutdown: ${error instanceof Error ? error.message : String(error)}`) }
+  server.close(() => process.exit(0))
+}
 process.once("SIGINT", shutdown)
 process.once("SIGTERM", shutdown)

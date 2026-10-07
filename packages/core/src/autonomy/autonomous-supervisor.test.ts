@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GoalStore } from "../api/goals-router.js";
-import { AutonomousSupervisor } from "./autonomous-supervisor.js";
+import { AutonomousSupervisor, classifyFailure } from "./autonomous-supervisor.js";
 import { ToolRegistry } from "../engine/tool-registry.js";
 
 
@@ -432,6 +432,139 @@ describe("AutonomousSupervisor", () => {
       nowMs += 200_000;
       expect(await decide("idle")).toBe(true);
       expect(supervisor.status().proactive_loop.no_action_streak).toBe(0);
+    });
+  });
+
+  describe("error handling", () => {
+    let nowMs: number;
+    let spy: jest.SpyInstance;
+    let notes: Array<{ text: string; kind?: string }>;
+    let notify: jest.Mock;
+
+    const failed = (error: string) => ({ ...makeResult("", "failed"), error });
+    const build = () => new AutonomousSupervisor({
+      db, agent: { run }, tools: makeTools(), activeRunCount, getConfig: () => config,
+      log: (message) => logs.push(message), now: () => new Date(nowMs).toISOString(), notify,
+    });
+    const decide = (trigger: "startup" | "idle") => (supervisor as any).runAmbientDecision(trigger) as Promise<boolean>;
+
+    beforeEach(() => {
+      nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+      spy = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS memory_chunks (id TEXT PRIMARY KEY, region TEXT NOT NULL, content TEXT NOT NULL, summary TEXT NOT NULL, importance REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      `);
+      config = {
+        autonomy: { enabled: true },
+        heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, failure_threshold: 3, failure_backoff_base_seconds: 30, failure_backoff_max_seconds: 120 } },
+      };
+      notes = [];
+      notify = jest.fn(async (n: { text: string; kind?: string }) => { notes.push(n); });
+      supervisor = build();
+    });
+
+    afterEach(() => spy.mockRestore());
+
+    it("classifies provider failures", () => {
+      expect(classifyFailure("No model is configured for this run.")).toBe("no_provider");
+      expect(classifyFailure("Model provider returned HTTP 429")).toBe("rate_limit");
+      expect(classifyFailure("Incorrect API key provided")).toBe("auth");
+      expect(classifyFailure(new Error("fetch failed: ECONNRESET"))).toBe("network");
+      expect(classifyFailure("HTTP 503 service unavailable")).toBe("provider_error");
+      expect(classifyFailure(Object.assign(new Error("boom"), { status: 429 }))).toBe("rate_limit");
+      expect(classifyFailure("Run exceeded the maximum number of turns.")).toBe("other");
+    });
+
+    it("treats a failed model run as a failure with short backoff, not as NO_ACTION", async () => {
+      run.mockResolvedValue(failed("Model provider returned HTTP 429"));
+      await decide("startup");
+      const loop = supervisor.status().proactive_loop;
+      expect(loop.failure_streak).toBe(1);
+      expect(loop.no_action_streak).toBe(0);
+      expect(loop.last_failure).toMatchObject({ kind: "rate_limit" });
+      expect(loop.next_decision_in_seconds).toBeLessThanOrEqual(30); // not hours
+
+      nowMs += 29_000;
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(1); // still backing off
+
+      nowMs += 2_000;
+      await decide("idle");
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(supervisor.status().proactive_loop.failure_streak).toBe(2);
+    });
+
+    it("opens the circuit with a single warning, then recovers and says so", async () => {
+      run.mockResolvedValue(failed("No model is configured"));
+      await decide("startup");
+      for (let i = 0; i < 4; i += 1) { nowMs += 130_000; await decide("idle"); }
+      expect(notes.filter((n) => n.kind === "warning")).toHaveLength(1);
+      expect(supervisor.status().proactive_loop.circuit_open).toBe(true);
+
+      run.mockResolvedValue(makeResult("NO_ACTION"));
+      nowMs += 130_000;
+      await decide("idle");
+      expect(supervisor.status().proactive_loop).toMatchObject({ failure_streak: 0, circuit_open: false });
+      expect(notes.filter((n) => n.kind === "progress")).toHaveLength(1);
+    });
+
+    it("counts a thrown provider error as a failure too", async () => {
+      run.mockRejectedValue(new Error("fetch failed ECONNREFUSED"));
+      await decide("startup");
+      expect(supervisor.status().proactive_loop).toMatchObject({ failure_streak: 1, last_failure: expect.objectContaining({ kind: "network" }) });
+    });
+
+    it("does not count a shutdown cancellation as a failure", async () => {
+      run.mockResolvedValue({ ...makeResult("", "failed"), status: "cancelled", error: "Run cancelled." });
+      await decide("startup");
+      expect(supervisor.status().proactive_loop.failure_streak).toBe(0);
+    });
+
+    it("keeps a proactive decision successful when notification delivery throws", async () => {
+      notify.mockRejectedValue(new Error("socket closed"));
+      run.mockResolvedValue(makeResult("Found something useful."));
+      await expect(decide("startup")).resolves.toBe(true);
+      expect(logs.some((line) => line.includes("notification failed"))).toBe(true);
+      expect(supervisor.status().proactive_loop.failure_streak).toBe(0);
+    });
+
+    it("does not mark a completed goal as failed when notification delivery throws", async () => {
+      notify.mockRejectedValue(new Error("db locked"));
+      const goal = goals.create({ title: "Notify fails", steps: ["Inspect"], replaceExisting: false });
+      const result = await supervisor.tick("test");
+      expect(result.status).toBe("completed");
+      expect(goals.get(goal.id)?.status).toBe("completed");
+    });
+
+    it("never blocks a goal because the model provider is down", async () => {
+      run.mockResolvedValue(failed("No model is configured"));
+      const goal = goals.create({ title: "Provider outage", steps: ["Inspect"], replaceExisting: false });
+      for (let i = 0; i < 6; i += 1) {
+        nowMs += 1_000; // run ids are time-based
+        await supervisor.tick("test");
+        db.prepare("UPDATE autonomy_goal_runs SET next_retry_at=? WHERE goal_id=?").run("2000-01-01T00:00:00.000Z", goal.id);
+      }
+      expect(goals.get(goal.id)?.status).not.toBe("blocked");
+      expect(run.mock.calls.length).toBeGreaterThanOrEqual(5);
+
+      // Once the provider is back the goal still has its full retry budget and completes.
+      run.mockResolvedValue(makeResult("Inspection complete."));
+      nowMs += 1_000;
+      const recovered = await supervisor.tick("test");
+      expect(recovered.status).toBe("completed");
+      expect(goals.get(goal.id)?.status).toBe("completed");
+    });
+
+    it("still blocks a goal after genuine (non-infrastructure) failures", async () => {
+      run.mockResolvedValue(failed("Run exceeded the maximum number of turns."));
+      const goal = goals.create({ title: "Genuinely failing", steps: ["Inspect"], replaceExisting: false });
+      for (let i = 0; i < 6; i += 1) {
+        nowMs += 1_000; // run ids are time-based
+        await supervisor.tick("test");
+        db.prepare("UPDATE autonomy_goal_runs SET next_retry_at=? WHERE goal_id=?").run("2000-01-01T00:00:00.000Z", goal.id);
+      }
+      expect(goals.get(goal.id)?.status).toBe("blocked");
     });
   });
 });
