@@ -43,6 +43,24 @@ describe("AgentEngine", () => {
     ]);
   });
 
+  it("forwards streamed text as message.delta events before the final answer", async () => {
+    const llm = {
+      model: "stream-model",
+      async complete(_messages: unknown, options: { onTextDelta?: (delta: string) => void } = {}) {
+        for (const part of ["Hel", "lo ", "there"]) options.onTextDelta?.(part);
+        return { choices: [{ message: { role: "assistant", content: "Hello there" } }], usage: { total_tokens: 4 } };
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry() });
+    const events: EngineEvent[] = [];
+    const result = await engine.run({ history: user("hi"), onEvent: (e) => events.push(e) });
+    expect(result.finalText).toBe("Hello there");
+    const deltas = events.filter((e) => e.type === "message.delta").map((e) => (e as { delta: string }).delta);
+    expect(deltas).toEqual(["Hel", "lo ", "there"]);
+    const types = events.map((e) => e.type);
+    expect(types.indexOf("message.delta")).toBeLessThan(types.indexOf("message.final"));
+  });
+
   it("runs a multi-step tool loop and feeds results back to the model", async () => {
     const readFile = jest.fn(async (input: Record<string, unknown>) => ({ content: `data:${input.path}` }));
     const { engine, llm } = setup(

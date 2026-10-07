@@ -44,6 +44,12 @@ export interface LLMCompletionOptions {
   maxCompletionTokens?: number;
   /** Optional provider-compatible thinking level, e.g. off/low/medium/high. */
   thinkingLevel?: string;
+  /**
+   * When set, the client streams the completion and calls this for every text
+   * fragment as it arrives. The returned LLMResponse is still the complete,
+   * assembled response, so callers keep one code path.
+   */
+  onTextDelta?: (delta: string) => void;
 }
 
 /** Minimal port the engine needs from any LLM backend. */
@@ -194,6 +200,7 @@ export type EngineEvent =
   | { type: "plan.updated"; runId: string; plan: AgentPlan }
   | { type: "turn.started"; runId: string; turn: number }
   | { type: "thought"; runId: string; turn: number; content: string }
+  | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
   | { type: "message.final"; runId: string; content: string }
   | {

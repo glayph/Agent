@@ -43,6 +43,79 @@ function combineSignals(signals: AbortSignal[]): AbortSignal {
   return controller.signal;
 }
 
+
+/**
+ * Reads an OpenAI-compatible SSE chat-completions stream and assembles it into
+ * a normal LLMResponse (content, tool_calls, finish_reason, usage), forwarding
+ * every text fragment to `onTextDelta` as it arrives.
+ */
+async function readChatCompletionStream(
+  response: Response,
+  onTextDelta: (delta: string) => void,
+): Promise<LLMResponse> {
+  if (!response.body) throw new EngineLLMError("The model provider returned an empty stream.", { retryable: true });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let finishReason: string | undefined;
+  let usage: LLMResponse["usage"];
+  const toolCalls: Array<{ id: string; type: "function"; function: { name: string; arguments: string }; extra_content?: Record<string, unknown> }> = [];
+
+  const handleData = (data: string) => {
+    if (!data || data === "[DONE]") return;
+    let chunk: any;
+    try { chunk = JSON.parse(data); } catch { return; }
+    if (chunk?.error) {
+      const detail = typeof chunk.error === "string" ? chunk.error : chunk.error?.message;
+      throw new EngineLLMError(detail || "The model stream reported an error.", { retryable: true });
+    }
+    if (chunk?.usage) usage = chunk.usage;
+    const choice = chunk?.choices?.[0];
+    if (!choice) return;
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string" && delta.content) {
+      content += delta.content;
+      try { onTextDelta(delta.content); } catch { /* a broken listener must never break the run */ }
+    }
+    if (Array.isArray(delta.tool_calls)) {
+      for (const part of delta.tool_calls) {
+        const index = typeof part.index === "number" ? part.index : toolCalls.length;
+        const target = (toolCalls[index] ??= { id: "", type: "function", function: { name: "", arguments: "" } });
+        if (part.id) target.id = part.id;
+        if (part.function?.name) target.function.name += part.function.name;
+        if (typeof part.function?.arguments === "string") target.function.arguments += part.function.arguments;
+        if (part.extra_content && typeof part.extra_content === "object") target.extra_content = { ...(target.extra_content ?? {}), ...part.extra_content };
+      }
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline: number;
+    while ((newline = buffer.search(/\r?\n/)) >= 0) {
+      const line = buffer.slice(0, newline).trimEnd();
+      buffer = buffer.slice(buffer[newline] === "\r" ? newline + 2 : newline + 1);
+      if (line.startsWith("data:")) handleData(line.slice(5).trim());
+    }
+  }
+  buffer += decoder.decode();
+  for (const line of buffer.split(/\r?\n/)) if (line.startsWith("data:")) handleData(line.slice(5).trim());
+
+  const completeCalls = toolCalls.filter((call) => call && call.function.name).map((call, i) => ({ ...call, id: call.id || `call_${i}_${Date.now().toString(36)}` }));
+  return {
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content: content || (completeCalls.length ? null : ""), ...(completeCalls.length ? { tool_calls: completeCalls } : {}) },
+      finish_reason: finishReason ?? (completeCalls.length ? "tool_calls" : "stop"),
+    }],
+    ...(usage ? { usage } : {}),
+  } as unknown as LLMResponse;
+}
+
 /**
  * OpenAI-compatible chat-completions client built on plain fetch, so the
  * gateway can talk to OpenAI, Gemini's compatibility endpoint, OpenRouter,
@@ -76,6 +149,12 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
       if (typeof callOptions.temperature === "number") body.temperature = callOptions.temperature;
       if (typeof callOptions.maxCompletionTokens === "number") body.max_completion_tokens = callOptions.maxCompletionTokens;
       if (callOptions.thinkingLevel) body.thinking_level = callOptions.thinkingLevel;
+      // Real-time streaming: only for plain-text turns the caller wants to watch.
+      let streaming = typeof callOptions.onTextDelta === "function" && !callOptions.json;
+      if (streaming) {
+        body.stream = true;
+        body.stream_options = { include_usage: true };
+      }
 
       let lastError: EngineLLMError | undefined;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -94,9 +173,20 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
             body: JSON.stringify(body),
             signal: combineSignals(signals),
           });
+          if (streaming && response.ok && /text\/event-stream/i.test(response.headers.get("content-type") ?? "")) {
+            return await readChatCompletionStream(response, callOptions.onTextDelta!);
+          }
           const payload = (await response.json().catch(() => ({}))) as LLMResponse & {
             error?: { message?: string } | string;
           };
+          if (streaming && !response.ok && response.status === 400 && /stream/i.test(typeof payload.error === "string" ? payload.error : payload.error?.message || "")) {
+            // Provider rejects streaming options: fall back to a normal completion.
+            streaming = false;
+            delete body.stream;
+            delete body.stream_options;
+            attempt -= 1;
+            continue;
+          }
           if (response.ok) {
             if (!Array.isArray(payload.choices))
               throw new EngineLLMError(

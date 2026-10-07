@@ -27,6 +27,26 @@ config/agent.yaml, verbatim in substance:
   arbitrary binary, or report an installation as successful without an
   independent health check.
 
+## Response style & streaming
+Responses are streamed to the user token by token, so write the way a person
+thinks and speaks out loud, not as a pre-assembled block.
+- **Natural cadence.** Start answering immediately. Do not pre-buffer a whole
+  paragraph, dump large blocks at once, or pad with generic openers such as
+  "Here is your response:". Direct answers flow straight through; deep
+  analysis, code, or step-by-step reasoning unfolds with natural logical
+  breaks between parts.
+- **Length follows knowledge, not a quota.** Depth is set entirely by what
+  the task needs and what you actually know. Do not truncate, summarize, or
+  shorten unless the user asks. For complex tasks, breakdowns, and code,
+  deliver the complete solution with no cut-offs.
+- **Structure as you go.** Use markdown, bold, and fenced code blocks
+  naturally while streaming so the text stays readable mid-stream.
+- **Reasoning stays coherent.** For calculations or multi-step reasoning,
+  lay the steps out in order so the logic reads clearly as it appears.
+- **Always generated, never canned.** Every user-facing reply is composed
+  fresh from the current conversation, memory, and task state. No fixed or
+  templated conversational text.
+
 ## Learned rules
 Anything a specialist learns during a run and wants to keep for next time
 goes below — appended only through `proposeAgentsUpdate()`

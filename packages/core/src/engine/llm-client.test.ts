@@ -65,3 +65,61 @@ describe("createRegistryLLMClient", () => {
     expect(complete).toHaveBeenCalledWith("gemini-flash", expect.any(Array), expect.objectContaining({ extra: expect.objectContaining({ tool_choice: "auto", response_format: { type: "json_object" } }) }));
   });
 });
+
+function sseResponse(lines: string[]): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Split mid-line on purpose so the parser must buffer partial chunks.
+      const text = lines.map((line) => `data: ${line}\n\n`).join("");
+      controller.enqueue(encoder.encode(text.slice(0, 25)));
+      controller.enqueue(encoder.encode(text.slice(25)));
+      controller.close();
+    },
+  });
+  return { ok: true, status: 200, headers: new Headers({ "content-type": "text/event-stream" }), body } as unknown as Response;
+}
+
+describe("createFetchLLMClient streaming", () => {
+  it("streams text deltas and assembles the full response", async () => {
+    const chunk = (delta: unknown, extra: Record<string, unknown> = {}) => JSON.stringify({ choices: [{ index: 0, delta, ...extra }] });
+    const fetchImpl = jest.fn(async () => sseResponse([
+      chunk({ role: "assistant", content: "Hel" }),
+      chunk({ content: "lo " }),
+      chunk({ content: "world" }, { finish_reason: "stop" }),
+      JSON.stringify({ choices: [], usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }),
+      "[DONE]",
+    ]));
+    const client = createFetchLLMClient({ baseUrl: "http://x", model: "m", fetchImpl: fetchImpl as never });
+    const seen: string[] = [];
+    const response = await client.complete([{ role: "user", content: "hi" }], { onTextDelta: (d) => seen.push(d) });
+    expect(seen).toEqual(["Hel", "lo ", "world"]);
+    expect(response.choices?.[0].message?.content).toBe("Hello world");
+    expect(response.usage?.total_tokens).toBe(5);
+    const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+  });
+
+  it("assembles streamed tool calls", async () => {
+    const chunk = (delta: unknown) => JSON.stringify({ choices: [{ index: 0, delta }] });
+    const fetchImpl = jest.fn(async () => sseResponse([
+      chunk({ tool_calls: [{ index: 0, id: "c1", function: { name: "read_file", arguments: "{\"pa" } }] }),
+      chunk({ tool_calls: [{ index: 0, function: { arguments: "th\":\"a.txt\"}" } }] }),
+      "[DONE]",
+    ]));
+    const client = createFetchLLMClient({ baseUrl: "http://x", model: "m", fetchImpl: fetchImpl as never });
+    const response = await client.complete([{ role: "user", content: "hi" }], { onTextDelta: () => undefined });
+    const message = response.choices?.[0].message as { tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
+    expect(message.tool_calls?.[0]).toMatchObject({ id: "c1", function: { name: "read_file", arguments: "{\"path\":\"a.txt\"}" } });
+  });
+
+  it("falls back to a normal completion when the provider rejects streaming", async () => {
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(json(400, { error: { message: "stream_options not supported" } }))
+      .mockResolvedValueOnce(json(200, okBody));
+    const client = createFetchLLMClient({ baseUrl: "http://x", model: "m", fetchImpl: fetchImpl as never, retryDelayMs: 1 });
+    const response = await client.complete([{ role: "user", content: "hi" }], { onTextDelta: () => undefined });
+    expect(response.choices?.[0].message?.content).toBe("hi");
+    expect(JSON.parse((fetchImpl.mock.calls[1] as unknown as [string, RequestInit])[1].body as string).stream).toBeUndefined();
+  });
+});

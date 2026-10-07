@@ -452,6 +452,11 @@ export class AgentEngine {
           ...(schemas.length ? { tools: schemas, toolChoice: "auto" as const } : {}),
           ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
           ...(maxCompletionTokens ? { maxCompletionTokens } : {}),
+          // Stream text to listeners as it is generated; the assembled response
+          // below is still what drives tool calls and the final answer.
+          ...(request.onEvent
+            ? { onTextDelta: (delta: string) => emit({ type: "message.delta", runId, turn, delta }) }
+            : {}),
           signal,
         });
       } catch (error) {

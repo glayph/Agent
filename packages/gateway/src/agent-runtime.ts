@@ -655,7 +655,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
           source: "api-test",
           onEvent: (event) => {
             if (event.type === "tool.call") events.push({ type: event.type, detail: { name: event.call.name, status: event.call.status } })
-            else if (event.type !== "message.final") events.push({ type: event.type })
+            else if (event.type !== "message.final" && event.type !== "message.delta") events.push({ type: event.type })
           },
         })
         return res.status(result.status === "failed" ? 502 : 200).json({
@@ -698,6 +698,8 @@ export function createWsEventMapper(
   /** Id of the primary/final assistant message. For adaptive output, finalIds contains all ordered chunks. */
   let finalId: string = randomUUID()
   const finalIds: string[] = []
+  /** Live message that is currently receiving streamed text, keyed by run. */
+  const streamed = new Map<string, { id: string; turn: number; text: string }>()
   let thoughtSeq = 0
   let stateSeq = 0
   let toolFeedbackSeq = 0
@@ -795,16 +797,55 @@ export function createWsEventMapper(
           run_id: runId,
         })
         break
+      case "message.delta": {
+        if (!event.delta) break
+        let live = streamed.get(runId)
+        if (!live || live.turn !== event.turn) {
+          live = { id: randomUUID(), turn: event.turn, text: "" }
+          streamed.set(runId, live)
+        }
+        live.text += event.delta
+        send("message.delta", { message_id: live.id, delta: event.delta, run_id: runId, ...(model ? { model_name: model } : {}) })
+        break
+      }
       case "thought":
+        // This turn ended in tool calls, so its streamed text was not the answer: retract it.
+        {
+          const live = streamed.get(runId)
+          if (live && live.turn === event.turn) {
+            send("message.delete", { message_id: live.id, run_id: runId })
+            streamed.delete(runId)
+          }
+        }
         // Raw chain-of-thought is intentionally not sent to clients.
         emitProgress(runId, `thought-${runId}-${event.turn}`, `Working on the task (turn ${event.turn}).`)
         break
       case "tool.call":
         toolFeedbackPayload(event.call, runId)
         break
-      case "message.final":
+      case "message.final": {
+        const live = streamed.get(runId)
+        streamed.delete(runId)
+        if (live && live.text.trim()) {
+          // The answer already streamed into one live message: finalize it in place.
+          // Long answers that adaptive output would split are re-emitted as ordered chunks.
+          const planned = planAdaptiveOutput(
+            { id: `final-${runId}`, runId, channel: "web", kind: "response", content: event.content, final: true, longRunning: true, streamingRequested: false },
+            undefined,
+            getMessagingConfig(),
+          )
+          if (planned.length <= 1) {
+            finalId = live.id
+            finalIds.length = 0
+            finalIds.push(live.id)
+            send("message.update", { message_id: live.id, content: event.content, kind: "normal", run_id: runId, ...(model ? { model_name: model } : {}) })
+            break
+          }
+          send("message.delete", { message_id: live.id, run_id: runId })
+        }
         emitAdaptiveResponse(runId, event.content, model)
         break
+      }
       case "run.finished":
         send("typing.stop", { run_id: runId })
         send("node.run_end", {
