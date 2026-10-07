@@ -12,6 +12,7 @@ const AssistantMessage = lazy(() =>
 
 interface ChatMessageProps {
   message: ChatMessageModel
+  isStreaming: boolean
   selected: boolean
   canRetry: boolean
   onSelect: (messageId: string) => void
@@ -23,6 +24,7 @@ interface ChatMessageProps {
 
 export const ChatMessage = memo(function ChatMessage({
   message,
+  isStreaming,
   selected,
   canRetry,
   onSelect,
@@ -51,6 +53,7 @@ export const ChatMessage = memo(function ChatMessage({
           <AssistantMessage
             id={message.id}
             content={message.content}
+            isStreaming={isStreaming}
             attachments={message.attachments}
             kind={message.kind}
             modelName={message.modelName}

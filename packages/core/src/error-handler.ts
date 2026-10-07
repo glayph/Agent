@@ -142,15 +142,23 @@ export class AdvancedErrorHandler {
       const result = await primary();
       breaker.recordSuccess();
       return result;
-    } catch {
+    } catch (primaryError) {
       breaker.recordFailure();
 
       if (breaker.isOpen()) {
         console.error(`Circuit breaker opened for ${serviceName}`);
       }
 
-      // Use fallback
-      return await fallback();
+      console.warn(`Primary operation failed for ${serviceName}; attempting fallback.`)
+      try {
+        return await fallback();
+      } catch (fallbackError) {
+        throw new AggregateError(
+          [primaryError, fallbackError],
+          `Both primary and fallback operations failed for ${serviceName}.`,
+          { cause: primaryError },
+        );
+      }
     }
   }
 

@@ -50,12 +50,12 @@ export function memoryToolDefinitions(): ToolDefinition[] {
       function: {
         name: "memory_note",
         description:
-          "Save something to memory. Use scope=long_term for durable facts, decisions and preferences (MEMORY.md); scope=daily for running context (today's note). Call this when the user says 'remember this' / 'মনে রাখো'. Never store passwords or secrets.",
+          "Save something to memory. Use scope=user for stable user preferences/instructions (USER.md), scope=long_term for durable facts and decisions (MEMORY.md), or scope=daily for running context. Call this when the user says 'remember this' / 'মনে রাখো'. Never store passwords or secrets.",
         parameters: {
           type: "object",
           properties: {
             text: { type: "string", description: "The fact/decision to remember, one self-contained statement." },
-            scope: { type: "string", enum: ["long_term", "daily"], description: "Default: long_term." },
+            scope: { type: "string", enum: ["user", "long_term", "daily"], description: "Default: long_term." },
           },
           required: ["text"],
         },
@@ -94,7 +94,7 @@ export async function runMemoryTool(
     }
     const text = asString(args["text"]).trim();
     if (!text) return JSON.stringify({ ok: false, error: "text is required" });
-    const scope = args["scope"] === "daily" ? "daily" : "long_term";
+    const scope = args["scope"] === "daily" ? "daily" : args["scope"] === "user" ? "user" : "long_term";
     const saved = await service.note(text, scope);
     return JSON.stringify({ ok: true, scope, saved: saved.path, duplicate: saved.duplicate });
   } catch (err) {

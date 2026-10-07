@@ -19,6 +19,7 @@ import { LearningStore } from "@miki/memory"
 import type { McpRuntimeConfig, McpServerConfig } from "@miki/core/mcp/types"
 import type { SpeechToTextSettings } from "@miki/config"
 import { getLifecycleBus } from "@miki/core/hooks"
+import { wrapAsyncRoutes } from "./async-route.js"
 
 export interface DashboardExtendedDeps {
   db: Database.Database
@@ -32,6 +33,7 @@ export interface DashboardExtendedDeps {
   rebindServer?: (port: number, publicAccess: boolean) => Promise<void>
   requireAuth: import("express").RequestHandler
   now: () => string
+  registerShutdownHandler?: (handler: () => void | Promise<void>) => void
   agent: {
     registry: { size: number; names(): string[] }
     llmFor(model?: string): { model: string } | undefined
@@ -322,7 +324,7 @@ async function scanSecrets(root: string) {
 }
 
 export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Router {
-  const router = Router()
+  const router = wrapAsyncRoutes(Router())
   const backupsDir = path.join(deps.dataRoot, "backups")
   const jobsDbInit = () => deps.db.exec(`
     CREATE TABLE IF NOT EXISTS runtime_jobs (id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2, progress REAL NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, run_after INTEGER NOT NULL DEFAULT 0, error_json TEXT);
@@ -337,6 +339,8 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   let evolutionEngine: SelfImprovementEngine | null = null
   let evolutionTimer: ReturnType<typeof setInterval> | null = null
   let evolutionRunning = false
+  let dashboardShuttingDown = false
+  let evolutionTask: Promise<Record<string, unknown>> | null = null
 
   function evolutionConfig(): SelfImprovementConfig {
     const rawEvolution = asRecord(deps.getAppConfig().evolution)
@@ -398,6 +402,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   }
 
   async function runDueEvolutionCycles(force = false): Promise<Record<string, unknown>> {
+    if (dashboardShuttingDown) return { status: "shutting_down" }
     const config = {
       ...asRecord(deps.getAppConfig().self_improvement),
       ...asRecord(deps.getAppConfig().evolution),
@@ -436,15 +441,29 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     }
   }
 
-  getLifecycleBus().on?.("message:sent", () => {
+  function runTrackedEvolutionCycle(force = false): Promise<Record<string, unknown>> {
+    if (dashboardShuttingDown) return Promise.resolve({ status: "shutting_down" })
+    if (evolutionTask) return evolutionTask
+    const task = runDueEvolutionCycles(force)
+    evolutionTask = task
+    void task.then(
+      () => { if (evolutionTask === task) evolutionTask = null },
+      () => { if (evolutionTask === task) evolutionTask = null },
+    )
+    return task
+  }
+
+  const onMessageSent = () => {
+    if (dashboardShuttingDown) return
     const cfg = evolutionConfig();
     if (cfg.enabled && String((asRecord(deps.getAppConfig().evolution).cold_path_trigger || "after_turn")) === "after_turn") {
-      void runDueEvolutionCycles(false).catch((error) => deps.appendGatewayLog(`Evolution after-turn cycle failed: ${error instanceof Error ? error.message : String(error)}`));
+      void runTrackedEvolutionCycle(false).catch((error) => deps.appendGatewayLog(`Evolution after-turn cycle failed: ${error instanceof Error ? error.message : String(error)}`));
     }
-  });
+  }
+  const unsubscribeMessageSent = getLifecycleBus().on?.("message:sent", onMessageSent)
 
   evolutionTimer = setInterval(() => {
-    if (evolutionConfig().enabled) void runDueEvolutionCycles(false).catch((error) => deps.appendGatewayLog(`Evolution cycle failed: ${error instanceof Error ? error.message : String(error)}`))
+    if (!dashboardShuttingDown && evolutionConfig().enabled) void runTrackedEvolutionCycle(false).catch((error) => deps.appendGatewayLog(`Evolution cycle failed: ${error instanceof Error ? error.message : String(error)}`))
   }, 30_000)
   evolutionTimer.unref?.()
 
@@ -522,6 +541,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   let lastUsbDevices: string[] | undefined;
   let lastUsbEvent: { type: "connected" | "disconnected"; device: string; at: string } | null = null;
   const usbMonitorTimer = setInterval(() => {
+    if (dashboardShuttingDown) return
     const devices = asRecord(deps.getAppConfig().devices);
     if (devices.enabled !== true || devices.monitor_usb !== true || process.platform !== "linux") {
       lastUsbDevices = undefined;
@@ -902,7 +922,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   router.post("/improvement/run", deps.requireAuth, async (req, res) => {
     try {
       const force = req.body?.force === true
-      const result = await runDueEvolutionCycles(force)
+      const result = await runTrackedEvolutionCycle(force)
       res.json(result)
     } catch (error) {
       res.status(502).json({ status: "failed", error: error instanceof Error ? error.message : String(error) })
@@ -1113,6 +1133,21 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   router.post("/enhancements/runtime/deliveries/:id/approve", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); receipt.status = "pending"; receipt.approvalRequired = false; receipt.updatedAt = deps.now(); deps.db.prepare("UPDATE delivery_receipts SET payload_json=?,status=?,updated_at=? WHERE id=?").run(JSON.stringify(receipt), receipt.status, receipt.updatedAt, req.params.id); res.json({ receipt, approval: { id: receipt.approvalRequestId, status: "approved", decidedBy: stringValue(req.body?.decidedBy) || "dashboard-operator" } }) })
   router.post("/enhancements/runtime/deliveries/:id/mock-dispatch", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); const outcome = stringValue(req.body?.outcome) || "sent"; receipt.attempts += 1; receipt.status = outcome; receipt.updatedAt = deps.now(); receipt.lastError = outcome === "failed" ? "Mock dispatch failed by requested outcome." : undefined; deps.db.prepare("UPDATE delivery_receipts SET payload_json=?,status=?,updated_at=? WHERE id=?").run(JSON.stringify(receipt), receipt.status, receipt.updatedAt, req.params.id); res.json({ receipt, outcome: { status: outcome, externalSideEffect: false } }) })
   router.post("/enhancements/runtime/deliveries/:id/replay", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); if (stringValue(req.body?.idempotencyKey) === receipt.idempotencyKey) return res.status(409).json({ error: "Replay requires a new idempotency key." }); receipt.replayOf = receipt.id; receipt.id = randomUUID(); receipt.idempotencyKey = stringValue(req.body?.idempotencyKey); receipt.status = "pending"; receipt.updatedAt = deps.now(); deps.db.prepare("INSERT INTO delivery_receipts(id,payload_json,status,updated_at) VALUES(?,?,?,?)").run(receipt.id, JSON.stringify(receipt), receipt.status, receipt.updatedAt); res.json({ receipt, preview: { externalSideEffect: false, previewHash: receipt.previewHash, bodyPreview: receipt.body.slice(0, 280) }, approval: {} }) })
+
+  deps.registerShutdownHandler?.(async () => {
+    dashboardShuttingDown = true
+    if (evolutionTimer) clearInterval(evolutionTimer)
+    clearInterval(usbMonitorTimer)
+    unsubscribeMessageSent?.()
+    await evolutionTask?.catch((error) => {
+      deps.appendGatewayLog(`Evolution cycle did not stop cleanly: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    try {
+      await mcpManager.close()
+    } catch (error) {
+      deps.appendGatewayLog(`MCP manager shutdown failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
 
   return router
 }

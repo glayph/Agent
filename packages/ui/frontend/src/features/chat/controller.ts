@@ -322,7 +322,38 @@ export async function connectChat() {
               : activeSequence
           activeCheckpointId = null
           activeSequence = -1
-          updateChatStore({ isTyping: false })
+          const payload = message.payload ?? {}
+          const runId = typeof payload.run_id === "string" ? payload.run_id : ""
+          const terminalStatus = [
+            "completed",
+            "completed_with_warning",
+            "failed",
+            "cancelled",
+          ].includes(String(payload.status))
+            ? (String(payload.status) as "completed" | "completed_with_warning" | "failed" | "cancelled")
+            : undefined
+          updateChatStore((prev) => {
+            if (!runId) return { isTyping: false }
+            const runningRunIds = prev.runningRunIds.filter(
+              (candidate) => candidate !== runId,
+            )
+            const isLastRun = runningRunIds.length === 0
+            return {
+              runningRunIds,
+              isTyping: !isLastRun,
+              runStatus: isLastRun
+                ? terminalStatus ?? prev.runStatus
+                : "running",
+              ...(isLastRun
+                ? {
+                    runError:
+                      typeof payload.error === "string"
+                        ? payload.error
+                        : undefined,
+                  }
+                : {}),
+            }
+          })
           return
         }
         if (message.type === "resume") {
@@ -707,6 +738,14 @@ export async function retryChatMessage(messageId: string): Promise<boolean> {
   const targetIndex = state.messages.findIndex((message) => message.id === messageId)
   if (targetIndex < 0 || targetIndex !== state.messages.length - 1) return false
   const target = state.messages[targetIndex]
+  const promptMessage =
+    target.role === "user"
+      ? target
+      : state.messages
+          .slice(0, targetIndex)
+          .reverse()
+          .find((message) => message.role === "user")
+  const attachments = normalizeOutgoingAttachments(promptMessage?.attachments)
   activeCheckpointId = null
   activeSequence = -1
   try {
@@ -714,7 +753,22 @@ export async function retryChatMessage(messageId: string): Promise<boolean> {
       JSON.stringify({
         type: "message.retry",
         id: messageId,
-        payload: { message_id: messageId, thinking_mode: store.get(thinkingModeAtom) },
+        payload: {
+          message_id: messageId,
+          thinking_mode: store.get(thinkingModeAtom),
+          ...(attachments.length > 0
+            ? {
+                attachments: attachments.map((attachment) => ({
+                  type: attachment.type,
+                  url: attachment.url,
+                  ...(attachment.filename ? { filename: attachment.filename } : {}),
+                  ...(attachment.contentType
+                    ? { content_type: attachment.contentType }
+                    : {}),
+                })),
+              }
+            : {}),
+        },
       }),
     )
     updateChatStore((prev) => ({
@@ -744,10 +798,19 @@ export async function switchChatSession(sessionId: string) {
     updateChatStore({
       messages: historyMessages,
       isTyping: false,
+      activeRunId: undefined,
+      runningRunIds: [],
       recentRunIds: [],
+      activeRunModel: undefined,
+      activeRunProvider: undefined,
+      runStatus: undefined,
+      runError: undefined,
+      deliveryOutcome: undefined,
       hasHydratedActiveSession: true,
       contextUsage: undefined,
     })
+    activeCheckpointId = null
+    activeSequence = -1
 
     if (store.get(gatewayAtom).status === "running") {
       shouldMaintainConnection = true
@@ -810,8 +873,24 @@ export async function stopChatGeneration(): Promise<boolean> {
   // Optimistically end the local typing/run state so the UI unblocks even if
   // the backend already finished or the task id was not yet assigned.
   updateChatStore((prev) => ({
-    isTyping: false,
-    runStatus: prev.runStatus === "running" ? "cancelled" : prev.runStatus,
+    runningRunIds: taskId
+      ? prev.runningRunIds.filter((candidate) => candidate !== taskId)
+      : prev.runningRunIds,
+    isTyping: taskId
+      ? prev.runningRunIds.some((candidate) => candidate !== taskId)
+      : false,
+    runStatus: taskId && prev.runningRunIds.some((candidate) => candidate !== taskId)
+      ? "running"
+      : prev.runStatus === "running" || prev.runStatus === "starting"
+        ? "cancelled"
+        : prev.runStatus,
+    ...(taskId && prev.activeRunId === taskId
+      ? {
+          activeRunId:
+            prev.runningRunIds.find((candidate) => candidate !== taskId) ??
+            undefined,
+        }
+      : {}),
   }))
 
   return cancelled || !taskId

@@ -29,6 +29,7 @@ const MarkdownRenderer = lazy(() => import("./markdown-renderer"))
 interface AssistantMessageProps {
   id: string
   content: string
+  isStreaming?: boolean
   selected?: boolean
   onSelect?: () => void
   attachments?: ChatAttachment[]
@@ -104,6 +105,7 @@ function classifyErrorContent(content: string): ErrorCategory {
 
 export const AssistantMessage = memo(function AssistantMessage({
   content,
+  isStreaming = false,
   selected = false,
   onSelect,
   attachments = EMPTY_ATTACHMENTS,
@@ -428,7 +430,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                       </div>
                     }
                   >
-                    <MarkdownRenderer content={visibleContent} />
+                    <MarkdownRenderer content={visibleContent} streaming={isStreaming} />
                   </Suspense>
                   {!isThought && <LinkPreviewCards content={content} />}
                 </div>

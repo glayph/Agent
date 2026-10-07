@@ -39,7 +39,8 @@ function digestOf(content: string, max: number): string {
 
 /**
  * Builds the memory block injected at the start of every turn/session:
- *  - MEMORY.md (curated long-term memory), truncated in the prompt copy only;
+ *  - USER.md (stable user directives) and MEMORY.md (curated facts), each
+ *    truncated in the prompt copy only with a separate bounded allowance;
  *  - an INDEX of the most recent daily notes / session summaries with a
  *    one-line digest each (not the files themselves — the agent opens them
  *    with memory_get / finds them with memory_search).
@@ -53,14 +54,24 @@ export class MemoryContextBuilder {
     private readonly getConfig: () => MemoryFilesConfig,
   ) {}
 
-  async build(opts: { compact?: boolean; now?: Date } = {}): Promise<string> {
+  async build(opts: { compact?: boolean; now?: Date; trustedUser?: boolean; trustedMemory?: boolean } = {}): Promise<string> {
     const cfg = this.getConfig();
     if (!cfg.enabled) return "";
     const now = opts.now ?? new Date();
     const parts: string[] = [];
     let budget = cfg.bootstrapMaxChars;
 
-    const memoryMd = stripComments(await this.store.readMemoryMd().catch(() => ""));
+    const userMd = opts.trustedUser === false ? "" : stripComments(await this.store.readUserMd().catch(() => ""));
+    if (userMd) {
+      const limit = Math.min(cfg.userMdMaxChars, budget);
+      const body = userMd.length > limit
+        ? `${userMd.slice(0, limit)}\n…[truncated in prompt; full file on disk — use memory_get]`
+        : userMd;
+      parts.push(`User profile (USER.md):\n${body}`);
+      budget -= body.length;
+    }
+
+    const memoryMd = opts.trustedMemory === false ? "" : stripComments(await this.store.readMemoryMd().catch(() => ""));
     if (memoryMd) {
       const limit = Math.min(cfg.memoryMdMaxChars, budget);
       const truncated = memoryMd.length > limit;
@@ -77,8 +88,8 @@ export class MemoryContextBuilder {
     if (parts.length === 0) return "";
     const hint = opts.compact
       ? ""
-      : "\nMemory tools: memory_search (find), memory_get (read a file/lines), memory_note (save). " +
-        "When the user says to remember something, save it with memory_note instead of keeping it only in this conversation.";
+      : "\nMemory tools: memory_search (find), memory_get (read a file/lines), memory_add (save). " +
+        "When the user says to remember something, save it with memory_add instead of keeping it only in this conversation.";
     return `${parts.join("\n\n")}${hint}`;
   }
 
@@ -92,7 +103,7 @@ export class MemoryContextBuilder {
     cutoff.setDate(cutoff.getDate() - (cfg.recentDays - 1));
     const recent: Array<MemoryFileInfo & { date: number }> = [];
     for (const f of files) {
-      if (f.rel === "MEMORY.md" || f.rel.includes("/compactions/")) continue;
+      if (f.rel === "MEMORY.md" || f.rel.includes("/compactions/") || f.rel.includes("/legacy-import/")) continue;
       const m = DATE_PREFIX.exec(f.rel.split("/").pop() ?? "");
       if (!m) continue;
       const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();

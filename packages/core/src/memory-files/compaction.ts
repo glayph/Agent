@@ -28,6 +28,8 @@ export interface CompactionResult {
 
 interface SessionState {
   doc: SummaryDoc;
+  /** Prefix length already folded into doc; history is append-only in normal chat. */
+  archivedMessages: number;
   compactions: number;
   /** One pre-compaction flush per cycle (reset after a compaction). */
   flushed: boolean;
@@ -77,7 +79,7 @@ export class CompactionManager {
   private sessionState(sessionId: string): SessionState {
     let s = this.state.get(sessionId);
     if (!s) {
-      s = { doc: emptyDoc(), compactions: 0, flushed: false };
+      s = { doc: emptyDoc(), archivedMessages: 0, compactions: 0, flushed: false };
       this.state.set(sessionId, s);
       if (this.state.size > 500) {
         const oldest = this.state.keys().next().value;
@@ -127,10 +129,19 @@ export class CompactionManager {
       if (messages.length < minMessages || chars <= threshold) return unchanged;
 
       const systemMessages = messages.filter((m) => m.role === "system" && !isSummary(m));
-      const priorSummary = messages.find(isSummary);
       const conversational = messages.filter((m) => m.role !== "system");
       const keepRecent = Math.max(2, ctx.keepRecent ?? c.keepRecent);
-      let start = conversational.length - keepRecent;
+      const keepRecentChars = Math.max(
+        1_000,
+        Math.min(c.keepRecentTokens * 4, Math.floor(ctx.budgetChars * 0.5)),
+      );
+      let tokenStart = conversational.length;
+      let tailChars = 0;
+      while (tokenStart > 0 && tailChars < keepRecentChars) {
+        tokenStart--;
+        tailChars += sizeOf(conversational[tokenStart]!);
+      }
+      let start = Math.min(conversational.length - keepRecent, tokenStart);
       // A tool result must stay with the assistant message that requested it.
       while (start > 0 && conversational[start]?.role === "tool") start--;
       if (start <= 0) return unchanged;
@@ -145,9 +156,15 @@ export class CompactionManager {
         thresholdChars: threshold,
       });
 
-      // Fold: prior rolling summary (session state) + the newly compacted turns.
-      const fresh = extractDoc(older as TurnLike[]);
-      const doc = mergeDocs(priorSummary ? state.doc : emptyDoc(), fresh);
+      // Fold only the newly archived prefix. This avoids re-tokenizing the full
+      // transcript and appending the same summary material on every later turn.
+      if (older.length < state.archivedMessages) {
+        state.doc = emptyDoc();
+        state.archivedMessages = 0;
+      }
+      const freshTurns = older.slice(state.archivedMessages);
+      const fresh = extractDoc(freshTurns as TurnLike[]);
+      const doc = mergeDocs(state.doc, fresh);
       const archivePath = this.store.compactionArchivePath(sessionId);
       const rel = relFromRoot(this.store.paths, archivePath);
       const rendered = renderDoc(doc, c.maxSummaryChars);
@@ -162,15 +179,19 @@ export class CompactionManager {
       };
 
       state.doc = doc;
+      state.archivedMessages = older.length;
       state.compactions++;
       state.flushed = false;
 
-      this.writer.enqueue({
-        type: "compaction_archive",
-        sessionId,
-        summary: rendered,
-        archivedCount: older.length,
-      });
+      const archiveDelta = renderDoc(fresh, c.maxSummaryChars);
+      if (archiveDelta.trim()) {
+        this.writer.enqueue({
+          type: "compaction_archive",
+          sessionId,
+          summary: archiveDelta,
+          archivedCount: freshTurns.length,
+        });
+      }
       getLifecycleBus().emit("session:compact:after", { phase: "after" });
       this.hooks.emit("after_compaction", {
         sessionId,

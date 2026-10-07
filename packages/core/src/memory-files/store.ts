@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { randomUUID } from "node:crypto";
 import type { MemoryPaths } from "./types.js";
 import {
   dailyFileName,
@@ -216,7 +217,62 @@ export class MemoryFileStore {
     }
   }
 
-  /** MEMORY.md plus every markdown file under memory/ (recursive). */
+  async readUserMd(): Promise<string> {
+    const safePath = await resolveMemoryFile(this.paths, this.paths.userMd);
+    if (!safePath) throw new Error("USER.md resolves outside the memory root");
+    try {
+      return await fs.promises.readFile(safePath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw err;
+    }
+  }
+
+  planUserNote(text: string, now = new Date()): FileOp {
+    const clean = redactSecrets(text.trim());
+    return {
+      path: this.paths.userMd,
+      mode: "append",
+      header: "# USER.md — stable user instructions\n\n",
+      skipIfContains: clean,
+      content: `- [observed ${formatDate(now)}; status: active] ${clean}\n`,
+    };
+  }
+
+  async supersedeUserNote(text: string, supersedes: string, now = new Date()): Promise<void> {
+    const safePath = await resolveMemoryFile(this.paths, this.paths.userMd);
+    if (!safePath) throw new Error("USER.md resolves outside the memory root");
+    const oldDirective = supersedes.trim();
+    const clean = redactSecrets(text.trim()).replace(/\s+/g, " ");
+    if (!oldDirective || !clean) throw new Error("Both the replacement and exact superseded directive are required.");
+    let original: string;
+    try {
+      original = await fs.promises.readFile(safePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("The superseded directive was not found in USER.md.");
+      throw error;
+    }
+    const lines = original.split(/(?<=\n)/);
+    const matches = lines.map((line, index) => ({ line, index })).filter(({ line }) =>
+      /status:\s*active/i.test(line) && line.includes(oldDirective),
+    );
+    if (matches.length !== 1) throw new Error("The exact active directive must match exactly one USER.md entry.");
+    const { line, index } = matches[0]!;
+    const superseded = line.replace(/\r?\n$/, "").replace(/status:\s*active/i, "status: superseded");
+    lines[index] = `${superseded}\n- [observed ${formatDate(now)}; status: active] ${clean}\n`;
+    const temp = `${safePath}.${process.pid}.${randomUUID()}.tmp`;
+    await fs.promises.writeFile(temp, lines.join(""), { flag: "wx", mode: 0o600 });
+    try {
+      const latest = await fs.promises.readFile(safePath, "utf8");
+      if (latest !== original) throw new Error("USER.md changed concurrently; retry the preference update.");
+      await fs.promises.rename(temp, safePath);
+    } catch (error) {
+      await fs.promises.unlink(temp).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** USER.md, MEMORY.md plus every markdown file under memory/ (recursive). */
   async listFiles(): Promise<MemoryFileInfo[]> {
     const out: MemoryFileInfo[] = [];
     const push = async (abs: string) => {
@@ -236,6 +292,7 @@ export class MemoryFileStore {
         /* missing is fine */
       }
     };
+    await push(this.paths.userMd);
     await push(this.paths.memoryMd);
     const walk = async (dir: string, depth: number): Promise<void> => {
       let entries: fs.Dirent[];

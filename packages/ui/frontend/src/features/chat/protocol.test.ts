@@ -96,6 +96,31 @@ describe("chat protocol flow", () => {
     })
   })
 
+  it("preserves persisted assistant error messages as error bubbles", () => {
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "error-run-1",
+          run_id: "run-1",
+          content: "An internal error interrupted this chat run.",
+          kind: "error",
+        },
+      },
+      "session-1",
+    )
+
+    expect(getChatState().messages).toEqual([
+      expect.objectContaining({
+        id: "error-run-1",
+        role: "assistant",
+        kind: "error",
+        content: "An internal error interrupted this chat run.",
+      }),
+    ])
+  })
+
 
   it("keeps concurrent execution lanes alive when one run finishes", () => {
     handlemikiMessage(

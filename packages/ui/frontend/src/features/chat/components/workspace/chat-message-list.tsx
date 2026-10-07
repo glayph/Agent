@@ -69,6 +69,9 @@ export function ChatMessageList({
     fromEnd: true,
     resetKey: messages[0]?.id ?? "empty",
   })
+  const streamingMessageId = isTyping
+    ? [...messages].reverse().find((message) => message.role === "assistant" && message.kind === "normal")?.id
+    : undefined
 
   return (
     <div
@@ -112,6 +115,7 @@ export function ChatMessageList({
           <WorkspaceChatMessage
             key={message.id}
             message={message}
+            isStreaming={message.id === streamingMessageId}
             selected={selectedMessageId === message.id}
             onSelect={setSelectedMessageId}
             canRetry={

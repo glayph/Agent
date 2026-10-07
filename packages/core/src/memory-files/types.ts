@@ -23,6 +23,8 @@ export interface MemoryFilesConfig {
   scope?: string;
   /** Total character budget for the memory block injected into the prompt. */
   bootstrapMaxChars: number;
+  /** Separate cap for stable user directives in USER.md. */
+  userMdMaxChars: number;
   /** Share of the budget MEMORY.md may use (injected copy only — the file on disk is never truncated). */
   memoryMdMaxChars: number;
   /** How many days back the "recent notes" index looks (today = 1). */
@@ -45,6 +47,8 @@ export interface MemoryFilesConfig {
     minMessages: number;
     /** Most recent conversational messages kept verbatim (>= 2). */
     keepRecent: number;
+    /** Approximate token budget for the verbatim recent tail. */
+    keepRecentTokens: number;
     maxSummaryChars: number;
     /** Silent pre-compaction "write durable notes now" pass. */
     flushEnabled: boolean;
@@ -81,6 +85,7 @@ export interface SummaryDoc {
 export interface MemoryPaths {
   root: string;
   memoryMd: string;
+  userMd: string;
   dailyDir: string;
   compactionDir: string;
 }

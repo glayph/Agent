@@ -108,6 +108,7 @@ class Runtime {
   private startedAt = 0;
   private readonly logs: string[] = [];
   private healthTimer: NodeJS.Timeout | null = null;
+  private healthFailures = 0;
   private readonly listeners = new Set<(line: string) => void>();
   private operation: Promise<void> = Promise.resolve();
 
@@ -122,7 +123,7 @@ class Runtime {
 
   async start(): Promise<void> { return this.queue(async () => {
     if (this.child || ["starting", "stopping"].includes(this.state)) return;
-    this.state = "starting"; this.error = ""; this.startedAt = Date.now(); this.logs.length = 0; this.log("Starting Miki runtime...");
+    this.state = "starting"; this.error = ""; this.healthFailures = 0; this.startedAt = Date.now(); this.logs.length = 0; this.log("Starting Miki runtime...");
     if (!existsSync(this.config.gatewayEntry)) return this.fail(`gateway entrypoint not found: ${this.config.gatewayEntry}`);
     for (const [name, port] of [["gateway", this.config.port], ["core", this.config.corePort], ["LiteLLM", this.config.liteLLMPort]] as const) {
       if (port > 0 && !(await portAvailable(this.config.host, port))) return this.fail(`${name}: port ${port} is already in use on ${this.config.host}; stop the existing process or choose another --port`);
@@ -137,15 +138,15 @@ class Runtime {
     this.child = child; writeFileSync(join(this.config.workspaceDir, "data", "gateway.pid"), String(child.pid)); this.log(`Runtime PID: ${child.pid}`);
     child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8"); child.stdout?.on("data", (chunk: string) => this.consume(chunk)); child.stderr?.on("data", (chunk: string) => this.consume(chunk));
     child.once("error", (err) => this.fail(`runtime failed: ${err.message}`));
-    child.once("exit", (code, signal) => { this.child = null; if (this.healthTimer) clearInterval(this.healthTimer); this.healthTimer = null; const requestedStop = existsSync(gatewayStopFile); if (requestedStop) { try { rmSync(gatewayStopFile, { force: true }); } catch {} } if (this.state !== "stopping") { this.state = requestedStop || code === 0 ? "stopped" : "error"; if (!requestedStop && code !== 0) this.error = `runtime exited with code ${code ?? signal ?? "unknown"}`; this.log(this.error || "Runtime stopped."); } });
+    child.once("exit", (code, signal) => { this.child = null; if (this.healthTimer) clearInterval(this.healthTimer); this.healthTimer = null; const requestedStop = existsSync(gatewayStopFile); if (requestedStop) { try { rmSync(gatewayStopFile, { force: true }); } catch {} } if (this.state !== "stopping") { this.state = requestedStop || code === 0 ? "stopped" : "error"; this.error = requestedStop || code === 0 ? "" : `runtime exited with code ${code ?? signal ?? "unknown"}`; this.log(this.error || "Runtime stopped."); } });
     this.healthTimer = setInterval(() => void this.pollHealth(), 900);
     await this.pollHealth();
   }); }
 
   async stop(): Promise<void> { return this.queue(async () => {
     if (!this.child) { this.state = "stopped"; return; }
-    this.state = "stopping"; this.log("Stopping Miki runtime..."); const child = this.child; child.kill("SIGTERM");
-    await new Promise<void>((resolvePromise) => { const timer = setTimeout(() => { if (!child.killed) child.kill("SIGKILL"); resolvePromise(); }, 4000); child.once("exit", () => { clearTimeout(timer); resolvePromise(); }); });
+    this.state = "stopping"; this.log("Stopping Miki runtime..."); const child = this.child;
+    await new Promise<void>((resolvePromise) => { let exited = false; const timer = setTimeout(() => { if (!exited) child.kill("SIGKILL"); resolvePromise(); }, 4000); child.once("exit", () => { exited = true; clearTimeout(timer); resolvePromise(); }); child.kill("SIGTERM"); });
     this.state = "stopped"; this.child = null; try { rmSync(join(this.config.workspaceDir, "data", "gateway.pid")); } catch { /* already removed */ }
   }); }
 
@@ -154,14 +155,83 @@ class Runtime {
   private fail(message: string): void { this.state = "error"; this.error = message; this.log(`Start failed: ${message}`); }
   private log(line: string): void { const clean = line.replace(/[\r\n]+$/, ""); if (!clean) return; this.logs.push(clean); if (this.logs.length > 1200) this.logs.shift(); for (const listener of this.listeners) listener(clean); }
   private consume(chunk: string): void { chunk.split(/\r?\n/).forEach((line) => this.log(line)); }
-  private async pollHealth(): Promise<void> { if (!this.child) return; try { const response = await fetch(`${this.dashboardUrl}/gateway/health`, { signal: AbortSignal.timeout(1200) }); if (response.ok) { if (this.state === "starting") this.log("Gateway is healthy."); this.state = "running"; this.error = ""; } } catch { /* startup can take a moment */ } }
+  private async pollHealth(): Promise<void> {
+    if (!this.child) return;
+    try {
+      const response = await fetch(`${this.dashboardUrl}/gateway/health`, { signal: AbortSignal.timeout(1200) });
+      if (!response.ok) throw new Error(`health endpoint returned HTTP ${response.status}`);
+      if (!this.child) return;
+      this.healthFailures = 0;
+      if (this.state === "starting") this.log("Gateway is healthy.");
+      this.state = "running";
+      this.error = "";
+    } catch (error) {
+      if (!this.child) return;
+      this.healthFailures += 1;
+      const startupFailed = this.state === "starting" && this.healthFailures >= 10;
+      const runtimeFailed = this.state === "running" && this.healthFailures >= 3;
+      if (startupFailed || runtimeFailed) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const message = `Gateway health check failed ${this.healthFailures} consecutive times: ${detail}`;
+        const firstFailure = this.state !== "error";
+        this.state = "error";
+        if (firstFailure) {
+          this.error = message;
+          this.log(message);
+        }
+      }
+    }
+  }
 }
 
 function portAvailable(host: string, port: number): Promise<boolean> { return new Promise((resolvePromise) => { const server = createServer(); server.once("error", () => resolvePromise(false)); server.listen(port, host, () => server.close(() => resolvePromise(true))); }); }
 function loaderArgs(loader: string): string[] { if (!loader || !existsSync(loader)) return []; const code = `import { register } from "node:module"; register(${JSON.stringify(pathToFileURL(loader).href)}, pathToFileURL("./"));`; return ["--import", `data:text/javascript,${encodeURIComponent(code)}`]; }
 function formatUptime(seconds: number): string { if (seconds < 60) return `${seconds}s`; const minutes = Math.floor(seconds / 60); if (minutes < 60) return `${minutes}m ${seconds % 60}s`; return `${Math.floor(minutes / 60)}h ${minutes % 60}m`; }
 
-async function runPlain(config: Config): Promise<number> { const runtime = new Runtime(config); if (!process.stdout.isTTY) runtime.onLog((line) => process.stdout.write(`${line}\n`)); try { await runtime.start(); } catch (error) { console.error(`Miki: ${error instanceof Error ? error.message : String(error)}`); return 1; } console.log(`Miki\n  Dashboard  ${runtime.dashboardUrl}\n  Stop       Ctrl+C\n`); if (process.stdout.isTTY) runtime.onLog((line) => console.log(line)); return new Promise((resolvePromise) => { const shutdown = async () => { process.off("SIGINT", shutdown); await runtime.stop(); resolvePromise(runtime.currentState === "error" ? 1 : 0); }; process.once("SIGINT", shutdown); runtime.onLog(() => { if (runtime.currentState === "error") void shutdown(); }); }); }
+async function runPlain(config: Config): Promise<number> {
+  const runtime = new Runtime(config)
+  const removeOutputListener = !process.stdout.isTTY
+    ? runtime.onLog((line) => process.stdout.write(`${line}\n`))
+    : undefined
+  try {
+    await runtime.start()
+  } catch (error) {
+    removeOutputListener?.()
+    console.error(`Miki: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
+  }
+  if (runtime.currentState === "error") {
+    removeOutputListener?.()
+    console.error(`Miki: ${runtime.lastError}`)
+    return 1
+  }
+  console.log(`Miki\n  Dashboard  ${runtime.dashboardUrl}\n  Stop       Ctrl+C\n`)
+
+  return new Promise((resolvePromise) => {
+    let stopping = false
+    let removeStateListener: () => void = () => undefined
+
+    const shutdown = async () => {
+      if (stopping) return
+      stopping = true
+      const exitCode = runtime.currentState === "error" ? 1 : 0
+      process.off("SIGINT", shutdown)
+      process.off("SIGTERM", shutdown)
+      removeOutputListener?.()
+      removeStateListener()
+      await runtime.stop()
+      resolvePromise(exitCode)
+    }
+
+    removeStateListener = runtime.onLog(() => {
+      if (runtime.currentState === "error" || runtime.currentState === "stopped") void shutdown()
+    })
+    if (process.stdout.isTTY) runtime.onLog((line) => console.log(line))
+    process.once("SIGINT", shutdown)
+    process.once("SIGTERM", shutdown)
+    if (runtime.currentState === "error" || runtime.currentState === "stopped") void shutdown()
+  })
+}
 
 async function runDashboard(config: Config): Promise<number> { const runtime = new Runtime(config); await runtime.start(); if (runtime.currentState === "error") { console.error(`Miki: ${runtime.lastError}`); return 1; } if (!process.stdin.isTTY || !process.stdout.isTTY) return runPlain(config); const stdin = process.stdin; stdin.setRawMode?.(true); stdin.resume(); stdin.setEncoding("utf8"); let selected = 0; let logsFocused = false; let confirmQuit = false; const actions = ["Start / Stop", "Restart", "Logs", "Shutdown"]; const render = () => { process.stdout.write("\x1b[2J\x1b[H"); const state = runtime.currentState.toUpperCase(); console.log(` MIKI  [${state}]  ${runtime.dashboardUrl}  uptime ${formatUptime(runtime.uptime)}`); console.log("─".repeat(Math.max(40, process.stdout.columns || 80))); actions.forEach((action, index) => console.log(`${!logsFocused && selected === index ? "❯" : " "} ${action}`)); console.log("\n Live logs"); console.log(runtime.recentLogs.slice(-12).join("\n") || "Waiting for runtime output..."); console.log(`\n ${confirmQuit ? "Shutdown Miki? Enter confirms, Esc cancels" : logsFocused ? "Tab menu · PgUp/PgDown/Home/End scroll · Q quit" : "Up/Down navigate · Enter action · Tab logs · Q quit"}`); }; const draw = () => render(); const onLog = () => draw(); runtime.onLog(onLog); const onData = async (key: string) => { if (confirmQuit) { if (["\r", " ", "y", "q", "\u0003"].includes(key)) { stdin.off("data", onData); stdin.setRawMode?.(false); await runtime.stop(); process.stdout.write("\n"); process.exit(0); } if (key === "\u001b") confirmQuit = false; draw(); return; } if (key === "q" || key === "\u0003" || key === "\u001b") confirmQuit = true; else if (key === "\t") logsFocused = !logsFocused; else if (!logsFocused && key === "\u001b[A") selected = Math.max(0, selected - 1); else if (!logsFocused && key === "\u001b[B") selected = Math.min(actions.length - 1, selected + 1); else if (key === "\r" || key === " ") { if (selected === 0) await (runtime.currentState === "running" || runtime.currentState === "starting" ? runtime.stop() : runtime.start()); else if (selected === 1) await runtime.restart(); else if (selected === 3) confirmQuit = true; } draw(); }; stdin.on("data", onData); const timer = setInterval(draw, 1000); draw(); return new Promise((resolvePromise) => process.once("exit", () => { clearInterval(timer); stdin.setRawMode?.(false); resolvePromise(0); })); }
 

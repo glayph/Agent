@@ -78,6 +78,30 @@ describe("CompactionManager", () => {
     expect(files.some((f) => f.rel.includes("compactions/"))).toBe(true);
   });
 
+  it("folds only newly archived turns into the rolling summary and archive", async () => {
+    root = tmpRoot();
+    const cfg: MemoryFilesConfig = {
+      ...DEFAULT_MEMORY_FILES_CONFIG,
+      compaction: { ...DEFAULT_MEMORY_FILES_CONFIG.compaction, keepRecent: 4, minMessages: 6 },
+    };
+    const { manager, writer } = makeManager(root, cfg);
+    const firstTurns = longMessages(20, 300);
+    const first = await manager.compact("s-incremental", firstTurns, { budgetChars: 2000 });
+    const firstSummary = String(first.messages.find((m) => m.role === "system" && String(m.content).startsWith(SUMMARY_SENTINEL))?.content ?? "").split("\n\n").at(-1) ?? "";
+    await writer.drain();
+
+    const allTurns = [...firstTurns, ...longMessages(8, 300)];
+    const second = await manager.compact("s-incremental", allTurns, { budgetChars: 2000 });
+    const secondSummary = second.messages.find((m) => m.role === "system" && String(m.content).startsWith(SUMMARY_SENTINEL));
+    expect(secondSummary?.content).toContain("24 earlier messages were compacted");
+    await writer.drain();
+
+    const archive = (await new MemoryFileStore(resolveMemoryPaths(root)).listFiles()).find((f) => f.rel.includes("compactions/"));
+    expect(archive).toBeTruthy();
+    const archiveText = await fs.promises.readFile(archive!.abs, "utf8");
+    expect(archiveText.split(firstSummary).length - 1).toBe(1);
+  });
+
   it("never separates a tool result from the assistant call that requested it", async () => {
     root = tmpRoot();
     const cfg: MemoryFilesConfig = {
@@ -96,6 +120,20 @@ describe("CompactionManager", () => {
       // whichever message starts the kept tail, it must not be a bare tool result
       expect(first?.role).not.toBe("tool");
     }
+  });
+
+  it("keeps the configured recent token budget even when it requires more than the message minimum", async () => {
+    root = tmpRoot();
+    const cfg: MemoryFilesConfig = {
+      ...DEFAULT_MEMORY_FILES_CONFIG,
+      compaction: { ...DEFAULT_MEMORY_FILES_CONFIG.compaction, keepRecent: 2, keepRecentTokens: 1_000, minMessages: 6 },
+    };
+    const { manager } = makeManager(root, cfg);
+    const messages = longMessages(30, 1_000);
+    const result = await manager.compact("s-token-tail", messages, { budgetChars: 5_000 });
+    expect(result.compacted).toBe(true);
+    expect(result.messages.filter((message) => message.role !== "system").length).toBeGreaterThan(2);
+    expect(result.messages.slice(-2).map((message) => message.content)).toEqual(messages.slice(-2).map((message) => message.content));
   });
 
   it("does not throw and returns the original messages if something internal goes wrong", async () => {

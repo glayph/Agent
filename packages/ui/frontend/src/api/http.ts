@@ -35,6 +35,35 @@ export class GatewayBackendError extends Error {
   }
 }
 
+function errorMessageFromBody(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined
+  const record = body as Record<string, unknown>
+  const nested = record.error && typeof record.error === "object"
+    ? record.error as Record<string, unknown>
+    : undefined
+  const candidate = typeof record.error === "string"
+    ? record.error
+    : typeof record.message === "string"
+      ? record.message
+      : typeof record.detail === "string"
+        ? record.detail
+        : typeof nested?.message === "string"
+          ? nested.message
+          : undefined
+  const trimmed = candidate?.trim()
+  return trimmed ? trimmed.slice(0, 500) : undefined
+}
+
+async function responseErrorMessage(response: Response): Promise<string> {
+  try {
+    const message = errorMessageFromBody(await response.clone().json())
+    if (message) return message
+  } catch {
+    // Do not surface non-JSON bodies such as an HTML server error page.
+  }
+  return `API Error (${response.status}): ${response.statusText || "Request failed"}`
+}
+
 /**
  * Same-origin fetch that sends cookies; redirects to launcher login on 401 JSON responses,
  * and displays error toasts on unexpected 5xx or 4xx responses when enabled.
@@ -70,16 +99,16 @@ export async function launcherFetch(
       ) {
         globalThis.location.assign("/launcher-login")
       }
-    } else if (showErrorToast && (res.status >= 400 || res.status >= 500)) {
-      toast.error(
-        `API Error (${res.status}): ${res.statusText || "Request failed"}`,
-      )
+    } else if (showErrorToast && !res.ok) {
+      toast.error(await responseErrorMessage(res))
     }
 
     return res
   } catch (error) {
     if (showErrorToast) {
-      toast.error("Network error: Please check your connection.")
+      toast.error(error instanceof GatewayBackendError
+        ? error.message
+        : "Network error: Please check your connection.")
     }
     throw error
   }

@@ -3,6 +3,7 @@ import * as fs from "fs";
 import type { MemoryPaths } from "./types.js";
 
 export const MEMORY_MD_FILE = "MEMORY.md";
+export const USER_MD_FILE = "USER.md";
 export const MEMORY_DIR_NAME = "memory";
 
 /**
@@ -30,6 +31,7 @@ export function resolveMemoryPaths(
   return {
     root,
     memoryMd: path.join(root, MEMORY_MD_FILE),
+    userMd: path.join(root, USER_MD_FILE),
     dailyDir,
     compactionDir: path.join(dailyDir, "compactions"),
   };
@@ -77,7 +79,7 @@ export function relFromRoot(paths: MemoryPaths, absolute: string): string {
  */
 function isMemoryFileLexical(paths: MemoryPaths, absolute: string): boolean {
   const resolved = path.resolve(absolute);
-  if (resolved === paths.memoryMd) return true;
+  if (resolved === paths.memoryMd || resolved === paths.userMd) return true;
   const rel = path.relative(paths.dailyDir, resolved);
   return !!rel && !rel.startsWith("..") && !path.isAbsolute(rel) && resolved.toLowerCase().endsWith(".md");
 }

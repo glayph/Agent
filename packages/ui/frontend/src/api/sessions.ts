@@ -27,7 +27,7 @@ export interface SessionDetail {
     role: "user" | "assistant"
     content: string
     created_at?: string
-    kind?: "normal" | "thought" | "tool_calls"
+    kind?: "normal" | "thought" | "tool_calls" | "action_update" | "error"
     run_id?: string
     thought_category?:
       "Plan" | "Action" | "Verification" | "Progress" | "Decision" | "Thought"

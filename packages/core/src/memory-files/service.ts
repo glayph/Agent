@@ -31,6 +31,11 @@ export interface SessionSource {
   }>;
 }
 
+export type MemorySearchBackend = (
+  query: string,
+  limit: number,
+) => Promise<SearchHit[]>;
+
 const MAX_NOTE_CHARS = 2_000;
 
 function toTurn(m: ChatMessage): TurnLike {
@@ -68,6 +73,8 @@ export class FileMemoryService {
   private readonly paths: MemoryPaths;
   private readonly summarized = new Map<string, string>();
   private readonly swept = new Map<string, number>();
+  private searchBackend?: MemorySearchBackend;
+  private writeObserver?: (relPath: string, provenance: "owner" | "agent") => void;
   private sweeper?: NodeJS.Timeout;
   private sweepSource?: SessionSource;
 
@@ -109,7 +116,7 @@ export class FileMemoryService {
   // ---- prompt context ----------------------------------------------------
 
   /** Memory block for the system prompt. Never throws; "" when there is nothing. */
-  async buildContextBlock(opts: { compact?: boolean } = {}): Promise<string> {
+  async buildContextBlock(opts: { compact?: boolean; trustedUser?: boolean; trustedMemory?: boolean } = {}): Promise<string> {
     try {
       return await this.contextBuilder.build(opts);
     } catch (err) {
@@ -121,7 +128,17 @@ export class FileMemoryService {
   // ---- tools -------------------------------------------------------------
 
   search(query: string, limit = 5): Promise<SearchHit[]> {
-    return this.searchIndex.search(query, limit);
+    return this.searchBackend
+      ? this.searchBackend(query, limit)
+      : this.searchIndex.search(query, limit);
+  }
+
+  setSearchBackend(backend: MemorySearchBackend | undefined): void {
+    this.searchBackend = backend;
+  }
+
+  setWriteObserver(observer: ((relPath: string, provenance: "owner" | "agent") => void) | undefined): void {
+    this.writeObserver = observer;
   }
 
   get(relPath: string, from?: number, lines?: number): Promise<GetResult> {
@@ -131,16 +148,26 @@ export class FileMemoryService {
   /** Explicit "remember this" — awaited because it is the tool's own result. */
   async note(
     text: string,
-    scope: "long_term" | "daily",
+    scope: "long_term" | "daily" | "user",
+    supersedes?: string,
   ): Promise<{ path: string; duplicate: boolean }> {
     const clean = text.trim().slice(0, MAX_NOTE_CHARS);
     if (!clean) throw new Error("text is empty");
-    const op =
-      scope === "daily"
-        ? this.store.planDailyNote(clean, "agent")
+    if (scope === "user" && supersedes) {
+      await this.store.supersedeUserNote(clean, supersedes);
+      const relPath = relFromRoot(this.paths, this.paths.userMd);
+      this.writeObserver?.(relPath, "owner");
+      return { path: relPath, duplicate: false };
+    }
+    const op = scope === "daily"
+      ? this.store.planDailyNote(clean, "agent")
+      : scope === "user"
+        ? this.store.planUserNote(clean)
         : this.store.planLongTermNote(clean);
     const written = await executeOp(op);
-    return { path: relFromRoot(this.paths, op.path), duplicate: written === null };
+    const relPath = relFromRoot(this.paths, op.path);
+    this.writeObserver?.(relPath, scope === "user" ? "owner" : "agent");
+    return { path: relPath, duplicate: written === null };
   }
 
   // ---- background work ---------------------------------------------------

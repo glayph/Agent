@@ -40,6 +40,9 @@ function parseAssistantMessageKind(
   if (kind === "action_update") {
     return "action_update"
   }
+  if (kind === "error") {
+    return "error"
+  }
   if (kind === "tool_calls" || toolCalls) {
     return "tool_calls"
   }

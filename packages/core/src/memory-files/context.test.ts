@@ -46,6 +46,31 @@ describe("MemoryContextBuilder", () => {
     expect(block).toContain("memory_search");
   });
 
+  it("loads USER.md directives before durable memory", async () => {
+    root = tmpRoot();
+    store = new MemoryFileStore(resolveMemoryPaths(root));
+    await executeOp(store.planUserNote("Prefer replies in Bengali."));
+    await executeOp(store.planLongTermNote("The project uses SQLite."));
+    const block = await new MemoryContextBuilder(store, () => DEFAULT_MEMORY_FILES_CONFIG).build();
+    expect(block).toContain("User profile (USER.md)");
+    expect(block).toContain("Prefer replies in Bengali.");
+    expect(block).toContain("The project uses SQLite.");
+    expect(block.indexOf("User profile")).toBeLessThan(block.indexOf("Long-term memory"));
+  });
+
+  it("omits bootstrap files when their provenance is not trusted", async () => {
+    root = tmpRoot();
+    store = new MemoryFileStore(resolveMemoryPaths(root));
+    await executeOp(store.planUserNote("Private preference"));
+    await executeOp(store.planLongTermNote("Unreviewed legacy fact"));
+    const block = await new MemoryContextBuilder(store, () => DEFAULT_MEMORY_FILES_CONFIG).build({
+      trustedUser: false,
+      trustedMemory: false,
+    });
+    expect(block).not.toContain("Private preference");
+    expect(block).not.toContain("Unreviewed legacy fact");
+  });
+
   it("truncates MEMORY.md in the prompt copy without touching the file on disk", async () => {
     root = tmpRoot();
     store = new MemoryFileStore(resolveMemoryPaths(root));

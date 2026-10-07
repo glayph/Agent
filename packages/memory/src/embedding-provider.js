@@ -182,6 +182,53 @@ class NoopEmbeddingProvider {
   }
 }
 
+/** Explicitly configured remote embeddings; never selected by default. */
+class OpenAICompatibleEmbeddingProvider {
+  constructor(options = null) {
+    const opts = options || {};
+    this.apiBase = String(opts.apiBase || process.env.MIKI_EMBEDDING_API_BASE || 'https://api.openai.com/v1').replace(/\/$/, '');
+    this.apiKey = String(opts.apiKey || process.env.MIKI_EMBEDDING_API_KEY || '');
+    this.model = String(opts.model || process.env.MIKI_EMBEDDING_MODEL || 'text-embedding-3-small');
+    this.name = 'openai-compatible';
+    this.dimensions = Number(opts.dimensions || process.env.MIKI_EMBEDDING_DIMS) || 1536;
+  }
+
+  async embed(text) {
+    const [vector] = await this.embedBatch([text]);
+    return vector;
+  }
+
+  async embedBatch(texts) {
+    if (!this.apiKey && !/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::|\/)/i.test(this.apiBase))
+      throw new Error('MIKI_EMBEDDING_API_KEY is required for the configured remote embedding provider.');
+    if (!this.model) throw new Error('MIKI_EMBEDDING_MODEL is required.');
+    const response = await fetch(`${this.apiBase}/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model: this.model, input: texts }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = String(body?.error?.message || `Embedding provider returned HTTP ${response.status}`);
+      throw new Error(message.slice(0, 300));
+    }
+    const data = Array.isArray(body?.data) ? body.data : [];
+    const ordered = [...data].sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0));
+    if (ordered.length !== texts.length) throw new Error('Embedding provider returned an unexpected vector count.');
+    return ordered.map((item) => {
+      const values = item?.embedding;
+      if (!Array.isArray(values) || values.length === 0 || values.some((value) => !Number.isFinite(value)))
+        throw new Error('Embedding provider returned an invalid vector.');
+      this.dimensions = values.length;
+      return Float32Array.from(values);
+    });
+  }
+}
+
 /**
  * Cosine similarity between two equal-length vectors.
  * @param {ArrayLike<number>} a
@@ -203,12 +250,11 @@ function cosineSimilarity(a, b) {
 }
 
 /**
- * Resolve provider from options or env.
- * MIKI_EMBEDDING_PROVIDER=hash|noop (default hash).
- * Future: xenova / openai-compatible local servers.
+ * Resolve provider from options or env. Default remains offline hash and is
+ * explicitly non-semantic. Remote calls require MIKI_EMBEDDING_PROVIDER=openai-compatible.
  *
  * @param {{ provider?: string, dimensions?: number } | null} [options]
- * @returns {HashEmbeddingProvider|NoopEmbeddingProvider|OnnxEmbeddingProvider}
+ * @returns {HashEmbeddingProvider|NoopEmbeddingProvider|OnnxEmbeddingProvider|OpenAICompatibleEmbeddingProvider}
  */
 function createEmbeddingProvider(options = null) {
   const opts = options || {};
@@ -223,6 +269,9 @@ function createEmbeddingProvider(options = null) {
       dimensions,
     });
   }
+  if (name === 'openai' || name === 'openai-compatible' || name === 'remote') {
+    return new OpenAICompatibleEmbeddingProvider(opts);
+  }
   // Default offline foundation. Real semantic models plug in here later.
   return new HashEmbeddingProvider(dimensions);
 }
@@ -231,6 +280,7 @@ module.exports = {
   HashEmbeddingProvider,
   NoopEmbeddingProvider,
   OnnxEmbeddingProvider,
+  OpenAICompatibleEmbeddingProvider,
   createEmbeddingProvider,
   cosineSimilarity,
 };

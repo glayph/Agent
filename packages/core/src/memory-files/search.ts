@@ -90,7 +90,7 @@ export class MemorySearchIndex {
       if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) continue;
       try {
         const content = await fs.promises.readFile(info.abs, "utf-8");
-        const boost = info.rel === "MEMORY.md" ? 1.25 : 1;
+        const boost = info.rel === "MEMORY.md" || info.rel === "USER.md" ? 1.25 : 1;
         this.files.set(info.abs, {
           mtimeMs: info.mtimeMs,
           size: info.size,

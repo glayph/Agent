@@ -37,6 +37,7 @@
     "runtime:24-7": "node scripts/miki-24-7.mjs",
     "runtime:24-7:check": "node scripts/miki-24-7.mjs --check",
     "test:supervisor": "node scripts/miki-24-7.integration.test.mjs",
+    "test:gateway": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.config.cjs --runInBand --runTestsByPath packages/gateway/src/memory-index.test.ts packages/gateway/src/async-route.test.ts packages/gateway/src/error-middleware.test.ts && vitest run --root . packages/gateway/src/restart-policy.test.ts",
     "soak": "node scripts/soak-agent.mjs",
     "test": "npm run test --workspaces --if-present",
     "verify": "node scripts/run-verify.mjs",

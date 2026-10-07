@@ -2,7 +2,8 @@ import type { MemoryFilesConfig, SummarizerMode } from "./types.js";
 
 export const DEFAULT_MEMORY_FILES_CONFIG: MemoryFilesConfig = {
   enabled: true,
-  bootstrapMaxChars: 6_000,
+  bootstrapMaxChars: 10_000,
+  userMdMaxChars: 4_000,
   memoryMdMaxChars: 3_500,
   recentDays: 2,
   indexMaxEntries: 6,
@@ -17,6 +18,7 @@ export const DEFAULT_MEMORY_FILES_CONFIG: MemoryFilesConfig = {
     triggerPercent: 75,
     minMessages: 8,
     keepRecent: 6,
+    keepRecentTokens: 20_000,
     maxSummaryChars: 3_000,
     flushEnabled: true,
     flushMarginPercent: 10,
@@ -78,6 +80,12 @@ export function resolveMemoryFilesConfig(
       500,
       50_000,
     ),
+    userMdMaxChars: bounded(
+      raw?.["user_md_max_chars"],
+      d.userMdMaxChars,
+      200,
+      4_000,
+    ),
     memoryMdMaxChars: bounded(
       raw?.["memory_md_max_chars"],
       d.memoryMdMaxChars,
@@ -127,6 +135,7 @@ export function resolveMemoryFilesConfig(
         200,
       ),
       keepRecent: bounded(c?.["keep_recent"], d.compaction.keepRecent, 2, 100),
+      keepRecentTokens: bounded(c?.["keep_recent_tokens"], d.compaction.keepRecentTokens, 1_000, 200_000),
       maxSummaryChars: bounded(
         c?.["max_summary_chars"],
         d.compaction.maxSummaryChars,

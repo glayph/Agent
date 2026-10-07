@@ -49,10 +49,47 @@ export const UserMessage = memo(function UserMessage({
   )
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
+  const actionBar = (
+    <MessageActionBar
+      content={content}
+      align="end"
+      placement="inline"
+      copyLabel={t("chat.copyMessage")}
+      copiedLabel={t("chat.copiedLabel")}
+      editLabel={t("chat.actions.edit", { defaultValue: "Edit message" })}
+      retryLabel={t("chat.actions.retry", { defaultValue: "Retry" })}
+      retryDisabledLabel={t("chat.actions.retryUnavailable", {
+        defaultValue: "Connect chat before retrying",
+      })}
+      deleteLabel={t("chat.actions.delete", { defaultValue: "Delete message" })}
+      deleteConfirmTitle={t("chat.actions.deleteConfirmTitle", {
+        defaultValue: "Delete message?",
+      })}
+      deleteConfirmDescription={t("chat.actions.deleteConfirmDescription", {
+        defaultValue: "This message will be removed from the conversation.",
+      })}
+      deleteConfirmCancelLabel={t("common.cancel")}
+      deleteConfirmActionLabel={t("chat.actions.delete", {
+        defaultValue: "Delete message",
+      })}
+      forkLabel={t("chat.actions.fork", { defaultValue: "Fork from here" })}
+      canRetry={canRetry}
+      className="self-end"
+      visible={selected}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onFork={onFork}
+      onRetry={canRetry ? onRetry : undefined}
+    />
+  )
   return (
     <div className="group/message flex w-full flex-col items-end gap-0.5">
       {imageAttachments.length > 0 && (
-        <div className="flex max-w-[var(--chat-user-message-max)] flex-wrap justify-end gap-1.5">
+        <div
+          data-chat-bubble={!hasText ? "user" : undefined}
+          onClick={!hasText ? onSelect : undefined}
+          className="flex max-w-[var(--chat-user-message-max)] flex-wrap justify-end gap-1.5"
+        >
           {imageAttachments.map((attachment, index) => (
             <img
               key={`${attachment.url}-${index}`}
@@ -69,7 +106,11 @@ export const UserMessage = memo(function UserMessage({
       )}
 
       {fileAttachments.length > 0 && (
-        <div className="flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1.5">
+        <div
+          data-chat-bubble={!hasText ? "user" : undefined}
+          onClick={!hasText ? onSelect : undefined}
+          className="flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1.5"
+        >
           {fileAttachments.map((attachment, index) => (
             <AttachmentCard
               key={`${attachment.url}-${index}`}
@@ -111,49 +152,10 @@ export const UserMessage = memo(function UserMessage({
             </span>
           )}
         </div>
-        <MessageActionBar
-            content={content}
-            align="end"
-            placement="inline"
-            copyLabel={t("chat.copyMessage")}
-            copiedLabel={t("chat.copiedLabel")}
-            editLabel={t("chat.actions.edit", {
-              defaultValue: "Edit message",
-            })}
-            retryLabel={t("chat.actions.retry", { defaultValue: "Retry" })}
-            retryDisabledLabel={t("chat.actions.retryUnavailable", {
-              defaultValue: "Connect chat before retrying",
-            })}
-            deleteLabel={t("chat.actions.delete", {
-              defaultValue: "Delete message",
-            })}
-            deleteConfirmTitle={t("chat.actions.deleteConfirmTitle", {
-              defaultValue: "Delete message?",
-            })}
-            deleteConfirmDescription={t(
-              "chat.actions.deleteConfirmDescription",
-              {
-                defaultValue:
-                  "This message will be removed from the conversation.",
-              },
-            )}
-            deleteConfirmCancelLabel={t("common.cancel")}
-            deleteConfirmActionLabel={t("chat.actions.delete", {
-              defaultValue: "Delete message",
-            })}
-            forkLabel={t("chat.actions.fork", {
-              defaultValue: "Fork from here",
-            })}
-            canRetry={canRetry}
-            className="self-end"
-            visible={selected}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onFork={onFork}
-            onRetry={canRetry ? onRetry : undefined}
-        />
+        {actionBar}
         </>
       )}
+      {!hasText && attachments.length > 0 && actionBar}
     </div>
   )
 })

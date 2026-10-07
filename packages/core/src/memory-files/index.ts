@@ -3,6 +3,7 @@ export { DEFAULT_MEMORY_FILES_CONFIG, resolveMemoryFilesConfig } from "./config.
 export {
   resolveMemoryPaths,
   MEMORY_MD_FILE,
+  USER_MD_FILE,
   MEMORY_DIR_NAME,
   isMemoryFile,
   slugify,
@@ -24,6 +25,25 @@ export type { MemoryJob } from "./writer.js";
 export { CompactionManager, SUMMARY_SENTINEL } from "./compaction.js";
 export { MemoryContextBuilder } from "./context.js";
 export { MemorySearchIndex, readMemoryRange, tokenize } from "./search.js";
+export {
+  chunkMarkdown,
+  tokenizeSearchText,
+  scoreBm25,
+  retrieveRelevantTurns,
+  scoreCosine,
+  fuseRankedPaths,
+  applyRankingAdjustments,
+  diversifyWithMmr,
+} from "./hybrid-search.js";
+export type {
+  MarkdownChunk,
+  SearchDocument,
+  PathScore,
+  FusedPathScore,
+  FusionOptions,
+  RankingOptions,
+} from "./hybrid-search.js";
 export { FileMemoryService } from "./service.js";
-export type { FileMemoryServiceOptions, SessionSource } from "./service.js";
+export type { FileMemoryServiceOptions, MemorySearchBackend, SessionSource } from "./service.js";
+export type { SearchHit } from "./search.js";
 export { memoryToolDefinitions, runMemoryTool, MEMORY_TOOL_NAMES } from "./tools.js";

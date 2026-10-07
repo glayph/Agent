@@ -38,6 +38,7 @@ import { BrowserTool, ComputerAgent } from "@miki/core/plugins"
 import { createGoalTools, GoalStore } from "@miki/core/api/goals"
 import { AdaptiveMessageCoordinator, planAdaptiveOutput, type AdaptiveMessagingConfig } from "@miki/core"
 import { getLifecycleBus } from "@miki/core/hooks"
+import type { FileMemoryService } from "@miki/core/memory-files"
 
 type Json = Record<string, unknown>
 
@@ -55,6 +56,9 @@ export interface AgentRuntimeDeps {
   recordFileRun(entry: { file: string; args: string[]; status: string; exitCode: number | null; durationMs: number; source: string }): void
   /** Skills the agent can discover, read, run, install and delete. */
   skills: { store: SkillStore; registry: SkillRegistryClient }
+  /** Canonical Markdown memory, indexed by the gateway's SQLite adapter. */
+  fileMemory?: FileMemoryService
+  memoryContextPolicy?: () => Promise<{ user: boolean; memory: boolean }>
   externalRunActive?: (runId: string) => boolean
   externalCancelRun?: (runId: string) => boolean
   log?: (message: string, details?: Json) => void
@@ -139,16 +143,45 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   // ---- tools --------------------------------------------------------------
   const memoryPort = {
-    search(query: string, limit: number) {
+    async search(query: string, limit: number) {
+      const fileHits = deps.fileMemory?.isEnabled()
+        ? await deps.fileMemory.search(query, limit)
+        : []
       const needle = `%${query.replace(/[%_\\]/g, (c) => `\\${c}`).toLowerCase()}%`
       const rows = db
         .prepare(
           "SELECT id,content,region FROM memory_chunks WHERE lower(content) LIKE ? ESCAPE '\\' OR lower(summary) LIKE ? ESCAPE '\\' ORDER BY importance DESC, updated_at DESC LIMIT ?",
         )
         .all(needle, needle, limit) as Array<{ id: string; content: string; region: string }>
-      return rows.map((row) => ({ id: row.id, text: row.content, region: row.region }))
+      const fileResults = fileHits.map((hit) => ({
+        id: `file:${hit.path}:${hit.startLine}`,
+        text: hit.snippet,
+        region: hit.path,
+        score: hit.score,
+      }))
+      const legacyResults = rows.map((row) => ({ id: row.id, text: row.content, region: row.region }))
+      const seen = new Set<string>()
+      return [...fileResults, ...legacyResults].filter((hit) => {
+        const key = hit.text.trim().toLocaleLowerCase()
+        if (!key || seen.has(key)) return false
+        seen.add(key)
+        return true
+      }).slice(0, limit)
     },
-    add(entry: { content: string; summary?: string; region?: string }) {
+    async add(entry: { content: string; summary?: string; region?: string; supersedes?: string }) {
+      if (entry.region === "untrusted") {
+        const id = randomUUID()
+        const stamp = now()
+        db.prepare(
+          "INSERT INTO memory_chunks(id,region,content,summary,provenance,confidence,importance,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ).run(id, "untrusted", entry.content, entry.summary || entry.content.slice(0, 160), "untrusted", 0.5, 0.25, stamp, stamp)
+        return { id }
+      }
+      if (deps.fileMemory?.isEnabled()) {
+        const scope = entry.region === "daily" ? "daily" : entry.region === "user" ? "user" : "long_term"
+        const saved = await deps.fileMemory.note(entry.content, scope, entry.supersedes)
+        return { id: `file:${saved.path}` }
+      }
       const id = randomUUID()
       const stamp = now()
       db.prepare(
@@ -469,31 +502,44 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       const identity = buildIdentityContext({
         groups: Object.keys(TOOL_GROUPS).map((key) => ({ key, enabled: state[key] === true })),
         persona,
-        identityDirs: [path.join(deps.workspaceRoot, "config", "identity"), path.join(deps.workspaceRoot, "identity")],
+        identityDirs: [path.join(deps.workspaceRoot, "identity"), path.join(deps.workspaceRoot, "config", "identity")],
       })
       return `${DEFAULT_SYSTEM_PROMPT}\n\n${identity}`
     },
-    // Advertise only the skills permitted by the active turn profile.
+    // Inject curated memory every turn and advertise only the skills permitted
+    // by the active turn profile. Episodic notes remain retrieval-only.
     contextProvider: async () => {
-      if (!registry.has("skill_read")) return undefined;
+      const blocks: string[] = []
+      if (deps.fileMemory?.isEnabled()) {
+        const trust = await deps.memoryContextPolicy?.()
+        const memory = await deps.fileMemory.buildContextBlock({
+          ...(trust ? { trustedUser: trust.user, trustedMemory: trust.memory } : {}),
+        })
+        if (memory) blocks.push(memory)
+      }
+      if (!registry.has("skill_read")) return blocks.join("\n\n") || undefined;
       const profile = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile;
       if (profile?.enabled === true) {
         const skills = profile.skills || {};
         const mode = String(skills.mode || "default");
-        if (mode === "off") return undefined;
+        if (mode === "off") return blocks.join("\n\n") || undefined;
         if (mode === "custom") {
           const allow = new Set(Array.isArray(skills.allow) ? skills.allow.filter((value: unknown): value is string => typeof value === "string").map((value: string) => value.trim()).filter(Boolean) : []);
           const records = (await deps.skills.store.list()).filter((record) => allow.has(record.name));
-          if (!records.length) return undefined;
-          const lines = records.map((skill) => `- ${skill.name}: ${skill.description.replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
-          return [
-            "Installed skills enabled for this turn:",
-            "Only the following skills are permitted. Call skill_read with one of these names before following its instructions.",
-            lines,
-          ].join("\n");
+          if (records.length) {
+            const lines = records.map((skill) => `- ${skill.name}: ${skill.description.replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
+            blocks.push([
+              "Installed skills enabled for this turn:",
+              "Only the following skills are permitted. Call skill_read with one of these names before following its instructions.",
+              lines,
+            ].join("\n"));
+          }
+          return blocks.join("\n\n") || undefined;
         }
       }
-      return buildSkillsContext(deps.skills.store);
+      const skillsContext = await buildSkillsContext(deps.skills.store)
+      if (skillsContext) blocks.push(skillsContext)
+      return blocks.join("\n\n") || undefined;
     },
     logger: (message, details) => deps.log?.(message, details as Json),
     maxTurns: () => Math.max(1, resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>)),

@@ -10,8 +10,10 @@ import {
   disconnectChat,
   editChatMessage,
   hydrateActiveSession,
+  retryChatMessage,
   sendChatMessage,
   setWebSocketFactory,
+  switchChatSession,
 } from "./controller"
 import { SINGLE_CHAT_SESSION_ID, writeStoredSessionId } from "./state"
 
@@ -56,6 +58,10 @@ class MockWebSocket {
   simulateOpen() {
     this.readyState = 1 // OPEN
     if (this.onopen) this.onopen()
+  }
+
+  simulateMessage(message: Record<string, unknown>) {
+    this.onmessage?.({ data: JSON.stringify(message) })
   }
 }
 
@@ -313,6 +319,7 @@ describe("chat controller WebSocket dependency injection", () => {
     expect(messageFrame).toBeDefined()
     expect(messageFrame).toMatchObject({
       type: "message.send",
+      id: expect.stringMatching(/^msg-/),
       payload: {
         content: "Hello from the test",
         media: [],
@@ -326,6 +333,140 @@ describe("chat controller WebSocket dependency injection", () => {
       ),
     ).toHaveLength(1)
     expect(getChatState().isTyping).toBe(true)
+    expect(getChatState().messages.at(-1)?.id).toBe(messageFrame.id)
+  })
+
+  it("retries with the original prompt attachments", async () => {
+    updateChatStore({
+      hasHydratedActiveSession: true,
+      messages: [
+        {
+          id: "user-prompt",
+          role: "user",
+          content: "Inspect this file",
+          timestamp: 1,
+          attachments: [
+            {
+              type: "file",
+              url: "/miki/media/report.pdf",
+              filename: "report.pdf",
+              contentType: "application/pdf",
+            },
+          ],
+        },
+        {
+          id: "assistant-failed",
+          role: "assistant",
+          content: "The run failed.",
+          kind: "error",
+          timestamp: 2,
+        },
+      ],
+    })
+    await connectChat()
+    createdSockets[0].simulateOpen()
+
+    expect(await retryChatMessage("assistant-failed")).toBe(true)
+
+    const retryFrame = createdSockets[0].sentData
+      .map((data) => JSON.parse(data))
+      .find((frame) => frame.type === "message.retry")
+    expect(retryFrame).toMatchObject({
+      payload: {
+        message_id: "assistant-failed",
+        attachments: [
+          {
+            type: "file",
+            url: "/miki/media/report.pdf",
+            filename: "report.pdf",
+            content_type: "application/pdf",
+          },
+        ],
+      },
+    })
+  })
+
+  it("clears run-specific state when switching sessions", async () => {
+    const store = getDefaultStore()
+    store.set(gatewayAtom, {
+      status: "stopped",
+      canStart: true,
+      restartRequired: false,
+      pendingRestartFields: [],
+    })
+    mockedGetSessionHistory.mockResolvedValue({
+      id: "session-next",
+      messages: [],
+      summary: "",
+      created: "2026-08-25T00:00:00.000Z",
+      updated: "2026-08-25T00:00:00.000Z",
+    })
+    updateChatStore({
+      activeRunId: "run-old",
+      runningRunIds: ["run-old"],
+      recentRunIds: ["run-old"],
+      activeRunModel: "provider/old-model",
+      activeRunProvider: "provider",
+      runStatus: "running",
+      runError: "old failure",
+      deliveryOutcome: {
+        runId: "run-old",
+        status: "failed",
+        artifactRefs: [],
+        warnings: [],
+        correlationId: "run-old",
+      },
+      isTyping: true,
+    })
+
+    await switchChatSession("session-next")
+
+    expect(getChatState()).toMatchObject({
+      activeSessionId: "session-next",
+      messages: [],
+      isTyping: false,
+      activeRunId: undefined,
+      runningRunIds: [],
+      recentRunIds: [],
+      activeRunModel: undefined,
+      activeRunProvider: undefined,
+      runStatus: undefined,
+      runError: undefined,
+      deliveryOutcome: undefined,
+    })
+
+    mockedGetSessionHistory.mockResolvedValue({
+      id: "session-1",
+      messages: [],
+      summary: "",
+      created: "2026-08-25T00:00:00.000Z",
+      updated: "2026-08-25T00:00:00.000Z",
+    })
+    await switchChatSession("session-1")
+  })
+
+  it("clears the completed run from state when a terminal stream_done arrives", async () => {
+    updateChatStore({ hasHydratedActiveSession: true })
+    await connectChat()
+    createdSockets[0].simulateOpen()
+    updateChatStore({
+      activeRunId: "run-cancelled",
+      runningRunIds: ["run-cancelled"],
+      runStatus: "running",
+      isTyping: true,
+    })
+
+    createdSockets[0].simulateMessage({
+      type: "stream_done",
+      session_id: getChatState().activeSessionId,
+      payload: { run_id: "run-cancelled", status: "cancelled" },
+    })
+
+    expect(getChatState()).toMatchObject({
+      runningRunIds: [],
+      isTyping: false,
+      runStatus: "cancelled",
+    })
   })
 
   it("rolls back the optimistic message when socket.send throws", async () => {

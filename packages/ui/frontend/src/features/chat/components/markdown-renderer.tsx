@@ -11,6 +11,7 @@ const MARKDOWN_REHYPE_PLUGINS = [rehypeHighlight, rehypeSanitize]
 
 interface MarkdownRendererProps {
   content: string
+  streaming?: boolean
 }
 
 const markdownComponents: Components = {
@@ -66,11 +67,11 @@ const markdownComponents: Components = {
   },
 }
 
-export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export default function MarkdownRenderer({ content, streaming = false }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-      rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+      rehypePlugins={streaming ? [rehypeSanitize] : MARKDOWN_REHYPE_PLUGINS}
       components={markdownComponents}
     >
       {content}

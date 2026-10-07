@@ -21,6 +21,7 @@ import { SessionHistoryMenu } from "@/features/chat/components/session-history-m
 import { LiveActivityStrip } from "@/features/chat/components/live-activity-strip"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
 import { Composer } from "@/features/chat/components/workspace/composer"
+import { getRetryableMessageIds } from "@/features/chat/retryable"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
 import { WorkspaceHeader } from "@/features/chat/components/workspace/workspace-header"
 import { WorkspaceShell } from "@/features/chat/components/workspace/workspace-shell"
@@ -181,24 +182,6 @@ function resolveChatInputDisabledReason({
   }
 
   return null
-}
-
-function messageHasRetryPrompt(message: ChatMessage): boolean {
-  return (
-    (message.content.trim().length > 0 ||
-      Boolean(
-        message.attachments?.some(
-          (attachment) => attachment.type === "image" && attachment.url,
-        ),
-      ))
-  )
-}
-
-function getRetryableMessageIds(messages: ChatMessage[]): Set<string> {
-  const lastMessage = messages.at(-1)
-  return lastMessage && messageHasRetryPrompt(lastMessage)
-    ? new Set([lastMessage.id])
-    : new Set()
 }
 
 function normalizePreview(value: string): string {
