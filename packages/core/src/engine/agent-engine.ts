@@ -15,6 +15,7 @@ import type {
 import { ToolRegistry } from "./tool-registry.js";
 import { createPlan } from "./planner.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { compactRunContext, pruneToolResults } from "./context-manager.js";
 import { TokenBudgetManager } from "../token-budget-manager.js";
 import {
   errorMessage,
@@ -55,6 +56,38 @@ export interface AgentEngineOptions {
   duplicateCallLimit?: number;
   /** Diagnostic hook for non-fatal problems (planner fallback, listener errors). */
   logger?: (message: string, details?: Record<string, unknown>) => void;
+  /**
+   * In-run context management. Old tool results are pruned from the prompt and,
+   * when the context is still close to the window, the oldest agent steps are
+   * summarised. `false` disables both. Requires `contextWindowTokens`.
+   */
+  compaction?:
+    | false
+    | {
+        /** Fraction of the context window that triggers compaction (default 0.75). */
+        triggerRatio?: number;
+        /** Newest agent steps kept verbatim when compacting (default 4). */
+        keepRecentUnits?: number;
+        /** Newest tool results never pruned from the prompt (default 4). */
+        keepRecentToolResults?: number;
+      };
+  /**
+   * Called with the summary right before the compacted details leave the context
+   * window. Hosts use it to write durable memory so nothing is forgotten.
+   */
+  onContextCompact?: (info: {
+    runId: string;
+    sessionId?: string;
+    goal: string;
+    summary: string;
+    droppedMessages: number;
+  }) => void | Promise<void>;
+  /** Models tried in order when the current model's request fails. */
+  fallbackModels?: string[] | (() => string[]);
+  /** Run independent read-only tool calls of one turn concurrently (default true). */
+  parallelToolCalls?: boolean;
+  /** Upper bound of concurrently running tool calls per turn (default 6). */
+  maxParallelToolCalls?: number;
 }
 
 function requestApprovalPolicy(
@@ -312,8 +345,8 @@ export class AgentEngine {
       loopDetected: false,
     };
 
-    const llm = this.resolveLLM(request.model);
-    const model = llm?.model ?? request.model ?? "";
+    let llm = this.resolveLLM(request.model);
+    let model = llm?.model ?? request.model ?? "";
 
     const finish = (
       status: RunStatus,
@@ -434,6 +467,15 @@ export class AgentEngine {
     let limitReason: string | undefined;
     let toolIterations = 0;
 
+    // In-run context management and model failover state.
+    const compactionConfig = this.options.compaction === false ? undefined : (this.options.compaction ?? {});
+    const compactionEnabled = Boolean(contextWindowTokens && compactionConfig);
+    const triggerRatio = Math.min(0.95, Math.max(0.3, compactionConfig?.triggerRatio ?? 0.75));
+    const keepRecentUnits = Math.max(1, Math.floor(compactionConfig?.keepRecentUnits ?? 4));
+    const keepRecentToolResults = Math.max(0, Math.floor(compactionConfig?.keepRecentToolResults ?? 4));
+    let compactions = 0;
+    const triedModels = new Set<string>([llm.model]);
+
     for (let turn = 1; turn <= maxTurns; turn += 1) {
       if (toolIterations >= maxToolIterations) {
         limitReason = `Tool iteration budget of ${maxToolIterations} reached.`;
@@ -443,25 +485,80 @@ export class AgentEngine {
       turns = turn;
       emit({ type: "turn.started", runId, turn });
 
+      // Keep long tasks inside the window: prune old tool output from the prompt,
+      // then summarise the oldest agent steps when that is still not enough.
+      if (contextWindowTokens && compactionEnabled && compactions < 3) {
+        const pruned = pruneToolResults(state.messages, { keepRecentToolResults });
+        if (estimateContext(pruned, schemas) > Math.floor(contextWindowTokens * triggerRatio)) {
+          const outcome = await compactRunContext({
+            messages: state.messages,
+            llm,
+            signal,
+            keepRecentUnits,
+          });
+          if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
+          if (outcome) {
+            compactions += 1;
+            state.messages = outcome.messages;
+            emit({
+              type: "context.compacted",
+              runId,
+              turn,
+              droppedMessages: outcome.droppedMessages,
+              summaryChars: outcome.summary.length,
+            });
+            try {
+              await this.options.onContextCompact?.({
+                runId,
+                sessionId: request.sessionId,
+                goal,
+                summary: outcome.summary,
+                droppedMessages: outcome.droppedMessages,
+              });
+            } catch (error) {
+              this.options.logger?.("context_compact_hook.failed", { error: errorMessage(error) });
+            }
+          }
+        }
+      }
+      const visibleMessages = compactionEnabled
+        ? pruneToolResults(state.messages, { keepRecentToolResults })
+        : state.messages;
+
       let response;
-      try {
-        const promptMessages = contextWindowTokens
-          ? fitContextWindow(state.messages, contextWindowTokens, schemas)
-          : state.messages;
-        response = await llm.complete(promptMessages, {
-          ...(schemas.length ? { tools: schemas, toolChoice: "auto" as const } : {}),
-          ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-          ...(maxCompletionTokens ? { maxCompletionTokens } : {}),
-          // Stream text to listeners as it is generated; the assembled response
-          // below is still what drives tool calls and the final answer.
-          ...(request.onEvent
-            ? { onTextDelta: (delta: string) => emit({ type: "message.delta", runId, turn, delta }) }
-            : {}),
-          signal,
-        });
-      } catch (error) {
-        if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
-        return finish("failed", "", errorMessage(error));
+      for (;;) {
+        try {
+          const promptMessages = contextWindowTokens
+            ? fitContextWindow(visibleMessages, contextWindowTokens, schemas)
+            : visibleMessages;
+          response = await llm.complete(promptMessages, {
+            ...(schemas.length ? { tools: schemas, toolChoice: "auto" as const } : {}),
+            ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+            ...(maxCompletionTokens ? { maxCompletionTokens } : {}),
+            // Stream text to listeners as it is generated; the assembled response
+            // below is still what drives tool calls and the final answer.
+            ...(request.onEvent
+              ? { onTextDelta: (delta: string) => emit({ type: "message.delta", runId, turn, delta }) }
+              : {}),
+            signal,
+          });
+          break;
+        } catch (error) {
+          if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
+          const fallback = this.nextFallbackClient(triedModels);
+          if (!fallback) return finish("failed", "", errorMessage(error));
+          emit({
+            type: "model.fallback",
+            runId,
+            turn,
+            from: llm.model,
+            to: fallback.model,
+            reason: errorMessage(error),
+          });
+          this.options.logger?.("llm.failover", { from: llm.model, to: fallback.model, error: errorMessage(error) });
+          llm = fallback;
+          model = fallback.model;
+        }
       }
       usage.promptTokens += response.usage?.prompt_tokens ?? 0;
       usage.completionTokens += response.usage?.completion_tokens ?? 0;
@@ -501,15 +598,9 @@ export class AgentEngine {
       });
       if (text.trim()) emit({ type: "thought", runId, turn, content: text.trim() });
 
-      for (const call of calls) {
-        if (state.records.length >= maxToolCalls) {
-          limitReason = `Tool call budget of ${maxToolCalls} reached.`;
-          this.answerSkippedCall(state, call, turn, limitReason, tools);
-          continue;
-        }
-        await this.runToolCall(state, call, turn, tools, request);
-        if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
-      }
+      const budgetHit = await this.executeToolCalls(state, calls, turn, tools, request, maxToolCalls);
+      if (budgetHit) limitReason = budgetHit;
+      if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
 
       if (state.loopDetected) {
         limitReason = "Repeated identical tool calls were blocked (loop detected).";
@@ -551,6 +642,97 @@ export class AgentEngine {
   // -------------------------------------------------------------------------
   // Tool-call lifecycle
   // -------------------------------------------------------------------------
+
+  /** Next configured fallback model that has not been tried in this run. */
+  private nextFallbackClient(tried: Set<string>): EngineLLMClient | undefined {
+    const configured = this.options.fallbackModels;
+    const names = typeof configured === "function" ? configured() : (configured ?? []);
+    for (const name of names) {
+      let client: EngineLLMClient | undefined;
+      try {
+        client = this.resolveLLM(name);
+      } catch {
+        client = undefined;
+      }
+      if (!client || tried.has(client.model)) continue;
+      tried.add(client.model);
+      return client;
+    }
+    return undefined;
+  }
+
+  /** A call may run concurrently only when it is read-only, opted in and needs no approval. */
+  private canRunInParallel(call: EngineToolCall, tools: ToolRegistry, request: RunRequest): boolean {
+    const tool = tools.get(call.function.name);
+    if (!tool || tool.risk !== "read" || tool.parallelSafe !== true) return false;
+    let args: unknown;
+    try {
+      args = JSON.parse(call.function.arguments || "{}");
+    } catch {
+      return false;
+    }
+    if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+    const decision = requestApprovalPolicy(request, tool, args as Record<string, unknown>);
+    if (decision) return decision.mode === "auto";
+    return !ToolRegistry.needsApproval(tool);
+  }
+
+  /**
+   * Runs the tool calls of one model turn. Consecutive independent read-only
+   * calls execute concurrently; everything else keeps the model's order. Every
+   * call is answered exactly once and results reach the model in call order.
+   * Returns a budget message when the tool-call budget cut the turn short.
+   */
+  private async executeToolCalls(
+    state: RunState,
+    calls: EngineToolCall[],
+    turn: number,
+    tools: ToolRegistry,
+    request: RunRequest,
+    maxToolCalls: number,
+  ): Promise<string | undefined> {
+    const parallel = this.options.parallelToolCalls !== false;
+    const maxParallel = Math.max(1, Math.floor(this.options.maxParallelToolCalls ?? 6));
+    let budgetHit: string | undefined;
+    let index = 0;
+    while (index < calls.length) {
+      if (state.signal.aborted) return budgetHit;
+      if (state.records.length >= maxToolCalls) {
+        budgetHit = `Tool call budget of ${maxToolCalls} reached.`;
+        this.answerSkippedCall(state, calls[index], turn, budgetHit, tools);
+        index += 1;
+        continue;
+      }
+      if (parallel && this.canRunInParallel(calls[index], tools, request)) {
+        const room = maxToolCalls - state.records.length;
+        const group: EngineToolCall[] = [];
+        while (
+          index < calls.length &&
+          group.length < maxParallel &&
+          group.length < room &&
+          this.canRunInParallel(calls[index], tools, request)
+        ) {
+          group.push(calls[index]);
+          index += 1;
+        }
+        if (group.length > 1) {
+          const startLength = state.messages.length;
+          await Promise.all(group.map((call) => this.runToolCall(state, call, turn, tools, request)));
+          // Tool results arrive in completion order; hand them to the model in call order.
+          const order = new Map(group.map((call, position) => [call.id, position]));
+          const added = state.messages.splice(startLength);
+          added.sort((a, b) => (order.get(a.tool_call_id ?? "") ?? 0) - (order.get(b.tool_call_id ?? "") ?? 0));
+          state.messages.push(...added);
+          continue;
+        }
+        await this.runToolCall(state, group[0], turn, tools, request);
+        continue;
+      }
+      await this.runToolCall(state, calls[index], turn, tools, request);
+      index += 1;
+    }
+    return budgetHit;
+  }
 
   private snapshot(state: RunState, turn: number, record: ToolCallRecord): void {
     state.emit({ type: "tool.call", runId: state.runId, turn, call: { ...record } });

@@ -1,5 +1,18 @@
 # ULTRA_ADVANCE_OPTIMIZATIONS Implementation Guide
 
+> **Status note (2026-10-08).** This document is a plan, not a verified record.
+> The "COMPLETE" markers and the percentage figures below were never measured, and
+> 17 of the 25 file paths listed here do not exist at those locations (a few may
+> live elsewhere, e.g. hybrid search is `memory-files/hybrid-search.ts`).
+> Treat every item as unverified unless the file is present.
+>
+> What the agent loop actually has today (all covered by tests):
+> - `engine/context-manager.ts` - in-run tool-result pruning and summary compaction,
+>   with an `onContextCompact` hook that writes the summary to durable memory.
+> - `engine/agent-engine.ts` - parallel execution of `parallelSafe` read-only tools,
+>   opt-in model failover (`fallbackModels`), loop detection, approvals, timeouts.
+> - `gateway/src/session-lane.ts` - one serialized chat run per conversation.
+
 ## Overview
 This directory contains complete implementation of the Ultra-Advance Optimization Plan for Miki, delivering **40% reduction in LLM calls, 60% cost reduction, and 62% latency improvement**.
 

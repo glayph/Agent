@@ -152,6 +152,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_info",
       description: "Show type, size and modification time of a workspace file or folder.",
       risk: "read",
+      parallelSafe: true,
       parameters: { type: "object", required: ["path"], properties: { path: { type: "string" } }, additionalProperties: false },
       execute(input) {
         const abs = resolve(input.path);

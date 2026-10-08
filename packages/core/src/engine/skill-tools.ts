@@ -98,6 +98,7 @@ export function createSkillTools(options: SkillToolsOptions): EngineTool[] {
       description:
         "List installed skills (name, description, category). Optionally filter by a keyword query.",
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         properties: {
@@ -129,6 +130,7 @@ export function createSkillTools(options: SkillToolsOptions): EngineTool[] {
       description:
         "Load a skill's instructions (SKILL.md) so you can follow them, or read one supporting file from the skill folder with `file`. Returns the skill's file list and scripts.",
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         required: ["name"],
@@ -176,6 +178,7 @@ export function createSkillTools(options: SkillToolsOptions): EngineTool[] {
       description:
         'Search installed skills, and optionally the configured skill registries, by keywords. Use scope "registry" or "all" to find skills that are not installed yet.',
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         required: ["query"],

@@ -56,6 +56,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
       description:
         "List files and folders in a workspace directory. Paths are relative to the workspace root.",
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         properties: {
@@ -87,6 +88,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
       description:
         "Read a UTF-8 text file from the workspace. Large files are truncated; use offset to continue.",
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         required: ["path"],
@@ -126,6 +128,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
       description:
         "Case-insensitive text search across workspace files. Returns file, line number and the matching line.",
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         required: ["query"],
@@ -236,6 +239,7 @@ export function createMemoryTools(memory: MemoryPort): EngineTool[] {
       name: "memory_search",
       description: "Search the agent's long-term memory for notes relevant to a query.",
       risk: "read",
+      parallelSafe: true,
       parameters: {
         type: "object",
         required: ["query"],

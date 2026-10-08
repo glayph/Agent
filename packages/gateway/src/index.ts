@@ -1,4 +1,5 @@
 import express from "express"
+import { createKeyedLane } from "./session-lane.js"
 import http from "node:http"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -1235,6 +1236,8 @@ type ActiveRunState = {
   done: boolean
   expiresAt: number
 }
+// One serialized chat run per conversation (OpenClaw-style session lane).
+const chatLane = createKeyedLane()
 const activeRuns = new Map<string, ActiveRunState>()
 const STREAM_RESUME_GRACE_MS = 30_000
 
@@ -1353,6 +1356,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
   })
   ws.on("message", (raw) => {
+    let releaseChatLane: (() => void) | undefined
     void (async () => {
     let message: {
       type?: "authenticate" | "resume" | "message.send" | "message.retry" | "cancel_task" | string
@@ -1420,6 +1424,10 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     // effect on the next turn without requiring a gateway or websocket restart.
     const sessionScope = normalizeSessionScope((getAppConfig() as any)?.session?.dm_scope)
     const contextId = resolveSessionContextId(sessionScope, channelId, peerId)
+    // Wait for the previous run of this conversation: this message needs its
+    // persisted answer in the history, and runs must never interleave. Released
+    // in the .finally() below, so every early return frees the lane.
+    releaseChatLane = await chatLane.acquire(contextId)
     let content = String(message.payload?.content || "").trim()
     const rawAttachments = Array.isArray(message.payload?.attachments) ? message.payload.attachments : []
     let incomingAttachments = rawAttachments
@@ -1715,7 +1723,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       } catch (reportError) {
         appendGatewayLog(`Could not report WebSocket message failure: ${reportError instanceof Error ? reportError.message : String(reportError)}`)
       }
-    })
+    }).finally(() => releaseChatLane?.())
   })
 })
 

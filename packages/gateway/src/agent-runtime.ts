@@ -509,39 +509,67 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     // Inject curated memory every turn and advertise only the skills permitted
     // by the active turn profile. Episodic notes remain retrieval-only.
     contextProvider: async () => {
-      const blocks: string[] = []
-      if (deps.fileMemory?.isEnabled()) {
+      // Memory and the skills catalog are independent; build them concurrently so
+      // the first model call is not delayed by two sequential lookups.
+      const memoryBlock = async (): Promise<string | undefined> => {
+        if (!deps.fileMemory?.isEnabled()) return undefined
         const trust = await deps.memoryContextPolicy?.()
         const memory = await deps.fileMemory.buildContextBlock({
           ...(trust ? { trustedUser: trust.user, trustedMemory: trust.memory } : {}),
         })
-        if (memory) blocks.push(memory)
+        return memory || undefined
       }
-      if (!registry.has("skill_read")) return blocks.join("\n\n") || undefined;
-      const profile = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile;
-      if (profile?.enabled === true) {
-        const skills = profile.skills || {};
-        const mode = String(skills.mode || "default");
-        if (mode === "off") return blocks.join("\n\n") || undefined;
-        if (mode === "custom") {
-          const allow = new Set(Array.isArray(skills.allow) ? skills.allow.filter((value: unknown): value is string => typeof value === "string").map((value: string) => value.trim()).filter(Boolean) : []);
-          const records = (await deps.skills.store.list()).filter((record) => allow.has(record.name));
-          if (records.length) {
-            const lines = records.map((skill) => `- ${skill.name}: ${skill.description.replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
-            blocks.push([
+      const skillsBlock = async (): Promise<string | undefined> => {
+        if (!registry.has("skill_read")) return undefined
+        const profile = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile
+        if (profile?.enabled === true) {
+          const skills = profile.skills || {}
+          const mode = String(skills.mode || "default")
+          if (mode === "off") return undefined
+          if (mode === "custom") {
+            const allow = new Set(Array.isArray(skills.allow) ? skills.allow.filter((value: unknown): value is string => typeof value === "string").map((value: string) => value.trim()).filter(Boolean) : [])
+            const records = (await deps.skills.store.list()).filter((record) => allow.has(record.name))
+            if (!records.length) return undefined
+            const lines = records.map((skill) => `- ${skill.name}: ${skill.description.replace(/\s+/g, " ").slice(0, 140)}`).join("\n")
+            return [
               "Installed skills enabled for this turn:",
               "Only the following skills are permitted. Call skill_read with one of these names before following its instructions.",
               lines,
-            ].join("\n"));
+            ].join("\n")
           }
-          return blocks.join("\n\n") || undefined;
         }
+        return (await buildSkillsContext(deps.skills.store)) || undefined
       }
-      const skillsContext = await buildSkillsContext(deps.skills.store)
-      if (skillsContext) blocks.push(skillsContext)
-      return blocks.join("\n\n") || undefined;
+      const [memory, skills] = await Promise.all([memoryBlock(), skillsBlock()])
+      return [memory, skills].filter(Boolean).join("\n\n") || undefined
     },
     logger: (message, details) => deps.log?.(message, details as Json),
+    // In-run context management. Evaluated at the start of every run, so a config
+    // change applies to the next run without restarting the gateway.
+    get compaction() {
+      const defaults = ((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>
+      if (defaults.run_compaction === false) return false as const
+      const percent = Number(defaults.run_compaction_percent)
+      return Number.isFinite(percent) && percent > 0 ? { triggerRatio: percent / 100 } : {}
+    },
+    // Details leave the context window only after their summary is in durable,
+    // cross-session memory, so a long task is never forgotten mid-way or later.
+    onContextCompact: (info) => {
+      if (!deps.fileMemory?.isEnabled()) return
+      deps.fileMemory.noteDaily(
+        `Task in progress: ${oneLine(info.goal, 200)}\nProgress notes (${info.droppedMessages} earlier steps compacted):\n${info.summary}`,
+        "run",
+      )
+    },
+    // Opt-in only: switching models can send the conversation to a different
+    // provider, so failover happens only for models the user listed explicitly in
+    // agents.defaults.fallback_models.
+    fallbackModels: () => {
+      const defaults = ((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>
+      return Array.isArray(defaults.fallback_models)
+        ? defaults.fallback_models.filter((name: unknown): name is string => typeof name === "string" && name.trim().length > 0).map((name: string) => name.trim())
+        : []
+    },
     maxTurns: () => Math.max(1, resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>)),
     maxToolCalls: () => Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
     maxToolIterations: () => resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
@@ -552,6 +580,29 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       return !p || p.enabled !== true || String(p?.system_prompt?.mode || "default") !== "off";
     },
   })
+
+  const oneLine = (text: string, max: number): string => {
+    const flat = String(text ?? "").replace(/\s+/g, " ").trim()
+    return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
+  }
+
+  /**
+   * Durable writeback: memory is one system-wide store, not per chat session, so
+   * the outcome of every tool-using run is logged there. A later session — or a
+   * brand-new chat — can then find what was done and what is still open.
+   */
+  function recordRunToMemory(result: RunResult, source: string): void {
+    if (!deps.fileMemory?.isEnabled() || source === "api-test" || result.status === "cancelled") return
+    const used = result.toolCalls.filter((call) => call.status === "succeeded")
+    if (used.length === 0) return
+    const tools = [...new Set(used.map((call) => call.name))].slice(0, 8).join(", ")
+    const label = result.status === "completed" ? "Completed task" : "Unfinished task (stopped early)"
+    const outcome = oneLine(result.finalText || result.error || "", 500)
+    deps.fileMemory.noteDaily(
+      `${label}: ${oneLine(result.goal, 200)}\ntools: ${tools} (${used.length} calls)${outcome ? `\noutcome: ${outcome}` : ""}`,
+      "run",
+    )
+  }
 
   // ---- run tracking (cancel, one run per session) -------------------------
   const runs = new Map<string, { controller: AbortController; sessionId?: string; startedAt: string; source: string }>()
@@ -621,6 +672,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         signal: controller.signal,
         onEvent: input.onEvent,
       })
+      try {
+        recordRunToMemory(result, input.source)
+      } catch (error) {
+        deps.log?.("run.memory_writeback_failed", { error: error instanceof Error ? error.message : String(error) } as Json)
+      }
       getLifecycleBus().emit("message:sent", {
         eventId: runId,
         session_key: input.sessionId,

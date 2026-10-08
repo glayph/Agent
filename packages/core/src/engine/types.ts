@@ -83,6 +83,12 @@ export interface EngineTool {
    * Default: `read` risk runs automatically, every other risk asks first.
    */
   approval?: "auto" | "required";
+  /**
+   * Opt-in: the tool has no ordering dependency on other calls of the same
+   * turn, so independent calls to it may run concurrently. Only meaningful for
+   * read-only tools; everything else always runs in the order the model gave.
+   */
+  parallelSafe?: boolean;
   execute(
     input: Record<string, unknown>,
     context: ToolExecutionContext,
@@ -203,6 +209,14 @@ export type EngineEvent =
   | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
   | { type: "message.final"; runId: string; content: string }
+  | {
+      type: "context.compacted";
+      runId: string;
+      turn: number;
+      droppedMessages: number;
+      summaryChars: number;
+    }
+  | { type: "model.fallback"; runId: string; turn: number; from: string; to: string; reason: string }
   | {
       type: "run.finished";
       runId: string;
