@@ -240,7 +240,7 @@ agents:
         mode: default
     system_access: full
 session:
-  dm_scope: per-channel
+  dm_scope: global
 evolution:
   enabled: true
   mode: observe

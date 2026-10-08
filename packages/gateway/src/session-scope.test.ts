@@ -5,7 +5,16 @@ describe("session scope", () => {
     expect(normalizeSessionScope("global")).toBe("global");
     expect(normalizeSessionScope("per-channel")).toBe("per-channel");
     expect(normalizeSessionScope("per-peer")).toBe("per-peer");
+    expect(normalizeSessionScope("per-channel-peer")).toBe("per-channel-peer");
     expect(normalizeSessionScope("bad-value")).toBe("per-channel-peer");
+  });
+
+  it("defaults to one global conversation when nothing is configured", () => {
+    expect(normalizeSessionScope(undefined)).toBe("global");
+    expect(normalizeSessionScope(null)).toBe("global");
+    expect(normalizeSessionScope("")).toBe("global");
+    expect(normalizeSessionScope("  ")).toBe("global");
+    expect(resolveSessionContextId(undefined, "webchat", "u1")).toBe("miki-global");
   });
 
   it("maps channel/peer identity to stable context keys", () => {
