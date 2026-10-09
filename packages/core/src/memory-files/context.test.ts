@@ -79,9 +79,34 @@ describe("MemoryContextBuilder", () => {
     const builder = new MemoryContextBuilder(store, () => cfg);
     const block = await builder.build();
     expect(block.length).toBeLessThan(5000);
-    expect(block).toContain("truncated in prompt");
+    expect(block).toContain("omitted in prompt");
     const onDisk = await store.readMemoryMd();
     expect(onDisk.length).toBeGreaterThan(4900);
+  });
+
+  it("keeps the NEWEST MEMORY.md entries when the file outgrows the prompt budget", async () => {
+    root = tmpRoot();
+    store = new MemoryFileStore(resolveMemoryPaths(root));
+    for (let index = 1; index <= 60; index += 1) {
+      await executeOp(store.planLongTermNote(`fact number ${index} about the project and its configuration details`));
+    }
+    const cfg = { ...DEFAULT_MEMORY_FILES_CONFIG, memoryMdMaxChars: 900, bootstrapMaxChars: 1200 };
+    const block = await new MemoryContextBuilder(store, () => cfg).build();
+    expect(block).toContain("fact number 60");
+    expect(block).toContain("fact number 59");
+    expect(block).not.toContain("fact number 30 ");
+    expect(block).toContain("omitted in prompt");
+  });
+
+  it("shows the latest bullets of a daily note in the recent-notes index, not the first ones", async () => {
+    root = tmpRoot();
+    store = new MemoryFileStore(resolveMemoryPaths(root));
+    for (let index = 1; index <= 8; index += 1) {
+      await executeOp(store.planDailyNote(`happening number ${index}`, "agent"));
+    }
+    const block = await new MemoryContextBuilder(store, () => DEFAULT_MEMORY_FILES_CONFIG).build();
+    expect(block).toContain("happening number 8");
+    expect(block).not.toContain("happening number 1 ");
   });
 
   it("compact mode omits the recent-notes index and the tool hint", async () => {

@@ -1621,7 +1621,7 @@ class TemporalKnowledgeGraph {
     const freq = new Map();
     const tokens = (text || '')
       .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
       .split(/\s+/)
       .filter(t => t.length > 2);
     for (const t of tokens) {

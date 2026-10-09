@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { tokenize } = require('./text-tokens');
 const { canonicalRegion, CANONICAL_REGIONS } = require('./regions');
 const { cosineSimilarity } = require('./embedding-provider');
 
@@ -10,6 +11,9 @@ const STOP_WORDS = new Set([
   'about', 'your', 'you', 'for', 'are', 'was', 'were', 'been', 'আমি', 'এবং',
   'এই', 'সেই', 'কী', 'কেন', 'কখন', 'কোথায়', 'করতে', 'হবে', 'জন্য',
 ]);
+
+// Bump when tokenization changes so stored tokens/postings are rebuilt once.
+const TOKENIZER_VERSION = 'v2-indic-marks-bengali-stems';
 
 function nowIso() { return new Date().toISOString(); }
 function id(prefix) { return `${prefix}-${crypto.randomUUID()}`; }
@@ -40,6 +44,11 @@ class SelectiveMemoryEngine {
       maxNeighbors: 6,
       maxTokens: 1200,
       minScore: 0.04,
+      // Relevance evidence an item needs before priors (freshness, importance,
+      // confidence, region) may rank it: at least two matching query tokens, or
+      // this share of the query's tokens, or a real embedding similarity.
+      minLexical: 0.12,
+      minSemantic: 0.35,
       scope: {
         agentId: process.env.MIKI_AGENT_ID || 'miki',
         ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
@@ -130,7 +139,38 @@ class SelectiveMemoryEngine {
       CREATE INDEX IF NOT EXISTS idx_mre_scope_time ON memory_retrieval_events(scope_key, created_at DESC);
     `);
     this.initialized = true;
+    this._migrateTokenizer();
     return this;
+  }
+
+  /**
+   * Chunks stored before the tokenizer learned Bengali have mangled tokens and
+   * postings. Rebuild them once whenever the tokenizer version changes.
+   */
+  _migrateTokenizer() {
+    this.db.exec('CREATE TABLE IF NOT EXISTS memory_engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    const current = this.db.prepare("SELECT value FROM memory_engine_meta WHERE key = 'tokenizer_version'").get();
+    if (current && current.value === TOKENIZER_VERSION) return;
+    const select = this.db.prepare('SELECT rowid AS rid, id, scope_key, content, metadata FROM memory_chunk_index WHERE rowid > ? ORDER BY rowid LIMIT 500');
+    const updateMeta = this.db.prepare('UPDATE memory_chunk_index SET metadata = ? WHERE id = ?');
+    const clearPostings = this.db.prepare('DELETE FROM memory_chunk_postings WHERE chunk_id = ?');
+    const insertPosting = this.db.prepare('INSERT OR REPLACE INTO memory_chunk_postings (scope_key, token, chunk_id, frequency) VALUES (?, ?, ?, 1)');
+    let last = 0;
+    for (;;) {
+      const rows = select.all(last);
+      if (rows.length === 0) break;
+      this.db.transaction(() => {
+        for (const row of rows) {
+          const tokens = this.normalizeTokens(row.content);
+          const metadata = parseJson(row.metadata, {});
+          updateMeta.run(safeJson({ ...metadata, tokens }), row.id);
+          clearPostings.run(row.id);
+          for (const token of tokens) insertPosting.run(row.scope_key, token, row.id);
+        }
+      })();
+      last = rows[rows.length - 1].rid;
+    }
+    this.db.prepare("INSERT OR REPLACE INTO memory_engine_meta (key, value) VALUES ('tokenizer_version', ?)").run(TOKENIZER_VERSION);
   }
 
   normalizeScope(scope = {}) {
@@ -159,13 +199,7 @@ class SelectiveMemoryEngine {
   }
 
   normalizeTokens(text) {
-    return [...new Set(String(text || '')
-      .toLowerCase()
-      .normalize('NFKC')
-      .split(/[^\p{L}\p{N}_-]+/u)
-      .map(token => token.replace(/^[-_]+|[-_]+$/g, ''))
-      .filter(token => token.length >= 2 && !STOP_WORDS.has(token))
-      .slice(0, 96))];
+    return tokenize(text, { stopWords: STOP_WORDS, max: 96 });
   }
 
   inferRegions(query) {
@@ -265,8 +299,38 @@ class SelectiveMemoryEngine {
       const overlap = candidateTokens.filter(token => tokenSet.has(token)).length;
       const regionBoost = candidate.region === region ? 0.12 : 0;
       const weight = clamp(0.12 + Math.min(0.65, overlap * 0.12) + regionBoost, 0, 1);
-      if (overlap === 0 && candidate.region !== region) continue;
+      // Sharing a region is not a relationship: without a shared token the two chunks are
+      // unrelated, and linking them would make the graph drag unrelated memories into recall.
+      if (overlap === 0) continue;
       this.connect(scope, chunkId, candidate.id, overlap > 1 ? relationType : 'related_to', { weight, confidence: 0.65, metadata: { tokenOverlap: overlap } });
+    }
+    this._linkByRareTokens(scope, chunkId, region, tokens, relationType, new Set(recent.map(candidate => candidate.id)));
+  }
+
+  /**
+   * Connect a new chunk to OLDER chunks that share at least two rare tokens.
+   * Linking only to the 12 most recent chunks would make the graph forget the
+   * past: a fact from months ago could never be reached from today's context.
+   * Rare tokens keep this cheap (their posting lists are short) and meaningful.
+   */
+  _linkByRareTokens(scope, chunkId, region, tokens, relationType, alreadyLinked) {
+    const maxPosting = 500;
+    const rare = [];
+    const probe = this.db.prepare('SELECT COUNT(*) AS n FROM (SELECT 1 FROM memory_chunk_postings WHERE scope_key = ? AND token = ? LIMIT ?)');
+    for (const token of tokens.slice(0, 32)) {
+      const { n } = probe.get(scope.scopeKey, token, maxPosting + 1);
+      if (n > 1 && n <= maxPosting) rare.push(token);
+      if (rare.length >= 16) break;
+    }
+    if (rare.length < 2) return;
+    const rows = this.db.prepare(`SELECT p.chunk_id AS id, c.region AS region, COUNT(*) AS overlap
+      FROM memory_chunk_postings p JOIN memory_chunk_index c ON c.id = p.chunk_id
+      WHERE p.scope_key = ? AND p.token IN (${rare.map(() => '?').join(',')}) AND p.chunk_id <> ? AND c.status = 'active'
+      GROUP BY p.chunk_id HAVING COUNT(*) >= 2 ORDER BY overlap DESC LIMIT 8`).all(scope.scopeKey, ...rare, chunkId);
+    for (const row of rows) {
+      if (alreadyLinked.has(row.id)) continue;
+      const weight = clamp(0.12 + Math.min(0.65, row.overlap * 0.12) + (row.region === region ? 0.12 : 0), 0, 1);
+      this.connect(scope, chunkId, row.id, row.overlap > 1 ? relationType : 'related_to', { weight, confidence: 0.6, metadata: { tokenOverlap: row.overlap, link: 'rare_tokens' } });
     }
   }
 
@@ -380,17 +444,19 @@ class SelectiveMemoryEngine {
   _score(row, tokens, queryEmbedding, regions) {
     const rowTokens = parseJson(row.metadata, {}).tokens || this.normalizeTokens(row.content);
     const rowTokenSet = new Set(rowTokens);
-    const lexical = tokens.length === 0 ? 0 : tokens.filter(token => rowTokenSet.has(token)).length / tokens.length;
+    const matches = tokens.filter(token => rowTokenSet.has(token)).length;
+    const lexical = tokens.length === 0 ? 0 : matches / tokens.length;
     let semantic = 0;
     if (queryEmbedding && row.embedding) semantic = Math.max(0, cosineSimilarity(queryEmbedding, parseJson(row.embedding, [])));
     const regionBoost = regions.has(row.region) ? 0.08 : 0;
     const freshness = this._freshness(row.updated_at);
     const score = (0.48 * lexical) + (0.20 * semantic) + (0.10 * freshness) + (0.10 * clamp(row.importance)) + (0.08 * clamp(row.confidence)) + regionBoost;
-    return { score: clamp(score, 0, 1), lexical, semantic, freshness };
+    const relevant = (matches >= 1 && (matches >= 2 || lexical >= this.options.minLexical)) || semantic >= this.options.minSemantic;
+    return { score: clamp(score, 0, 1), lexical, semantic, freshness, relevant };
   }
 
   _neighbors(scope, chunkId, regions, maxNeighbors) {
-    const rows = this.db.prepare(`SELECT e.*, c.*,
+    const rows = this.db.prepare(`SELECT c.*, e.id AS edge_id, e.relation_type AS relation_type, e.weight AS edge_weight,
       CASE WHEN e.source_chunk_id = ? THEN e.target_chunk_id ELSE e.source_chunk_id END AS neighbor_id
       FROM memory_chunk_edges e JOIN memory_chunk_index c ON c.id = CASE WHEN e.source_chunk_id = ? THEN e.target_chunk_id ELSE e.source_chunk_id END
       WHERE e.scope_key = ? AND (e.source_chunk_id = ? OR e.target_chunk_id = ?)
@@ -412,7 +478,8 @@ class SelectiveMemoryEngine {
     const queryEmbedding = this._queryEmbedding(query, options);
     const candidates = this._candidateRows(scope, tokens, regions);
     const scored = candidates.map(row => ({ row, ...this._score(row, tokens, queryEmbedding, regions), depth: 0, via: null }))
-      .filter(item => item.score >= this.options.minScore || tokens.length === 0)
+      // Priors (freshness, importance, ...) only rank relevant items; they never make one relevant.
+      .filter(item => tokens.length === 0 || (item.relevant && item.score >= this.options.minScore))
       .sort((a, b) => b.score - a.score || String(b.row.updated_at).localeCompare(String(a.row.updated_at)));
 
     const selected = [];
@@ -440,9 +507,9 @@ class SelectiveMemoryEngine {
         const neighbors = this._neighbors(scope, parent.row.id, regions, this.options.maxNeighbors);
         for (const neighbor of neighbors) {
           if (selectedIds.has(neighbor.neighbor_id)) continue;
-          const score = clamp(parent.score * 0.78 + Number(neighbor.weight || 0) * 0.22);
+          const score = clamp(parent.score * 0.78 + Number(neighbor.edge_weight || 0) * 0.22);
           const item = { row: neighbor, score, lexical: 0, semantic: 0, freshness: this._freshness(neighbor.updated_at) };
-          if (add(item, depth, { chunkId: parent.row.id, edgeId: neighbor.id, relation: neighbor.relation_type })) next.push(selected[selected.length - 1]);
+          if (add(item, depth, { chunkId: parent.row.id, edgeId: neighbor.edge_id, relation: neighbor.relation_type })) next.push(selected[selected.length - 1]);
           if (selected.length >= maxSelected) break;
         }
         if (selected.length >= maxSelected) break;

@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { tokenize } = require('./text-tokens');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
@@ -337,7 +338,7 @@ class GraphCognitiveMemory {
     return edgeId;
   }
 
-  _tokens(text) { return String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 1).slice(0, 32); }
+  _tokens(text) { return tokenize(text, { max: 32 }); }
   _recency(lastAccessedAt, now = Date.now()) {
     if (!lastAccessedAt) return 0.35;
     const ageDays = Math.max(0, (now - Date.parse(lastAccessedAt)) / 86400000);
@@ -385,12 +386,17 @@ class GraphCognitiveMemory {
     // retrieval even if maintenance() has not yet archived them.
     const rows = this.db.prepare(`SELECT n.*, c.slug AS category_slug FROM memory_nodes n JOIN memory_categories c ON c.id = n.category_id WHERE n.scope_key IN (${scopePlaceholders}) AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY n.activation_score DESC, n.updated_at DESC LIMIT ?`).all(...scopeKeys, this.options.maxCandidates);
     const scored = rows.map((node) => {
-      const haystack = `${node.content} ${node.memory_type} ${node.category_slug} ${node.source_reference || ''}`.toLowerCase();
-      const lexical = tokens.length ? tokens.filter((token) => haystack.includes(token)).length / tokens.length : 0.1;
+      // Whole-token matching (not substrings), with the same stemming as the query.
+      const haystack = new Set(tokenize(`${node.content} ${node.memory_type} ${node.category_slug} ${node.source_reference || ''}`, { max: 512 }));
+      const matches = tokens.filter((token) => haystack.has(token)).length;
+      const lexical = tokens.length ? matches / tokens.length : 0.1;
+      const relevant = matches >= 1 && (matches >= 2 || lexical >= 0.12);
+      // "Recently active" only counts as context for the SAME task; elsewhere it is just noise.
+      const sameTask = Boolean(options.taskReference && node.task_reference && node.task_reference === options.taskReference);
       const projectBoost = node.project_id ? this._projectBoost(scope, node.project_id) : 0;
       const score = clamp(0.30 * lexical + 0.20 * Number(node.graph_relevance || 0) + 0.15 * Number(node.recency_score || 0) + 0.15 * Number(node.frequency_score || 0) + 0.10 * Number(node.explicit_importance || 0) + 0.10 * Number(node.confidence || 0) + projectBoost);
-      return { node, score, lexical, projectBoost };
-    }).filter((item) => !tokens.length || item.lexical > 0 || item.node.activation_score >= 0.35)
+      return { node, score, lexical, projectBoost, relevant, sameTask };
+    }).filter((item) => !tokens.length || item.relevant || (item.sameTask && item.node.activation_score >= 0.35))
       .sort((a, b) => b.score - a.score || String(b.node.updated_at).localeCompare(String(a.node.updated_at)));
 
     const selected = [];

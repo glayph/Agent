@@ -20,7 +20,26 @@ function oneLine(text: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
 }
 
-/** Short human digest of a memory file: its title/first bullets — never the whole file. */
+/**
+ * Fit a file into a prompt budget. MEMORY.md and USER.md are append-only, so the
+ * newest entries sit at the END. Cutting from the end (the old behaviour) threw
+ * away exactly what was learned most recently. Keep a short head (title, the
+ * oldest foundational lines) and the whole recent tail, and drop the middle.
+ */
+function fitToLimit(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const marker = "\n…[middle omitted in prompt; full file on disk — use memory_get or memory_search]\n";
+  const room = Math.max(0, limit - marker.length);
+  const headBudget = Math.floor(room * 0.3);
+  const tailBudget = room - headBudget;
+  const headCut = text.slice(0, headBudget);
+  const head = headCut.includes("\n") ? headCut.slice(0, headCut.lastIndexOf("\n")) : headCut;
+  const tailCut = text.slice(text.length - tailBudget);
+  const tail = tailCut.includes("\n") ? tailCut.slice(tailCut.indexOf("\n") + 1) : tailCut;
+  return `${head}${marker}${tail}`;
+}
+
+/** Short human digest of a memory file: its title and NEWEST bullets — never the whole file. */
 function digestOf(content: string, max: number): string {
   const lines = stripComments(content)
     .split(/\r?\n/)
@@ -30,7 +49,8 @@ function digestOf(content: string, max: number): string {
   const bullets = lines
     .filter((l) => /^[-*]\s+/.test(l) && !/^[-*]\s+(Date|Session|Trigger|Summary by):/i.test(l))
     .map((l) => l.replace(/^[-*]\s+/, ""))
-    .slice(0, 3);
+    // Notes are chronological: the latest entries are the ones worth surfacing.
+    .slice(-3);
   const text = [title && !title.startsWith("Memory —") ? title : "", ...bullets]
     .filter(Boolean)
     .join(" · ");
@@ -64,9 +84,7 @@ export class MemoryContextBuilder {
     const userMd = opts.trustedUser === false ? "" : stripComments(await this.store.readUserMd().catch(() => ""));
     if (userMd) {
       const limit = Math.min(cfg.userMdMaxChars, budget);
-      const body = userMd.length > limit
-        ? `${userMd.slice(0, limit)}\n…[truncated in prompt; full file on disk — use memory_get]`
-        : userMd;
+      const body = fitToLimit(userMd, limit);
       parts.push(`User profile (USER.md):\n${body}`);
       budget -= body.length;
     }
@@ -74,8 +92,7 @@ export class MemoryContextBuilder {
     const memoryMd = opts.trustedMemory === false ? "" : stripComments(await this.store.readMemoryMd().catch(() => ""));
     if (memoryMd) {
       const limit = Math.min(cfg.memoryMdMaxChars, budget);
-      const truncated = memoryMd.length > limit;
-      const body = truncated ? `${memoryMd.slice(0, limit)}\n…[truncated in prompt; full file on disk — use memory_get]` : memoryMd;
+      const body = fitToLimit(memoryMd, limit);
       parts.push(`Long-term memory (MEMORY.md):\n${body}`);
       budget -= body.length;
     }

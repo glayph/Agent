@@ -178,7 +178,7 @@ class NodeGraph {
     return edgeId;
   }
 
-  _tokens(text) { return String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(token => token.length > 1).slice(0, 32); }
+  _tokens(text) { return String(text || '').toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u).filter(token => token.length > 1).slice(0, 32); }
   _recency(lastUsedAt) { if (!lastUsedAt) return 0.35; return Math.exp(-Math.max(0, (Date.now() - Date.parse(lastUsedAt)) / 86400000) / 30); }
   _score(node, tokens) {
     const contextText = JSON.stringify(this._parse(node.context, {})).toLowerCase();
