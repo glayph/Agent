@@ -39,6 +39,7 @@ import { createGoalTools, GoalStore } from "@miki/core/api/goals"
 import { AdaptiveMessageCoordinator, planAdaptiveOutput, type AdaptiveMessagingConfig } from "@miki/core"
 import { getLifecycleBus } from "@miki/core/hooks"
 import type { FileMemoryService } from "@miki/core/memory-files"
+import type { GlobalMemory } from "@miki/core/memory"
 
 type Json = Record<string, unknown>
 
@@ -58,6 +59,8 @@ export interface AgentRuntimeDeps {
   skills: { store: SkillStore; registry: SkillRegistryClient }
   /** Canonical Markdown memory, indexed by the gateway's SQLite adapter. */
   fileMemory?: FileMemoryService
+  /** One memory shared by every channel (owner-only, see @miki/core/memory). */
+  globalMemory?: GlobalMemory
   memoryContextPolicy?: () => Promise<{ user: boolean; memory: boolean }>
   externalRunActive?: (runId: string) => boolean
   externalCancelRun?: (runId: string) => boolean
@@ -508,7 +511,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     },
     // Inject curated memory every turn and advertise only the skills permitted
     // by the active turn profile. Episodic notes remain retrieval-only.
-    contextProvider: async () => {
+    contextProvider: async (info) => {
       // Memory and the skills catalog are independent; build them concurrently so
       // the first model call is not delayed by two sequential lookups.
       const memoryBlock = async (): Promise<string | undefined> => {
@@ -540,8 +543,15 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         }
         return (await buildSkillsContext(deps.skills.store)) || undefined
       }
-      const [memory, skills] = await Promise.all([memoryBlock(), skillsBlock()])
-      return [memory, skills].filter(Boolean).join("\n\n") || undefined
+      // Semantic recall from the one global memory, keyed by what the user just asked.
+      // Owner-only: strangers on any channel get nothing and leave nothing.
+      const recalled = async (): Promise<string | undefined> => {
+        const origin = runOrigins.get(info.runId)
+        if (!origin || !deps.globalMemory) return undefined
+        return deps.globalMemory.recall(info.goal, origin)
+      }
+      const [memory, skills, global] = await Promise.all([memoryBlock(), skillsBlock(), recalled()])
+      return [memory, global, skills].filter(Boolean).join("\n\n") || undefined
     },
     logger: (message, details) => deps.log?.(message, details as Json),
     // In-run context management. Evaluated at the start of every run, so a config
@@ -581,6 +591,14 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     },
   })
 
+  const lastUserContent = (history: EngineMessage[]): string => {
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const message = history[index]
+      if (message.role === "user" && typeof message.content === "string") return message.content
+    }
+    return ""
+  }
+
   const oneLine = (text: string, max: number): string => {
     const flat = String(text ?? "").replace(/\s+/g, " ").trim()
     return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
@@ -610,6 +628,8 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
   // A session can host independent work streams (for example a background
   // autonomous task plus an interactive user question). Callers that do not
   // provide a lane keep the legacy one-run-per-session behavior.
+  // Where each active run came from (channel, sender, chat/task). Read by contextProvider.
+  const runOrigins = new Map<string, { source: string; peerId?: string; sessionId?: string; taskTitle?: string }>()
   const executionLanes = new Map<string, string>()
 
   function cancelRun(runId: string): boolean {
@@ -625,6 +645,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     model?: string
     allowTools?: boolean
     source: string
+    /** Sender on that channel (Telegram user id, ...). Decides whether the shared memory applies. */
+    peerId?: string
+    /** Title of the chat/task, recorded with what is remembered. */
+    taskTitle?: string
     runId?: string
     executionLaneId?: string
     goal?: string
@@ -644,6 +668,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     runs.set(runId, { controller, sessionId: input.sessionId, startedAt: now(), source: input.source })
     if (laneId) executionLanes.set(laneId, runId)
     if (input.sessionId && !input.executionLaneId) sessionRuns.set(input.sessionId, runId)
+    runOrigins.set(runId, { source: input.source, peerId: input.peerId, sessionId: input.sessionId, taskTitle: input.taskTitle })
     try {
       getLifecycleBus().emit("message:received", {
         eventId: runId,
@@ -677,6 +702,19 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       } catch (error) {
         deps.log?.("run.memory_writeback_failed", { error: error instanceof Error ? error.message : String(error) } as Json)
       }
+      try {
+        deps.globalMemory?.recordTurn({
+          source: input.source,
+          peerId: input.peerId,
+          sessionId: input.sessionId,
+          taskTitle: input.taskTitle,
+          userMessage: input.goal ?? lastUserContent(input.history),
+          assistantMessage: result.finalText,
+          status: result.status,
+        })
+      } catch (error) {
+        deps.log?.("run.global_memory_failed", { error: error instanceof Error ? error.message : String(error) } as Json)
+      }
       getLifecycleBus().emit("message:sent", {
         eventId: runId,
         session_key: input.sessionId,
@@ -686,6 +724,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       })
       return result
     } finally {
+      runOrigins.delete(runId)
       runs.delete(runId)
       if (laneId && executionLanes.get(laneId) === runId) executionLanes.delete(laneId)
       if (input.sessionId && !input.executionLaneId && sessionRuns.get(input.sessionId) === runId) sessionRuns.delete(input.sessionId)

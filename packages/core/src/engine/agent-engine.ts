@@ -37,7 +37,16 @@ export interface AgentEngineOptions {
   /** Base system prompt, or a resolver evaluated at the start of every run. */
   systemPrompt?: string | (() => string);
   /** Extra system-prompt context evaluated at the start of every run (skills catalog, ...). */
-  contextProvider?: () => string | undefined | Promise<string | undefined>;
+  /**
+   * Extra context for the system prompt. It receives the user's request so the
+   * provider can recall what is relevant to it (semantic memory) instead of
+   * injecting the same block every time.
+   */
+  contextProvider?: (info: {
+    runId: string;
+    sessionId?: string;
+    goal: string;
+  }) => string | undefined | Promise<string | undefined>;
   /** Maximum model round-trips per run. */
   maxTurns?: number | (() => number);
   /** Maximum tool calls per run across all turns. */
@@ -435,7 +444,7 @@ export class AgentEngine {
     let extraContext: string | undefined;
     if (runToolsEnabled && this.options.contextProvider) {
       try {
-        extraContext = await this.options.contextProvider();
+        extraContext = await this.options.contextProvider({ runId, sessionId: request.sessionId, goal });
       } catch (error) {
         this.options.logger?.("context_provider.failed", {
           error: error instanceof Error ? error.message : String(error),

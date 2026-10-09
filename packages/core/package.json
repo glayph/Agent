@@ -82,6 +82,10 @@
       "import": "./dist/memory-files/index.js",
       "types": "./dist/memory-files/index.d.ts"
     },
+    "./memory": {
+      "import": "./dist/memory/index.js",
+      "types": "./dist/memory/index.d.ts"
+    },
     "./autonomy": {
       "import": "./dist/autonomy/autonomous-supervisor.js",
       "types": "./dist/autonomy/autonomous-supervisor.d.ts"

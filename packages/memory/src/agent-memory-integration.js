@@ -168,8 +168,26 @@ class AgentMemoryIntegration {
     });
   }
 
-  getEnhancedSystemPrompt(userMessage) {
-    const hook = this.preExecutionHook(userMessage);
+  getEnhancedSystemPrompt(userMessage, systemState = {}) {
+    return this.getPromptContext(userMessage, systemState).text;
+  }
+
+  /**
+   * Bounded prompt context plus a flag telling whether anything was actually
+   * recalled. Callers use hasContent to skip the block on an empty memory
+   * instead of spending tokens on a header and a generic anchor every turn.
+   */
+  getPromptContext(userMessage, systemState = {}) {
+    const hook = this.preExecutionHook(userMessage, systemState);
+    const hasContent = Boolean(
+      (hook.selectiveContext && Array.isArray(hook.selectiveContext.items) && hook.selectiveContext.items.length > 0)
+      || (hook.graphContext && Array.isArray(hook.graphContext.items) && hook.graphContext.items.length > 0)
+      || (Array.isArray(hook.specialEvents) && hook.specialEvents.length > 0)
+    );
+    return { text: this._formatPromptFromHook(hook), hasContent };
+  }
+
+  _formatPromptFromHook(hook) {
 
     const parts = [];
     parts.push('=== MEMORY CONTEXT ===');

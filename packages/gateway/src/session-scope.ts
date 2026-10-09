@@ -1,14 +1,13 @@
 export type SessionScope = "per-channel-peer" | "per-channel" | "per-peer" | "global";
 
 /**
- * Unset means "global": one shared conversation across every channel and peer,
- * so earlier work is never lost when the user switches channel. An explicit but
- * unrecognised value falls back to the most isolated mode, never to a wider one.
+ * Conversation scope. Every chat (web chat session, Telegram chat, ...) is its own
+ * conversation by default, so each task keeps its own history and the user can see
+ * what was started when and why. Long-term memory is NOT scoped by this setting: it
+ * is one global store shared by every channel (see @miki/core/memory).
  */
 export function normalizeSessionScope(value: unknown): SessionScope {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "global";
-  switch (raw) {
+  switch (String(value ?? "").trim()) {
     case "global": return "global";
     case "per-channel": return "per-channel";
     case "per-peer": return "per-peer";

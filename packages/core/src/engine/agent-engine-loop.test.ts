@@ -326,3 +326,25 @@ describe("context-manager helpers", () => {
     ]);
   });
 });
+
+describe("contextProvider", () => {
+  it("receives the user's request and session so memory can be recalled semantically", async () => {
+    const seen: Array<{ runId: string; sessionId?: string; goal: string }> = [];
+    const llm = scriptedLLM([{ text: "ok" }]);
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "noop" }));
+    const engine = new AgentEngine({
+      llm: llm.client,
+      tools: registry,
+      contextProvider: (info) => {
+        seen.push(info);
+        return "RECALLED: the project codename is Falcon";
+      },
+    });
+    const result = await engine.run({ runId: "run-ctx", sessionId: "chat-9", history: user("what is my codename?") });
+    expect(result.status).toBe("completed");
+    expect(seen).toEqual([{ runId: "run-ctx", sessionId: "chat-9", goal: "what is my codename?" }]);
+    const system = llm.requests[0].messages.find((message) => message.role === "system");
+    expect(String(system?.content)).toContain("RECALLED: the project codename is Falcon");
+  });
+});

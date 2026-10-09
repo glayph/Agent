@@ -261,8 +261,18 @@ const AgentMemoryFilesSchema = z
   })
   .passthrough();
 
+// The one global memory shared by every channel. Only the owner's own channels
+// (web chat, CLI) read and write it; another platform's sender is the owner only
+// when listed here as "<platform>:<sender id>", e.g. "telegram:123456789".
+const AgentMemoryGlobalSchema = z
+  .object({
+    owner_peers: z.array(z.string().min(1).max(200)).max(100).optional(),
+  })
+  .passthrough();
+
 const AgentMemorySchema = z
   .object({
+    global: AgentMemoryGlobalSchema.optional(),
     short_term_limit: z.number().int().min(1).max(200).optional(),
     long_term_enabled: z.boolean().optional(),
     auto_summarize: z.boolean().optional(),

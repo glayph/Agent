@@ -309,6 +309,11 @@ export interface AgentMemoryIntegration {
     agentResponse: string,
     metadata?: Record<string, unknown>,
   ): { userEvent: WriteEventResult; agentEvent: WriteEventResult };
+  /** Bounded prompt block plus whether anything was actually recalled. */
+  getPromptContext(
+    userMessage: string,
+    systemState?: Record<string, unknown>,
+  ): { text: string; hasContent: boolean };
   logToolCall(
     toolName: string,
     args: unknown,

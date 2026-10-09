@@ -49,6 +49,10 @@ agent:
     prune_low_value_facts: true
     fact_prune_threshold: 0.15
     fact_prune_min_age_days: 30
+    # One global memory shared by every channel. Web chat and CLI are the owner.
+    # Another platform's sender may use it only when listed as "<platform>:<sender id>".
+    global:
+      owner_peers: []
     files:
       enabled: true
       bootstrap_max_chars: 6000
@@ -240,7 +244,7 @@ agents:
         mode: default
     system_access: full
 session:
-  dm_scope: global
+  dm_scope: per-channel-peer
 evolution:
   enabled: true
   mode: observe

@@ -141,7 +141,7 @@ export const EMPTY_FORM: CoreConfigForm = {
     toolsMode: "default",
     toolsAllowText: "",
   },
-  dmScope: "global",
+  dmScope: "per-channel-peer",
   heartbeatEnabled: true,
   heartbeatInterval: "30",
   devicesEnabled: false,

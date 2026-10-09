@@ -1,5 +1,7 @@
 import express from "express"
 import { createKeyedLane } from "./session-lane.js"
+import { DEFAULT_CHAT_TITLE, titleFromMessage } from "./task-title.js"
+import { createGlobalMemory, initMemory } from "@miki/core/memory"
 import http from "node:http"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -723,6 +725,13 @@ let gatewayRunId = Math.floor(Date.now() / 1000)
 const gatewayLogs: Array<{ runId: number; message: string; at: string }> = []
 const appendGatewayLog = (message: string) => { gatewayLogs.push({ runId: gatewayRunId, message, at: now() }); if (gatewayLogs.length > 500) gatewayLogs.splice(0, gatewayLogs.length - 500) }
 appendGatewayLog("Gateway initialization started.")
+// One memory for every channel. Opened lazily on first use so a memory problem can
+// never stop the gateway from starting; recall/record already swallow and log errors.
+const globalMemory = createGlobalMemory({
+  getIntegration: () => initMemory(dataRoot),
+  getConfig: getAppConfig,
+  log: (message, details) => appendGatewayLog(`${message} ${details ? JSON.stringify(details) : ""}`.trim()),
+})
 const agent = createAgentRuntime({
   db,
   dataRoot,
@@ -735,6 +744,7 @@ const agent = createAgentRuntime({
   recordFileRun,
   skills,
   fileMemory,
+  globalMemory,
   memoryContextPolicy: () => memoryIndex.bootstrapTrust(),
   log: (message, details) => console.warn(`[miki] ${message}`, details ?? {}),
 })
@@ -1535,6 +1545,10 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
         : randomUUID()
       db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,image_urls,attachments_json) VALUES(?,?,?,?,?,?,?,?)").run(persistedMessageId, sessionId, "user", content, now(), contextId, imageUrls.length > 0 ? JSON.stringify(imageUrls) : null, incomingAttachments.length > 0 ? JSON.stringify(incomingAttachments) : null)
       db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
+      // A new chat is a new task: name it after what was asked, so the chat list shows
+      // what was started and for what purpose. Renamed chats are left alone.
+      const autoTitle = titleFromMessage(content)
+      if (autoTitle) db.prepare("UPDATE chat_sessions SET title=? WHERE id=? AND title=?").run(autoTitle, sessionId, DEFAULT_CHAT_TITLE)
     }
     // Conversation history for the model: persisted normal messages only (thoughts/tool traces stay out).
     const storedHistory = (db.prepare("SELECT role,content,image_urls,attachments_json FROM chat_messages WHERE context_id=? AND kind='normal' ORDER BY created_at ASC").all(contextId) as Array<{ role: string; content: string; image_urls?: string | null; attachments_json?: string | null }>)
@@ -1672,6 +1686,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
         toolAllowlist: turnPolicy.toolAllowlist,
         ...(thinkingLevel ? { thinkingLevel } : {}),
         source: "webchat",
+        peerId,
+        taskTitle: String((db.prepare("SELECT title FROM chat_sessions WHERE id=?").get(sessionId) as { title?: string } | undefined)?.title || ""),
         onEvent: mapper.handle,
       })
       const recoverableLimit = result.status === "failed" && /limit|budget|step|empty response|could not make progress/i.test(result.error || "")
