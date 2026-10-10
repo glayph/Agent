@@ -6,10 +6,11 @@
 
 **Remembers everything · Works across every channel · Runs on your own machine**
 
-[![Node](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/Node.js-%E2%89%A5%2022.19-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![pnpm](https://img.shields.io/badge/pnpm-workspaces-F69220?logo=pnpm&logoColor=white)](https://pnpm.io)
 [![Platform](https://img.shields.io/badge/Ubuntu%20%7C%20Windows-VirtualBox-7F3FBF)](#-installation)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.3.14-ff69b4)](package.json)
 
 </div>
@@ -67,7 +68,7 @@ Miki is a **local-first autonomous agent**. It plans, uses tools, browses the we
 
 ## 🚀 Quick start
 
-> **Requirements:** Node.js 20+, pnpm, and Git. Ubuntu (recommended) or Windows. Running inside an Oracle VirtualBox Ubuntu VM works well.
+> **Requirements:** Node.js 22.19+, npm, and Git. Ubuntu (recommended) or Windows. Running inside an Oracle VirtualBox Ubuntu VM works well.
 
 ```bash
 # 1. Clone
