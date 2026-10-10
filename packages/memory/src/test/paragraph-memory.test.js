@@ -137,6 +137,45 @@ const MESSAGE = [
     }
   });
 
+  await test('pruneWordEntities removes plain-word entities and their graph junk, keeps names and related entities', async () => {
+    const dir = tmp();
+    const tkg = new TemporalKnowledgeGraph(path.join(dir, 'tkg.db'));
+    await tkg.initialize();
+    try {
+      // What the OLD rule produced: every word an entity, with node-graph nodes and co_occurs edges.
+      const junk = ['আকাশ', 'পরিষ্কার', 'deployment', 'installing'];
+      const ids = {};
+      for (const name of [...junk, 'Miki', 'billing', 'Falcon']) {
+        ids[name] = tkg._ensureEntity({ name, type: 'entity', ...(name === 'Falcon' ? { attributes: { kind: 'project' } } : {}) }, 'long_term');
+        tkg.nodeGraph.upsertNode({ id: `entity:${ids[name]}`, key: `entity:${ids[name]}`, kind: 'entity', label: name, context: { name }, scope: undefined });
+      }
+      const all = Object.keys(ids);
+      for (let i = 0; i < all.length; i += 1) for (let j = i + 1; j < all.length; j += 1) {
+        tkg.nodeGraph.connect(`entity:${ids[all[i]]}`, `entity:${ids[all[j]]}`, 'co_occurs', {}, 0.18, undefined);
+      }
+      // "billing" is a plain word, but it has an explicit relation: it is knowledge, not junk.
+      tkg.addEntityRelation(ids.billing, ids.Miki, 'handled_by', { factText: 'billing is handled by Miki' });
+
+      const dry = tkg.pruneWordEntities();
+      assert.strictEqual(dry.dryRun, true);
+      assert.strictEqual(dry.candidates, 4, `junk only: ${dry.sample}`);
+      assert.strictEqual(tkg.db.prepare('SELECT COUNT(*) AS n FROM entities').get().n, 7, 'dry run deletes nothing');
+
+      const done = tkg.pruneWordEntities({ dryRun: false });
+      assert.strictEqual(done.pruned, 4);
+      assert.ok(done.graphEdgesRemoved > 0 && done.graphNodesRemoved === 4);
+      const left = tkg.db.prepare('SELECT name FROM entities').all().map((r) => r.name).sort();
+      assert.deepStrictEqual(left, ['Falcon', 'Miki', 'billing']);
+      const nodes = tkg.db.prepare("SELECT label FROM node_graph_nodes WHERE kind = 'entity'").all().map((r) => r.label).sort();
+      assert.deepStrictEqual(nodes, ['Falcon', 'Miki', 'billing']);
+      // Running it again is a no-op.
+      assert.strictEqual(tkg.pruneWordEntities({ dryRun: false }).pruned, 0);
+    } finally {
+      try { tkg.close && tkg.close(); } catch (_) { /* ignore */ }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1); }
   console.log('🏁 Paragraph memory — ✅ ALL PASSED');
 })();

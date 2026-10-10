@@ -1,4 +1,4 @@
-import type { AgentMemoryIntegration } from "./types.js";
+import type { AgentMemoryIntegration, ExtractionSummary } from "./types.js";
 
 /**
  * One global memory for every channel.
@@ -81,6 +81,16 @@ export interface GlobalMemory {
   recall(goal: string, origin: TurnOrigin): string | undefined;
   /** Remember a finished turn. Returns whether it was written. */
   recordTurn(turn: RecordedTurn): boolean;
+  /**
+   * Turn stored paragraphs into graph knowledge (entities and relations) with the
+   * given model. Only the owner's turns are ever stored, so everything processed
+   * here already passed the owner check.
+   */
+  extractPending(options: {
+    complete: (messages: Array<{ role: string; content: string }>) => Promise<string>;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<ExtractionSummary>;
 }
 
 export function createGlobalMemory(deps: GlobalMemoryDeps): GlobalMemory {
@@ -104,6 +114,18 @@ export function createGlobalMemory(deps: GlobalMemoryDeps): GlobalMemory {
       } catch (error) {
         log("global_memory.recall_failed", { error: error instanceof Error ? error.message : String(error) });
         return undefined;
+      }
+    },
+
+    async extractPending(options) {
+      const empty: ExtractionSummary = { processed: 0, entities: 0, relations: 0, skipped: 0, failed: 0 };
+      try {
+        const integration = deps.getIntegration();
+        if (!integration) return empty;
+        return await integration.extractPending({ ...options, log });
+      } catch (error) {
+        log("global_memory.extract_failed", { error: error instanceof Error ? error.message : String(error) });
+        return empty;
       }
     },
 

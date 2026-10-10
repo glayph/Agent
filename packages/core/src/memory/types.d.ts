@@ -309,6 +309,14 @@ export interface AgentMemoryIntegration {
     agentResponse: string,
     metadata?: Record<string, unknown>,
   ): { userEvent: WriteEventResult; agentEvent: WriteEventResult };
+  /** Turn not-yet-processed paragraph memories into entities and relations with a model. */
+  extractPending(options: {
+    complete: (messages: Array<{ role: string; content: string }>) => Promise<string>;
+    limit?: number;
+    signal?: AbortSignal;
+    log?: (message: string, details?: Record<string, unknown>) => void;
+  }): Promise<ExtractionSummary>;
+
   /** Bounded prompt block plus whether anything was actually recalled. */
   getPromptContext(
     userMessage: string,
@@ -363,4 +371,12 @@ export interface MikiMemoryModule {
   MultiHopRetriever?: new (tkg: TemporalKnowledgeGraph) => {
     retrieve(opts?: Record<string, unknown>): unknown;
   };
+}
+
+export interface ExtractionSummary {
+  processed: number;
+  entities: number;
+  relations: number;
+  skipped: number;
+  failed: number;
 }

@@ -9,6 +9,7 @@ const { createEmbeddingProvider } = require('./embedding-provider');
 const NodeGraph = require('./node-graph');
 const GraphCognitiveMemory = require('./graph-cognitive-memory');
 const SelectiveMemoryEngine = require('./selective-memory-engine');
+const { tokenize } = require('./text-tokens');
 // Capitalised words that are ordinary language, not names.
 const ENTITY_STOP = /^(the|and|for|with|from|this|that|these|those|have|been|will|are|was|were|not|but|you|your|our|their|there|here|what|when|where|which|who|how|why|yes|please|thanks|thank|hello|okay|sure|also|then|now|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
 const LearningStore = require('./learning-store');
@@ -899,6 +900,105 @@ class TemporalKnowledgeGraph {
       : `${scope.scopeKey}:${id}`.slice(0, 120);
   }
 
+  /**
+   * Compact "fact cards" for the names a question mentions: the currently valid
+   * relations of those entities, one short line each. They are the cheapest form
+   * of memory (about 25 tokens per fact), so they go into the prompt before any
+   * paragraph does.
+   */
+  getFactCards(query, options = {}) {
+    const scope = this._scope(options.scope);
+    const limit = Math.max(1, Math.min(12, Math.floor(options.limit || 6)));
+    const maxChars = Math.max(80, Math.min(1200, Math.floor(options.maxChars || 480)));
+    const queryTokens = new Set(tokenize(String(query || ''), { max: 48 }));
+    if (queryTokens.size === 0) return { items: [], text: '' };
+
+    const edges = this.db.prepare(`
+      SELECT e.id, e.relation_type, e.weight, e.metadata, s.name AS source_name, t.name AS target_name
+      FROM entity_edges e
+      JOIN entities s ON s.id = e.source_id AND s.scope_key = e.scope_key
+      JOIN entities t ON t.id = e.target_id AND t.scope_key = e.scope_key
+      WHERE e.scope_key = ? AND e.valid_until IS NULL AND s.is_active = 1 AND t.is_active = 1
+      ORDER BY e.weight DESC, e.updated_at DESC
+      LIMIT 2000
+    `).all(scope.scopeKey);
+
+    // An entity is "mentioned" when at least half of its name's words are in the question.
+    const mentioned = new Map();
+    const isMentioned = (name) => {
+      if (mentioned.has(name)) return mentioned.get(name);
+      const words = tokenize(name, { max: 8 });
+      const hits = words.filter((word) => queryTokens.has(word)).length;
+      const result = words.length > 0 && hits / words.length >= 0.5;
+      mentioned.set(name, result);
+      return result;
+    };
+
+    const items = [];
+    const seen = new Set();
+    let used = 0;
+    for (const edge of edges) {
+      if (items.length >= limit) break;
+      if (!isMentioned(edge.source_name) && !isMentioned(edge.target_name)) continue;
+      let fact = '';
+      try { fact = String((JSON.parse(edge.metadata || '{}') || {}).factText || ''); } catch (_) { fact = ''; }
+      const line = fact && fact !== edge.relation_type
+        ? `${edge.source_name} ${edge.relation_type} ${edge.target_name}: ${fact}`
+        : `${edge.source_name} ${edge.relation_type} ${edge.target_name}`;
+      if (seen.has(line)) continue;
+      if (used + line.length > maxChars && items.length > 0) break;
+      seen.add(line);
+      used += line.length;
+      items.push({ id: edge.id, source: edge.source_name, relation: edge.relation_type, target: edge.target_name, fact, weight: Number(edge.weight) || 0 });
+      items[items.length - 1].text = line;
+    }
+    return { items, text: items.map((item) => `- ${item.text}`).join('\n') };
+  }
+
+  /**
+   * Remove the junk left by the old entity rule, which turned every ordinary word of
+   * a sentence into an entity (up to 30 per message, plus a co_occurs edge for every
+   * pair of them). Only entities that are unmistakably plain words are removed:
+   * single token, not name-shaped (no capital, no inner capital, no acronym, no
+   * digits/dots), no attributes, and no explicit relation to anything.
+   * Dry-run unless `dryRun: false` is passed.
+   */
+  pruneWordEntities(options = {}) {
+    const scope = this._scope(options.scope);
+    const dryRun = options.dryRun !== false;
+    const nameShaped = (name) => /^[A-Z]/.test(name) || /[a-z][A-Z]/.test(name) || /^[A-Z0-9]{2,}$/.test(name) || /[0-9._]/.test(name);
+    const hasRelation = this.db.prepare('SELECT 1 FROM entity_edges WHERE scope_key = ? AND (source_id = ? OR target_id = ?) LIMIT 1');
+    const rows = this.db.prepare("SELECT id, name, attributes FROM entities WHERE scope_key = ? AND type = 'entity'").all(scope.scopeKey);
+    const candidates = rows.filter((row) => {
+      const name = String(row.name || '').trim();
+      if (!name || /\s/.test(name)) return false;
+      if (nameShaped(name) && !ENTITY_STOP.test(name)) return false;
+      let attributes = {};
+      try { attributes = JSON.parse(row.attributes || '{}') || {}; } catch (_) { attributes = {}; }
+      if (Object.keys(attributes).length > 0) return false;
+      return !hasRelation.get(scope.scopeKey, row.id, row.id);
+    });
+    const result = { scanned: rows.length, candidates: candidates.length, pruned: 0, graphEdgesRemoved: 0, graphNodesRemoved: 0, sample: candidates.slice(0, 20).map((row) => row.name), dryRun };
+    if (dryRun || candidates.length === 0) return result;
+
+    const nodeIds = this.db.prepare("SELECT id FROM node_graph_nodes WHERE scope_key = ? AND kind = 'entity' AND label = ?");
+    const delEdges = this.db.prepare('DELETE FROM node_graph_edges WHERE scope_key = ? AND (source_id = ? OR target_id = ?)');
+    const delNode = this.db.prepare('DELETE FROM node_graph_nodes WHERE id = ?');
+    const delFts = this.db.prepare('DELETE FROM entities_fts WHERE entity_id = ?');
+    const delEntity = this.db.prepare('DELETE FROM entities WHERE id = ? AND scope_key = ?');
+    this.db.transaction(() => {
+      for (const row of candidates) {
+        for (const node of nodeIds.all(scope.scopeKey, row.name)) {
+          result.graphEdgesRemoved += delEdges.run(scope.scopeKey, node.id, node.id).changes;
+          result.graphNodesRemoved += delNode.run(node.id).changes;
+        }
+        delFts.run(row.id);
+        result.pruned += delEntity.run(row.id, scope.scopeKey).changes;
+      }
+    })();
+    return result;
+  }
+
   _ensureEntity(entityData, memoryCategory, scopeInput) {
     const scope = this._scope(scopeInput);
     const now = this._now();
@@ -909,6 +1009,11 @@ class TemporalKnowledgeGraph {
     const existing = this.db.prepare('SELECT * FROM entities WHERE id = ? AND scope_key = ?').get(id, scope.scopeKey);
     if (existing) {
       this.db.prepare('UPDATE entities SET last_seen_at = ?, access_count = access_count + 1, is_active = 1 WHERE id = ? AND scope_key = ?').run(now, id, scope.scopeKey);
+      // A name first seen by the cheap heuristic is typed 'entity'; when a model later says it
+      // is a product/person/project, keep the more specific type.
+      if (entityData.type && entityData.type !== 'entity' && existing.type === 'entity') {
+        this.db.prepare('UPDATE entities SET type = ? WHERE id = ? AND scope_key = ?').run(String(entityData.type).slice(0, 40), id, scope.scopeKey);
+      }
       // Promote dynamic_category if caller supplies one and row still empty.
       if (entityData.dynamic_category && !existing.dynamic_category) {
         this.db.prepare('UPDATE entities SET dynamic_category = ? WHERE id = ? AND scope_key = ?')

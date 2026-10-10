@@ -53,6 +53,12 @@ agent:
     # Another platform's sender may use it only when listed as "<platform>:<sender id>".
     global:
       owner_peers: []
+      # Background extraction of entities and relations from remembered paragraphs.
+      # Spends model tokens (about one short call per paragraph), so it is off by default.
+      extraction:
+        enabled: false
+        # model: <a cheaper model name than the one used for chat>
+        batch_size: 3
     files:
       enabled: true
       bootstrap_max_chars: 6000

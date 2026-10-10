@@ -421,6 +421,28 @@ class SelectiveMemoryEngine {
     return { stored: storedCount > 0, chunkIds, paragraphs: parts.length, group };
   }
 
+  /** Active chunks the graph extraction has not processed yet (newest first). */
+  listPendingExtraction(scopeInput, limit = 5) {
+    if (!this.initialized) this.initializeSync();
+    const scope = this.normalizeScope(scopeInput);
+    return this.db.prepare(`SELECT id, content, region, metadata FROM memory_chunk_index
+      WHERE scope_key = ? AND status = 'active'
+        AND metadata NOT LIKE '%"extractedAt"%' AND metadata NOT LIKE '%"extractionFailed"%'
+      ORDER BY created_at DESC LIMIT ?`).all(scope.scopeKey, Math.max(1, Math.min(50, limit)))
+      .map((row) => ({ id: row.id, content: row.content, region: row.region, extractionAttempts: Number(parseJson(row.metadata, {}).extractionAttempts || 0) }));
+  }
+
+  /** Merge a patch into a chunk's metadata (used to record extraction progress). */
+  markExtraction(scopeInput, chunkId, patch) {
+    if (!this.initialized) this.initializeSync();
+    const scope = this.normalizeScope(scopeInput);
+    const row = this.db.prepare('SELECT metadata FROM memory_chunk_index WHERE id = ? AND scope_key = ?').get(chunkId, scope.scopeKey);
+    if (!row) return false;
+    this.db.prepare('UPDATE memory_chunk_index SET metadata = ? WHERE id = ? AND scope_key = ?')
+      .run(safeJson({ ...parseJson(row.metadata, {}), ...patch }), chunkId, scope.scopeKey);
+    return true;
+  }
+
   connect(scopeInput, sourceChunkId, targetChunkId, relationType = 'related_to', options = {}) {
     if (!this.initialized) this.initializeSync();
     const scope = this.normalizeScope(scopeInput);

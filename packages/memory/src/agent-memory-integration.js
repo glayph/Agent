@@ -1,6 +1,7 @@
 'use strict';
 
 const { splitParagraphs } = require('./paragraph-chunker');
+const { extractPending } = require('./graph-extraction');
 
 class AgentMemoryIntegration {
   constructor(tkg, options = {}) {
@@ -58,9 +59,20 @@ class AgentMemoryIntegration {
       ? (selectiveContext.text || this._formatAnchor(anchor))
       : this.tkg.getContextWindow(query, 25);
 
+    // Known facts about the names the question mentions (cheapest, most precise memory).
+    let factCards = { items: [], text: '' };
+    try {
+      if (typeof this.tkg.getFactCards === 'function') {
+        factCards = this.tkg.getFactCards(query, { scope: this._scope(systemState), limit: 6, maxChars: 480 });
+      }
+    } catch (err) {
+      console.warn('[memory] fact cards failed:', err && err.message ? err.message : err);
+    }
+
     return {
       anchor,
       specialEvents,
+      factCards,
       contextWindow: context,
       selectiveContext,
       graphContext,
@@ -113,6 +125,14 @@ class AgentMemoryIntegration {
     }
 
     return { ...result, graphMemory };
+  }
+
+  /**
+   * Turn not-yet-processed paragraph memories into graph knowledge (entities and
+   * relations) with the given model. See graph-extraction.js.
+   */
+  extractPending(options = {}) {
+    return extractPending(this.tkg, { ...options, scope: options.scope || this.defaultScope });
   }
 
   /**
@@ -217,6 +237,7 @@ class AgentMemoryIntegration {
       (hook.selectiveContext && Array.isArray(hook.selectiveContext.items) && hook.selectiveContext.items.length > 0)
       || (hook.graphContext && Array.isArray(hook.graphContext.items) && hook.graphContext.items.length > 0)
       || (Array.isArray(hook.specialEvents) && hook.specialEvents.length > 0)
+      || (hook.factCards && Array.isArray(hook.factCards.items) && hook.factCards.items.length > 0)
     );
     return { text: this._formatPromptFromHook(hook), hasContent };
   }
@@ -231,6 +252,12 @@ class AgentMemoryIntegration {
 
     if (hook.formattedSpecialEvents) {
       parts.push(hook.formattedSpecialEvents);
+      parts.push('');
+    }
+
+    if (hook.factCards && hook.factCards.text) {
+      parts.push('=== KNOWN FACTS ===');
+      parts.push(hook.factCards.text);
       parts.push('');
     }
 

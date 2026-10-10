@@ -591,6 +591,43 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     },
   })
 
+  /**
+   * Background graph extraction: a few not-yet-processed paragraphs per run, only when
+   * enabled in agent.memory.global.extraction. One batch at a time, never blocks a reply,
+   * and any failure is logged and forgotten.
+   */
+  let extractionRunning = false
+  function scheduleGraphExtraction(): void {
+    const settings = (deps.getAppConfig() as any)?.agent?.memory?.global?.extraction
+    if (settings?.enabled !== true || !deps.globalMemory || extractionRunning) return
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (extractionRunning) return
+        extractionRunning = true
+        try {
+          const model = typeof settings.model === "string" && settings.model.trim() ? settings.model.trim() : undefined
+          const llm = llmFor(model)
+          if (!llm) return
+          const batch = Math.min(10, Math.max(1, Math.floor(Number(settings.batch_size) || 3)))
+          const result = await deps.globalMemory!.extractPending({
+            limit: batch,
+            complete: async (messages) => {
+              const response = await llm.complete(messages as EngineMessage[], { maxCompletionTokens: 700, temperature: 0 })
+              const text = response.choices?.[0]?.message?.content
+              return typeof text === "string" ? text : ""
+            },
+          })
+          if (result.processed || result.failed) deps.log?.("graph_extraction.batch", result as unknown as Json)
+        } catch (error) {
+          deps.log?.("graph_extraction.failed", { error: error instanceof Error ? error.message : String(error) } as Json)
+        } finally {
+          extractionRunning = false
+        }
+      })()
+    }, 2_000)
+    ;(timer as { unref?: () => void }).unref?.()
+  }
+
   const lastUserContent = (history: EngineMessage[]): string => {
     for (let index = history.length - 1; index >= 0; index -= 1) {
       const message = history[index]
@@ -712,6 +749,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
           assistantMessage: result.finalText,
           status: result.status,
         })
+        scheduleGraphExtraction()
       } catch (error) {
         deps.log?.("run.global_memory_failed", { error: error instanceof Error ? error.message : String(error) } as Json)
       }

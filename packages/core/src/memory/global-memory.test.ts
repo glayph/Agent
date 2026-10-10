@@ -116,3 +116,36 @@ describe("createGlobalMemory", () => {
     expect(logged[0].metadata).toMatchObject({ source: "telegram", peer: "42" });
   });
 });
+
+describe("extractPending", () => {
+  const summary = { processed: 2, entities: 5, relations: 3, skipped: 0, failed: 0 };
+
+  it("hands the model and limit to the memory and returns its summary", async () => {
+    const calls: Array<{ limit?: number; hasComplete: boolean; hasLog: boolean }> = [];
+    const integration = {
+      extractPending: async (options: { limit?: number; complete: unknown; log?: unknown }) => {
+        calls.push({ limit: options.limit, hasComplete: typeof options.complete === "function", hasLog: typeof options.log === "function" });
+        return summary;
+      },
+    } as unknown as AgentMemoryIntegration;
+    const memory = createGlobalMemory({ getIntegration: () => integration, getConfig: () => ({}) });
+    const result = await memory.extractPending({ limit: 4, complete: async () => "{}" });
+    expect(result).toEqual(summary);
+    expect(calls).toEqual([{ limit: 4, hasComplete: true, hasLog: true }]);
+  });
+
+  it("returns an empty summary when the memory is unavailable or throws", async () => {
+    const none = createGlobalMemory({ getIntegration: () => null, getConfig: () => ({}) });
+    expect(await none.extractPending({ complete: async () => "{}" })).toEqual({ processed: 0, entities: 0, relations: 0, skipped: 0, failed: 0 });
+
+    const logs: string[] = [];
+    const broken = {
+      extractPending: async () => {
+        throw new Error("db locked");
+      },
+    } as unknown as AgentMemoryIntegration;
+    const guarded = createGlobalMemory({ getIntegration: () => broken, getConfig: () => ({}), log: (message) => logs.push(message) });
+    expect((await guarded.extractPending({ complete: async () => "{}" })).processed).toBe(0);
+    expect(logs).toEqual(["global_memory.extract_failed"]);
+  });
+});

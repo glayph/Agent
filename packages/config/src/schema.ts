@@ -267,6 +267,16 @@ const AgentMemoryFilesSchema = z
 const AgentMemoryGlobalSchema = z
   .object({
     owner_peers: z.array(z.string().min(1).max(200)).max(100).optional(),
+    // Background extraction of entities and relations from stored paragraphs. It spends
+    // model tokens, so it is off unless enabled. `model` picks a cheaper model than chat.
+    extraction: z
+      .object({
+        enabled: z.boolean().optional(),
+        model: z.string().max(200).optional(),
+        batch_size: z.number().int().min(1).max(10).optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
