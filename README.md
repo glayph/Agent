@@ -1,67 +1,155 @@
-# Miki Agent Test Workflow
+<div align="center">
 
-Target: app
-Created: 2026-09-23T12:58:36.680Z
+# ✨ Miki
 
-## Brief
-Create a folder 'repaired-agent-test', inside it a file 'summary.md' with five practical numbered examples of Agent Miki’s capabilities, then verify folder and file existence, exact number of entries, and provide the final path and summary.
+### *Your local-first, autonomous AI agent*
 
-## Architecture
-Modular vertical-slice architecture with domain, adapter, interface, and verification layers.
+**Remembers everything · Works across every channel · Runs on your own machine**
 
-- ui: User flows, state, responsive layout, and accessibility.
-- api: Backend endpoints, auth boundary, validation, and integration contracts.
-- domain: Core business rules independent from UI and transport.
-- persistence: Data models, migrations, caching, and recovery behavior.
-- tests: Unit, integration, visual, and smoke verification gates.
+[![Node](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![pnpm](https://img.shields.io/badge/pnpm-workspaces-F69220?logo=pnpm&logoColor=white)](https://pnpm.io)
+[![Platform](https://img.shields.io/badge/Ubuntu%20%7C%20Windows-VirtualBox-7F3FBF)](#-installation)
+[![Version](https://img.shields.io/badge/version-1.3.14-ff69b4)](package.json)
 
-## File Tree
-- [must] miki-agent-test/README.md - Project overview, setup, and delivery checklist.
-- [must] miki-agent-test/docs/architecture.md - Architecture decisions, boundaries, and data flow.
-- [must] miki-agent-test/src/index.ts - Main application or library entry point.
-- [must] miki-agent-test/src/domain/index.ts - Core domain rules separated from adapters.
-- [should] miki-agent-test/src/adapters/index.ts - External service and platform adapter boundary.
-- [must] miki-agent-test/tests/smoke.test.ts - End-to-end or integration smoke gate.
-- [must] miki-agent-test/scripts/verify.mjs - Portable scaffold verification used by post-generation gates.
-- [must] miki-agent-test/package.json - Scripts for build, test, lint, and smoke.
+</div>
 
-## Milestones
-### Blueprint
-Requirements, architecture, and risk plan are explicit before writing broad code.
-- Extract concrete requirements from the brief and any sketches/assets.
-- Define module boundaries, data flow, and runtime constraints.
-- Choose the smallest vertical slice that proves the architecture.
-- Gate: blueprint review - Requirements and acceptance gates are written down.
+---
 
-### Vertical Slice
-A minimal running artifact proves the highest-risk path.
-- Create the workspace and core files.
-- Implement the startup path and one end-to-end user/system workflow.
-- Keep placeholders isolated behind interfaces so later expansion does not require rewrites.
-- Gate: unit tests (node scripts/verify.mjs test) - Core behavior and adapters pass focused tests.
-- Gate: build (node scripts/verify.mjs build) - Production artifact builds without type or bundling errors.
+## 🌈 What is Miki?
 
-### Feature Expansion
-Expected capabilities are added behind the established boundaries.
-- Implement modules in dependency order.
-- Add regression tests next to each module contract.
-- Run smoke checks after each meaningful integration step.
-- Gate: unit tests (node scripts/verify.mjs test) - Core behavior and adapters pass focused tests.
-- Gate: build (node scripts/verify.mjs build) - Production artifact builds without type or bundling errors.
-- Gate: smoke (node scripts/verify.mjs smoke) - Primary user workflow works in runtime.
+Miki is a **local-first autonomous agent**. It plans, uses tools, browses the web, edits files, and reports back, all while keeping one **global memory** that follows you from the chat window to Telegram and beyond.
 
-### Hardening
-The artifact is maintainable, testable, and ready for review.
-- Remove dead paths, insecure defaults, and placeholder behavior.
-- Document setup, limitations, and verification evidence.
-- Run the full gate list from a clean state.
-- Gate: unit tests (node scripts/verify.mjs test) - Core behavior and adapters pass focused tests.
-- Gate: build (node scripts/verify.mjs build) - Production artifact builds without type or bundling errors.
-- Gate: smoke (node scripts/verify.mjs smoke) - Primary user workflow works in runtime.
+| | Feature | What it means |
+|---|---|---|
+| 🧠 | **Global memory** | One owner-only memory shared by every channel. Nothing is forgotten between sessions. |
+| 💬 | **Task-per-chat** | Every new task opens its own chat, so you always see *what* started *when* and *why*. |
+| 🖼️ | **Visual proof** | Screenshots and generated files appear right inside the conversation. |
+| 🛠️ | **Real tools** | Browser automation, file workspace, skills, and MCP connectors. |
+| 🌏 | **Bengali-aware** | Tokenizer and retrieval handle Bengali text properly. |
+| 🔒 | **Yours** | Runs locally; your data stays in your data directory. |
 
-## Review Loop
-- Plan the smallest next change.
-- Edit only the files needed for that change.
-- Run the narrowest meaningful gate.
-- Broaden tests/build/smoke before declaring the milestone done.
-- Record evidence and remaining risk.
+---
+
+## 🗺️ Architecture at a glance
+
+```
+          ┌──────────────────────────────────────────────┐
+          │                 Channels                     │
+          │   💻 Web chat   📱 Telegram   🔌 MCP tools   │
+          └───────────────────────┬──────────────────────┘
+                                  ▼
+          ┌──────────────────────────────────────────────┐
+          │  gateway  ·  REST + WebSocket  ·  auth       │
+          └───────────────────────┬──────────────────────┘
+                                  ▼
+   ┌────────────┬─────────────────┴────────────┬───────────────┐
+   │ 🤖 core     │ 🧠 memory                     │ 🧩 skills     │
+   │ agent loop  │ graph + paragraph recall      │ bundled tools │
+   │ tools/LLMs  │ global, owner-only            │ & workflows   │
+   └────────────┴──────────────────────────────┴───────────────┘
+        ▲                  ▲                         ▲
+     ⚙️ config         📦 installer               🎨 ui (React)
+```
+
+| Package | Role |
+|---|---|
+| `packages/core` | Agent engine, LLM providers, tools, autonomy, safety |
+| `packages/gateway` | Express + WebSocket server, sessions, auth, chat media |
+| `packages/memory` | Global graph-based memory and retrieval |
+| `packages/skills` | Bundled and downloadable skills |
+| `packages/config` | Typed runtime configuration and validation |
+| `packages/installer` | Guided setup |
+| `packages/ui` | Dashboard and chat interface (React + Vite) |
+| `packages/cli` | Command-line access |
+
+---
+
+## 🚀 Quick start
+
+> **Requirements:** Node.js 20+, pnpm, and Git. Ubuntu (recommended) or Windows. Running inside an Oracle VirtualBox Ubuntu VM works well.
+
+```bash
+# 1. Clone
+git clone https://github.com/glayph/agent.git
+cd agent
+
+# 2. Install dependencies
+npm install
+
+# 3. Build everything
+npm run build
+
+# 4. Start Miki
+npm start
+```
+
+Then open the dashboard in your browser (default gateway port **18800**, set with `GATEWAY_PORT`).
+
+### 🧪 Developer mode
+
+```bash
+npm run dev            # hot-reload development
+npm run verify         # full verification pass
+npm run test:gateway   # gateway test suite
+```
+
+### 🤖 Local models
+
+```bash
+npm run model:list     # see available models
+npm run model:install  # install one
+npm run model:status   # check what is ready
+```
+
+### 🌙 Run 24/7
+
+```bash
+npm run runtime:24-7        # supervised, auto-restart runtime
+npm run runtime:24-7:check  # health check
+```
+
+---
+
+## 🌟 Highlights
+
+- 🪄 **Plans before acting** — breaks big goals into steps and tracks progress.
+- 🖱️ **Browses for you** — Playwright-powered browser with screenshots you can see in chat.
+- 📂 **Works in a workspace** — reads and writes files safely, with approvals for risky changes.
+- 🔁 **Recovers gracefully** — restart policies, graceful shutdown, and budget-aware continuation.
+- 🧾 **Remembers the story** — old conversations are compacted and recalled, not dropped.
+
+---
+
+## 🛡️ Safety & privacy
+
+- Miki runs **on your machine**; secrets, databases, and `.git` contents are never exposed through the media route.
+- File writes and dangerous commands go through **approval** and policy checks.
+- Memory is **owner-only** and never mixed with other users.
+
+---
+
+## 🧭 Roadmap
+
+- [x] Global, cross-channel memory
+- [x] Task-per-chat sessions
+- [x] Visual proof attachments in chat
+- [ ] Graph memory for very long histories (100k+ messages)
+- [ ] Richer skill marketplace
+- [ ] Windows and Linux one-click installers
+
+---
+
+## 🤝 Contributing
+
+Pull requests are welcome! Please run `npm run verify` and `npm run test:gateway` before opening one. Keep changes small, tested, and well described.
+
+---
+
+<div align="center">
+
+**Made with 💜 by glayph**
+
+*Miki — remember everything, forget nothing.*
+
+</div>
