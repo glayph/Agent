@@ -39,6 +39,7 @@ import { createGoalTools, GoalStore } from "@miki/core/api/goals"
 import { AdaptiveMessageCoordinator, planAdaptiveOutput, type AdaptiveMessagingConfig } from "@miki/core"
 import { getLifecycleBus } from "@miki/core/hooks"
 import type { FileMemoryService } from "@miki/core/memory-files"
+import { createAttachmentCollector, type AttachmentContext, type ChatAttachmentPayload } from "./chat-attachments.js"
 import type { GlobalMemory } from "@miki/core/memory"
 
 type Json = Record<string, unknown>
@@ -870,7 +871,11 @@ export function createWsEventMapper(
   model?: string,
   getToolFeedbackConfig: () => { enabled: boolean; separateMessages: boolean; maxArgsLength: number } = () => ({ enabled: true, separateMessages: false, maxArgsLength: 300 }),
   getMessagingConfig: () => Partial<AdaptiveMessagingConfig> = () => ({}),
+  getAttachmentContext?: () => AttachmentContext,
 ) {
+  /** Proof files (screenshots, written files) gathered from this run's tool calls. */
+  const attachmentCollector = getAttachmentContext ? createAttachmentCollector(getAttachmentContext) : undefined
+  const attachmentsFor = (): ChatAttachmentPayload[] => attachmentCollector?.list() ?? []
   const toolMessageId = (callId: string) => `tool-${callId}`
   const created = new Set<string>()
   const messaging = new AdaptiveMessageCoordinator(getMessagingConfig() as AdaptiveMessagingConfig)
@@ -921,11 +926,13 @@ export function createWsEventMapper(
       getMessagingConfig(),
     )
     finalIds.length = 0
-    for (const item of planned) {
+    const proof = attachmentsFor()
+    for (const [index, item] of planned.entries()) {
       const id = randomUUID()
       if (!finalId) finalId = id
       finalIds.push(id)
       send("message.create", {
+        ...(proof.length > 0 && index === planned.length - 1 ? { attachments: proof } : {}),
         message_id: id,
         message_group_id: item.groupId,
         message_sequence: item.sequence,
@@ -1001,6 +1008,7 @@ export function createWsEventMapper(
         break
       case "tool.call":
         toolFeedbackPayload(event.call, runId)
+        attachmentCollector?.observe(event.call)
         break
       case "message.final": {
         const live = streamed.get(runId)
@@ -1017,7 +1025,8 @@ export function createWsEventMapper(
             finalId = live.id
             finalIds.length = 0
             finalIds.push(live.id)
-            send("message.update", { message_id: live.id, content: event.content, kind: "normal", run_id: runId, ...(model ? { model_name: model } : {}) })
+            const proof = attachmentsFor()
+            send("message.update", { message_id: live.id, content: event.content, kind: "normal", run_id: runId, ...(proof.length > 0 ? { attachments: proof } : {}), ...(model ? { model_name: model } : {}) })
             break
           }
           send("message.delete", { message_id: live.id, run_id: runId })
@@ -1037,5 +1046,5 @@ export function createWsEventMapper(
         break
     }
   }
-  return { handle, finalId, finalIds }
+  return { handle, finalId, finalIds, attachments: attachmentsFor }
 }

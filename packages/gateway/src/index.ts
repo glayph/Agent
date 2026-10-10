@@ -22,6 +22,7 @@ import { globalErrorHandler } from "@miki/core/error-handler"
 import { getLifecycleBus } from "@miki/core/hooks"
 import { planAdaptiveOutput } from "@miki/core"
 import { createDashboardExtendedRouter } from "./dashboard-extended.js"
+import { MEDIA_ROUTE, describeFile, resolveMediaPath } from "./chat-attachments.js"
 import { validateRuntimeConfig, migrateRuntimeConfig } from "@miki/config"
 import { AutonomousSupervisor } from "@miki/core/autonomy"
 import { normalizeSessionScope, resolveSessionContextId } from "./session-scope.js"
@@ -968,6 +969,23 @@ app.post("/api/models/test-tools-inline", async (req, res) => {
   }
 })
 
+// Chat proof media: screenshots and files the agent produced, shown inline in chat.
+// /api is already behind requireAuth; the resolver additionally limits this to the
+// workspace + screenshots dir, known file types, and never secrets/databases.
+app.get(MEDIA_ROUTE, (req, res) => {
+  const requested = typeof req.query.path === "string" ? req.query.path : ""
+  const file = resolveMediaPath(requested, { workspaceRoot, dataRoot })
+  const info = file ? describeFile(file) : null
+  if (!file || !info) return res.status(404).json({ error: "Attachment not found." })
+  res.setHeader("Content-Type", info.contentType)
+  res.setHeader("X-Content-Type-Options", "nosniff")
+  // Sandboxed so a served .html/.svg can never run script with the dashboard session.
+  res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'")
+  res.setHeader("Cache-Control", "private, max-age=300")
+  if (req.query.download === "1") res.setHeader("Content-Disposition", `attachment; filename="${path.basename(file).replace(/"/g, "")}"`)
+  return res.sendFile(file)
+})
+
 // Files / Drive: the full file manager (list, read, write, create, rename, move, copy, delete,
 // upload, download, archive, preview, run). Everything here needs the dashboard session.
 app.use("/api/files", requireAuth, createFileManagerRouter({
@@ -1635,7 +1653,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
         multiMessageMinLength: Math.max(256, Number(messaging.multiMessageMinLength ?? 800) || 800),
         progressIntervalMs: Math.max(500, Number(messaging.progressIntervalMs ?? 1800) || 1800),
       }
-    })
+    }, () => ({ workspaceRoot, dataRoot }))
     const persistAdaptiveReply = (text: string, modelName: string | undefined) => {
       if (!text) return
       const finalIds = mapper.finalIds.length > 0 ? mapper.finalIds : [mapper.finalId]
@@ -1663,7 +1681,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
         const item = chunks[i]
         const id = finalIds[i] || item.id
         const createdAt = new Date(Date.now() + i).toISOString()
-        db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,model_name,context_id) VALUES(?,?,?,?,?,?,?)").run(id, sessionId, "assistant", item.content, createdAt, modelName || null, contextId)
+        const proof = i === chunks.length - 1 ? mapper.attachments() : []
+        db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,model_name,context_id,attachments_json) VALUES(?,?,?,?,?,?,?,?)").run(id, sessionId, "assistant", item.content, createdAt, modelName || null, contextId, proof.length > 0 ? JSON.stringify(proof) : null)
       }
       db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
       getLifecycleBus().emit("message:sent", {
