@@ -1,5 +1,7 @@
 'use strict';
 
+const { splitParagraphs } = require('./paragraph-chunker');
+
 class AgentMemoryIntegration {
   constructor(tkg, options = {}) {
     this.tkg = tkg;
@@ -81,17 +83,28 @@ class AgentMemoryIntegration {
 
     const result = this.tkg.writeEvent(eventData);
     const memoryCategory = result && result.memoryCategory ? result.memoryCategory : undefined;
+    // One node per paragraph, not one per answer: a recalled memory is the passage
+    // that matters, and the sequence of paragraphs stays reconstructable.
     const graphMemory = this.graphMemory
-      ? this.graphMemory.ingest({
-        scope: this._scope(metadata),
-        content: typeof agentOutput === 'string' ? agentOutput : JSON.stringify(agentOutput || ''),
-        category: metadata.category || 'conversation',
-        memoryType: metadata.memoryType || 'assistant_response',
-        sourceType: 'agent',
-        sourceReference: metadata.messageId || metadata.runId || null,
-        taskReference: metadata.taskId || metadata.runId || null,
-        metadata: { userInput: typeof userInput === 'string' ? userInput.substring(0, 1000) : '' },
-      })
+      ? (() => {
+        const text = typeof agentOutput === 'string' ? agentOutput : JSON.stringify(agentOutput || '');
+        const parts = splitParagraphs(text);
+        const results = (parts.length ? parts : [{ index: 0, text }]).map((part) => this.graphMemory.ingest({
+          scope: this._scope(metadata),
+          content: part.text,
+          category: metadata.category || 'conversation',
+          memoryType: metadata.memoryType || 'assistant_response',
+          sourceType: 'agent',
+          sourceReference: metadata.messageId || metadata.runId || null,
+          taskReference: metadata.taskId || metadata.runId || null,
+          metadata: {
+            userInput: typeof userInput === 'string' ? userInput.substring(0, 1000) : '',
+            paragraphIndex: part.index,
+            paragraphCount: parts.length || 1,
+          },
+        }));
+        return results.length === 1 ? results[0] : { paragraphs: results.length, results };
+      })()
       : null;
 
     const entities = this.tkg._extractEntities({ content: agentOutput });
@@ -100,6 +113,25 @@ class AgentMemoryIntegration {
     }
 
     return { ...result, graphMemory };
+  }
+
+  /**
+   * Store text in the cognitive graph as one node per paragraph. A recalled memory
+   * is then the passage that matters (a few dozen tokens), not the whole message.
+   */
+  _ingestParagraphNodes(text, metadata, kind) {
+    const parts = splitParagraphs(text);
+    const units = parts.length ? parts : [{ index: 0, text }];
+    return units.map((part) => this.graphMemory.ingest({
+      scope: this._scope(metadata),
+      content: part.text,
+      category: metadata.category || 'conversation',
+      memoryType: kind.memoryType,
+      sourceType: kind.sourceType,
+      sourceReference: metadata.messageId || null,
+      taskReference: metadata.taskId || metadata.runId || null,
+      metadata: { role: kind.role, paragraphIndex: part.index, paragraphCount: units.length },
+    }));
   }
 
   logInteraction(userMessage, agentResponse, metadata = {}) {
@@ -120,9 +152,11 @@ class AgentMemoryIntegration {
     let graphEvents = [];
     if (this.graphMemory) {
       try {
+        const userText = typeof userMessage === 'string' ? userMessage : (userMessage?.content || '');
+        const agentText = typeof agentResponse === 'string' ? agentResponse : (agentResponse?.content || '');
         graphEvents = [
-          this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof userMessage === 'string' ? userMessage : (userMessage?.content || ''), category: metadata.category || 'conversation', memoryType: 'user_message', sourceType: 'user', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'user' } }),
-          this.graphMemory.ingest({ scope: this._scope(metadata), content: typeof agentResponse === 'string' ? agentResponse : (agentResponse?.content || ''), category: metadata.category || 'conversation', memoryType: 'assistant_response', sourceType: 'agent', sourceReference: metadata.messageId || null, taskReference: metadata.taskId || metadata.runId || null, metadata: { role: 'assistant' } }),
+          ...this._ingestParagraphNodes(userText, metadata, { memoryType: 'user_message', sourceType: 'user', role: 'user' }),
+          ...this._ingestParagraphNodes(agentText, metadata, { memoryType: 'assistant_response', sourceType: 'agent', role: 'assistant' }),
         ];
       } catch (err) {
         console.warn('[memory] graph ingest failed (TKG events kept):', err && err.message ? err.message : err);

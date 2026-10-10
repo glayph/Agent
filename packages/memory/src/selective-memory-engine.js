@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { tokenize } = require('./text-tokens');
+const { splitParagraphs } = require('./paragraph-chunker');
 const { canonicalRegion, CANONICAL_REGIONS } = require('./regions');
 const { cosineSimilarity } = require('./embedding-provider');
 
@@ -14,6 +15,10 @@ const STOP_WORDS = new Set([
 
 // Bump when tokenization changes so stored tokens/postings are rebuilt once.
 const TOKENIZER_VERSION = 'v2-indic-marks-bengali-stems';
+// Bump when the memory unit changes (whole message -> paragraph) so old chunks are re-cut once.
+const CHUNKING_VERSION = 'p1-paragraphs';
+// Chunks longer than this many characters are candidates for re-cutting into paragraphs.
+const RECHUNK_MIN_CHARS = 1400;
 
 function nowIso() { return new Date().toISOString(); }
 function id(prefix) { return `${prefix}-${crypto.randomUUID()}`; }
@@ -140,6 +145,7 @@ class SelectiveMemoryEngine {
     `);
     this.initialized = true;
     this._migrateTokenizer();
+    this._migrateParagraphs();
     return this;
   }
 
@@ -171,6 +177,48 @@ class SelectiveMemoryEngine {
       last = rows[rows.length - 1].rid;
     }
     this.db.prepare("INSERT OR REPLACE INTO memory_engine_meta (key, value) VALUES ('tokenizer_version', ?)").run(TOKENIZER_VERSION);
+  }
+
+  /**
+   * Memories written before paragraph chunking are whole messages. Re-cut the long
+   * ones once: each becomes a chain of paragraph chunks, and the original chunk is
+   * marked 'superseded' (not deleted; the raw event still holds the full text).
+   */
+  _migrateParagraphs() {
+    const current = this.db.prepare("SELECT value FROM memory_engine_meta WHERE key = 'chunking_version'").get();
+    if (current && current.value === CHUNKING_VERSION) return;
+    const select = this.db.prepare(`SELECT rowid AS rid, * FROM memory_chunk_index
+      WHERE rowid > ? AND status = 'active' AND length(content) > ? AND metadata NOT LIKE '%"paragraphCount"%'
+      ORDER BY rowid LIMIT 100`);
+    const supersede = this.db.prepare("UPDATE memory_chunk_index SET status = 'superseded', updated_at = ? WHERE id = ?");
+    let last = 0;
+    for (;;) {
+      const rows = select.all(last, RECHUNK_MIN_CHARS);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        last = row.rid;
+        const parts = splitParagraphs(row.content);
+        if (parts.length <= 1) continue;
+        const [agentId, ownerId, workspaceId] = String(row.scope_key).split(':').map(decodeURIComponent);
+        const old = parseJson(row.metadata, {});
+        const result = this.ingestParagraphs({
+          scope: { agentId, ownerId, workspaceId },
+          content: row.content,
+          region: row.region,
+          sourceType: row.source_type,
+          sourceReference: row.source_reference,
+          provenance: row.provenance,
+          confidence: Number(row.confidence),
+          importance: Number(row.importance),
+          createdAt: row.created_at,
+          entities: Array.isArray(old.entities) ? old.entities : [],
+          metadata: { ...old, rechunkedFrom: row.id },
+          group: `rechunk-${row.id}`,
+        });
+        if (result.chunkIds.length > 0) supersede.run(nowIso(), row.id);
+      }
+    }
+    this.db.prepare("INSERT OR REPLACE INTO memory_engine_meta (key, value) VALUES ('chunking_version', ?)").run(CHUNKING_VERSION);
   }
 
   normalizeScope(scope = {}) {
@@ -299,9 +347,10 @@ class SelectiveMemoryEngine {
       const overlap = candidateTokens.filter(token => tokenSet.has(token)).length;
       const regionBoost = candidate.region === region ? 0.12 : 0;
       const weight = clamp(0.12 + Math.min(0.65, overlap * 0.12) + regionBoost, 0, 1);
-      // Sharing a region is not a relationship: without a shared token the two chunks are
-      // unrelated, and linking them would make the graph drag unrelated memories into recall.
-      if (overlap === 0) continue;
+      // Sharing a region is not a relationship, and neither is one common word ("details", "notes").
+      // Two topic words in common are the minimum for an edge; otherwise the graph becomes a web of
+      // coincidences that drags unrelated memories into recall.
+      if (overlap < 2) continue;
       this.connect(scope, chunkId, candidate.id, overlap > 1 ? relationType : 'related_to', { weight, confidence: 0.65, metadata: { tokenOverlap: overlap } });
     }
     this._linkByRareTokens(scope, chunkId, region, tokens, relationType, new Set(recent.map(candidate => candidate.id)));
@@ -332,6 +381,44 @@ class SelectiveMemoryEngine {
       const weight = clamp(0.12 + Math.min(0.65, row.overlap * 0.12) + (row.region === region ? 0.12 : 0), 0, 1);
       this.connect(scope, chunkId, row.id, row.overlap > 1 ? relationType : 'related_to', { weight, confidence: 0.6, metadata: { tokenOverlap: row.overlap, link: 'rare_tokens' } });
     }
+  }
+
+  /**
+   * Store text as paragraph-sized memories instead of one blob. Each paragraph is
+   * its own chunk (so recalling it costs a few dozen tokens, not the whole
+   * message) and consecutive paragraphs are chained with strong "next_paragraph"
+   * edges, so the graph can still walk from a recalled paragraph to its
+   * neighbours and rebuild the surrounding passage when needed.
+   */
+  ingestParagraphs(input = {}) {
+    if (!this.initialized) this.initializeSync();
+    const scope = this.normalizeScope(input.scope);
+    const parts = splitParagraphs(String(input.content || ''), input.chunking);
+    if (parts.length === 0) return { stored: false, reason: 'empty', chunkIds: [], paragraphs: 0 };
+    const group = String(input.group || input.metadata?.eventId || id('mgroup'));
+    const chunkIds = [];
+    let storedCount = 0;
+    for (const part of parts) {
+      const result = this.ingest({
+        ...input,
+        content: part.text,
+        summary: parts.length === 1 ? input.summary : null,
+        metadata: {
+          ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}),
+          paragraphGroup: group,
+          paragraphIndex: part.index,
+          paragraphCount: parts.length,
+        },
+      });
+      if (result.chunkId) chunkIds.push(result.chunkId);
+      if (result.stored) storedCount += 1;
+    }
+    for (let index = 1; index < chunkIds.length; index += 1) {
+      if (chunkIds[index - 1] !== chunkIds[index]) {
+        this.connect(scope, chunkIds[index - 1], chunkIds[index], 'next_paragraph', { weight: 0.85, confidence: 0.95, metadata: { group } });
+      }
+    }
+    return { stored: storedCount > 0, chunkIds, paragraphs: parts.length, group };
   }
 
   connect(scopeInput, sourceChunkId, targetChunkId, relationType = 'related_to', options = {}) {
@@ -507,7 +594,8 @@ class SelectiveMemoryEngine {
         const neighbors = this._neighbors(scope, parent.row.id, regions, this.options.maxNeighbors);
         for (const neighbor of neighbors) {
           if (selectedIds.has(neighbor.neighbor_id)) continue;
-          const score = clamp(parent.score * 0.78 + Number(neighbor.edge_weight || 0) * 0.22);
+          // A neighbour is context for the memory that matched; it must never outrank it.
+        const score = Math.min(parent.score * 0.92, clamp(parent.score * 0.78 + Number(neighbor.edge_weight || 0) * 0.22));
           const item = { row: neighbor, score, lexical: 0, semantic: 0, freshness: this._freshness(neighbor.updated_at) };
           if (add(item, depth, { chunkId: parent.row.id, edgeId: neighbor.edge_id, relation: neighbor.relation_type })) next.push(selected[selected.length - 1]);
           if (selected.length >= maxSelected) break;

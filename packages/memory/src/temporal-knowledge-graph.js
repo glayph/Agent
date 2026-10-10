@@ -9,6 +9,8 @@ const { createEmbeddingProvider } = require('./embedding-provider');
 const NodeGraph = require('./node-graph');
 const GraphCognitiveMemory = require('./graph-cognitive-memory');
 const SelectiveMemoryEngine = require('./selective-memory-engine');
+// Capitalised words that are ordinary language, not names.
+const ENTITY_STOP = /^(the|and|for|with|from|this|that|these|those|have|been|will|are|was|were|not|but|you|your|our|their|there|here|what|when|where|which|who|how|why|yes|please|thanks|thank|hello|okay|sure|also|then|now|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
 const LearningStore = require('./learning-store');
 
 class TemporalKnowledgeGraph {
@@ -639,7 +641,7 @@ class TemporalKnowledgeGraph {
           ownerId: process.env.MIKI_OWNER_ID || 'default-owner',
           workspaceId: process.env.MIKI_WORKSPACE_ID || 'default-workspace',
         };
-        this.selectiveMemory.ingest({
+        this.selectiveMemory.ingestParagraphs({
           scope: selectiveScope,
           content: eventData.content || '',
           region: memoryCategory,
@@ -833,34 +835,40 @@ class TemporalKnowledgeGraph {
     const content = eventData.content || '';
     const seen = new Set(entities.map(e => String(e.name).toLowerCase()));
 
-    // 1) English-style Capitalized multi-word names (legacy heuristic).
-    const engMatches = content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g);
-    if (engMatches) {
-      for (const name of engMatches) {
-        if (name.length > 3 && !seen.has(name.toLowerCase())) {
-          seen.add(name.toLowerCase());
-          entities.push({ name, type: 'entity' });
-        }
-      }
+    // An entity is a NAME (a person, product, place, project), never an ordinary
+    // word. Treating every word of a sentence as an entity (the old behaviour,
+    // 30 per event) turned the graph into a bag of words with no meaning.
+    // Real extraction of concepts is the job of the LLM extraction step; this
+    // heuristic only keeps what is unmistakably a name:
+    const add = (name) => {
+      // "The Falcon Project" is the name "Falcon Project"; drop leading filler words.
+      const words = String(name || '').trim().replace(/^["'“‘«]+|["'”’»]+$/g, '').split(/\s+/);
+      while (words.length > 1 && ENTITY_STOP.test(words[0])) words.shift();
+      const clean = words.join(' ');
+      const key = clean.toLowerCase();
+      if (clean.length < 3 || seen.has(key) || ENTITY_STOP.test(clean)) return;
+      seen.add(key);
+      entities.push({ name: clean, type: 'entity' });
+    };
+
+    // 1) Capitalised names: multi-word ("Falcon Project") anywhere, or a single
+    //    capitalised word that is not merely the first word of a sentence.
+    const sentenceStart = /(^|[.!?\u0964\n]\s*)$/;
+    const capitalised = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g;
+    let m;
+    while ((m = capitalised.exec(content)) !== null) {
+      const multiWord = /\s/.test(m[0]);
+      if (multiWord || !sentenceStart.test(content.slice(0, m.index))) add(m[0]);
     }
 
-    // 2) Unicode letter sequences (Bengali, Arabic, Devanagari, CJK, etc.).
-    //    Require length >= 2 so single particles are skipped. Prefer runs
-    //    at word boundaries (start, whitespace, punctuation).
-    const unicodeNameRe = /(?:^|[\s,;:«»„"\u0964\u0965])([\p{L}][\p{L}\p{M}\p{N}'’-]{1,40})/gu;
-    let m;
-    while ((m = unicodeNameRe.exec(content)) !== null) {
-      const name = m[1].trim();
-      if (name.length < 2) continue;
-      // Skip pure ASCII lowercase short fillers already covered / noise.
-      if (/^[a-z]+$/.test(name) && name.length < 5) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      if (/^(the|and|for|with|from|this|that|have|been|will|are|was|were|not|but|you|your|our|their)$/i.test(name)) {
-        continue;
-      }
-      seen.add(key);
-      entities.push({ name, type: 'entity' });
+    // 2) Product / code names written in CamelCase or with inner capitals
+    //    (VirtualBox, OpenClaw, SQLite, GitHub) and ALL-CAPS acronyms of 3+ letters.
+    for (const token of content.match(/\b(?:[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+|[A-Z]{2,}[a-z][A-Za-z0-9]*|[a-z]+[A-Z][A-Za-z0-9]*|[A-Z]{3,})\b/g) || []) add(token);
+
+    // 3) Anything the writer quoted or bracketed as a name: "Falcon", «ফ্যালকন».
+    const quoted = /["“«‘]([^"”»’\n]{2,60})["”»’]/g;
+    while ((m = quoted.exec(content)) !== null) {
+      if (m[1].trim().split(/\s+/).length <= 5) add(m[1]);
     }
 
     // Cap extraction volume per event to avoid flooding the graph.
