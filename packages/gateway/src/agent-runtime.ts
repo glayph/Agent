@@ -524,7 +524,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         return memory || undefined
       }
       const skillsBlock = async (): Promise<string | undefined> => {
-        if (!registry.has("skill_read")) return undefined
+        if (!info.toolsEnabled || !registry.has("skill_read")) return undefined
         const profile = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile
         if (profile?.enabled === true) {
           const skills = profile.skills || {}

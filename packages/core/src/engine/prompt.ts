@@ -24,8 +24,9 @@ export function buildSystemPrompt(input: {
     parts.push(`Available tools: ${input.toolNames.join(", ")}.`);
   else
     parts.push("No tools are available in this run; answer from the conversation alone.");
-  if (input.extraContext?.trim() && input.toolNames.length)
-    parts.push(input.extraContext.trim());
+  // Recalled memory applies with or without tools; hosts leave out tool-only
+  // context (the skills catalog) themselves when a run has no tools.
+  if (input.extraContext?.trim()) parts.push(input.extraContext.trim());
   if (input.plan && input.plan.source !== "none" && input.plan.steps.length > 1)
     parts.push(
       `Working plan (adapt it if the evidence requires):\n${describePlan(input.plan)}`,

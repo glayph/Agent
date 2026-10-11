@@ -68,6 +68,26 @@ export function raceAbort(promise, signal) {
  * a model's malformed arguments become a clear tool error it can correct,
  * instead of an exception deep inside a tool.
  */
+/**
+ * Compact one-line description of a tool's parameters ("query (string, required),
+ * limit (integer)"). Appended to argument errors so the model can correct the call
+ * in the very next turn instead of guessing what the tool expects.
+ */
+export function describeParameters(schema, maxProps = 12) {
+    const properties = schema.properties && typeof schema.properties === "object"
+        ? schema.properties
+        : {};
+    const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+    const entries = Object.entries(properties);
+    if (!entries.length)
+        return "no arguments";
+    const shown = entries.slice(0, maxProps).map(([key, value]) => {
+        const type = typeof value?.type === "string" ? value.type : "any";
+        return `${key} (${type}${required.has(key) ? ", required" : ""})`;
+    });
+    const more = entries.length > maxProps ? `, +${entries.length - maxProps} more` : "";
+    return `${shown.join(", ")}${more}`;
+}
 export function validateArguments(schema, args) {
     const properties = schema.properties && typeof schema.properties === "object"
         ? schema.properties

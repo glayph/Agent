@@ -309,7 +309,8 @@ describe("AgentEngine", () => {
     expect(result.status).toBe("completed");
     for (const request of llm.requests) {
       expect(request.messages.some((message) => message.content === "old question")).toBe(false);
-      expect(request.messages.some((message) => String(message.content || "").length >= 900)).toBe(false);
+      // The system prompt is itself longer than 900 chars; the assertion is about tool payloads.
+      expect(request.messages.some((message) => message.role !== "system" && String(message.content || "").length >= 900)).toBe(false);
     }
   });
 

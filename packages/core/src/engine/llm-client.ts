@@ -44,6 +44,23 @@ function combineSignals(signals: AbortSignal[]): AbortSignal {
 }
 
 
+/** Seconds or HTTP-date from a Retry-After header, in ms; capped so a bad header cannot stall a run. */
+export function parseRetryAfterMs(value: string | null | undefined, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const seconds = Number(trimmed);
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(trimmed) - now;
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  return Math.min(ms, 30_000);
+}
+
+/** Exponential backoff with +/-25% jitter so parallel runs do not retry in lockstep. */
+function backoffDelayMs(baseMs: number, attempt: number, retryAfterMs?: number): number {
+  const exponential = baseMs * 2 ** attempt * (0.75 + Math.random() * 0.5);
+  return Math.max(exponential, retryAfterMs ?? 0);
+}
+
 /**
  * Reads an OpenAI-compatible SSE chat-completions stream and assembles it into
  * a normal LLMResponse (content, tool_calls, finish_reason, usage), forwarding
@@ -157,7 +174,9 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
       }
 
       let lastError: EngineLLMError | undefined;
+      let retryAfterMs: number | undefined;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
+        retryAfterMs = undefined;
         const signals = [AbortSignal.timeout(options.timeoutMs ?? 120_000)];
         if (callOptions.signal) signals.push(callOptions.signal);
         try {
@@ -223,6 +242,7 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
               ? payload.error
               : payload.error?.message;
           const retryable = response.status === 429 || response.status >= 500;
+          retryAfterMs = parseRetryAfterMs(response.headers?.get?.("retry-after"));
           lastError = new EngineLLMError(
             detail || `Model provider returned HTTP ${response.status}.`,
             { status: response.status, retryable },
@@ -245,7 +265,7 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
         }
         if (attempt < retries) {
           try {
-            await sleep(retryDelayMs * 2 ** attempt, callOptions.signal);
+            await sleep(backoffDelayMs(retryDelayMs, attempt, retryAfterMs), callOptions.signal);
           } catch {
             throw new Error("aborted");
           }

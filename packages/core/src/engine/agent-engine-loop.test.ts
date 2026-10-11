@@ -329,7 +329,7 @@ describe("context-manager helpers", () => {
 
 describe("contextProvider", () => {
   it("receives the user's request and session so memory can be recalled semantically", async () => {
-    const seen: Array<{ runId: string; sessionId?: string; goal: string }> = [];
+    const seen: Array<{ runId: string; sessionId?: string; goal: string; toolsEnabled: boolean }> = [];
     const llm = scriptedLLM([{ text: "ok" }]);
     const registry = new ToolRegistry();
     registry.register(tool({ name: "noop" }));
@@ -343,8 +343,68 @@ describe("contextProvider", () => {
     });
     const result = await engine.run({ runId: "run-ctx", sessionId: "chat-9", history: user("what is my codename?") });
     expect(result.status).toBe("completed");
-    expect(seen).toEqual([{ runId: "run-ctx", sessionId: "chat-9", goal: "what is my codename?" }]);
+    expect(seen).toEqual([{ runId: "run-ctx", sessionId: "chat-9", goal: "what is my codename?", toolsEnabled: true }]);
     const system = llm.requests[0].messages.find((message) => message.role === "system");
     expect(String(system?.content)).toContain("RECALLED: the project codename is Falcon");
+  });
+});
+
+describe("run pipeline improvements", () => {
+  it("still recalls memory when the run has tools disabled", async () => {
+    const seen: boolean[] = [];
+    const llm = scriptedLLM([{ text: "ok" }]);
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "noop" }));
+    const engine = new AgentEngine({
+      llm: llm.client,
+      tools: registry,
+      contextProvider: (info) => {
+        seen.push(info.toolsEnabled);
+        return "RECALLED: owner prefers Bengali";
+      },
+    });
+    const result = await engine.run({ history: user("hello"), allowTools: false });
+    expect(result.status).toBe("completed");
+    expect(seen).toEqual([false]);
+    const system = llm.requests[0].messages.find((message) => message.role === "system");
+    expect(String(system?.content)).toContain("RECALLED: owner prefers Bengali");
+  });
+
+  it("retries once in the same run when the first model reply is empty", async () => {
+    const llm = scriptedLLM([{ text: "" }, { text: "Here is the answer." }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const result = await engine.run({ history: user("question") });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("Here is the answer.");
+    expect(llm.requests).toHaveLength(2);
+  });
+
+  it("fails only after the empty-reply retry is also empty", async () => {
+    const llm = scriptedLLM([{ text: "" }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const result = await engine.run({ history: user("question") });
+    expect(result.status).toBe("failed");
+    expect(llm.requests).toHaveLength(2);
+  });
+
+  it("tells the model what a tool expects when the arguments are invalid", async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      tool({
+        name: "search",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" }, limit: { type: "integer" } },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      }),
+    );
+    const llm = scriptedLLM([{ calls: [{ name: "search", args: {} }] }, { text: "done" }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    await engine.run({ history: user("find it") });
+    const toolMessage = llm.requests[1].messages.find((message) => message.role === "tool");
+    expect(String(toolMessage?.content)).toContain("Missing required argument");
+    expect(String(toolMessage?.content)).toContain("query (string, required), limit (integer)");
   });
 });

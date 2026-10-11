@@ -1,4 +1,4 @@
-import { createFetchLLMClient, createRegistryLLMClient, EngineLLMError } from "./llm-client.js";
+import { createFetchLLMClient, createRegistryLLMClient, EngineLLMError, parseRetryAfterMs } from "./llm-client.js";
 
 const okBody = { choices: [{ message: { role: "assistant", content: "hi" } }], usage: { total_tokens: 3 } };
 const json = (status: number, body: unknown) =>
@@ -121,5 +121,27 @@ describe("createFetchLLMClient streaming", () => {
     const response = await client.complete([{ role: "user", content: "hi" }], { onTextDelta: () => undefined });
     expect(response.choices?.[0].message?.content).toBe("hi");
     expect(JSON.parse((fetchImpl.mock.calls[1] as unknown as [string, RequestInit])[1].body as string).stream).toBeUndefined();
+  });
+});
+
+describe("retry timing", () => {
+  it("parses Retry-After seconds and dates and caps absurd values", () => {
+    expect(parseRetryAfterMs("2")).toBe(2000);
+    expect(parseRetryAfterMs("999999")).toBe(30_000);
+    expect(parseRetryAfterMs(Date.UTC(2030, 0, 1, 0, 0, 5) ? new Date(Date.UTC(2030, 0, 1, 0, 0, 5)).toUTCString() : "", Date.UTC(2030, 0, 1))).toBe(5000);
+    expect(parseRetryAfterMs("garbage")).toBeUndefined();
+    expect(parseRetryAfterMs(null)).toBeUndefined();
+    expect(parseRetryAfterMs("-3")).toBeUndefined();
+  });
+
+  it("waits at least as long as the provider asks on a 429", async () => {
+    const limited = jest.fn()
+      .mockResolvedValueOnce({ ...json(429, { error: { message: "slow down" } }), headers: new Headers({ "retry-after": "0.2" }) } as Response)
+      .mockResolvedValueOnce(json(200, okBody));
+    const client = createFetchLLMClient({ baseUrl: "http://x", model: "m", fetchImpl: limited as never, retryDelayMs: 1 });
+    const started = Date.now();
+    await client.complete([{ role: "user", content: "a" }]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(190);
+    expect(limited).toHaveBeenCalledTimes(2);
   });
 });

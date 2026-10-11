@@ -18,6 +18,7 @@ import { buildSystemPrompt } from "./prompt.js";
 import { compactRunContext, pruneToolResults } from "./context-manager.js";
 import { TokenBudgetManager } from "../token-budget-manager.js";
 import {
+  describeParameters,
   errorMessage,
   raceAbort,
   redactSecrets,
@@ -46,6 +47,8 @@ export interface AgentEngineOptions {
     runId: string;
     sessionId?: string;
     goal: string;
+    /** False when this run has no tools, so the provider can skip tool-only context (skills catalog). */
+    toolsEnabled: boolean;
   }) => string | undefined | Promise<string | undefined>;
   /** Maximum model round-trips per run. */
   maxTurns?: number | (() => number);
@@ -442,9 +445,16 @@ export class AgentEngine {
       emit({ type: "plan.created", runId, plan: structuredClone(state.plan) });
 
     let extraContext: string | undefined;
-    if (runToolsEnabled && this.options.contextProvider) {
+    // Recall applies to every run, with or without tools: the one global memory
+    // must never be skipped just because a turn profile disabled the tools.
+    if (this.options.contextProvider) {
       try {
-        extraContext = await this.options.contextProvider({ runId, sessionId: request.sessionId, goal });
+        extraContext = await this.options.contextProvider({
+          runId,
+          sessionId: request.sessionId,
+          goal,
+          toolsEnabled: runToolsEnabled,
+        });
       } catch (error) {
         this.options.logger?.("context_provider.failed", {
           error: error instanceof Error ? error.message : String(error),
@@ -496,9 +506,12 @@ export class AgentEngine {
 
       // Keep long tasks inside the window: prune old tool output from the prompt,
       // then summarise the oldest agent steps when that is still not enough.
+      // Pruned once per turn; recomputed only when compaction replaces the messages.
+      let visibleMessages = compactionEnabled
+        ? pruneToolResults(state.messages, { keepRecentToolResults })
+        : state.messages;
       if (contextWindowTokens && compactionEnabled && compactions < 3) {
-        const pruned = pruneToolResults(state.messages, { keepRecentToolResults });
-        if (estimateContext(pruned, schemas) > Math.floor(contextWindowTokens * triggerRatio)) {
+        if (estimateContext(visibleMessages, schemas) > Math.floor(contextWindowTokens * triggerRatio)) {
           const outcome = await compactRunContext({
             messages: state.messages,
             llm,
@@ -509,6 +522,7 @@ export class AgentEngine {
           if (outcome) {
             compactions += 1;
             state.messages = outcome.messages;
+            visibleMessages = pruneToolResults(state.messages, { keepRecentToolResults });
             emit({
               type: "context.compacted",
               runId,
@@ -530,9 +544,6 @@ export class AgentEngine {
           }
         }
       }
-      const visibleMessages = compactionEnabled
-        ? pruneToolResults(state.messages, { keepRecentToolResults })
-        : state.messages;
 
       let response;
       for (;;) {
@@ -584,12 +595,16 @@ export class AgentEngine {
 
       if (calls.length === 0) {
         if (!text.trim()) {
-          if (state.records.length > 0 && !nudged) {
+          // Providers occasionally return an empty completion. Ask once, in the
+          // same run, before reporting a failure.
+          if (!nudged) {
             nudged = true;
             state.messages.push({
               role: "user",
               content:
-                "Give your final answer to the user now, based on the tool results above.",
+                state.records.length > 0
+                  ? "Give your final answer to the user now, based on the tool results above."
+                  : "Your previous reply was empty. Answer the user's last message now.",
             });
             continue;
           }
@@ -832,7 +847,7 @@ export class AgentEngine {
     }
     const invalid = validateArguments(tool.parameters, args);
     if (invalid) {
-      fail("failed", invalid);
+      fail("failed", `${invalid} Expected arguments for ${tool.name}: ${describeParameters(tool.parameters)}.`);
       return;
     }
 
