@@ -1,8 +1,7 @@
-import { parseControlIntent } from "./intent.js";
 const definitions = [
     {
         name: "agent_control_capabilities",
-        description: "List the typed, safe agent-management operations available in the current runtime.",
+        description: "List the typed, safe agent-management operations available in the current runtime. Call this first to learn the valid capability, action and input shape before planning or executing a change.",
         risk: "read",
         parameters: { type: "object", properties: {}, additionalProperties: false },
     },
@@ -14,7 +13,7 @@ const definitions = [
     },
     {
         name: "agent_control_plan",
-        description: "Create a validated, approval-aware plan for a typed control operation without mutating state.",
+        description: "Create a validated, approval-aware plan for a typed control operation without mutating state. Translate the user's request into capability, action and input yourself; do not pass free text.",
         risk: "read",
         parameters: {
             type: "object",
@@ -24,17 +23,6 @@ const definitions = [
                 action: { type: "string" },
                 input: { type: "object" },
             },
-            additionalProperties: false,
-        },
-    },
-    {
-        name: "agent_control_request",
-        description: "Interpret one unambiguous self-management request, then plan and execute it through the guarded control service.",
-        risk: "config_write",
-        parameters: {
-            type: "object",
-            required: ["message"],
-            properties: { message: { type: "string" } },
             additionalProperties: false,
         },
     },
@@ -82,18 +70,6 @@ export function createControlToolFactory(service) {
                     : undefined,
                 context: effectiveContext,
             };
-            if (name === "agent_control_request") {
-                const message = typeof input.message === "string" ? input.message : "";
-                const parsed = parseControlIntent(message);
-                if (!parsed.matched || !parsed.request)
-                    return { parsed };
-                const guardedRequest = { ...parsed.request, context: effectiveContext };
-                return {
-                    parsed: { ...parsed, request: guardedRequest },
-                    plan: await service.plan(guardedRequest),
-                    outcome: await service.execute(guardedRequest),
-                };
-            }
             if (name === "agent_control_plan")
                 return { plan: await service.plan(request) };
             if (name === "agent_control_execute")

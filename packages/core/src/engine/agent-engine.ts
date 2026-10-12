@@ -15,6 +15,7 @@ import type {
 import { ToolRegistry } from "./tool-registry.js";
 import { createPlan } from "./planner.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { verifyAnswer } from "./verifier.js";
 import { compactRunContext, pruneToolResults } from "./context-manager.js";
 import { TokenBudgetManager } from "../token-budget-manager.js";
 import {
@@ -96,11 +97,27 @@ export interface AgentEngineOptions {
   }) => void | Promise<void>;
   /** Models tried in order when the current model's request fails. */
   fallbackModels?: string[] | (() => string[]);
+  /**
+   * Self-check: after a tool-using run drafts its final answer, the model checks
+   * that draft against the request and the tool evidence and, when it finds a
+   * concrete problem, revises once. Off by default (it costs one extra model
+   * call); hosts enable it. Never inspects wording: the model judges.
+   */
+  selfCheck?: SelfCheckConfig | (() => SelfCheckConfig);
   /** Run independent read-only tool calls of one turn concurrently (default true). */
   parallelToolCalls?: boolean;
   /** Upper bound of concurrently running tool calls per turn (default 6). */
   maxParallelToolCalls?: number;
 }
+
+export type SelfCheckConfig =
+  | false
+  | {
+      /** Only runs with at least this many tool calls are checked (default 1). */
+      minToolCalls?: number;
+      /** Revisions allowed per run (default 1). */
+      maxRevisions?: number;
+    };
 
 function requestApprovalPolicy(
   request: RunRequest,
@@ -483,6 +500,7 @@ export class AgentEngine {
 
     // 2. Agent loop.
     let nudged = false;
+    let revisions = 0;
     let limitReason: string | undefined;
     let toolIterations = 0;
 
@@ -611,6 +629,35 @@ export class AgentEngine {
           return finish("failed", "", "The model returned an empty response.");
         }
         const finalText = text.trim();
+
+        // Self-check: judge the draft against the evidence before it becomes the answer.
+        const selfCheck = typeof this.options.selfCheck === "function" ? this.options.selfCheck() : this.options.selfCheck;
+        if (selfCheck && state.records.length >= Math.max(1, selfCheck.minToolCalls ?? 1) && revisions < Math.max(0, selfCheck.maxRevisions ?? 1)) {
+          const verdict = await verifyAnswer({
+            llm,
+            goal,
+            answer: finalText,
+            messages: state.messages,
+            signal,
+            onError: (reason) => this.options.logger?.("self_check.unavailable", { reason }),
+          });
+          if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
+          if (verdict && !verdict.ok) {
+            revisions += 1;
+            this.options.logger?.("self_check.revise", { issues: verdict.issues });
+            // The streamed draft is not the answer: retract it, as for a tool turn.
+            emit({ type: "thought", runId, turn, content: finalText });
+            state.messages.push({ role: "assistant", content: finalText });
+            state.messages.push({
+              role: "user",
+              content:
+                `A verification pass found problems with your draft answer:\n${verdict.issues.map((issue) => `- ${issue}`).join("\n")}\n` +
+                "Fix them (use tools again if you need more evidence) and give the corrected final answer. State clearly if something could not be done.",
+            });
+            continue;
+          }
+        }
+
         emit({ type: "message.final", runId, content: finalText });
         return finish("completed", finalText);
       }

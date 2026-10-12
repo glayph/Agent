@@ -1,5 +1,7 @@
 export { AgentEngine, NoModelConfiguredError } from "./agent-engine.js";
-export type { AgentEngineOptions, LLMResolver } from "./agent-engine.js";
+export type { AgentEngineOptions, LLMResolver, SelfCheckConfig } from "./agent-engine.js";
+export { verifyAnswer, parseVerdict, buildEvidence } from "./verifier.js";
+export type { AnswerVerdict } from "./verifier.js";
 export { ToolRegistry } from "./tool-registry.js";
 export { ApprovalStore } from "./approval-store.js";
 export type {

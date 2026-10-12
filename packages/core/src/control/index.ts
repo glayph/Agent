@@ -5,8 +5,6 @@ export {
 export { ControlJournal } from "./journal.js";
 export { createControlRouter } from "./router.js";
 export { createControlToolFactory } from "./tools.js";
-export { parseControlIntent } from "./intent.js";
-export type { ControlIntentResult } from "./intent.js";
 export type { ControlToolDefinition, ControlToolFactory } from "./tools.js";
 export type {
   AgentControlServiceOptions,

@@ -298,6 +298,8 @@ export interface AgentMemoryIntegration {
     formattedAnchor: string;
     formattedSpecialEvents: string;
     selectiveContext?: SelectiveMemoryContext | null;
+    factCards?: { items: Array<{ id?: string; text: string; score?: number }>; text: string };
+    graphContext?: { items: Array<{ id?: string; text: string; category?: string; score?: number }>; text: string };
   };
   postExecutionHook(
     agentOutput: string,

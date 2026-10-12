@@ -355,6 +355,16 @@ const AgentBlockSchema = z
       .passthrough()
       .optional(),
     resource: AgentResourceSchema.optional(),
+    // Accuracy: a tool-using run checks its draft answer against the tool
+    // evidence and revises once on a concrete problem (one extra model call).
+    self_check: z
+      .object({
+        enabled: z.boolean().optional(),
+        max_revisions: z.number().int().min(0).max(2).optional(),
+        min_tool_calls: z.number().int().min(1).max(50).optional(),
+      })
+      .passthrough()
+      .optional(),
     memory: AgentMemorySchema.optional(),
     model_router: AgentModelRouterSchema.optional().catch(undefined),
     security: z

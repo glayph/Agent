@@ -229,7 +229,11 @@ export interface MemoryHit {
 
 /** Storage port; the gateway backs it with SQLite, a later step can add vector search. */
 export interface MemoryPort {
-  search(query: string, limit: number): Promise<MemoryHit[]> | MemoryHit[];
+  search(
+    query: string,
+    limit: number,
+    context?: { runId: string; sessionId?: string },
+  ): Promise<MemoryHit[]> | MemoryHit[];
   add(entry: { content: string; summary?: string; region?: string; supersedes?: string }): Promise<{ id: string }> | { id: string };
 }
 
@@ -246,9 +250,12 @@ export function createMemoryTools(memory: MemoryPort): EngineTool[] {
         properties: { query: { type: "string" }, limit: { type: "integer" } },
         additionalProperties: false,
       },
-      async execute(input) {
+      async execute(input, context) {
         const limit = Math.min(20, Math.max(1, Number(input.limit ?? 8)));
-        const hits = await memory.search(asString(input.query, "query"), limit);
+        const hits = await memory.search(asString(input.query, "query"), limit, {
+          runId: context.runId,
+          sessionId: context.sessionId,
+        });
         return { count: hits.length, hits };
       },
     },

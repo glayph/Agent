@@ -76,9 +76,22 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
+export interface GlobalMemoryHit {
+  id: string;
+  text: string;
+  region: string;
+  score: number;
+}
+
 export interface GlobalMemory {
   /** Bounded recall for this message, or undefined (not the owner, nothing recalled, or an error). */
   recall(goal: string, origin: TurnOrigin): string | undefined;
+  /**
+   * Graph + semantic search over the same memory, as structured hits for the
+   * `memory_search` tool. Owner-only like recall; no word matching is involved:
+   * ranking comes from the memory engine (graph relations, activation, embeddings).
+   */
+  search(query: string, origin: TurnOrigin, limit: number): GlobalMemoryHit[];
   /** Remember a finished turn. Returns whether it was written. */
   recordTurn(turn: RecordedTurn): boolean;
   /**
@@ -114,6 +127,37 @@ export function createGlobalMemory(deps: GlobalMemoryDeps): GlobalMemory {
       } catch (error) {
         log("global_memory.recall_failed", { error: error instanceof Error ? error.message : String(error) });
         return undefined;
+      }
+    },
+
+    search(query, origin, limit) {
+      const text = query.trim();
+      if (text.length < 2 || !isOwnerOrigin(origin, deps.getConfig())) return [];
+      try {
+        const integration = deps.getIntegration();
+        if (!integration) return [];
+        const hook = integration.preExecutionHook(clip(text, 1_000), { taskId: origin.sessionId });
+        const hits: GlobalMemoryHit[] = [];
+        const seen = new Set<string>();
+        const push = (id: unknown, body: unknown, region: unknown, score: unknown) => {
+          const value = typeof body === "string" ? body.trim() : "";
+          const key = value.toLowerCase();
+          if (!value || seen.has(key)) return;
+          seen.add(key);
+          hits.push({
+            id: `graph:${String(id ?? hits.length)}`,
+            text: clip(value, 1_200),
+            region: typeof region === "string" && region ? region : "graph",
+            score: typeof score === "number" && Number.isFinite(score) ? score : 0,
+          });
+        };
+        for (const item of hook.factCards?.items ?? []) push(item.id, item.text, "fact", item.score ?? 1);
+        for (const item of hook.selectiveContext?.items ?? []) push(item.id, item.text, item.region, item.score);
+        for (const item of hook.graphContext?.items ?? []) push(item.id, item.text, item.category, item.score);
+        return hits.sort((a, b) => b.score - a.score).slice(0, Math.max(1, limit));
+      } catch (error) {
+        log("global_memory.search_failed", { error: error instanceof Error ? error.message : String(error) });
+        return [];
       }
     },
 

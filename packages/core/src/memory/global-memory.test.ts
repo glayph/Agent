@@ -149,3 +149,43 @@ describe("extractPending", () => {
     expect(logs).toEqual(["global_memory.extract_failed"]);
   });
 });
+
+describe("search (graph + semantic)", () => {
+  const hook = {
+    factCards: { items: [{ id: "f1", text: "Miki runs inside VirtualBox", score: 0.9 }], text: "" },
+    selectiveContext: {
+      items: [
+        { id: "s1", text: "Owner installs Miki on Ubuntu", region: "long_term", score: 0.7 },
+        { id: "s2", text: "miki runs inside virtualbox", region: "daily", score: 0.5 },
+      ],
+      text: "",
+    },
+    graphContext: { items: [{ id: "g1", text: "Ubuntu VM has 8 GB RAM", category: "static", score: 0.4 }], text: "" },
+  };
+  const integration = { preExecutionHook: () => hook } as unknown as AgentMemoryIntegration;
+  const origin = { source: "webchat", sessionId: "chat-1" };
+
+  it("returns de-duplicated, score-ranked hits from facts, selective and graph memory", () => {
+    const memory = createGlobalMemory({ getIntegration: () => integration, getConfig: () => ({}) });
+    const hits = memory.search("where does Miki run?", origin, 10);
+    expect(hits.map((hit) => hit.id)).toEqual(["graph:f1", "graph:s1", "graph:g1"]);
+    expect(hits[1]).toMatchObject({ region: "long_term" });
+  });
+
+  it("honours the limit and the owner check, and never throws", () => {
+    const memory = createGlobalMemory({ getIntegration: () => integration, getConfig: () => ({}) });
+    expect(memory.search("where does Miki run?", origin, 1)).toHaveLength(1);
+    expect(memory.search("where does Miki run?", { source: "telegram", peerId: "9" }, 5)).toEqual([]);
+    expect(memory.search("x", origin, 5)).toEqual([]);
+
+    const broken = {
+      preExecutionHook: () => {
+        throw new Error("db locked");
+      },
+    } as unknown as AgentMemoryIntegration;
+    const logs: string[] = [];
+    const guarded = createGlobalMemory({ getIntegration: () => broken, getConfig: () => ({}), log: (message) => logs.push(message) });
+    expect(guarded.search("where does Miki run?", origin, 5)).toEqual([]);
+    expect(logs).toEqual(["global_memory.search_failed"]);
+  });
+});

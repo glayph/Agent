@@ -147,25 +147,22 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   // ---- tools --------------------------------------------------------------
   const memoryPort = {
-    async search(query: string, limit: number) {
+    async search(query: string, limit: number, context?: { runId: string; sessionId?: string }) {
       const fileHits = deps.fileMemory?.isEnabled()
         ? await deps.fileMemory.search(query, limit)
         : []
-      const needle = `%${query.replace(/[%_\\]/g, (c) => `\\${c}`).toLowerCase()}%`
-      const rows = db
-        .prepare(
-          "SELECT id,content,region FROM memory_chunks WHERE lower(content) LIKE ? ESCAPE '\\' OR lower(summary) LIKE ? ESCAPE '\\' ORDER BY importance DESC, updated_at DESC LIMIT ?",
-        )
-        .all(needle, needle, limit) as Array<{ id: string; content: string; region: string }>
+      // Graph + semantic recall from the one global memory (owner-only). Ranking
+      // comes from the memory engine, never from matching words in a SQL LIKE.
+      const origin = context ? runOrigins.get(context.runId) : undefined
+      const graphHits = origin && deps.globalMemory ? deps.globalMemory.search(query, origin, limit) : []
       const fileResults = fileHits.map((hit) => ({
         id: `file:${hit.path}:${hit.startLine}`,
         text: hit.snippet,
         region: hit.path,
         score: hit.score,
       }))
-      const legacyResults = rows.map((row) => ({ id: row.id, text: row.content, region: row.region }))
       const seen = new Set<string>()
-      return [...fileResults, ...legacyResults].filter((hit) => {
+      return [...fileResults, ...graphHits].filter((hit) => {
         const key = hit.text.trim().toLocaleLowerCase()
         if (!key || seen.has(key)) return false
         seen.add(key)
@@ -498,6 +495,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     llm: llmFor,
     tools: registry,
     approvals,
+    // Accuracy: a tool-using run checks its draft answer against the evidence and
+    // revises once on a concrete problem. Disable with agent.self_check.enabled=false.
+    selfCheck: () => {
+      const cfg = (deps.getAppConfig() as any)?.agent?.self_check
+      if (cfg?.enabled === false) return false
+      const maxRevisions = Number(cfg?.max_revisions)
+      const minToolCalls = Number(cfg?.min_tool_calls)
+      return {
+        ...(Number.isFinite(maxRevisions) ? { maxRevisions: Math.min(2, Math.max(0, Math.floor(maxRevisions))) } : {}),
+        ...(Number.isFinite(minToolCalls) ? { minToolCalls: Math.max(1, Math.floor(minToolCalls)) } : {}),
+      }
+    },
     // Identity + live capability context; the model still writes every reply itself.
     systemPrompt: () => {
       const config = deps.getAppConfig() as any

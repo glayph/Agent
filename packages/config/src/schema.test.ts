@@ -470,4 +470,11 @@ describe("runtime config schema", () => {
     expect(result.valid).toBe(true);
     expect(result.config.agent?.model_router).toBeUndefined();
   });
+
+  it("accepts agent.self_check and rejects out-of-range values", () => {
+    expect(validateRuntimeConfig({ agent: { self_check: { enabled: false, max_revisions: 2, min_tool_calls: 3 } } }).valid).toBe(true);
+    const bad = validateRuntimeConfig({ agent: { self_check: { max_revisions: 9 } } });
+    expect(bad.valid).toBe(false);
+    expect(bad.errors).toContainEqual(expect.objectContaining({ path: "agent.self_check.max_revisions" }));
+  });
 });

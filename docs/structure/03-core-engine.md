@@ -134,3 +134,11 @@ packages/core/
 - `plugins/model-router/` + `llm/` — local (llama.cpp) vs cloud (Gemini etc.) routing.
 - `autonomy/` — long-running autonomous goal loops and state machines.
 - `self-improvement/` — reward calculation and improvement engine.
+
+**Agent loop behaviour (`src/engine/`)**
+- Understanding is the model's job. There is no keyword, regex or intent routing of user messages anywhere in the loop; the old regex control parser and the free-text `agent_control_request` tool were removed. The model calls the typed `agent_control_*` tools directly (capabilities → plan → execute).
+- Memory recall runs on every run, with or without tools. The `memory_search` tool ranks with the graph/semantic memory engine (facts, selective graph context), not with SQL `LIKE`.
+- Empty model replies are retried once in the same run. Invalid tool arguments come back with the tool's expected parameters so the model can correct the call immediately.
+- LLM retries honour `Retry-After` and add jitter to the exponential backoff.
+- Self-check (`verifier.ts`, enabled by the gateway; `agent.self_check.enabled=false` turns it off): after a run that used tools drafts its answer, the model checks it against the tool evidence and revises once if it finds a concrete problem (unsupported claim, failure reported as success, ignored part of the request). One extra model call; chat-only runs are not checked. Tunables: `agent.self_check.max_revisions` (0-2), `agent.self_check.min_tool_calls`.
+

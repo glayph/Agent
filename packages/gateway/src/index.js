@@ -1104,7 +1104,7 @@ app.get("/api/tools", (_req, res) => {
             group("filesystem", "filesystem", "Read, search, organize and (with approval) write, delete or run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run"]),
             group("memory", "memory", "Search and store long-term memory notes.", "memory", true, ["memory_search", "memory_add"]),
             group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
-            group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_request", "agent_control_execute"]),
+            group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
             group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", false, ["web_search"]),
             group("browser", "browser", "Isolated Playwright browser tools. Navigation and interaction require approval.", "browser", false, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"]),
         ] });

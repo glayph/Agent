@@ -113,7 +113,7 @@ describe("memory and control tools", () => {
     };
     const tools = Object.fromEntries(createMemoryTools(memory).map((t) => [t.name, t]));
     await expect(run(tools.memory_search, { query: "q", limit: 99 })).resolves.toEqual({ count: 1, hits: [{ id: "1", text: "note" }] });
-    expect(memory.search).toHaveBeenCalledWith("q", 20);
+    expect(memory.search).toHaveBeenCalledWith("q", 20, expect.objectContaining({ runId: expect.any(String) }));
     await expect(run(tools.memory_add, { content: "  " })).rejects.toThrow("empty");
     await expect(run(tools.memory_add, { content: "fact" })).resolves.toEqual({ id: "new" });
   });
