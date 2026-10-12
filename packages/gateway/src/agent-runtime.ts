@@ -1,5 +1,6 @@
 import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
 import { createTerminalTool } from "./terminal-tool.js";
+import { resolveModel } from "./model-resolution.js";
 import { buildIdentityContext } from "./identity-prompt.js";
 import express from "express"
 import { randomUUID } from "node:crypto"
@@ -96,53 +97,26 @@ function deepMerge(base: Json, patch: Json): Json {
   return out
 }
 
-function isLocalUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]"
-  } catch {
-    return false
-  }
-}
-function providerDefaults(provider: string): { baseUrl: string; apiKey: string } {
-  const normalized = provider.trim().toLowerCase()
-  if (normalized === "gemini" || normalized === "google") return { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/", apiKey: process.env.GEMINI_API_KEY || "" }
-  if (normalized === "openrouter" || normalized === "open-router") return { baseUrl: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY || "" }
-  if (normalized === "openai-compatible" || normalized === "compatible" || normalized === "openai_compatible") return { baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL || "http://127.0.0.1:8000/v1", apiKey: process.env.OPENAI_COMPATIBLE_API_KEY || "" }
-  if (normalized === "llama.cpp" || normalized === "llama-cpp" || normalized === "llamacpp" || normalized === "local") return { baseUrl: process.env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1", apiKey: "" }
-  return { baseUrl: "https://api.openai.com/v1", apiKey: process.env.OPENAI_API_KEY || "" }
-}
-
 export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const { db } = deps
   const now = () => new Date().toISOString()
 
   // ---- model resolution ---------------------------------------------------
+  // Single source of truth shared with the Models page and health endpoints
+  // (see model-resolution.ts). An unknown requested name falls back to the
+  // default model instead of building a ghost client, and keys are validated
+  // structurally (not just for presence) before a model counts as configured.
+  const resolveCurrentModel = (requested?: string) => resolveModel(deps.storedModels(), requested)
   const llmFor = (requested?: string): EngineLLMClient | undefined => {
-    const stored = deps.storedModels()
-    const entry = requested
-      ? stored.find((item) => item.payload.model === requested || item.payload.model_name === requested)
-      : stored.find((item) => item.isDefault) ?? stored[0]
-    const payload = entry?.payload ?? {}
-    // The UI sends model_name (a friendly label such as "Test"), while the
-    // provider requires the stored model identifier (for example
-    // "gemini-3.5-flash-lite"). Prefer the stored identifier whenever the
-    // request matched a configured entry by either field.
-    const model = String(
-      entry?.payload.model || entry?.payload.model_name || requested || process.env.MIKI_MODEL || process.env.OPENAI_MODEL || "",
-    ).trim()
-    if (!model) return undefined
-    const provider = String(payload.provider || process.env.MIKI_PROVIDER || "openai-compatible")
-    const defaults = providerDefaults(provider)
-    const apiKey = String(payload.api_key || defaults.apiKey || process.env.OPENAI_API_KEY || "")
-    const baseUrl = String(payload.api_base || defaults.baseUrl || process.env.OPENAI_API_BASE || "https://api.openai.com/v1")
-    if (!apiKey && !isLocalUrl(baseUrl)) return undefined
+    const resolved = resolveCurrentModel(requested)
+    if (!resolved.configured) return undefined
+    const payload = resolved.entry?.payload ?? {}
     const extraBody: Record<string, unknown> = isRecord(payload.extra_body) ? { ...payload.extra_body } : {};
     const configuredThinking = String(payload.thinking_level || "").trim();
     if (configuredThinking && extraBody.thinking_level === undefined) {
       extraBody.thinking_level = configuredThinking;
     }
-    return createFetchLLMClient({ baseUrl, model, apiKey: apiKey || undefined, ...(Object.keys(extraBody).length ? { extraBody } : {}) })
+    return createFetchLLMClient({ baseUrl: resolved.baseUrl, model: resolved.model, apiKey: resolved.apiKey || undefined, ...(Object.keys(extraBody).length ? { extraBody } : {}) })
   }
 
   // ---- tools --------------------------------------------------------------
@@ -881,7 +855,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     const result = await controller.setToolState(name, enabled)
     return { ...result, status: enabled ? "enabled" : "disabled", name }
   }
-  return { engine, control, approvals, registry, llmFor, mount, startRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
+  return { engine, control, approvals, registry, llmFor, resolveCurrentModel, mount, startRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>

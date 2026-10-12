@@ -116,7 +116,23 @@ export interface ModelProviderOption {
   plugin?: ModelProviderPluginInfo
 }
 
+/** Live resolution of the model chat will actually run, computed by the backend (single source of truth). */
+interface ModelResolution {
+  configured: boolean
+  source: "stored" | "env" | "none"
+  model: string
+  model_name: string
+  provider: string
+  api_base: string
+  is_default: boolean
+  key_status: "valid" | "missing" | "malformed" | "placeholder" | "not_required"
+  reason?: string
+  matched_requested?: boolean
+  availability?: { reachable: boolean; status?: number; state: string; detail?: string }
+}
+
 interface ModelsListResponse {
+  resolved?: ModelResolution
   models: ModelInfo[]
   total: number
   default_model: string
@@ -176,6 +192,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new ModelApiError(message, "backend_api", res.status, category)
   }
   return res.json() as Promise<T>
+}
+
+export async function getModelResolution(options: { probe?: boolean; model?: string } = {}): Promise<ModelResolution> {
+  const query = new URLSearchParams()
+  if (options.probe) query.set("probe", "1")
+  if (options.model) query.set("model", options.model)
+  const suffix = query.toString()
+  return request<ModelResolution>(`/api/models/resolve${suffix ? `?${suffix}` : ""}`)
 }
 
 export async function getModels(): Promise<ModelsListResponse> {
@@ -364,4 +388,4 @@ export async function deleteCatalog(id: string): Promise<void> {
   )
 }
 
-export type { ModelsListResponse, ModelActionResponse }
+export type { ModelsListResponse, ModelActionResponse, ModelResolution }

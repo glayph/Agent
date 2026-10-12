@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
-import { type ModelInfo, getModels, setDefaultModel } from "@/api/models"
+import { type ModelInfo, type ModelResolution, getModels, setDefaultModel } from "@/api/models"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
@@ -26,10 +26,12 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
   const [defaultModelId, setDefaultModelId] = useState("")
+  const [resolution, setResolution] = useState<ModelResolution | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
   const setDefaultRequestIdRef = useRef(0)
 
   const syncDefaultModelName = useCallback(
-    (models: ModelInfo[], defaultModel: string) => {
+    (models: ModelInfo[], defaultModel: string, resolved?: ModelResolution | null) => {
       const selected = models.find(
         (model) =>
           model.model_name === defaultModel ||
@@ -43,20 +45,37 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
         )
         return
       }
+      // Environment-only setups have no stored row; trust the backend's live resolution.
+      if (resolved?.configured && resolved.model) {
+        setDefaultModelName(resolved.model_name || resolved.model)
+        setDefaultModelId(resolved.model)
+        return
+      }
       setDefaultModelName("")
       setDefaultModelId("")
     },
     [],
   )
 
+  // Always ask the backend (single source of truth). A failed fetch is retried with
+  // backoff instead of being swallowed, so a transient error at start-up can no
+  // longer leave the chat stuck on "No model is configured".
   const loadModels = useCallback(async () => {
-    try {
-      const data = await getModels()
-      setModelList(data.models)
-      syncDefaultModelName(data.models, data.default_model)
-    } catch {
-      // silently fail
+    const delays = [0, 1500, 4000]
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+      if (delays[attempt] > 0) await new Promise((resolve) => setTimeout(resolve, delays[attempt]))
+      try {
+        const data = await getModels()
+        setModelList(data.models)
+        setResolution(data.resolved ?? null)
+        syncDefaultModelName(data.models, data.default_model, data.resolved)
+        setLoadFailed(false)
+        return
+      } catch {
+        // retry
+      }
     }
+    setLoadFailed(true)
   }, [syncDefaultModelName])
 
   useEffect(() => {
@@ -66,6 +85,19 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
 
     return () => clearTimeout(timerId)
   }, [isConnected, loadModels])
+
+  // Re-resolve when the tab regains focus (e.g. after fixing the key on the Models page).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadModels()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
+    }
+  }, [loadModels])
 
   const handleSetDefault = useCallback(
     async (modelName: string) => {
@@ -80,7 +112,8 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
         }
 
         setModelList(data.models)
-        syncDefaultModelName(data.models, data.default_model)
+        setResolution(data.resolved ?? null)
+        syncDefaultModelName(data.models, data.default_model, data.resolved)
         const gateway = await refreshGatewayState({ force: true })
         showSaveSuccessOrRestartToast(
           t,
@@ -105,8 +138,10 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
   )
 
   const hasAvailableModels = useMemo(
-    () => defaultSelectableModels.some((m) => m.available),
-    [defaultSelectableModels],
+    () =>
+      defaultSelectableModels.some((m) => m.available) ||
+      resolution?.configured === true,
+    [defaultSelectableModels, resolution],
   )
 
   const oauthModels = useMemo(
@@ -134,6 +169,8 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
     defaultModelName,
     defaultModelId,
     hasAvailableModels,
+    resolution,
+    loadFailed,
     apiKeyModels,
     oauthModels,
     localModels,

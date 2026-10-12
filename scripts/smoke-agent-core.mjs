@@ -25,6 +25,8 @@ fs.writeFileSync(path.join(workspace, "hello.txt"), "hello from the workspace")
 // ---- fake model provider ---------------------------------------------------
 const llmRequests = []
 const llm = http.createServer((req, res) => {
+  // Availability probe (GET /v1/models) used by /api/models/resolve?probe=1
+  if (req.method === "GET") return res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: [{ id: "fake-model" }] }))
   let body = ""
   req.on("data", (chunk) => (body += chunk))
   req.on("end", () => {
@@ -69,6 +71,7 @@ const gateway = spawn(process.execPath, [path.join(root, "packages/gateway/dist/
     OPENAI_API_KEY: "test-key",
     OPENAI_API_BASE: `http://127.0.0.1:${llmPort}/v1`,
     MIKI_MODEL: "fake-model",
+    MIKI_CHAT_RUN_TIMEOUT_MS: "15000",
   },
   stdio: ["ignore", "pipe", "pipe"],
 })
@@ -119,18 +122,20 @@ const api = async (method, url, body, { auth = true } = {}) => {
 }
 
 // WebSocket helper: send one message and collect events until the run ends.
-function chat(sessionId, content, { onEvent } = {}) {
+function chat(sessionId, content, { onEvent, timeoutMs = 15000, until = "node.run_end" } = {}) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${gatewayPort}/miki/ws?session_id=${sessionId}`, { headers: { Cookie: cookie } })
     const events = []
-    const timer = setTimeout(() => { ws.close(); reject(new Error(`chat timed out; events: ${events.map((e) => e.type).join(",")}`)) }, 15000)
+    const timer = setTimeout(() => { ws.close(); reject(new Error(`chat timed out after ${timeoutMs}ms; events: ${events.map((e) => e.type).join(",")}`)) }, timeoutMs)
     ws.on("error", reject)
     ws.on("message", (raw) => {
       const event = JSON.parse(raw.toString())
       events.push(event)
       onEvent?.(event, ws)
-      if (event.type === "connection.ready") ws.send(JSON.stringify({ type: "message.send", id: "t1", payload: { content } }))
-      if (event.type === "node.run_end") { clearTimeout(timer); ws.close(); resolve(events) }
+      // The gateway requires an explicit authenticate frame before any command.
+      if (event.type === "connection.ready") ws.send(JSON.stringify({ type: "authenticate" }))
+      if (event.type === "auth.ok") ws.send(JSON.stringify({ type: "message.send", id: "t1", payload: { content } }))
+      if (event.type === until) { clearTimeout(timer); ws.close(); resolve(events) }
     })
   })
 }
@@ -250,6 +255,64 @@ await check("chat: the agent loop calls a tool and answers from its result", asy
   assert.ok(session.json.messages.some((m) => m.role === "assistant" && m.content.includes("hello.txt")))
 })
 
+await check("models: chat, Models page and health resolve the same default model", async () => {
+  const resolve = await api("GET", "/api/models/resolve")
+  assert.equal(resolve.status, 200)
+  assert.equal(resolve.json.configured, true, JSON.stringify(resolve.json))
+  assert.equal(resolve.json.model, "fake-model")
+  assert.equal(resolve.json.api_base, `http://127.0.0.1:${llmPort}/v1`)
+  const list = await api("GET", "/api/models")
+  assert.equal(list.json.default_model, "fake-model")
+  assert.equal(list.json.resolved.configured, true)
+  assert.ok(!JSON.stringify(list.json).includes("test-key"), "the API key must never be returned to the client")
+  const probe = await api("GET", "/api/models/resolve?probe=1")
+  assert.equal(probe.json.availability.state, "ok", JSON.stringify(probe.json))
+})
+
+await check("chat: the user message is persisted immediately and marked completed", async () => {
+  const events = await chat("s-persist", "just say hi")
+  const accepted = events.find((e) => e.type === "message.accepted")
+  assert.ok(accepted, "the gateway should acknowledge the saved message before running the model")
+  assert.ok(events.findIndex((e) => e.type === "message.accepted") < events.findIndex((e) => e.type === "node.run_start"))
+  const history = await api("GET", "/api/sessions/s-persist")
+  const user = history.json.messages.find((m) => m.role === "user")
+  assert.ok(user, "user message must be in the database")
+  assert.equal(user.content, "just say hi")
+  assert.equal(user.status, "completed")
+  assert.ok(history.json.messages.some((m) => m.role === "assistant"), "assistant reply must be persisted too")
+})
+
+await check("chat: the same client message id in two sessions never drops a message", async () => {
+  await chat("s-dup-a", "first session message")
+  await chat("s-dup-b", "second session message")
+  const b = await api("GET", "/api/sessions/s-dup-b")
+  assert.ok(b.json.messages.some((m) => m.role === "user" && m.content === "second session message"))
+})
+
+await check("health: gateway + default model working means overall status is healthy", async () => {
+  const { status, json } = await api("GET", "/api/enhancements/health/full")
+  assert.equal(status, 200)
+  assert.equal(json.status, "healthy", JSON.stringify({ status: json.status, checks: json.doctor?.checks?.filter((c) => c.status !== "pass") }))
+})
+
+await check("chat: a run that never answers is stopped, saved as failed, and the client gets a clean error", async () => {
+  const started = Date.now()
+  const events = await chat("s-timeout", "HANG forever please", { timeoutMs: 45000, until: "stream_done" })
+  const elapsed = Date.now() - started
+  assert.ok(elapsed < 40000, `the turn must be bounded by the watchdog (took ${elapsed}ms)`)
+  const error = events.find((e) => e.type === "error")
+  assert.ok(error, "the client must receive an error event, not hang")
+  assert.equal(error.payload.code, "run_timeout", JSON.stringify(error.payload))
+  assert.equal(error.payload.retryable, true)
+  const end = events.filter((e) => e.type === "node.run_end").at(-1)
+  assert.equal(end.payload.status, "failed")
+  assert.match(error.payload.message, /15 seconds/)
+  const history = await api("GET", "/api/sessions/s-timeout")
+  const user = history.json.messages.find((m) => m.role === "user")
+  assert.ok(user, "the user message must survive the failure")
+  assert.equal(user.status, "failed")
+})
+
 await check("chat: a write waits for approval, runs after approval, and the file exists", async () => {
   let approved = false
   const events = await chat("s-write", "WRITEFILE now", {
@@ -310,13 +373,16 @@ await check("DELETE /api/tasks/:id cancels an active run over HTTP", async () =>
   assert.equal((await api("DELETE", "/api/tasks/run_does_not_exist")).status, 404)
 })
 
-await check("multi-step goals are planned by the model before execution", async () => {
+// Skipped: auto-planning of multi-step goals was removed on purpose in ca31a9f ("LLM decides chat vs task; remove regex/keyword analyzeGoal").
+console.log("  skip  multi-step goals are planned by the model before execution (auto-planning removed in ca31a9f)")
+const _stalePlanningCheck = async () => {
   const before = llmRequests.length
   const events = await chat("s-plan", "First LISTFILES in the workspace and then read the config file, then check the setting")
   const plan = events.find((e) => e.type === "message.create" && e.payload.thought_category === "Plan")
   assert.ok(plan.payload.content.includes("List the workspace"), JSON.stringify(plan?.payload))
   assert.ok(llmRequests.length > before + 1)
-})
+}
+void _stalePlanningCheck
 
 // ---- Files / Drive ----------------------------------------------------------
 const abs = (name) => path.join(workspace, name)

@@ -35,6 +35,9 @@ export interface SessionDetail {
     model_name?: string
     media?: string[]
     image_urls?: string[]
+    /** Delivery state: queued | processing | completed | failed | retrying */
+    status?: "queued" | "processing" | "completed" | "failed" | "retrying"
+    status_detail?: string | null
     attachments?: {
       type?: "image" | "audio" | "video" | "file"
       url: string

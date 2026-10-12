@@ -31,6 +31,7 @@ import { resolveContextWindowTokens } from "./runtime-settings.js"
 import { FileMemoryService, retrieveRelevantTurns } from "@miki/core/memory-files"
 import { SqliteMemoryIndex } from "./memory-index.js"
 import { wrapAsyncRoutes } from "./async-route.js"
+import { checkApiKey, describeResolution, probeModelProvider, resolveModel } from "./model-resolution.js"
 import { createGatewayErrorMiddleware } from "./error-middleware.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -75,6 +76,9 @@ ensureColumn("orchestrator_runs", "finished_at", "TEXT")
 ensureColumn("chat_messages", "context_id", "TEXT")
 ensureColumn("chat_messages", "image_urls", "TEXT")
 ensureColumn("chat_messages", "attachments_json", "TEXT")
+// Delivery state of a chat turn: queued -> processing -> completed | failed (| retrying). Existing rows are completed.
+ensureColumn("chat_messages", "status", "TEXT NOT NULL DEFAULT 'completed'")
+ensureColumn("chat_messages", "status_detail", "TEXT")
 db.prepare("UPDATE chat_messages SET context_id='channel:default-channel:peer:' || session_id WHERE context_id IS NULL").run()
 db.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_context_created ON chat_messages(context_id, created_at)")
 // A process restart cannot safely resume a partially executed DAG because transient
@@ -358,7 +362,7 @@ app.get("/api/sessions", (_req, res) => {
 app.get("/api/sessions/:id", (req, res) => {
   const id = req.params.id; ensureSession(id)
   const summary = sessionSummary(id)
-  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json FROM chat_messages WHERE session_id=? ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
+  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,status,status_detail FROM chat_messages WHERE session_id=? ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
     let attachments: unknown
     try { attachments = message.attachments_json ? JSON.parse(String(message.attachments_json)) : undefined } catch { attachments = undefined }
     const { attachments_json: _attachmentsJson, ...rest } = message
@@ -444,14 +448,20 @@ const providerDefaultApiBase = (provider: unknown) => {
 }
 const modelPayload = (row: { id: number; payload: string; is_default: number }) => {
   const raw = JSON.parse(row.payload) as Record<string, unknown>
-  const model = String(raw.model || raw.model_name || "")
-  const keySet = Boolean(raw.api_key || providerEnvironmentApiKey(raw.provider))
+  // Same resolver the chat runtime uses, so the Models page can never claim a
+  // model is available while chat reports "No model is configured".
+  const resolved = resolveModel([{ payload: raw, isDefault: row.is_default === 1 }])
   const local = isRecord(raw.local) ? raw.local : undefined
   const localConfigured = String(raw.provider || "").toLowerCase().includes("llama") && Boolean(local?.model_path)
-  const keyOptional = providerKeyOptional(raw.provider)
-  const apiBase = String(raw.api_base || providerDefaultApiBase(raw.provider) || process.env.OPENAI_API_BASE || "")
-  const configured = Boolean(model) && (localConfigured || keySet || keyOptional)
-  return { index: row.id, ...raw, model_name: String(raw.model_name || model), model, api_base: apiBase, api_key: "", api_key_set: keySet, enabled: raw.enabled !== false, available: configured, status: configured ? (keySet || localConfigured ? "available" : "configured") : "unconfigured", is_default: row.is_default === 1, is_virtual: false }
+  const keySet = resolved.keyCheck.status === "valid"
+  const configured = resolved.configured
+  return {
+    index: row.id, ...raw, model_name: resolved.modelName, model: resolved.model, api_base: resolved.baseUrl,
+    api_key: "", api_key_set: keySet, key_status: resolved.keyCheck.status, ...(resolved.reason ? { status_reason: resolved.reason } : {}),
+    enabled: raw.enabled !== false, available: configured,
+    status: configured ? (keySet || localConfigured ? "available" : "configured") : "unconfigured",
+    is_default: row.is_default === 1, is_virtual: false,
+  }
 }
 const storedModels = () => db.prepare("SELECT id,payload,is_default FROM model_configs ORDER BY id").all() as { id: number; payload: string; is_default: number }[]
 const envModel = () => {
@@ -534,21 +544,37 @@ const providerOptions = () => [
     aliases: ["llama-cpp", "llamacpp", "local"],
   },
 ]
+const storedEntries = () => storedModels().map((row) => ({ payload: JSON.parse(row.payload) as Record<string, unknown>, isDefault: row.is_default === 1 }))
+/** What chat will actually run right now (stored default, or environment fallback). */
+const currentResolution = (requested?: string) => resolveModel(storedEntries(), requested)
 const effectiveModel = () => {
   const rows = storedModels()
   if (rows.length) return modelPayload(rows.find((row) => row.is_default === 1) || rows[0])
-  const model = configuredModel()
-  const provider = process.env.MIKI_PROVIDER || "openai-compatible"
-  const keySet = Boolean(providerEnvironmentApiKey(provider))
-  const configured = Boolean(model && (keySet || providerKeyOptional(provider)))
-  return model
-    ? { index: 0, ...envModel(), api_key: "", available: configured, status: configured ? (keySet ? "available" : "configured") : "unconfigured", is_default: true, is_virtual: true }
+  const resolved = currentResolution()
+  return resolved.model
+    ? { index: 0, ...envModel(), model_name: resolved.modelName, model: resolved.model, api_key: "", available: resolved.configured, status: resolved.configured ? (resolved.keyCheck.status === "valid" ? "available" : "configured") : "unconfigured", key_status: resolved.keyCheck.status, is_default: true, is_virtual: true }
     : null
 }
 app.get("/api/models", (_req, res) => {
   const rows = storedModels()
   const models = rows.map(modelPayload)
-  res.json({ models, total: models.length, default_model: (models.find((item) => item.is_default) as { model?: string } | undefined)?.model || "", provider_options: providerOptions() })
+  const resolved = currentResolution()
+  // Environment-only setups (no stored model) still expose the model chat will use.
+  if (!models.length && resolved.model) models.push(effectiveModel() as never)
+  const storedDefault = (models.find((item) => item.is_default) as { model?: string } | undefined)?.model || ""
+  res.json({ models, total: models.length, default_model: storedDefault || resolved.model || "", resolved: describeResolution(resolved), provider_options: providerOptions() })
+})
+// Live resolution straight from the backend; the chat UI calls this on mount instead of trusting cached client state.
+app.get("/api/models/resolve", async (req, res) => {
+  const requested = typeof req.query.model === "string" ? req.query.model : undefined
+  const resolved = currentResolution(requested)
+  const body: Record<string, unknown> = { ...describeResolution(resolved), matched_requested: resolved.matchedRequested }
+  if (req.query.probe === "1" && resolved.configured) {
+    const probe = await probeModelProvider(resolved)
+    body.availability = probe
+    if (probe.state === "key_rejected") { body.configured = false; body.reason = probe.detail }
+  }
+  res.json(body)
 })
 app.post("/api/models", (req, res) => {
   const payload = { ...(req.body as Record<string, unknown>) }
@@ -1268,6 +1294,43 @@ type ActiveRunState = {
 const chatLane = createKeyedLane()
 const activeRuns = new Map<string, ActiveRunState>()
 const STREAM_RESUME_GRACE_MS = 30_000
+// Hard ceiling for one chat turn. A stuck provider/tool can never leave the UI on
+// "Agent is working" forever: the run is cancelled, the user message is marked
+// failed and the client receives a clean error. Override with MIKI_CHAT_RUN_TIMEOUT_MS.
+const CHAT_RUN_TIMEOUT_MS = Math.max(15_000, Number(process.env.MIKI_CHAT_RUN_TIMEOUT_MS) || 10 * 60_000)
+// How long the abort gets to unwind before the turn is force-failed.
+const CHAT_RUN_ABORT_GRACE_MS = 10_000
+// History compaction may call the LLM; it must never block the turn for long.
+const CHAT_COMPACTION_TIMEOUT_MS = Math.max(1_000, Number(process.env.MIKI_CHAT_COMPACTION_TIMEOUT_MS) || 20_000)
+// A queued message waits for the previous turn, which is itself bounded by the run timeout.
+const CHAT_QUEUE_WAIT_MS = CHAT_RUN_TIMEOUT_MS + CHAT_RUN_ABORT_GRACE_MS + 5_000
+class ChatRunTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`The agent did not finish within ${ms < 90_000 ? `${Math.round(ms / 1000)} seconds` : `${Math.round(ms / 60_000)} minutes`}, so the run was stopped. Your message is saved - retry it or ask me to continue.`)
+    this.name = "ChatRunTimeoutError"
+  }
+}
+const TRANSIENT_ERROR = /timed? ?out|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network|\b(?:429|500|502|503|504)\b|rate.?limit|overloaded|temporarily/i
+const setMessageStatus = (messageId: string | undefined, status: "queued" | "processing" | "completed" | "failed" | "retrying", detail?: string) => {
+  if (!messageId) return
+  try {
+    db.prepare("UPDATE chat_messages SET status=?, status_detail=? WHERE id=?").run(status, detail ? detail.slice(0, 500) : null, messageId)
+  } catch (error) {
+    appendGatewayLog(`Could not set chat message ${messageId} to ${status}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+/** Reject if `work` does not settle in time. The work itself is not cancelled here. */
+const withDeadline = <T,>(work: Promise<T>, ms: number, label: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms)
+    ;(timer as { unref?: () => void }).unref?.()
+    work.then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+  })
+// Anything still queued/processing when the process starts belonged to a run that died with the previous process.
+try {
+  const stale = db.prepare("UPDATE chat_messages SET status='failed', status_detail='Interrupted by a gateway restart.' WHERE status IN ('queued','processing','retrying')").run()
+  if (stale.changes > 0) console.warn(`[miki] marked ${stale.changes} interrupted chat message(s) as failed`)
+} catch { /* column is created above; never block startup */ }
 
 const sendRawEvent = (ws: WebSocket, type: string, sessionId: string, payload: Record<string, unknown> = {}) => {
   if (ws.readyState !== ws.OPEN) return
@@ -1385,6 +1448,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
   })
   ws.on("message", (raw) => {
     let releaseChatLane: (() => void) | undefined
+    let ownMessageId: string | undefined
     void (async () => {
     let message: {
       type?: "authenticate" | "resume" | "message.send" | "message.retry" | "cancel_task" | string
@@ -1452,10 +1516,6 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     // effect on the next turn without requiring a gateway or websocket restart.
     const sessionScope = normalizeSessionScope((getAppConfig() as any)?.session?.dm_scope)
     const contextId = resolveSessionContextId(sessionScope, channelId, peerId)
-    // Wait for the previous run of this conversation: this message needs its
-    // persisted answer in the history, and runs must never interleave. Released
-    // in the .finally() below, so every early return frees the lane.
-    releaseChatLane = await chatLane.acquire(contextId)
     let content = String(message.payload?.content || "").trim()
     const rawAttachments = Array.isArray(message.payload?.attachments) ? message.payload.attachments : []
     let incomingAttachments = rawAttachments
@@ -1473,6 +1533,34 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       .filter((item) => item.url.length > 0)
       .slice(0, 16)
     let imageUrls = incomingAttachments.filter((item) => item.type === "image").map((item) => item.url)
+    // Optimistic persistence: save the user's message BEFORE waiting on the lane,
+    // compacting history or calling any model. If anything below hangs or crashes
+    // the message is still in the database (and survives a page refresh).
+    let persistedUserMessageId: string | undefined
+    if (!isRetry && (content || incomingAttachments.length > 0)) {
+      const clientMessageId = typeof message.id === "string" ? message.id.trim() : ""
+      // chat_messages.id is globally unique. A client-supplied id that already belongs to another
+      // session must never make the insert silently drop this message: mint a fresh id instead.
+      // Re-delivery of the same id inside the same session stays idempotent.
+      const idValid = /^[A-Za-z0-9_-]{1,128}$/.test(clientMessageId)
+      const idOwner = idValid ? (db.prepare("SELECT session_id FROM chat_messages WHERE id=?").get(clientMessageId) as { session_id: string } | undefined) : undefined
+      persistedUserMessageId = idValid && (!idOwner || idOwner.session_id === sessionId) ? clientMessageId : randomUUID()
+      const receivedAt = now()
+      db.prepare("INSERT OR IGNORE INTO chat_messages(id,session_id,role,content,created_at,context_id,image_urls,attachments_json,status) VALUES(?,?,?,?,?,?,?,?,?)").run(persistedUserMessageId, sessionId, "user", content, receivedAt, contextId, imageUrls.length > 0 ? JSON.stringify(imageUrls) : null, incomingAttachments.length > 0 ? JSON.stringify(incomingAttachments) : null, "queued")
+      db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(receivedAt, sessionId)
+      // A new chat is a new task: name it after what was asked, so the chat list shows
+      // what was started and for what purpose. Renamed chats are left alone.
+      const autoTitle = titleFromMessage(content)
+      if (autoTitle) db.prepare("UPDATE chat_sessions SET title=? WHERE id=? AND title=?").run(autoTitle, sessionId, DEFAULT_CHAT_TITLE)
+      ownMessageId = persistedUserMessageId
+      sendEvent(ws, "message.accepted", sessionId, { message_id: persistedUserMessageId, status: "queued", queue_position: chatLane.pending(contextId) })
+    }
+    // Wait for the previous run of this conversation: this message needs its
+    // persisted answer in the history, and runs must never interleave. Released
+    // in the .finally() below, so every early return frees the lane. The wait is
+    // bounded by the previous turn's own run timeout, so it can never block forever.
+    releaseChatLane = await chatLane.acquire(contextId, { maxWaitMs: CHAT_QUEUE_WAIT_MS })
+    setMessageStatus(persistedUserMessageId, "processing")
     if (isRetry) {
       const targetId = String(message.payload?.message_id || "")
       const target = targetId
@@ -1556,20 +1644,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     sendRawEvent(ws, "stream_checkpoint", sessionId, { checkpoint_id: stream.checkpointId, run_id: runId, sequence: 0 })
     const thinkingMode = message.payload?.thinking_mode || "auto"
     const thinkingLevel = thinkingMode !== "auto" ? thinkingMode : undefined
-    if (!isRetry) {
-      const clientMessageId = typeof message.id === "string" ? message.id.trim() : ""
-      const persistedMessageId = /^[A-Za-z0-9_-]{1,128}$/.test(clientMessageId)
-        ? clientMessageId
-        : randomUUID()
-      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,image_urls,attachments_json) VALUES(?,?,?,?,?,?,?,?)").run(persistedMessageId, sessionId, "user", content, now(), contextId, imageUrls.length > 0 ? JSON.stringify(imageUrls) : null, incomingAttachments.length > 0 ? JSON.stringify(incomingAttachments) : null)
-      db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
-      // A new chat is a new task: name it after what was asked, so the chat list shows
-      // what was started and for what purpose. Renamed chats are left alone.
-      const autoTitle = titleFromMessage(content)
-      if (autoTitle) db.prepare("UPDATE chat_sessions SET title=? WHERE id=? AND title=?").run(autoTitle, sessionId, DEFAULT_CHAT_TITLE)
-    }
     // Conversation history for the model: persisted normal messages only (thoughts/tool traces stay out).
-    const storedHistory = (db.prepare("SELECT role,content,image_urls,attachments_json FROM chat_messages WHERE context_id=? AND kind='normal' ORDER BY created_at ASC").all(contextId) as Array<{ role: string; content: string; image_urls?: string | null; attachments_json?: string | null }>)
+    const storedHistory = (db.prepare("SELECT role,content,image_urls,attachments_json FROM chat_messages WHERE context_id=? AND kind='normal' AND (status IS NULL OR status<>'queued' OR id=?) ORDER BY created_at ASC").all(contextId, persistedUserMessageId ?? "") as Array<{ role: string; content: string; image_urls?: string | null; attachments_json?: string | null }>)
       .filter((row) => row.role === "user" || row.role === "assistant").map((row) => {
         let parsedImages: unknown
         try { parsedImages = row.image_urls ? JSON.parse(row.image_urls) : undefined } catch { parsedImages = undefined }
@@ -1593,10 +1669,19 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     // Leave room for system/identity/memory context, tool schemas, and the
     // pending user turn before compacting the persisted conversation view.
     const promptBudgetTokens = Math.max(2_048, contextBudgetTokens - outputReserveTokens - Math.min(8_192, Math.floor(contextBudgetTokens * 0.12)))
-    const compacted = await fileMemory.compaction.compact(contextId, storedHistory as any, {
-      budgetChars: promptBudgetTokens * 4,
-      triggerPercent: Number(defaults.summarize_token_percent ?? 75),
-      minMessages: Number(defaults.summarize_message_threshold ?? 8),
+    // Compaction may call the LLM. It is an optimisation, so a slow or failing
+    // summariser must never block the turn: fall back to the uncompacted history.
+    const compacted: { compacted: boolean; messages: any[]; archivedCount: number } = await withDeadline(
+      Promise.resolve(fileMemory.compaction.compact(contextId, storedHistory as any, {
+        budgetChars: promptBudgetTokens * 4,
+        triggerPercent: Number(defaults.summarize_token_percent ?? 75),
+        minMessages: Number(defaults.summarize_message_threshold ?? 8),
+      })) as Promise<any>,
+      CHAT_COMPACTION_TIMEOUT_MS,
+      "History compaction",
+    ).catch((error: unknown) => {
+      appendGatewayLog(`History compaction skipped for ${contextId}: ${error instanceof Error ? error.message : String(error)}`)
+      return { compacted: false, messages: [], archivedCount: 0 }
     })
     const compactedHistory = compacted.compacted
       ? compacted.messages.map((row: any) => ({
@@ -1694,21 +1779,54 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       })
     }
 
+    const runInput = {
+      runId,
+      sessionId: contextId,
+      executionLaneId: `chat:${runId}`,
+      history,
+      model: requested,
+      allowTools: turnPolicy.allowTools,
+      toolAllowlist: turnPolicy.toolAllowlist,
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+      source: "webchat" as const,
+      peerId,
+      taskTitle: String((db.prepare("SELECT title FROM chat_sessions WHERE id=?").get(sessionId) as { title?: string } | undefined)?.title || ""),
+      onEvent: mapper.handle,
+    }
+    // One bounded attempt: soft timeout aborts the run, hard deadline guarantees this
+    // promise settles even if the abort cannot unwind (e.g. a tool ignoring signals).
+    const runBounded = async () => {
+      const controller = new AbortController()
+      let timedOut = false
+      const timer = setTimeout(() => { timedOut = true; controller.abort() }, CHAT_RUN_TIMEOUT_MS)
+      ;(timer as { unref?: () => void }).unref?.()
+      try {
+        const result = await withDeadline(agent.startRun({ ...runInput, signal: controller.signal } as any), CHAT_RUN_TIMEOUT_MS + CHAT_RUN_ABORT_GRACE_MS, "Agent run")
+        if (timedOut) throw new ChatRunTimeoutError(CHAT_RUN_TIMEOUT_MS)
+        return result
+      } catch (error) {
+        if (timedOut || (error instanceof Error && /^Agent run timed out/.test(error.message))) {
+          agent.cancelRun(runId)
+          throw error instanceof ChatRunTimeoutError ? error : new ChatRunTimeoutError(CHAT_RUN_TIMEOUT_MS)
+        }
+        throw error
+      } finally {
+        clearTimeout(timer)
+      }
+    }
     try {
-      const result = await agent.startRun({
-        runId,
-        sessionId: contextId,
-        executionLaneId: `chat:${runId}`,
-        history,
-        model: requested,
-        allowTools: turnPolicy.allowTools,
-        toolAllowlist: turnPolicy.toolAllowlist,
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-        source: "webchat",
-        peerId,
-        taskTitle: String((db.prepare("SELECT title FROM chat_sessions WHERE id=?").get(sessionId) as { title?: string } | undefined)?.title || ""),
-        onEvent: mapper.handle,
-      })
+      let result = await runBounded()
+      // One automatic retry for transient provider/network failures, only when the first
+      // attempt produced nothing and ran no tools (so a retry cannot repeat side effects).
+      const transientFailure = (candidate: typeof result) =>
+        candidate.status === "failed" && !candidate.finalText?.trim() && candidate.toolCalls.length === 0 && TRANSIENT_ERROR.test(candidate.error || "")
+      if (transientFailure(result)) {
+        appendGatewayLog(`Chat run ${runId} hit a transient failure (${result.error}); retrying once.`)
+        setMessageStatus(persistedUserMessageId, "retrying", result.error)
+        emitStreamEvent(stream, "message.retrying", { run_id: runId, message_id: persistedUserMessageId, reason: result.error })
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+        result = await runBounded()
+      }
       const recoverableLimit = result.status === "failed" && /limit|budget|step|empty response|could not make progress/i.test(result.error || "")
       const resultText = result.finalText?.trim() || (recoverableLimit
         ? "I reached the current execution limit before finishing. The work completed so far is preserved; please continue and I will resume from the latest state."
@@ -1724,14 +1842,18 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
           : result.finalText
             ? "completed"
             : "failed"
+      setMessageStatus(persistedUserMessageId, streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
       emitStreamDone(stream, streamStatus, result.error)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       const category = error instanceof ProviderRequestError ? error.category : undefined
+      const timedOut = error instanceof ChatRunTimeoutError
       appendGatewayLog(`Chat run ${runId} failed: ${detail}`)
-      const clientMessage = error instanceof ProviderRequestError ? detail : "An internal error interrupted this chat run."
+      // Clean, user-facing payload: provider and timeout errors are safe to show, anything else is generic.
+      const clientMessage = error instanceof ProviderRequestError || timedOut ? detail : "An internal error interrupted this chat run. Your message was saved; you can retry it."
+      setMessageStatus(persistedUserMessageId, "failed", detail)
       persistRunError(stream, clientMessage)
-      emitStreamEvent(stream, "error", { code: category || "internal_error", message: clientMessage, ...(category ? { error_category: category } : {}) })
+      emitStreamEvent(stream, "error", { code: timedOut ? "run_timeout" : category || "internal_error", message: clientMessage, retryable: timedOut || Boolean(category) || TRANSIENT_ERROR.test(detail), ...(category ? { error_category: category } : {}) })
       emitStreamEvent(stream, "typing.stop", { run_id: runId })
       emitStreamEvent(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })
       emitStreamDone(stream, "failed", clientMessage)
@@ -1742,6 +1864,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     })().catch((error: unknown) => {
       const detail = error instanceof Error ? error.message : String(error)
       appendGatewayLog(`WebSocket message handler failed for session ${sessionId}: ${detail}`)
+      // Never leave a saved-but-unprocessed message looking like it is still being worked on.
+      try { db.prepare("UPDATE chat_messages SET status='failed', status_detail=? WHERE id=? AND status IN ('queued','processing','retrying')").run(detail.slice(0, 500), ownMessageId ?? "") } catch { /* best effort */ }
       const run = Array.from(socketRuns).map((runId) => activeRuns.get(runId)).find((candidate) => candidate && !candidate.done)
         const clientMessage = "An internal error prevented this chat request from completing."
         try {
@@ -1774,7 +1898,7 @@ app.use("/api", createDashboardExtendedRouter({
   rebindServer,
   requireAuth,
   now,
-  agent: { registry: agent.registry, llmFor: (model) => agent.llmFor(model), activeRunCount: agent.activeRunCount },
+  agent: { registry: agent.registry, llmFor: (model) => agent.llmFor(model), resolveCurrentModel: (model) => agent.resolveCurrentModel(model), activeRunCount: agent.activeRunCount },
   getGatewayLogs: (offset, runId) => { const filtered = gatewayLogs.filter((entry) => runId === undefined || entry.runId === runId); return { logs: filtered.slice(Math.max(0, offset)).map((entry) => `[${entry.at}] ${entry.message}`), log_total: filtered.length, log_run_id: gatewayRunId } },
   appendGatewayLog: (message) => appendGatewayLog(message),
   registerShutdownHandler: (handler) => { shutdownHandlers.push(handler) },

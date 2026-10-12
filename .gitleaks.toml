@@ -1,0 +1,20 @@
+# Allowlist for gitleaks (CI / pre-commit). Dummy credentials in tests and examples are not real secrets.
+title = "miki gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixtures, examples, docs and build output"
+paths = [
+  '''(^|/)\.env\.(example|sample|template|dist)$''',
+  '''(^|/)(__tests__|__mocks__|tests?|fixtures?|examples?)/''',
+  '''\.(test|spec)\.(ts|tsx|js|mjs|cjs)$''',
+  '''_test\.go$''',
+  '''(^|/)(node_modules|dist|build|coverage)/''',
+  '''(^|/)(package-lock\.json|pnpm-lock\.yaml)$''',
+]
+regexes = [
+  '''(?i)(your|changeme|replace|example|dummy|placeholder)[_-]?(api[_-]?)?(key|token|secret)''',
+  '''(?i)local-no-auth-required''',
+]

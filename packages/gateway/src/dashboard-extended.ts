@@ -20,6 +20,7 @@ import type { McpRuntimeConfig, McpServerConfig } from "@miki/core/mcp/types"
 import type { SpeechToTextSettings } from "@miki/config"
 import { getLifecycleBus } from "@miki/core/hooks"
 import { wrapAsyncRoutes } from "./async-route.js"
+import { IGNORED_DIRS as SECRET_IGNORED_DIRS, isFixturePath, isIgnoredPath, isScannableFile, parseIgnoreFile, scanLine } from "./secret-scan-rules.js"
 
 export interface DashboardExtendedDeps {
   db: Database.Database
@@ -37,6 +38,8 @@ export interface DashboardExtendedDeps {
   agent: {
     registry: { size: number; names(): string[] }
     llmFor(model?: string): { model: string } | undefined
+    /** Same resolution chat uses; health must agree with it. */
+    resolveCurrentModel(model?: string): { configured: boolean; model: string; reason?: string; keyCheck: { status: string } }
     activeRunCount(): number
   }
   getGatewayLogs: (offset: number, runId?: number) => { logs: string[]; log_total: number; log_run_id: number }
@@ -291,36 +294,43 @@ async function loadBackups(dir: string): Promise<Array<{ id: string; createdAt: 
   return out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
 }
 
-function redactedPreview(value: string): string {
-  return value.replace(/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{8,}([A-Za-z0-9_-]{4})/g, "$1••••$2")
-}
-
 async function scanSecrets(root: string) {
-  const findings: Array<{ file: string; line: number; pattern: string; redactedPreview: string }> = []
+  type Finding = { file: string; line: number; pattern: string; redactedPreview: string }
+  const findings: Finding[] = []
+  const fixtureFindings: Finding[] = []
   let scannedFiles = 0
-  const ignored = new Set(["node_modules", ".git", "dist", ".cache"])
+  // Project-level allowlists: Miki's own file and gitleaks' ignore file (path part only).
+  const matchers: RegExp[] = []
+  for (const name of [".miki-secretignore", ".gitleaksignore"]) {
+    try { matchers.push(...parseIgnoreFile(await fsp.readFile(path.join(root, name), "utf8"))) } catch { /* optional file */ }
+  }
   async function walk(dir: string): Promise<void> {
     const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])
     for (const entry of entries) {
-      if (ignored.has(entry.name)) continue
+      if (entry.isSymbolicLink()) continue
       const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) { await walk(full); continue }
-      if (!entry.isFile()) continue
+      if (entry.isDirectory()) { if (!SECRET_IGNORED_DIRS.has(entry.name)) await walk(full); continue }
+      if (!entry.isFile() || !isScannableFile(entry.name)) continue
+      const relative = path.relative(root, full)
+      if (isIgnoredPath(relative, matchers)) continue
       try {
         const stat = await fsp.stat(full)
         if (stat.size > 1024 * 1024) continue
         const content = await fsp.readFile(full, "utf8")
         if (content.includes("\u0000")) continue
         scannedFiles += 1
-        content.split(/\r?\n/).forEach((line, index) => {
-          if (/BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY/.test(line)) findings.push({ file: path.relative(root, full), line: index + 1, pattern: "private-key", redactedPreview: "[PRIVATE KEY MATERIAL]" })
-          else if (/(api[_-]?key|access[_-]?token|bot[_-]?token|client[_-]?secret|password)\s*[:=]\s*[\"']?[^\s\"']{8,}/i.test(line)) findings.push({ file: path.relative(root, full), line: index + 1, pattern: "credential-assignment", redactedPreview: redactedPreview(line.trim()) })
-        })
+        const target = isFixturePath(relative) ? fixtureFindings : findings
+        const lines = content.split(/\r?\n/)
+        for (let index = 0; index < lines.length; index += 1) {
+          const hit = scanLine(lines[index], relative)
+          if (hit) target.push({ file: relative, line: index + 1, pattern: hit.pattern, redactedPreview: hit.preview })
+        }
       } catch { /* unreadable/binary files are ignored */ }
     }
   }
   await walk(root)
-  return { scannedFiles, fixedFiles: [], findings: findings.slice(0, 200) }
+  // Fixture matches (tests, .env.example, docs) are reported for transparency but never degrade health.
+  return { scannedFiles, fixedFiles: [], findings: findings.slice(0, 200), fixtureFindings: fixtureFindings.slice(0, 200) }
 }
 
 export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Router {
@@ -1043,11 +1053,12 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   })
 
   router.get("/enhancements/health/full", deps.requireAuth, async (_req, res) => {
+    const defaultModel = deps.agent.resolveCurrentModel()
     const doctorChecks = [
       { id: "database", label: "SQLite database", status: "pass" as const, message: "SQLite is reachable.", details: {} },
       { id: "workspace", label: "Workspace", status: fs.existsSync(deps.workspaceRoot) ? "pass" as const : "fail" as const, message: deps.workspaceRoot, details: {} },
       { id: "tools", label: "Agent tools", status: deps.agent.registry.size > 0 ? "pass" as const : "warn" as const, message: `${deps.agent.registry.size} registered tool(s).`, details: {} },
-      { id: "model", label: "Default model", status: deps.agent.llmFor() ? "pass" as const : "warn" as const, message: deps.agent.llmFor()?.model || "No model configured.", details: {} },
+      { id: "model", label: "Default model", status: defaultModel.configured ? "pass" as const : "warn" as const, message: defaultModel.configured ? defaultModel.model : (defaultModel.reason || "No model configured."), details: { key_status: defaultModel.keyCheck.status } },
     ]
     const backups = await loadBackups(backupsDir)
     const jobs = deps.db.prepare("SELECT * FROM runtime_jobs ORDER BY updated_at DESC LIMIT 100").all() as Array<Record<string, unknown>>
@@ -1058,10 +1069,10 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const safeMode = safeModeRow?.value ? JSON.parse(safeModeRow.value) : { enabled: false, reasons: [] }
     const secretScan = await scanSecrets(deps.workspaceRoot)
     const memoryCount = Number((deps.db.prepare("SELECT COUNT(*) c FROM memory_chunks").get() as { c?: number } | undefined)?.c || 0)
-    const pluginHealth = listBuiltinPluginHealth({ "tools.core-registry": { ok: deps.agent.registry.size > 0, status: deps.agent.registry.size > 0 ? "functional" : "partial" }, "workflow.agent-loop": { ok: Boolean(deps.agent.llmFor()), status: deps.agent.llmFor() ? "functional" : "partial" } })
+    const pluginHealth = listBuiltinPluginHealth({ "tools.core-registry": { ok: deps.agent.registry.size > 0, status: deps.agent.registry.size > 0 ? "functional" : "partial" }, "workflow.agent-loop": { ok: defaultModel.configured, status: defaultModel.configured ? "functional" : "partial" } })
     const components = [
       { name: "gateway", status: "healthy" as const, message: `PID ${process.pid}` },
-      { name: "agent-runtime", status: deps.agent.llmFor() ? "healthy" as const : "degraded" as const, message: deps.agent.llmFor()?.model || "No configured model" },
+      { name: "agent-runtime", status: defaultModel.configured ? "healthy" as const : "degraded" as const, message: defaultModel.configured ? defaultModel.model : (defaultModel.reason || "No configured model") },
       { name: "memory", status: memoryCount >= 0 ? "healthy" as const : "failed" as const, message: `${memoryCount} memory chunk(s)` },
       { name: "plugins", status: Object.values(pluginHealth).every((v) => v.ok) ? "healthy" as const : "degraded" as const, message: `${Object.keys(pluginHealth).length} built-in capability checks` },
     ]
