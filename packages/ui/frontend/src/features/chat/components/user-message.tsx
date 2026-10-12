@@ -5,7 +5,7 @@ import { AttachmentCard } from "@/features/chat/components/attachment-card"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
 import { cn } from "@/lib/utils"
-import type { ChatAttachment } from "@/store/chat"
+import type { ChatAttachment, ChatDeliveryStatus } from "@/store/chat"
 
 interface UserMessageProps {
   id: string
@@ -14,6 +14,8 @@ interface UserMessageProps {
   onSelect?: () => void
   attachments?: ChatAttachment[]
   timestamp?: string | number
+  deliveryStatus?: ChatDeliveryStatus
+  deliveryDetail?: string
   canRetry?: boolean
   onEdit?: () => void
   onDelete?: () => void
@@ -29,6 +31,8 @@ export const UserMessage = memo(function UserMessage({
   onSelect,
   attachments = EMPTY_ATTACHMENTS,
   timestamp = "",
+  deliveryStatus,
+  deliveryDetail,
   canRetry = true,
   onEdit,
   onDelete,
@@ -156,6 +160,42 @@ export const UserMessage = memo(function UserMessage({
         </>
       )}
       {!hasText && attachments.length > 0 && actionBar}
+      {deliveryStatus === "queued" && (
+        <span role="status" className="text-muted-foreground/70 text-[11px]">
+          {t("chat.delivery.queued", {
+            defaultValue: "Queued - waiting for the previous reply",
+          })}
+        </span>
+      )}
+      {deliveryStatus === "retrying" && (
+        <span role="status" className="text-muted-foreground/70 text-[11px]">
+          {t("chat.delivery.retrying", {
+            defaultValue: "Temporary problem - retrying...",
+          })}
+        </span>
+      )}
+      {deliveryStatus === "failed" && (
+        <span
+          role="alert"
+          className="text-destructive flex max-w-[var(--chat-user-message-max)] flex-wrap items-center justify-end gap-x-2 text-[11px]"
+        >
+          <span className="[overflow-wrap:anywhere]">
+            {t("chat.delivery.failed", {
+              defaultValue: "Not answered - your message is saved.",
+            })}
+            {deliveryDetail ? ` ${deliveryDetail}` : ""}
+          </span>
+          {canRetry && onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="underline underline-offset-2 hover:no-underline"
+            >
+              {t("chat.actions.retry", { defaultValue: "Retry" })}
+            </button>
+          )}
+        </span>
+      )}
     </div>
   )
 })

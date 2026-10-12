@@ -613,6 +613,44 @@ export function handlemikiMessage(
       break
     }
 
+    case "message.accepted":
+    case "message.status": {
+      const messageId =
+        typeof payload.message_id === "string" ? payload.message_id : ""
+      const clientId =
+        typeof payload.client_message_id === "string"
+          ? payload.client_message_id
+          : ""
+      const rawStatus =
+        message.type === "message.accepted" ? "queued" : payload.status
+      const detail =
+        typeof payload.detail === "string" ? payload.detail : undefined
+      if (!messageId) break
+      updateChatStore((prev) => ({
+        messages: prev.messages.map((item) => {
+          if (item.role !== "user") return item
+          if (item.id !== messageId && item.id !== clientId) return item
+          // The server may have minted a fresh id (client id collision): adopt it.
+          const next = { ...item, id: messageId }
+          if (
+            rawStatus === "queued" ||
+            rawStatus === "processing" ||
+            rawStatus === "retrying" ||
+            rawStatus === "failed"
+          ) {
+            return {
+              ...next,
+              deliveryStatus: rawStatus,
+              deliveryDetail: rawStatus === "failed" ? detail : undefined,
+            }
+          }
+          // completed: clear any transient state
+          return { ...next, deliveryStatus: undefined, deliveryDetail: undefined }
+        }),
+      }))
+      break
+    }
+
     case "pong":
       break
 

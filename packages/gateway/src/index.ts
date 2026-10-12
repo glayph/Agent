@@ -1553,7 +1553,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       const autoTitle = titleFromMessage(content)
       if (autoTitle) db.prepare("UPDATE chat_sessions SET title=? WHERE id=? AND title=?").run(autoTitle, sessionId, DEFAULT_CHAT_TITLE)
       ownMessageId = persistedUserMessageId
-      sendEvent(ws, "message.accepted", sessionId, { message_id: persistedUserMessageId, status: "queued", queue_position: chatLane.pending(contextId) })
+      sendEvent(ws, "message.accepted", sessionId, { message_id: persistedUserMessageId, client_message_id: clientMessageId || undefined, status: "queued", queue_position: chatLane.pending(contextId) })
     }
     // Wait for the previous run of this conversation: this message needs its
     // persisted answer in the history, and runs must never interleave. Released
@@ -1642,6 +1642,11 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     activeRuns.set(runId, stream)
     socketRuns.add(runId)
     sendRawEvent(ws, "stream_checkpoint", sessionId, { checkpoint_id: stream.checkpointId, run_id: runId, sequence: 0 })
+    // One event per delivery-state change so the UI can show queued / retrying / failed on the user's own message.
+    const emitMessageStatus = (status: "processing" | "retrying" | "completed" | "failed", detail?: string) => {
+      if (persistedUserMessageId) emitStreamEvent(stream, "message.status", { message_id: persistedUserMessageId, status, ...(detail ? { detail: detail.slice(0, 500) } : {}), run_id: runId })
+    }
+    emitMessageStatus("processing")
     const thinkingMode = message.payload?.thinking_mode || "auto"
     const thinkingLevel = thinkingMode !== "auto" ? thinkingMode : undefined
     // Conversation history for the model: persisted normal messages only (thoughts/tool traces stay out).
@@ -1779,6 +1784,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       })
     }
 
+    const heldRunFinished: Array<{ type?: string }> = []
+    const flushRunFinished = () => { for (const event of heldRunFinished.splice(0)) mapper.handle(event as never) }
     const runInput = {
       runId,
       sessionId: contextId,
@@ -1791,7 +1798,13 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       source: "webchat" as const,
       peerId,
       taskTitle: String((db.prepare("SELECT title FROM chat_sessions WHERE id=?").get(sessionId) as { title?: string } | undefined)?.title || ""),
-      onEvent: mapper.handle,
+      // The engine's own terminal event ("run.finished" -> typing.stop + node.run_end) is held back
+      // until this turn knows its real outcome. Otherwise a watchdog timeout or an automatic retry
+      // would show the client a premature "cancelled"/"failed" end followed by a second one.
+      onEvent: (event: { type?: string }) => {
+        if (event.type === "run.finished") heldRunFinished.push(event)
+        else mapper.handle(event as never)
+      },
     }
     // One bounded attempt: soft timeout aborts the run, hard deadline guarantees this
     // promise settles even if the abort cannot unwind (e.g. a tool ignoring signals).
@@ -1823,10 +1836,13 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       if (transientFailure(result)) {
         appendGatewayLog(`Chat run ${runId} hit a transient failure (${result.error}); retrying once.`)
         setMessageStatus(persistedUserMessageId, "retrying", result.error)
-        emitStreamEvent(stream, "message.retrying", { run_id: runId, message_id: persistedUserMessageId, reason: result.error })
+        emitMessageStatus("retrying", result.error)
+        heldRunFinished.length = 0
         await new Promise((resolve) => setTimeout(resolve, 1_500))
+        emitMessageStatus("processing")
         result = await runBounded()
       }
+      flushRunFinished()
       const recoverableLimit = result.status === "failed" && /limit|budget|step|empty response|could not make progress/i.test(result.error || "")
       const resultText = result.finalText?.trim() || (recoverableLimit
         ? "I reached the current execution limit before finishing. The work completed so far is preserved; please continue and I will resume from the latest state."
@@ -1843,8 +1859,10 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
             ? "completed"
             : "failed"
       setMessageStatus(persistedUserMessageId, streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
+      emitMessageStatus(streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
       emitStreamDone(stream, streamStatus, result.error)
     } catch (error) {
+      heldRunFinished.length = 0 // the single terminal event is emitted below
       const detail = error instanceof Error ? error.message : String(error)
       const category = error instanceof ProviderRequestError ? error.category : undefined
       const timedOut = error instanceof ChatRunTimeoutError
@@ -1853,6 +1871,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       const clientMessage = error instanceof ProviderRequestError || timedOut ? detail : "An internal error interrupted this chat run. Your message was saved; you can retry it."
       setMessageStatus(persistedUserMessageId, "failed", detail)
       persistRunError(stream, clientMessage)
+      emitMessageStatus("failed", clientMessage)
       emitStreamEvent(stream, "error", { code: timedOut ? "run_timeout" : category || "internal_error", message: clientMessage, retryable: timedOut || Boolean(category) || TRANSIENT_ERROR.test(detail), ...(category ? { error_category: category } : {}) })
       emitStreamEvent(stream, "typing.stop", { run_id: runId })
       emitStreamEvent(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })

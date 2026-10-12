@@ -75,7 +75,12 @@ export interface ChatMessage {
   attachments?: ChatAttachment[]
   voice?: ChatVoiceMetadata
   toolCalls?: ChatToolCall[]
+  /** Delivery state of a user message: queued | processing | retrying | failed (completed is the default and omitted). */
+  deliveryStatus?: ChatDeliveryStatus
+  deliveryDetail?: string
 }
+
+export type ChatDeliveryStatus = "queued" | "processing" | "retrying" | "failed"
 
 export interface ContextUsage {
   used_tokens: number

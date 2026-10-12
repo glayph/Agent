@@ -77,6 +77,8 @@ export const ChatMessage = memo(function ChatMessage({
           content={message.content}
           attachments={message.attachments}
           timestamp={message.timestamp}
+          deliveryStatus={message.deliveryStatus}
+          deliveryDetail={message.deliveryDetail}
           selected={selected}
           onSelect={() => onSelect(message.id)}
           canRetry={canRetry}

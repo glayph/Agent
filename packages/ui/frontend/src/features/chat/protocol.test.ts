@@ -644,4 +644,39 @@ describe("chat protocol flow", () => {
     expect(getChatState().isTyping).toBe(false)
     expect(getChatState().messages).toEqual([])
   })
+
+  it("tracks delivery status on the user's own message (queued, retrying, failed, completed)", () => {
+    updateChatStore({
+      messages: [{ id: "req-1", role: "user", content: "hello", timestamp: 1 }],
+    })
+    const send = (type: string, payload: Record<string, unknown>) =>
+      handlemikiMessage({ type, session_id: "session-1", payload }, "session-1")
+
+    send("message.accepted", { message_id: "req-1", client_message_id: "req-1" })
+    expect(getChatState().messages[0].deliveryStatus).toBe("queued")
+
+    send("message.status", { message_id: "req-1", status: "retrying" })
+    expect(getChatState().messages[0].deliveryStatus).toBe("retrying")
+
+    send("message.status", { message_id: "req-1", status: "failed", detail: "Provider timed out" })
+    expect(getChatState().messages[0]).toMatchObject({
+      deliveryStatus: "failed",
+      deliveryDetail: "Provider timed out",
+    })
+
+    send("message.status", { message_id: "req-1", status: "completed" })
+    expect(getChatState().messages[0].deliveryStatus).toBeUndefined()
+  })
+
+  it("adopts the server-minted id when the client id collided", () => {
+    updateChatStore({
+      messages: [{ id: "t1", role: "user", content: "hello", timestamp: 1 }],
+    })
+    handlemikiMessage({
+      type: "message.accepted",
+      session_id: "session-1",
+      payload: { message_id: "uuid-9", client_message_id: "t1" },
+    }, "session-1")
+    expect(getChatState().messages[0]).toMatchObject({ id: "uuid-9", deliveryStatus: "queued" })
+  })
 })

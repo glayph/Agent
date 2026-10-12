@@ -270,10 +270,13 @@ await check("models: chat, Models page and health resolve the same default model
 })
 
 await check("chat: the user message is persisted immediately and marked completed", async () => {
-  const events = await chat("s-persist", "just say hi")
+  const events = await chat("s-persist", "just say hi", { until: "stream_done" })
   const accepted = events.find((e) => e.type === "message.accepted")
   assert.ok(accepted, "the gateway should acknowledge the saved message before running the model")
   assert.ok(events.findIndex((e) => e.type === "message.accepted") < events.findIndex((e) => e.type === "node.run_start"))
+  const statuses = events.filter((e) => e.type === "message.status").map((e) => e.payload.status)
+  assert.deepEqual(statuses, ["processing", "completed"], `delivery status sequence: ${statuses}`)
+  assert.equal(accepted.payload.client_message_id, "t1")
   const history = await api("GET", "/api/sessions/s-persist")
   const user = history.json.messages.find((m) => m.role === "user")
   assert.ok(user, "user message must be in the database")
@@ -304,7 +307,12 @@ await check("chat: a run that never answers is stopped, saved as failed, and the
   assert.ok(error, "the client must receive an error event, not hang")
   assert.equal(error.payload.code, "run_timeout", JSON.stringify(error.payload))
   assert.equal(error.payload.retryable, true)
-  const end = events.filter((e) => e.type === "node.run_end").at(-1)
+  const failedStatus = events.filter((e) => e.type === "message.status").at(-1)
+  assert.equal(failedStatus.payload.status, "failed")
+  assert.match(failedStatus.payload.detail, /15 seconds/)
+  const ends = events.filter((e) => e.type === "node.run_end")
+  assert.equal(ends.length, 1, "exactly one terminal run_end (no premature cancelled followed by failed)")
+  const end = ends[0]
   assert.equal(end.payload.status, "failed")
   assert.match(error.payload.message, /15 seconds/)
   const history = await api("GET", "/api/sessions/s-timeout")

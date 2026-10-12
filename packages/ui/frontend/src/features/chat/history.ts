@@ -60,6 +60,12 @@ export async function loadSessionMessages(
       media: message.media,
       attachments: message.attachments,
     }),
+    ...(message.role === "user" && message.status && message.status !== "completed"
+      ? {
+          deliveryStatus: message.status,
+          ...(message.status_detail ? { deliveryDetail: message.status_detail } : {}),
+        }
+      : {}),
     voice: message.voice
       ? {
           source: message.voice.source,
