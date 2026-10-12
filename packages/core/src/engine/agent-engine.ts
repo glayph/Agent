@@ -16,6 +16,7 @@ import { ToolRegistry } from "./tool-registry.js";
 import { createPlan } from "./planner.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { verifyAnswer } from "./verifier.js";
+import { assessProgress } from "./budget.js";
 import { compactRunContext, pruneToolResults } from "./context-manager.js";
 import { TokenBudgetManager } from "../token-budget-manager.js";
 import {
@@ -98,6 +99,14 @@ export interface AgentEngineOptions {
   /** Models tried in order when the current model's request fails. */
   fallbackModels?: string[] | (() => string[]);
   /**
+   * Dynamic budget: when a run reaches its turn / tool-iteration / tool-call
+   * limit while its latest tool calls are still succeeding and not repeating,
+   * the limits are raised by a bounded step instead of cutting the run off.
+   * Failing or looping runs still stop at the limit. Off by default; hosts
+   * enable it. Ignored when the request carries its own `maxToolCalls` cap.
+   */
+  dynamicBudget?: DynamicBudgetConfig | (() => DynamicBudgetConfig);
+  /**
    * Self-check: after a tool-using run drafts its final answer, the model checks
    * that draft against the request and the tool evidence and, when it finds a
    * concrete problem, revises once. Off by default (it costs one extra model
@@ -109,6 +118,18 @@ export interface AgentEngineOptions {
   /** Upper bound of concurrently running tool calls per turn (default 6). */
   maxParallelToolCalls?: number;
 }
+
+export type DynamicBudgetConfig =
+  | false
+  | {
+      /** Turns and tool iterations added per extension (default 6). */
+      extensionTurns?: number;
+      /** Extensions allowed per run (default 2): the hard ceiling is base + extensions * step. */
+      maxExtensions?: number;
+      /** Newest tool calls judged for progress (default 4). */
+      window?: number;
+      minSuccessRate?: number;
+    };
 
 export type SelfCheckConfig =
   | false
@@ -504,6 +525,32 @@ export class AgentEngine {
     let limitReason: string | undefined;
     let toolIterations = 0;
 
+    // Limits may grow during the run (dynamic budget), so the loop works on mutable caps.
+    let turnCap = maxTurns;
+    let iterationCap = maxToolIterations;
+    let callCap = maxToolCalls;
+    let extensions = 0;
+    const dynamic = typeof this.options.dynamicBudget === "function" ? this.options.dynamicBudget() : this.options.dynamicBudget;
+    const tryExtend = (budgetHit?: string): boolean => {
+      if (!dynamic || request.maxToolCalls !== undefined) return false;
+      if (extensions >= Math.max(0, Math.floor(dynamic.maxExtensions ?? 2))) return false;
+      const progress = assessProgress(state.records, {
+        window: dynamic.window,
+        minSuccessRate: dynamic.minSuccessRate,
+        ignore: (record) => budgetHit !== undefined && record.status === "blocked" && record.error === budgetHit,
+      });
+      if (!progress.productive) return false;
+      const step = Math.max(1, Math.floor(dynamic.extensionTurns ?? 6));
+      extensions += 1;
+      turnCap += step;
+      iterationCap += step;
+      // Calls that were only skipped because the call budget ended still used up budget slots.
+      const skipped = budgetHit === undefined ? 0 : state.records.filter((record) => record.status === "blocked" && record.error === budgetHit).length;
+      callCap += step * Math.max(1, Math.ceil(maxToolCalls / maxToolIterations)) + skipped;
+      this.options.logger?.("budget.extended", { extensions, turnCap, iterationCap, callCap, ...progress });
+      return true;
+    };
+
     // In-run context management and model failover state.
     const compactionConfig = this.options.compaction === false ? undefined : (this.options.compaction ?? {});
     const compactionEnabled = Boolean(contextWindowTokens && compactionConfig);
@@ -513,9 +560,10 @@ export class AgentEngine {
     let compactions = 0;
     const triedModels = new Set<string>([llm.model]);
 
-    for (let turn = 1; turn <= maxTurns; turn += 1) {
-      if (toolIterations >= maxToolIterations) {
-        limitReason = `Tool iteration budget of ${maxToolIterations} reached.`;
+    for (let turn = 1; ; turn += 1) {
+      if (turn > turnCap && !tryExtend()) break;
+      if (toolIterations >= iterationCap && !tryExtend()) {
+        limitReason = `Tool iteration budget of ${iterationCap} reached.`;
         break;
       }
       if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
@@ -669,8 +717,8 @@ export class AgentEngine {
       });
       if (text.trim()) emit({ type: "thought", runId, turn, content: text.trim() });
 
-      const budgetHit = await this.executeToolCalls(state, calls, turn, tools, request, maxToolCalls);
-      if (budgetHit) limitReason = budgetHit;
+      const budgetHit = await this.executeToolCalls(state, calls, turn, tools, request, callCap);
+      if (budgetHit) limitReason = !state.loopDetected && tryExtend(budgetHit) ? undefined : budgetHit;
       if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
 
       if (state.loopDetected) {
@@ -681,7 +729,7 @@ export class AgentEngine {
     }
 
     // 3. Budget exhausted: ask for a wrap-up without tools so the user still gets an answer.
-    limitReason ??= `Step limit of ${maxTurns} turns reached.`;
+    limitReason ??= `Step limit of ${turnCap} turns reached.`;
     if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
     let summary = "";
     try {

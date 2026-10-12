@@ -477,4 +477,9 @@ describe("runtime config schema", () => {
     expect(bad.valid).toBe(false);
     expect(bad.errors).toContainEqual(expect.objectContaining({ path: "agent.self_check.max_revisions" }));
   });
+
+  it("accepts agent.dynamic_budget and rejects out-of-range values", () => {
+    expect(validateRuntimeConfig({ agent: { dynamic_budget: { enabled: true, extension_turns: 8, max_extensions: 3 } } }).valid).toBe(true);
+    expect(validateRuntimeConfig({ agent: { dynamic_budget: { max_extensions: 50 } } }).valid).toBe(false);
+  });
 });

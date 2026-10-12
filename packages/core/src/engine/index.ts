@@ -1,5 +1,5 @@
 export { AgentEngine, NoModelConfiguredError } from "./agent-engine.js";
-export type { AgentEngineOptions, LLMResolver, SelfCheckConfig } from "./agent-engine.js";
+export type { AgentEngineOptions, LLMResolver, SelfCheckConfig, DynamicBudgetConfig } from "./agent-engine.js";
 export { verifyAnswer, parseVerdict, buildEvidence } from "./verifier.js";
 export type { AnswerVerdict } from "./verifier.js";
 export { ToolRegistry } from "./tool-registry.js";
@@ -49,3 +49,5 @@ export { buildSkillsContext, createSkillTools } from "./skill-tools.js";
 export type { SkillToolsOptions } from "./skill-tools.js";
 export { redactSecrets, stableStringify } from "./util.js";
 export type * from "./types.js";
+export { assessProgress } from "./budget.js";
+export type { ProgressAssessment, ProgressOptions } from "./budget.js";

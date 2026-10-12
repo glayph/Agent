@@ -357,6 +357,16 @@ const AgentBlockSchema = z
     resource: AgentResourceSchema.optional(),
     // Accuracy: a tool-using run checks its draft answer against the tool
     // evidence and revises once on a concrete problem (one extra model call).
+    // Dynamic budget: a run that reaches its turn / tool-call limit while its
+    // newest tool calls are still succeeding gets a bounded extension.
+    dynamic_budget: z
+      .object({
+        enabled: z.boolean().optional(),
+        extension_turns: z.number().int().min(1).max(24).optional(),
+        max_extensions: z.number().int().min(0).max(5).optional(),
+      })
+      .passthrough()
+      .optional(),
     self_check: z
       .object({
         enabled: z.boolean().optional(),

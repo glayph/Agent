@@ -495,6 +495,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     llm: llmFor,
     tools: registry,
     approvals,
+    // Dynamic budget: a run that hits its turn / tool limit while still making
+    // progress gets a bounded extension. Disable with agent.dynamic_budget.enabled=false.
+    dynamicBudget: () => {
+      const cfg = (deps.getAppConfig() as any)?.agent?.dynamic_budget
+      if (cfg?.enabled === false) return false
+      const extensionTurns = Number(cfg?.extension_turns)
+      const maxExtensions = Number(cfg?.max_extensions)
+      return {
+        ...(Number.isFinite(extensionTurns) ? { extensionTurns: Math.min(24, Math.max(1, Math.floor(extensionTurns))) } : {}),
+        ...(Number.isFinite(maxExtensions) ? { maxExtensions: Math.min(5, Math.max(0, Math.floor(maxExtensions))) } : {}),
+      }
+    },
     // Accuracy: a tool-using run checks its draft answer against the evidence and
     // revises once on a concrete problem. Disable with agent.self_check.enabled=false.
     selfCheck: () => {
