@@ -26,6 +26,8 @@ const SAFE_AUTONOMOUS_TOOLS = [
 
 const PHASE2_CAPABILITY_TOOLS = [
   "terminal_run",
+  "terminal_status",
+  "terminal_kill",
   "file_copy",
   "file_delete",
   "file_move",

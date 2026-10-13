@@ -441,4 +441,60 @@ describe("AgentEngine", () => {
     expect(result.status).toBe("completed");
     expect(llm.requests[0].options?.tools).toBeUndefined();
   });
+
+  describe("long-running tools and system notices", () => {
+    it("a tool can opt out of the engine's per-call timeout (timeoutMs: 0)", async () => {
+      const slow = tool({
+        name: "slow",
+        timeoutMs: 0,
+        execute: (_input, ctx) =>
+          new Promise((resolve, reject) => {
+            ctx.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+            setTimeout(() => resolve({ done: true }), 150);
+          }),
+      });
+      const { engine } = setup([{ calls: [{ name: "slow" }] }, { text: "ok" }], [slow], { toolTimeoutMs: 40 });
+      const result = await engine.run({ history: user("go") });
+      expect(result.toolCalls[0].status).toBe("succeeded");
+      expect(result.finalText).toBe("ok");
+    });
+
+    it("a tool without an override is still stopped by the default tool timeout", async () => {
+      const slow = tool({
+        name: "slow",
+        execute: (_input, ctx) =>
+          new Promise((_resolve, reject) => ctx.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })),
+      });
+      const { engine } = setup([{ calls: [{ name: "slow" }] }, { text: "gave up" }], [slow], { toolTimeoutMs: 40 });
+      const result = await engine.run({ history: user("go") });
+      expect(result.toolCalls[0].status).toBe("failed");
+    });
+
+    it("delivers host notices to the model at the start of the next turn", async () => {
+      const notices = [[], ["Command proc_1 finished successfully (exit code 0)."]];
+      let call = 0;
+      const { engine, llm } = setup([{ calls: [{ name: "ping" }] }, { text: "noted" }], [tool({ name: "ping" })], {
+        notifications: () => notices[Math.min(call++, notices.length - 1)],
+      });
+      const events: EngineEvent[] = [];
+      await engine.run({ history: user("start a build"), onEvent: (e) => events.push(e) });
+      const second = llm.requests[1].messages;
+      const last = second[second.length - 1];
+      expect(last.role).toBe("user");
+      expect(last.content).toContain("[system notice]");
+      expect(last.content).toContain("proc_1 finished successfully");
+      expect(llm.requests[0].messages.some((m) => String(m.content).includes("[system notice]"))).toBe(false);
+      expect(events.some((e) => e.type === "system.notice")).toBe(true);
+    });
+
+    it("a failing notifications hook never breaks the run", async () => {
+      const { engine } = setup([{ text: "fine" }], [tool({ name: "ping" })], {
+        notifications: () => {
+          throw new Error("boom");
+        },
+      });
+      const result = await engine.run({ history: user("hi") });
+      expect(result.status).toBe("completed");
+    });
+  });
 });

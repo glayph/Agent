@@ -1088,7 +1088,7 @@ app.get("/api/tools", async (_req, res) => {
     group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
     group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"], browserBlocked),
-    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to add approval and guard rails).", "system", true, ["terminal_run"]),
+    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to add approval and guard rails).", "system", true, ["terminal_run", "terminal_status", "terminal_kill"]),
   ] })
 })
 app.put("/api/tools/:name/state", requireAuth, async (req, res) => {
@@ -1294,16 +1294,21 @@ type ActiveRunState = {
 const chatLane = createKeyedLane()
 const activeRuns = new Map<string, ActiveRunState>()
 const STREAM_RESUME_GRACE_MS = 30_000
-// Hard ceiling for one chat turn. A stuck provider/tool can never leave the UI on
-// "Agent is working" forever: the run is cancelled, the user message is marked
-// failed and the client receives a clean error. Override with MIKI_CHAT_RUN_TIMEOUT_MS.
-const CHAT_RUN_TIMEOUT_MS = Math.max(15_000, Number(process.env.MIKI_CHAT_RUN_TIMEOUT_MS) || 10 * 60_000)
+// An autonomous agent must be able to work for as long as the job needs, so there is NO hard
+// ceiling on a chat turn by default: slow commands are followed with terminal_status (never
+// killed), a hung model call is bounded by the LLM client's own request timeout, and the Stop
+// button always cancels. Operators who want a safety net can opt in with
+// MIKI_CHAT_RUN_TIMEOUT_MS=<ms> (minimum 15000); 0 or unset = disabled.
+const CHAT_RUN_TIMEOUT_MS = (() => {
+  const configured = Number(process.env.MIKI_CHAT_RUN_TIMEOUT_MS)
+  return Number.isFinite(configured) && configured > 0 ? Math.max(15_000, configured) : 0
+})()
 // How long the abort gets to unwind before the turn is force-failed.
 const CHAT_RUN_ABORT_GRACE_MS = 10_000
 // History compaction may call the LLM; it must never block the turn for long.
 const CHAT_COMPACTION_TIMEOUT_MS = Math.max(1_000, Number(process.env.MIKI_CHAT_COMPACTION_TIMEOUT_MS) || 20_000)
 // A queued message waits for the previous turn, which is itself bounded by the run timeout.
-const CHAT_QUEUE_WAIT_MS = CHAT_RUN_TIMEOUT_MS + CHAT_RUN_ABORT_GRACE_MS + 5_000
+const CHAT_QUEUE_WAIT_MS = CHAT_RUN_TIMEOUT_MS > 0 ? CHAT_RUN_TIMEOUT_MS + CHAT_RUN_ABORT_GRACE_MS + 5_000 : 24 * 60 * 60_000
 class ChatRunTimeoutError extends Error {
   constructor(ms: number) {
     super(`The agent did not finish within ${ms < 90_000 ? `${Math.round(ms / 1000)} seconds` : `${Math.round(ms / 60_000)} minutes`}, so the run was stopped. Your message is saved - retry it or ask me to continue.`)
@@ -1821,6 +1826,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     // One bounded attempt: soft timeout aborts the run, hard deadline guarantees this
     // promise settles even if the abort cannot unwind (e.g. a tool ignoring signals).
     const runBounded = async () => {
+      // No ceiling configured: the run takes as long as it needs (Stop still cancels it).
+      if (!CHAT_RUN_TIMEOUT_MS) return await agent.startRun(runInput as any)
       const controller = new AbortController()
       let timedOut = false
       const timer = setTimeout(() => { timedOut = true; controller.abort() }, CHAT_RUN_TIMEOUT_MS)
@@ -1917,6 +1924,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
   })
 })
 
+// Do not leave commands the agent started running after the gateway stops.
+shutdownHandlers.push(() => agent.processes.killAll())
 app.use("/api", createDashboardExtendedRouter({
   db,
   app,

@@ -43,6 +43,19 @@ const llm = http.createServer((req, res) => {
     const call = (name, args) => reply({ role: "assistant", content: null, tool_calls: [{ id: `call_${Date.now()}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] })
     if (system.includes("planning module"))
       return reply({ role: "assistant", content: JSON.stringify({ steps: [{ title: "List the workspace", tool: "workspace_list" }, { title: "Report" }] }) })
+    // ---- long-running command scenarios (terminal_run is never killed; the agent is told when it ends) ----
+    const asked = (word) => messages.some((m) => m.role === "user" && String(m.content).includes(word))
+    if (String(last.content).includes("[system notice]") && last.role === "user")
+      return reply({ role: "assistant", content: `NOTICE SEEN: ${String(last.content).includes("finished successfully") ? "command finished successfully" : "other"}` })
+    if (asked("LONGCMD")) {
+      if (last.role === "tool") {
+        const out = String(last.content)
+        if (out.includes('"status":"running"')) return call("terminal_status", { process_id: /"process_id":"([^"]+)"/.exec(out)[1], wait_seconds: 30 })
+        if (out.includes("finished-ok")) return reply({ role: "assistant", content: "LONG DONE: the command finished and I verified its output" })
+      } else return call("terminal_run", { command: "echo begin; sleep 3; echo finished-ok", wait_seconds: 1 })
+    }
+    if (asked("LONGBG") && last.role === "tool") return reply({ role: "assistant", content: "BG STARTED: it keeps running in the background" })
+    if (asked("LONGBG") && !asked("any news")) return call("terminal_run", { command: "sleep 2; echo bg-ok", background: true })
     if (last.role === "tool") return reply({ role: "assistant", content: `TOOL RESULT SEEN: ${last.content}` })
     const text = String(last.content)
     // HANGONCE hangs the first time only (retry test); plain HANG never answers (cancel/timeout tests).
@@ -355,6 +368,23 @@ await check("chat: a failed turn can be retried from the user message and then c
   assert.equal(users[0].status, "completed")
   assert.ok(!history2.json.messages.some((m) => m.kind === "error"), "the stale error message is removed")
   assert.ok(history2.json.messages.some((m) => m.role === "assistant" && /PLAIN ANSWER/.test(m.content)))
+})
+
+await check("terminal: a slow command is not killed; the agent follows it with terminal_status and verifies the result", async () => {
+  const events = await chat("s-long", "LONGCMD please", { timeoutMs: 40000, until: "stream_done" })
+  const tools = events.filter((e) => e.type === "message.create" || e.type === "message.update").flatMap((e) => (e.payload.tool_calls ?? []).map((t) => t.function?.name)).filter(Boolean)
+  assert.ok(tools.includes("terminal_run") && tools.includes("terminal_status"), `tools used: ${[...new Set(tools)]}`)
+  const final = events.filter((e) => e.type === "message.create" && e.payload.content).map((e) => e.payload.content).join("\n")
+  assert.match(final, /LONG DONE/)
+  assert.ok(!events.some((e) => e.type === "error"))
+})
+
+await check("terminal: a background command that finishes later is announced to the agent as a system notice", async () => {
+  await chat("s-bg", "LONGBG start the job", { timeoutMs: 20000, until: "stream_done" })
+  await new Promise((resolve) => setTimeout(resolve, 3500)) // the background command (2s) ends while no run is active
+  const events = await chat("s-bg", "any news?", { timeoutMs: 20000, until: "stream_done" })
+  const final = events.filter((e) => e.type === "message.create" && e.payload.content).map((e) => e.payload.content).join("\n")
+  assert.match(final, /NOTICE SEEN: command finished successfully/, final)
 })
 
 await check("chat: a write waits for approval, runs after approval, and the file exists", async () => {

@@ -1,5 +1,6 @@
 import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
-import { createTerminalTool } from "./terminal-tool.js";
+import { createTerminalTools } from "./terminal-tool.js";
+import { ProcessManager } from "./process-manager.js";
 import { resolveModel } from "./model-resolution.js";
 import { buildIdentityContext } from "./identity-prompt.js";
 import express from "express"
@@ -102,6 +103,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const now = () => new Date().toISOString()
 
   // ---- model resolution ---------------------------------------------------
+  // Commands started by the agent. A slow command is never killed by a timeout: it keeps running,
+  // the agent re-checks it (about every 60s) and is told the moment it exits.
+  const processes = new ProcessManager()
+  const noticedRuns = new Set<string>()
   // Single source of truth shared with the Models page and health endpoints
   // (see model-resolution.ts). An unknown requested name falls back to the
   // default model instead of building a ghost client, and keys are validated
@@ -296,9 +301,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       onRun: (entry) => deps.recordFileRun({ file: `${entry.skill}/${entry.script}`, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: `skill:${entry.skill}` }),
     }),
     ...createControlTools(createControlToolFactory(control)),
-    createTerminalTool({
+    ...createTerminalTools({
       root: effectiveWorkspaceRoot,
       restrictToWorkspace: () => (deps.getAppConfig() as any)?.agents?.defaults?.restrict_to_workspace !== false,
+      processes,
     }),
     {
       name: "browser_navigate",
@@ -466,6 +472,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
   syncTools()
 
   const engine = new AgentEngine({
+    // Finished background commands are announced to the model at the start of its next turn,
+    // so it never has to poll; the first turn of a run also lists commands still running.
+    notifications: ({ runId, sessionId }) => {
+      const notices = processes.takeFinishedNotices(sessionId)
+      if (!noticedRuns.has(runId)) {
+        noticedRuns.add(runId)
+        if (noticedRuns.size > 500) noticedRuns.delete(noticedRuns.values().next().value as string)
+        const running = processes.runningSummary(sessionId)
+        if (running.length) notices.push(`Commands still running from earlier: ${running.join("; ")}`)
+      }
+      return notices
+    },
     llm: llmFor,
     tools: registry,
     approvals,
@@ -855,7 +873,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     const result = await controller.setToolState(name, enabled)
     return { ...result, status: enabled ? "enabled" : "disabled", name }
   }
-  return { engine, control, approvals, registry, llmFor, resolveCurrentModel, mount, startRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
+  return { engine, control, approvals, registry, processes, llmFor, resolveCurrentModel, mount, startRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>

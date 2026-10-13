@@ -7,7 +7,7 @@ export interface ToolGroupStatus {
 }
 
 const CAPABILITY_TEXT: Record<string, string> = {
-  terminal: "Terminal (terminal_run): run any shell command like a human operator — builds, git, package managers, scripts, system inspection.",
+  terminal: "Terminal (terminal_run, terminal_status, terminal_kill): run any shell command like a human operator — builds, git, package managers, scripts, system inspection. Slow commands are never killed: if terminal_run reports status \"running\", the command is still going; call terminal_status (it waits until the command exits, about a minute per call) to follow it, and you are told automatically when it finishes. Do not assume success before it exits.",
   browser: "Browser (browser_*): open pages, click, type, extract content and take screenshots in a real browser.",
   web_search: "Web search (web_search): look up current information on the web and cite the results.",
   filesystem: "Files (file_*, workspace_*): read, search, write, move, copy and delete files.",

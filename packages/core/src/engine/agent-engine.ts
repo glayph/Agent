@@ -65,6 +65,12 @@ export interface AgentEngineOptions {
   /** Controls whether the configured base system prompt is included. */
   systemPromptEnabled?: boolean | (() => boolean);
   toolTimeoutMs?: number;
+  /**
+   * System notices to deliver to the model, drained at the start of every turn. Hosts use it to
+   * tell the agent that something it started (a background command) has finished, so the agent
+   * never has to poll to find out.
+   */
+  notifications?: (info: { runId: string; sessionId?: string }) => string[] | undefined | Promise<string[] | undefined>;
   maxToolResultChars?: number;
   /** An identical call may be made this many times before it is blocked as a loop. */
   duplicateCallLimit?: number;
@@ -572,6 +578,17 @@ export class AgentEngine {
 
       // Keep long tasks inside the window: prune old tool output from the prompt,
       // then summarise the oldest agent steps when that is still not enough.
+      if (this.options.notifications) {
+        try {
+          const notices = (await this.options.notifications({ runId, sessionId: request.sessionId }))?.filter((text) => text.trim());
+          if (notices?.length) {
+            state.messages.push({ role: "user", content: `[system notice]\n${notices.join("\n")}` });
+            emit({ type: "system.notice", runId, turn, count: notices.length });
+          }
+        } catch (error) {
+          this.options.logger?.("notifications.failed", { error: errorMessage(error) });
+        }
+      }
       // Pruned once per turn; recomputed only when compaction replaces the messages.
       let visibleMessages = compactionEnabled
         ? pruneToolResults(state.messages, { keepRecentToolResults })
@@ -1016,10 +1033,13 @@ export class AgentEngine {
     let timedOut = false;
     const onRunAbort = () => toolController.abort();
     state.signal.addEventListener("abort", onRunAbort, { once: true });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      toolController.abort();
-    }, this.toolTimeoutMs);
+    const effectiveTimeoutMs = tool.timeoutMs ?? this.toolTimeoutMs;
+    const timer = effectiveTimeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          toolController.abort();
+        }, effectiveTimeoutMs)
+      : undefined;
     try {
       const output = await raceAbort(
         Promise.resolve(
@@ -1052,7 +1072,7 @@ export class AgentEngine {
       if (state.signal.aborted) {
         fail("cancelled", "The run was cancelled.", startedMs);
       } else if (timedOut) {
-        fail("failed", `Tool timed out after ${this.toolTimeoutMs} ms.`, startedMs);
+        fail("failed", `Tool timed out after ${effectiveTimeoutMs} ms.`, startedMs);
       } else {
         fail("failed", redactSecrets(errorMessage(error)), startedMs);
       }

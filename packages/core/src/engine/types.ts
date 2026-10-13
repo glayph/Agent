@@ -89,6 +89,12 @@ export interface EngineTool {
    * read-only tools; everything else always runs in the order the model gave.
    */
   parallelSafe?: boolean;
+  /**
+   * Per-tool timeout override in ms. `0` disables the engine's per-call timeout. Tools that
+   * manage their own long-running work (terminal processes) use this so a slow command is
+   * waited on in bounded slices instead of being killed by the default tool timeout.
+   */
+  timeoutMs?: number;
   execute(
     input: Record<string, unknown>,
     context: ToolExecutionContext,
@@ -205,6 +211,7 @@ export type EngineEvent =
   | { type: "plan.created"; runId: string; plan: AgentPlan }
   | { type: "plan.updated"; runId: string; plan: AgentPlan }
   | { type: "turn.started"; runId: string; turn: number }
+  | { type: "system.notice"; runId: string; turn: number; count: number }
   | { type: "thought"; runId: string; turn: number; content: string }
   | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
