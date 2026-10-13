@@ -133,6 +133,19 @@ export interface DeliveryOutcome {
   correlationId: string
 }
 
+/** Live view of what a running turn is waiting on (from the gateway's run.heartbeat events). */
+export interface RunActivity {
+  runId: string
+  elapsedSeconds: number
+  idleSeconds: number
+  activity: "model" | "writing" | "tool" | "approval"
+  activitySeconds: number
+  label?: string
+  turn: number
+  /** Local clock when the heartbeat arrived; used to keep the counters ticking between beats. */
+  receivedAt: number
+}
+
 export interface ChatStoreState {
   messages: ChatMessage[]
   connectionState: ConnectionState
@@ -148,6 +161,7 @@ export interface ChatStoreState {
   runStatus?: RunStatus
   runError?: string
   deliveryOutcome?: DeliveryOutcome
+  runActivity?: RunActivity
 }
 
 type ChatStorePatch = Partial<ChatStoreState>

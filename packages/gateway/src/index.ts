@@ -1358,6 +1358,12 @@ const emitStreamEvent = (run: ActiveRunState, type: string, payload: Record<stri
   if (run.events.length > 500) run.events.splice(0, run.events.length - 500)
   if (run.socket?.readyState === run.socket.OPEN) run.socket.send(message)
 }
+/** Live-only event (heartbeats): sent to the open socket, never buffered or sequenced for stream resume. */
+const emitLiveEvent = (run: ActiveRunState, type: string, payload: Record<string, unknown> = {}) => {
+  if (run.socket?.readyState === run.socket.OPEN) {
+    run.socket.send(JSON.stringify({ type, session_id: run.sessionId, timestamp: Date.now(), payload: { ...payload, run_id: run.runId } }))
+  }
+}
 const emitStreamDone = (run: ActiveRunState, status: "completed" | "completed_with_warning" | "failed" | "cancelled", error?: string) => {
   if (run.done) return
   emitStreamEvent(run, "stream_done", { status, ...(error ? { error } : {}) })
@@ -1802,6 +1808,37 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
 
     const heldRunFinished: Array<{ type?: string }> = []
+    // Live activity for the UI: what the agent is waiting on, so a slow model call or a long command is
+    // visible (and Stop is an informed choice) instead of an unexplained spinner.
+    const runStartedAt = Date.now()
+    const live = { kind: "model" as "model" | "writing" | "tool" | "approval", label: "", turn: 0, lastEventAt: runStartedAt, kindSince: runStartedAt }
+    const setActivity = (kind: typeof live.kind, label = "") => { live.kind = kind; live.label = label; live.kindSince = Date.now(); live.lastEventAt = Date.now() }
+    const trackActivity = (event: any) => {
+      switch (event?.type) {
+        case "turn.started": live.turn = Number(event.turn) || live.turn; setActivity("model"); break
+        case "message.delta": if (live.kind !== "writing") setActivity("writing"); else live.lastEventAt = Date.now(); break
+        case "tool.call": {
+          const status = String(event.call?.status ?? "")
+          if (status === "awaiting_approval") setActivity("approval", String(event.call?.name ?? ""))
+          else if (status === "running" || status === "requested") setActivity("tool", String(event.call?.name ?? ""))
+          else setActivity("model")
+          break
+        }
+        default: live.lastEventAt = Date.now()
+      }
+    }
+    const heartbeat = setInterval(() => {
+      const now = Date.now()
+      emitLiveEvent(stream, "run.heartbeat", {
+        elapsed_seconds: Math.round((now - runStartedAt) / 1000),
+        idle_seconds: Math.round((now - live.lastEventAt) / 1000),
+        activity: live.kind,
+        activity_seconds: Math.round((now - live.kindSince) / 1000),
+        ...(live.label ? { label: live.label } : {}),
+        turn: live.turn,
+      })
+    }, 5_000)
+    ;(heartbeat as { unref?: () => void }).unref?.()
     const flushRunFinished = () => { for (const event of heldRunFinished.splice(0)) mapper.handle(event as never) }
     const runInput = {
       runId,
@@ -1819,6 +1856,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       // until this turn knows its real outcome. Otherwise a watchdog timeout or an automatic retry
       // would show the client a premature "cancelled"/"failed" end followed by a second one.
       onEvent: (event: { type?: string }) => {
+        trackActivity(event)
         if (event.type === "run.finished") heldRunFinished.push(event)
         else mapper.handle(event as never)
       },
@@ -1896,6 +1934,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       emitStreamEvent(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })
       emitStreamDone(stream, "failed", clientMessage)
     } finally {
+      clearInterval(heartbeat)
       socketRuns.delete(runId)
       if (stream.done && !stream.socket) stream.expiresAt = Date.now() + 10_000
     }

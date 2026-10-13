@@ -679,4 +679,25 @@ describe("chat protocol flow", () => {
     }, "session-1")
     expect(getChatState().messages[0]).toMatchObject({ id: "uuid-9", deliveryStatus: "queued" })
   })
+
+  it("stores run.heartbeat activity and ignores malformed beats", () => {
+    updateChatStore({ messages: [], runningRunIds: ["run-9"], isTyping: true })
+    const beat = (payload: Record<string, unknown>) =>
+      handlemikiMessage({ type: "run.heartbeat", session_id: "session-1", payload }, "session-1")
+
+    beat({ run_id: "run-9", elapsed_seconds: 75, idle_seconds: 70, activity: "model", activity_seconds: 70, turn: 2 })
+    expect(getChatState().runActivity).toMatchObject({
+      runId: "run-9",
+      elapsedSeconds: 75,
+      idleSeconds: 70,
+      activity: "model",
+      turn: 2,
+    })
+
+    beat({ run_id: "run-9", activity: "nonsense" })
+    expect(getChatState().runActivity?.activity).toBe("model")
+
+    beat({ run_id: "run-9", elapsed_seconds: 80, idle_seconds: 0, activity: "tool", label: "terminal_run" })
+    expect(getChatState().runActivity).toMatchObject({ activity: "tool", label: "terminal_run" })
+  })
 })

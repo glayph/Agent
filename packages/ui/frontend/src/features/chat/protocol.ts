@@ -613,6 +613,36 @@ export function handlemikiMessage(
       break
     }
 
+    case "run.heartbeat": {
+      const runId = typeof payload.run_id === "string" ? payload.run_id : ""
+      const activity = payload.activity
+      if (
+        !runId ||
+        (activity !== "model" &&
+          activity !== "writing" &&
+          activity !== "tool" &&
+          activity !== "approval")
+      )
+        break
+      const num = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) ? value : 0
+      updateChatStore(() => ({
+        runActivity: {
+          runId,
+          elapsedSeconds: num(payload.elapsed_seconds),
+          idleSeconds: num(payload.idle_seconds),
+          activity,
+          activitySeconds: num(payload.activity_seconds),
+          ...(typeof payload.label === "string" && payload.label
+            ? { label: payload.label }
+            : {}),
+          turn: num(payload.turn),
+          receivedAt: Date.now(),
+        },
+      }))
+      break
+    }
+
     case "message.accepted":
     case "message.status": {
       const messageId =

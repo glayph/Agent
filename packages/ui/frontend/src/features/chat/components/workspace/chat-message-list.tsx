@@ -3,6 +3,7 @@ import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
+import { RunActivityLine } from "@/features/chat/components/run-activity-line"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { Button } from "@/shared/ui/button"
 import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
@@ -129,6 +130,8 @@ export function ChatMessageList({
             onRetry={onRetryMessage}
           />
         ))}
+
+        <RunActivityLine />
       </div>
     </div>
   )
