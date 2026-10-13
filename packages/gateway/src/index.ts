@@ -1,5 +1,6 @@
 import express from "express"
 import { createKeyedLane } from "./session-lane.js"
+import { StreamHub, sendSocketEvent, type RunStream } from "./stream-hub.js"
 import { DEFAULT_CHAT_TITLE, titleFromMessage } from "./task-title.js"
 import { createGlobalMemory, initMemory } from "@miki/core/memory"
 import http from "node:http"
@@ -1279,21 +1280,9 @@ async function completeWithProvider(messages: { role: string; content: string }[
 }
 
 const wss = new WebSocketServer({ noServer: true })
-type ActiveRunState = {
-  runId: string
-  sessionId: string
-  contextId: string
-  checkpointId: string
-  sequence: number
-  events: string[]
-  socket: WebSocket | null
-  done: boolean
-  expiresAt: number
-}
 // One serialized chat run per conversation (OpenClaw-style session lane).
 const chatLane = createKeyedLane()
-const activeRuns = new Map<string, ActiveRunState>()
-const STREAM_RESUME_GRACE_MS = 30_000
+const streamHub = new StreamHub()
 // An autonomous agent must be able to work for as long as the job needs, so there is NO hard
 // ceiling on a chat turn by default: slow commands are followed with terminal_status (never
 // killed), a hung model call is bounded by the LLM client's own request timeout, and the Stop
@@ -1337,46 +1326,7 @@ try {
   if (stale.changes > 0) console.warn(`[miki] marked ${stale.changes} interrupted chat message(s) as failed`)
 } catch { /* column is created above; never block startup */ }
 
-const sendRawEvent = (ws: WebSocket, type: string, sessionId: string, payload: Record<string, unknown> = {}) => {
-  if (ws.readyState !== ws.OPEN) return
-  const message: Record<string, unknown> = { type, session_id: sessionId, timestamp: Date.now(), payload }
-  if (typeof payload.checkpoint_id === "string") message.checkpoint_id = payload.checkpoint_id
-  if (typeof payload.sequence === "number") message.sequence = payload.sequence
-  ws.send(JSON.stringify(message))
-}
-const emitStreamEvent = (run: ActiveRunState, type: string, payload: Record<string, unknown> = {}) => {
-  run.sequence += 1
-  const message = JSON.stringify({
-    type,
-    session_id: run.sessionId,
-    timestamp: Date.now(),
-    checkpoint_id: run.checkpointId,
-    sequence: run.sequence,
-    payload: { ...payload, run_id: run.runId },
-  })
-  run.events.push(message)
-  if (run.events.length > 500) run.events.splice(0, run.events.length - 500)
-  if (run.socket?.readyState === run.socket.OPEN) run.socket.send(message)
-}
-/** Live-only event (heartbeats): sent to the open socket, never buffered or sequenced for stream resume. */
-const emitLiveEvent = (run: ActiveRunState, type: string, payload: Record<string, unknown> = {}) => {
-  if (run.socket?.readyState === run.socket.OPEN) {
-    run.socket.send(JSON.stringify({ type, session_id: run.sessionId, timestamp: Date.now(), payload: { ...payload, run_id: run.runId } }))
-  }
-}
-const emitStreamDone = (run: ActiveRunState, status: "completed" | "completed_with_warning" | "failed" | "cancelled", error?: string) => {
-  if (run.done) return
-  emitStreamEvent(run, "stream_done", { status, ...(error ? { error } : {}) })
-  run.done = true
-  run.expiresAt = Date.now() + 10_000
-  setTimeout(() => {
-    if (activeRuns.get(run.runId) === run && Date.now() >= run.expiresAt) activeRuns.delete(run.runId)
-  }, 11_000).unref()
-}
-setInterval(() => {
-  const cutoff = Date.now()
-  for (const [runId, run] of activeRuns) if (run.expiresAt <= cutoff && !run.socket) activeRuns.delete(runId)
-}, 5_000).unref()
+const sendRawEvent = sendSocketEvent
 
 const sendEvent = (ws: WebSocket, type: string, sessionId: string, payload: Record<string, unknown> = {}) => {
   sendRawEvent(ws, type, sessionId, payload)
@@ -1425,7 +1375,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
   const peerId = url.searchParams.get("peer_id") || requestedSessionId
   const sessionId = requestedSessionId
   ensureSession(sessionId)
-  const persistRunError = (run: ActiveRunState, content: string) => {
+  const persistRunError = (run: RunStream, content: string) => {
     const messageId = `error-${run.runId}`
     const contextId = run.contextId
     try {
@@ -1435,7 +1385,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     } catch (persistError) {
       appendGatewayLog(`Could not persist chat error for ${run.runId}: ${persistError instanceof Error ? persistError.message : String(persistError)}`)
     }
-    emitStreamEvent(run, "message.create", {
+    streamHub.publish(run, "message.create", {
       message_id: messageId,
       content,
       kind: "error",
@@ -1447,15 +1397,10 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
   ws.on("error", (error) => appendGatewayLog(`WebSocket transport error for session ${sessionId}: ${error.message}`))
   if (!setting("dashboard_password")) proactiveSockets.add(ws)
   sendRawEvent(ws, "connection.ready", sessionId, { session_id: sessionId, backend: "persistent-node", protocol: "miki.ws.v1", authenticated: !Boolean(setting("dashboard_password")) })
+  streamHub.attach(sessionId, ws)
   ws.on("close", () => {
     proactiveSockets.delete(ws)
-    for (const runId of socketRuns) {
-      const run = activeRuns.get(runId)
-      if (run && !run.done && run.socket === ws) {
-        run.socket = null
-        run.expiresAt = Date.now() + STREAM_RESUME_GRACE_MS
-      }
-    }
+    streamHub.detach(ws)
   })
   ws.on("message", (raw) => {
     let releaseChatLane: (() => void) | undefined
@@ -1494,27 +1439,20 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     if (message.type === "resume") {
       const checkpointId = typeof message.checkpoint_id === "string" ? message.checkpoint_id : ""
       const lastSequence = Number.isFinite(Number(message.last_sequence)) ? Number(message.last_sequence) : -1
-      const run = Array.from(activeRuns.values()).find((candidate) => candidate.sessionId === sessionId && candidate.checkpointId === checkpointId)
+      const run = streamHub.findByCheckpoint(sessionId, checkpointId)
       if (!run) {
         sendEvent(ws, "error", sessionId, { code: "resume_not_found", message: "The requested stream checkpoint is no longer available.", checkpoint_id: checkpointId })
         return
       }
-      run.socket = ws
       socketRuns.add(run.runId)
-      run.expiresAt = Date.now() + (run.done ? 10_000 : STREAM_RESUME_GRACE_MS)
-      for (const serialized of run.events) {
-        try {
-          const candidate = JSON.parse(serialized) as { sequence?: number }
-          if (Number(candidate.sequence) > lastSequence && ws.readyState === ws.OPEN) ws.send(serialized)
-        } catch {}
-      }
+      streamHub.resume(run, ws, lastSequence)
       return
     }
     if (message.type === "cancel_task") {
       if (message.task_id) {
         agent.cancelRun(message.task_id)
-        const run = activeRuns.get(message.task_id)
-        if (run) emitStreamDone(run, "cancelled")
+        const run = streamHub.get(message.task_id)
+        if (run) streamHub.finish(run, "cancelled")
       }
       return
     }
@@ -1649,23 +1587,12 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     if (!content && incomingAttachments.length === 0) return
     const runId = `run_${randomUUID()}`
     const requested = message.payload?.requested_model?.trim() || undefined
-    const stream: ActiveRunState = {
-      runId,
-      sessionId,
-      contextId,
-      checkpointId: `checkpoint_${runId}`,
-      sequence: 0,
-      events: [],
-      socket: ws,
-      done: false,
-      expiresAt: Date.now() + STREAM_RESUME_GRACE_MS,
-    }
-    activeRuns.set(runId, stream)
+    const stream = streamHub.createRun({ runId, sessionId, contextId, socket: ws })
     socketRuns.add(runId)
-    sendRawEvent(ws, "stream_checkpoint", sessionId, { checkpoint_id: stream.checkpointId, run_id: runId, sequence: 0 })
+    streamHub.announce(stream)
     // One event per delivery-state change so the UI can show queued / retrying / failed on the user's own message.
     const emitMessageStatus = (status: "processing" | "retrying" | "completed" | "failed", detail?: string) => {
-      if (persistedUserMessageId) emitStreamEvent(stream, "message.status", { message_id: persistedUserMessageId, status, ...(detail ? { detail: detail.slice(0, 500) } : {}), run_id: runId })
+      if (persistedUserMessageId) streamHub.publish(stream, "message.status", { message_id: persistedUserMessageId, status, ...(detail ? { detail: detail.slice(0, 500) } : {}), run_id: runId })
     }
     ownMessageId = persistedUserMessageId
     setMessageStatus(persistedUserMessageId, "processing")
@@ -1745,7 +1672,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       }
     }
     const model = agent.llmFor(requested)?.model || requested
-    const mapper = createWsEventMapper((type, payload) => emitStreamEvent(stream, type, payload as Record<string, unknown>), model, () => {
+    const mapper = createWsEventMapper((type, payload) => streamHub.publish(stream, type, payload as Record<string, unknown>), model, () => {
       const feedback = (getAppConfig() as any)?.agents?.defaults?.tool_feedback
       return {
         enabled: feedback?.enabled !== false,
@@ -1829,7 +1756,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
     const heartbeat = setInterval(() => {
       const now = Date.now()
-      emitLiveEvent(stream, "run.heartbeat", {
+      streamHub.publishLive(stream, "run.heartbeat", {
         elapsed_seconds: Math.round((now - runStartedAt) / 1000),
         idle_seconds: Math.round((now - live.lastEventAt) / 1000),
         activity: live.kind,
@@ -1917,7 +1844,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
             : "failed"
       setMessageStatus(persistedUserMessageId, streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
       emitMessageStatus(streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
-      emitStreamDone(stream, streamStatus, result.error)
+      streamHub.finish(stream, streamStatus, result.error)
     } catch (error) {
       heldRunFinished.length = 0 // the single terminal event is emitted below
       const detail = error instanceof Error ? error.message : String(error)
@@ -1929,29 +1856,29 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       setMessageStatus(persistedUserMessageId, "failed", detail)
       persistRunError(stream, clientMessage)
       emitMessageStatus("failed", clientMessage)
-      emitStreamEvent(stream, "error", { code: timedOut ? "run_timeout" : category || "internal_error", message: clientMessage, retryable: timedOut || Boolean(category) || TRANSIENT_ERROR.test(detail), ...(category ? { error_category: category } : {}) })
-      emitStreamEvent(stream, "typing.stop", { run_id: runId })
-      emitStreamEvent(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })
-      emitStreamDone(stream, "failed", clientMessage)
+      streamHub.publish(stream, "error", { code: timedOut ? "run_timeout" : category || "internal_error", message: clientMessage, retryable: timedOut || Boolean(category) || TRANSIENT_ERROR.test(detail), ...(category ? { error_category: category } : {}) })
+      streamHub.publish(stream, "typing.stop", { run_id: runId })
+      streamHub.publish(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })
+      streamHub.finish(stream, "failed", clientMessage)
     } finally {
       clearInterval(heartbeat)
       socketRuns.delete(runId)
-      if (stream.done && !stream.socket) stream.expiresAt = Date.now() + 10_000
+      streamHub.settle(stream)
     }
     })().catch((error: unknown) => {
       const detail = error instanceof Error ? error.message : String(error)
       appendGatewayLog(`WebSocket message handler failed for session ${sessionId}: ${detail}`)
       // Never leave a saved-but-unprocessed message looking like it is still being worked on.
       try { db.prepare("UPDATE chat_messages SET status='failed', status_detail=? WHERE id=? AND status IN ('queued','processing','retrying')").run(detail.slice(0, 500), ownMessageId ?? "") } catch { /* best effort */ }
-      const run = Array.from(socketRuns).map((runId) => activeRuns.get(runId)).find((candidate) => candidate && !candidate.done)
+      const run = Array.from(socketRuns).map((runId) => streamHub.get(runId)).find((candidate) => candidate && !candidate.done)
         const clientMessage = "An internal error prevented this chat request from completing."
         try {
         if (run) {
           persistRunError(run, clientMessage)
-          emitStreamEvent(run, "error", { code: "internal_error", message: clientMessage })
-          emitStreamEvent(run, "typing.stop", { run_id: run.runId })
-          emitStreamEvent(run, "node.run_end", { run_id: run.runId, status: "failed", error: clientMessage })
-          emitStreamDone(run, "failed", clientMessage)
+          streamHub.publish(run, "error", { code: "internal_error", message: clientMessage })
+          streamHub.publish(run, "typing.stop", { run_id: run.runId })
+          streamHub.publish(run, "node.run_end", { run_id: run.runId, status: "failed", error: clientMessage })
+          streamHub.finish(run, "failed", clientMessage)
           socketRuns.delete(run.runId)
         } else {
           sendEvent(ws, "error", sessionId, { code: "internal_error", message: clientMessage })
