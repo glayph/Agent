@@ -24,6 +24,7 @@ fs.writeFileSync(path.join(workspace, "hello.txt"), "hello from the workspace")
 
 // ---- fake model provider ---------------------------------------------------
 const llmRequests = []
+let hangedOnce = false
 const llm = http.createServer((req, res) => {
   // Availability probe (GET /v1/models) used by /api/models/resolve?probe=1
   if (req.method === "GET") return res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: [{ id: "fake-model" }] }))
@@ -44,7 +45,10 @@ const llm = http.createServer((req, res) => {
       return reply({ role: "assistant", content: JSON.stringify({ steps: [{ title: "List the workspace", tool: "workspace_list" }, { title: "Report" }] }) })
     if (last.role === "tool") return reply({ role: "assistant", content: `TOOL RESULT SEEN: ${last.content}` })
     const text = String(last.content)
-    if (text.includes("HANG")) return // never answers: used for the cancel test
+    // HANGONCE hangs the first time only (retry test); plain HANG never answers (cancel/timeout tests).
+    if (text.includes("HANGONCE")) {
+      if (!hangedOnce) { hangedOnce = true; return }
+    } else if (text.includes("HANG")) return // never answers: used for the cancel test
     if (text.includes("LISTFILES")) return call("workspace_list", {})
     if (text.includes("WRITEFILE")) return call("file_write", { path: "notes/out.txt", content: "written by the agent" })
     if (text.includes("READSECRET")) return call("file_read", { path: ".env" })
@@ -319,6 +323,38 @@ await check("chat: a run that never answers is stopped, saved as failed, and the
   const user = history.json.messages.find((m) => m.role === "user")
   assert.ok(user, "the user message must survive the failure")
   assert.equal(user.status, "failed")
+})
+
+await check("chat: a failed turn can be retried from the user message and then completes", async () => {
+  const first = await chat("s-retry", "HANGONCE question", { timeoutMs: 45000, until: "stream_done" })
+  assert.equal(first.filter((e) => e.type === "message.status").at(-1).payload.status, "failed")
+  const history1 = await api("GET", "/api/sessions/s-retry")
+  const user = history1.json.messages.find((m) => m.role === "user")
+  assert.equal(user.status, "failed")
+  assert.ok(history1.json.messages.some((m) => m.role === "assistant"), "the failed turn leaves an error message")
+
+  // Retry exactly what the UI sends: message.retry for the user's message.
+  const events = await new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${gatewayPort}/miki/ws?session_id=s-retry`, { headers: { Cookie: cookie } })
+    const seen = []
+    const timer = setTimeout(() => { ws.close(); reject(new Error(`retry timed out; events: ${seen.map((e) => e.type).join(",")}`)) }, 30000)
+    ws.on("error", reject)
+    ws.on("message", (raw) => {
+      const event = JSON.parse(raw.toString())
+      seen.push(event)
+      if (event.type === "connection.ready") ws.send(JSON.stringify({ type: "authenticate" }))
+      if (event.type === "auth.ok") ws.send(JSON.stringify({ type: "message.retry", id: "retry-1", payload: { message_id: user.id } }))
+      if (event.type === "stream_done") { clearTimeout(timer); ws.close(); resolve(seen) }
+    })
+  })
+  const statuses = events.filter((e) => e.type === "message.status").map((e) => e.payload.status)
+  assert.deepEqual(statuses, ["processing", "completed"], `retry statuses: ${statuses}; events: ${events.map((e) => e.type)}`)
+  const history2 = await api("GET", "/api/sessions/s-retry")
+  const users = history2.json.messages.filter((m) => m.role === "user")
+  assert.equal(users.length, 1, "retry must not duplicate the user message")
+  assert.equal(users[0].status, "completed")
+  assert.ok(!history2.json.messages.some((m) => m.kind === "error"), "the stale error message is removed")
+  assert.ok(history2.json.messages.some((m) => m.role === "assistant" && /PLAIN ANSWER/.test(m.content)))
 })
 
 await check("chat: a write waits for approval, runs after approval, and the file exists", async () => {

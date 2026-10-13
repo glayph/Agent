@@ -51,4 +51,17 @@ describe("chat prompt retryability", () => {
       ]),
     ).toEqual(new Set())
   })
+
+  it("keeps a failed user turn retryable even though an error message follows it", () => {
+    const failed = userMessage({ id: "u-failed", content: "Do it", deliveryStatus: "failed" })
+    const error: ChatMessage = { id: "error-run", role: "assistant", kind: "error", content: "timed out", timestamp: 2 }
+    expect(getRetryableMessageIds([failed, error]).has("u-failed")).toBe(true)
+  })
+
+  it("does not offer retry for an older failed turn once the user wrote again", () => {
+    const failed = userMessage({ id: "u-old", content: "Old", deliveryStatus: "failed" })
+    const answer: ChatMessage = { id: "a-1", role: "assistant", content: "ok", timestamp: 2 }
+    const next = userMessage({ id: "u-new", content: "New", timestamp: 3 })
+    expect(getRetryableMessageIds([failed, answer, next])).toEqual(new Set(["u-new"]))
+  })
 })

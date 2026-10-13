@@ -1564,17 +1564,27 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     if (isRetry) {
       const targetId = String(message.payload?.message_id || "")
       const target = targetId
-        ? db.prepare("SELECT id,role,content,created_at,image_urls,attachments_json FROM chat_messages WHERE session_id=? AND context_id=? AND id=?").get(sessionId, contextId, targetId) as { id: string; role: string; content: string; created_at: string; image_urls?: string | null; attachments_json?: string | null } | undefined
+        ? db.prepare("SELECT id,role,content,created_at,image_urls,attachments_json,status FROM chat_messages WHERE session_id=? AND context_id=? AND id=?").get(sessionId, contextId, targetId) as { id: string; role: string; content: string; created_at: string; status?: string; image_urls?: string | null; attachments_json?: string | null } | undefined
         : undefined
       const latest = db.prepare("SELECT id FROM chat_messages WHERE session_id=? AND context_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId, contextId) as { id: string } | undefined
-      if (!target || latest?.id !== target.id) {
+      // A failed turn leaves its error/explanation after the user message, so the user message is no
+      // longer "the last message". It stays retryable as long as nothing newer was said by the user.
+      const failedUserTurn = Boolean(target && target.role === "user" && target.status === "failed" &&
+        !db.prepare("SELECT 1 FROM chat_messages WHERE session_id=? AND context_id=? AND role='user' AND created_at>?").get(sessionId, contextId, target.created_at))
+      if (!target || (latest?.id !== target.id && !failedUserTurn)) {
         sendEvent(ws, "error", sessionId, { message: "Only the last chat message can be retried." })
         return
       }
+      if (failedUserTurn) {
+        // Drop what the failed attempt left behind (error message, explanation, partial output).
+        db.prepare("DELETE FROM chat_messages WHERE session_id=? AND context_id=? AND role='assistant' AND created_at>?").run(sessionId, contextId, target.created_at)
+      }
+      if (target.role === "user") persistedUserMessageId = target.id
       let sourceUser: { content: string; image_urls?: string | null; attachments_json?: string | null } | undefined =
         target.role === "user" ? target : undefined
       if (target.role === "assistant") {
-        const previousUser = db.prepare("SELECT content,image_urls,attachments_json FROM chat_messages WHERE session_id=? AND context_id=? AND role='user' AND created_at<=? ORDER BY created_at DESC LIMIT 1").get(sessionId, contextId, target.created_at) as { content: string; image_urls?: string | null; attachments_json?: string | null } | undefined
+        const previousUser = db.prepare("SELECT id,content,image_urls,attachments_json FROM chat_messages WHERE session_id=? AND context_id=? AND role='user' AND created_at<=? ORDER BY created_at DESC LIMIT 1").get(sessionId, contextId, target.created_at) as { id: string; content: string; image_urls?: string | null; attachments_json?: string | null } | undefined
+        if (previousUser) persistedUserMessageId = previousUser.id
         sourceUser = previousUser
         content = String(previousUser?.content || "").trim()
         db.prepare("DELETE FROM chat_messages WHERE session_id=? AND context_id=? AND id=?").run(sessionId, contextId, target.id)
@@ -1646,6 +1656,8 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     const emitMessageStatus = (status: "processing" | "retrying" | "completed" | "failed", detail?: string) => {
       if (persistedUserMessageId) emitStreamEvent(stream, "message.status", { message_id: persistedUserMessageId, status, ...(detail ? { detail: detail.slice(0, 500) } : {}), run_id: runId })
     }
+    ownMessageId = persistedUserMessageId
+    setMessageStatus(persistedUserMessageId, "processing")
     emitMessageStatus("processing")
     const thinkingMode = message.payload?.thinking_mode || "auto"
     const thinkingLevel = thinkingMode !== "auto" ? thinkingMode : undefined

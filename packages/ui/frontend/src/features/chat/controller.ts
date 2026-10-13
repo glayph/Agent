@@ -25,6 +25,7 @@ import {
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import { handleMonitorMessage } from "@/features/monitor/protocol"
 import i18n from "@/i18n"
+import { findFailedUserTurn } from "@/features/chat/retryable"
 import {
   type ChatAttachment,
   type ChatMessage,
@@ -736,7 +737,9 @@ export async function retryChatMessage(messageId: string): Promise<boolean> {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) return false
   const state = getChatState()
   const targetIndex = state.messages.findIndex((message) => message.id === messageId)
-  if (targetIndex < 0 || targetIndex !== state.messages.length - 1) return false
+  if (targetIndex < 0) return false
+  const isFailedTurn = findFailedUserTurn(state.messages)?.id === messageId
+  if (targetIndex !== state.messages.length - 1 && !isFailedTurn) return false
   const target = state.messages[targetIndex]
   const promptMessage =
     target.role === "user"
@@ -775,7 +778,16 @@ export async function retryChatMessage(messageId: string): Promise<boolean> {
       messages:
         target.role === "assistant"
           ? prev.messages.filter((message) => message.id !== messageId)
-          : prev.messages,
+          : isFailedTurn
+            ? // The gateway drops what the failed attempt left behind (error message etc.); mirror that.
+              prev.messages
+                .slice(0, targetIndex + 1)
+                .map((message) =>
+                  message.id === messageId
+                    ? { ...message, deliveryStatus: "processing" as const, deliveryDetail: undefined }
+                    : message,
+                )
+            : prev.messages,
       isTyping: true,
     }))
     return true
