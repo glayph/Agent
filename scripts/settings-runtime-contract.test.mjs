@@ -9,7 +9,8 @@ const browser=read("packages/core/src/plugins/browser/runtime.ts");
 const gateway=read("packages/gateway/src/agent-runtime.ts");
 const runtimeSettings=read("packages/gateway/src/runtime-settings.ts");
 const sessionScope=read("packages/gateway/src/session-scope.ts");
-const index=read("packages/gateway/src/index.ts");
+// The chat turn (history query by context_id) moved to chat-turn-runner.ts; index.ts still resolves the context.
+const index=read("packages/gateway/src/index.ts")+"\n"+read("packages/gateway/src/chat-turn-runner.ts");
 const ui=read("packages/ui/frontend/src/features/config/components/config-sections.tsx");
 
 for (const n of ["contextWindowTokens","maxCompletionTokens","maxTurns =","maxToolCalls =","fitContextWindow"]) assert.ok(engine.includes(n),n);

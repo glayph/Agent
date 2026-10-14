@@ -5,7 +5,8 @@ const read = (p) => fs.readFileSync(p, 'utf8')
 const engine = read('packages/core/src/engine/agent-engine.ts')
 const skills = read('packages/core/src/engine/skill-tools.ts')
 const runtime = read('packages/gateway/src/agent-runtime.ts')
-const gateway = read('packages/gateway/src/index.ts')
+// The chat turn (feedback, compaction, lifecycle events) lives in chat-turn-runner.ts; the websocket handler in index.ts is only an adapter.
+const gateway = read('packages/gateway/src/index.ts') + '\n' + read('packages/gateway/src/chat-turn-runner.ts')
 const evolution = read('packages/gateway/src/dashboard-extended.ts')
 const pkg = JSON.parse(read('packages/core/package.json'))
 

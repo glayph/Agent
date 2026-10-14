@@ -6,6 +6,11 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const supervisor = fs.readFileSync(`${root}/packages/core/src/autonomy/autonomous-supervisor.ts`, 'utf8');
 const gw = fs.readFileSync(`${root}/packages/gateway/src/index.ts`, 'utf8');
 const runtime = fs.readFileSync(`${root}/packages/gateway/src/agent-runtime.ts`, 'utf8');
+// The chat turn lives in its own module (the websocket handler is only an adapter), so the
+// gateway-wide checks below cover every gateway chat source, not just index.ts.
+const chatTurnRunner = fs.readFileSync(`${root}/packages/gateway/src/chat-turn-runner.ts`, 'utf8');
+const streamHub = fs.readFileSync(`${root}/packages/gateway/src/stream-hub.ts`, 'utf8');
+const gwChat = [gw, chatTurnRunner, streamHub].join('\n');
 const config = fs.readFileSync(`${root}/config/agent.yaml`, 'utf8');
 
 const legacyFastChat = ['FAST', '_CHAT'].join('');
@@ -13,13 +18,14 @@ const legacyLayered = ['Layered', 'Orchestrator'].join('');
 const legacyRoute = ['route', 'Message'].join('');
 const legacyEvent = ['Layered', 'Event'].join('');
 const legacyNamespace = ['orchestrator', '.'].join('');
-assert.equal(gw.includes(legacyFastChat), false);
-assert.equal(gw.includes(legacyLayered), false);
-assert.equal(gw.includes(legacyRoute), false);
+assert.equal(gwChat.includes(legacyFastChat), false);
+assert.equal(gwChat.includes(legacyLayered), false);
+assert.equal(gwChat.includes(legacyRoute), false);
 assert.equal(runtime.includes(legacyEvent), false);
 assert.equal(supervisor.includes(legacyLayered), false);
 assert.equal(supervisor.includes(legacyNamespace), false);
-assert.match(gw, /agent\.startRun\(/);
+assert.match(chatTurnRunner, /agent\.startRun\(/);
+assert.match(gw, /createChatTurnRunner\(/);
 assert.match(gw, /const autonomy = new AutonomousSupervisor\(/);
 assert.match(gw, /agent: agent\.engine/);
 assert.match(supervisor, /this\.options\.agent\.run\(/);
