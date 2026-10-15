@@ -2,6 +2,7 @@
  * has the same effective behavior as the UI's default state. */
 export const DEFAULT_MAX_COMPLETION_TOKENS = 32768;
 export const DEFAULT_MAX_TOOL_ITERATIONS = 50;
+export const DEFAULT_MAX_WALL_TIME_MS = 30 * 60_000;
 
 function positiveInteger(value: unknown): number | undefined {
   const numeric = Number(value);
@@ -19,4 +20,7 @@ export function resolveContextWindowTokens(defaults: Record<string, unknown>): n
   if (explicit !== undefined) return explicit;
   const maxTokens = positiveInteger(defaults.max_completion_tokens ?? defaults.max_tokens) ?? DEFAULT_MAX_COMPLETION_TOKENS;
   return maxTokens * 4;
+}
+export function resolveMaxWallTimeMs(defaults: Record<string, unknown>): number {
+  return positiveInteger(defaults.max_wall_time_ms ?? defaults.max_wall_time) ?? DEFAULT_MAX_WALL_TIME_MS;
 }

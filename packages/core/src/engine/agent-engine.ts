@@ -34,6 +34,8 @@ export type LLMResolver = (model?: string) => EngineLLMClient | undefined;
 export interface AgentEngineOptions {
   /** A fixed client, or a resolver that picks one per run (requested model, vault keys...). */
   llm: EngineLLMClient | LLMResolver;
+  /** Optional host-provided diagnostic description when no model is configured. */
+  describeNoModel?: (requested?: string) => string;
   tools: ToolRegistry;
   /** Decides tool calls that need confirmation. Without a gate, such calls are denied. */
   approvals?: ApprovalGate;
@@ -62,6 +64,8 @@ export interface AgentEngineOptions {
   contextWindowTokens?: number | (() => number);
   /** Maximum completion tokens requested from the model. */
   maxCompletionTokens?: number | (() => number);
+  /** Maximum wall-clock time allowed for a run, when enforced by the host. */
+  maxWallTimeMs?: number | (() => number);
   /** Controls whether the configured base system prompt is included. */
   systemPromptEnabled?: boolean | (() => boolean);
   toolTimeoutMs?: number;
@@ -344,6 +348,11 @@ export class AgentEngine {
 
   get tools(): ToolRegistry {
     return this.options.tools;
+  }
+
+  /** Compatibility hook for transports that offer follow-up steering. */
+  steer(_runId: string, _text: string): boolean {
+    return false;
   }
 
   /** Resolve the model client for a run; undefined when nothing usable is configured. */

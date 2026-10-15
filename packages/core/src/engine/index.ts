@@ -1,5 +1,7 @@
 export { AgentEngine, NoModelConfiguredError } from "./agent-engine.js";
 export type { AgentEngineOptions, LLMResolver, SelfCheckConfig, DynamicBudgetConfig } from "./agent-engine.js";
+export { DurableTaskStore } from "./durable-task-store.js";
+export type { DurableTaskStatus } from "./durable-task-store.js";
 export { verifyAnswer, parseVerdict, buildEvidence } from "./verifier.js";
 export type { AnswerVerdict } from "./verifier.js";
 export { ToolRegistry } from "./tool-registry.js";

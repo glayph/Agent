@@ -141,6 +141,7 @@ export class AutonomousSupervisor {
   private inFlight = false;
   private lastTickAt: string | null = null;
   private running = false;
+  private paused = false;
   private loopPromise: Promise<void> | null = null;
   private loopAbort: AbortController | null = null;
   private ambientLastAt = 0;
@@ -369,6 +370,7 @@ export class AutonomousSupervisor {
       mode: "FULL_AGENT-24/7",
       in_flight: this.inFlight,
       running: this.running,
+      paused: this.paused,
       last_tick_at: this.lastTickAt,
       last_outcome: this.lastOutcome,
       active_goal: active
@@ -959,6 +961,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       this.options.log(`Autonomy config unreadable at start (starting anyway): ${errorText(error)}`);
     }
     this.running = true;
+    this.paused = false;
     this.wakeRequested = true;
     this.loopAbort = new AbortController();
     this.loopPromise = this.runLoop();
@@ -968,6 +971,14 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
   wake(): void {
     this.wakeRequested = true;
     this.wakeResolver?.();
+  }
+  pause(): void {
+    this.paused = true;
+    this.wake();
+  }
+  resume(): void {
+    this.paused = false;
+    this.wake();
   }
 
   async stop(): Promise<void> {
@@ -1002,6 +1013,10 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     // block shutdown for up to max_poll_seconds.
     const loopSignal = this.loopAbort?.signal;
     while (this.running && !loopSignal?.aborted) {
+      if (this.paused) {
+        await this.sleepInterruptible(1000, loopSignal);
+        continue;
+      }
       let sleepMs: number;
       try {
         const config = this.config();
