@@ -12,9 +12,10 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypt
 import { isIP } from "node:net"
 import Database from "better-sqlite3"
 import { WebSocketServer, type WebSocket } from "ws"
+import * as yaml from "js-yaml"
 import { createAgentRuntime, createWsEventMapper } from "./agent-runtime.js"
 import { createFileManagerRouter, FileManagerError } from "@miki/core/file-manager"
-import { FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine"
+import { DurableTaskStore, FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine"
 import { normalizeRuntimePaths } from "@miki/core/paths"
 import { createSkillsRouter, createSkillsService } from "@miki/core/skills"
 import { createEmbeddingProvider, cosineSimilarity } from "@miki/memory"
@@ -50,6 +51,8 @@ const dataRoot = process.env.MIKI_DATA_DIR
 mkdirSync(dataRoot, { recursive: true })
 const db = new Database(path.join(dataRoot, "miki-runtime.sqlite"))
 db.pragma("journal_mode = WAL")
+const durableTaskStore = new DurableTaskStore(db)
+durableTaskStore.recoverExpired()
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS auth_sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
@@ -156,27 +159,31 @@ const verifyPassword = (password: string, stored: string) => {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 const cookie = (req: express.Request, name: string) => req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1] ?? null
+const NO_AUTH_EXPIRY = "9999-12-31T23:59:59.999Z"
 const authSessionConfig = () => {
   try {
     const raw = db.prepare("SELECT value FROM settings WHERE key='launcher_config'").get() as { value?: string } | undefined
     const value = raw?.value ? JSON.parse(raw.value) : {}
     const minutes = Number(value?.session_timeout_minutes || 0)
-    return Number.isFinite(minutes) && minutes > 0 ? Math.min(Math.floor(minutes), 31 * 24 * 60) : 30 * 24 * 60
+    return Number.isFinite(minutes) && minutes >= 0 ? Math.min(Math.floor(minutes), 31 * 24 * 60) : 0
   } catch {
-    return 30 * 24 * 60
+    return 0
   }
 }
 const issueAuth = (res: express.Response) => {
   const token = randomBytes(32).toString("hex")
   const maxAgeMinutes = authSessionConfig()
-  const expires = new Date(Date.now() + 1000 * 60 * maxAgeMinutes).toISOString()
+  const expires = maxAgeMinutes > 0
+    ? new Date(Date.now() + 1000 * 60 * maxAgeMinutes).toISOString()
+    : NO_AUTH_EXPIRY
   db.prepare("INSERT INTO auth_sessions(token,created_at,expires_at) VALUES(?,?,?)").run(token, now(), expires)
-  res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeMinutes * 60}`)
+  const maxAge = maxAgeMinutes > 0 ? `; Max-Age=${maxAgeMinutes * 60}` : ""
+  res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax${maxAge}`)
 }
 const authenticated = (req: express.Request) => {
   const token = cookie(req, "miki_session")
   if (!token) return false
-  return Boolean(db.prepare("SELECT token FROM auth_sessions WHERE token=? AND expires_at>? ").get(token, now()))
+  return Boolean(db.prepare("SELECT token FROM auth_sessions WHERE token=? AND (expires_at=? OR expires_at>?)").get(token, NO_AUTH_EXPIRY, now()))
 }
 function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (authenticated(req)) return next()
@@ -263,15 +270,18 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/auth/status", (req, res) => {
   const token = cookie(req, "miki_session")
   const isAuthenticated = authenticated(req)
-  let row = token ? db.prepare("SELECT expires_at FROM auth_sessions WHERE token=? AND expires_at>? ").get(token, now()) as { expires_at?: string } | undefined : undefined
+  let row = token ? db.prepare("SELECT expires_at FROM auth_sessions WHERE token=? AND (expires_at=? OR expires_at>?)").get(token, NO_AUTH_EXPIRY, now()) as { expires_at?: string } | undefined : undefined
   if (isAuthenticated && token) {
     const minutes = authSessionConfig()
-    const expires = new Date(Date.now() + 1000 * 60 * minutes).toISOString()
+    const expires = minutes > 0
+      ? new Date(Date.now() + 1000 * 60 * minutes).toISOString()
+      : NO_AUTH_EXPIRY
     db.prepare("UPDATE auth_sessions SET expires_at=? WHERE token=?").run(expires, token)
-    res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${minutes * 60}`)
+    const maxAge = minutes > 0 ? `; Max-Age=${minutes * 60}` : ""
+    res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax${maxAge}`)
     row = { expires_at: expires }
   }
-  res.json({ authenticated: isAuthenticated, initialized: Boolean(setting("dashboard_password")), session_timeout_minutes: authSessionConfig(), session_expires_at: row?.expires_at ? Date.parse(row.expires_at) : undefined })
+  res.json({ authenticated: isAuthenticated, initialized: Boolean(setting("dashboard_password")), session_timeout_minutes: authSessionConfig(), session_expires_at: row?.expires_at && row.expires_at !== NO_AUTH_EXPIRY ? Date.parse(row.expires_at) : undefined })
 })
 app.post("/api/auth/setup", (req, res, next) => {
   if (setting("dashboard_password")) return next(Object.assign(new Error("Dashboard is already configured."), { status: 409 }))
@@ -280,6 +290,19 @@ app.post("/api/auth/setup", (req, res, next) => {
   if (password.length < 8) return next(Object.assign(new Error("Password must be at least 8 characters."), { status: 400 }))
   if (password !== confirm) return next(Object.assign(new Error("Passwords do not match."), { status: 400 }))
   putSetting("dashboard_password", hashPassword(password)); issueAuth(res); res.json({ ok: true })
+})
+app.post("/api/auth/password", requireAuth, (req, res, next) => {
+  const current = typeof req.body?.current_password === "string" ? req.body.current_password.trim() : ""
+  const password = typeof req.body?.password === "string" ? req.body.password.trim() : ""
+  const confirm = typeof req.body?.confirm === "string" ? req.body.confirm.trim() : ""
+  const stored = setting("dashboard_password")?.value
+  if (!stored || !verifyPassword(current, stored)) return next(Object.assign(new Error("Current dashboard password is incorrect."), { status: 401 }))
+  if (password.length < 8) return next(Object.assign(new Error("Password must be at least 8 characters."), { status: 400 }))
+  if (password !== confirm) return next(Object.assign(new Error("Passwords do not match."), { status: 400 }))
+  putSetting("dashboard_password", hashPassword(password))
+  const token = cookie(req, "miki_session")
+  if (token) db.prepare("DELETE FROM auth_sessions WHERE token<>?").run(token)
+  res.json({ ok: true })
 })
 app.post("/api/auth/login", (req, res, next) => {
   const password = typeof req.body?.password === "string" ? req.body.password.trim() : ""
@@ -631,9 +654,27 @@ app.post("/api/models/fetch", async (req, res) => {
     return res.status(error instanceof ProviderRequestError && error.status === 401 ? 401 : 502).json(detail)
   }
 })
-const getAppConfig = () => { const raw = setting("app_config")?.value; if (!raw) return {}; try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} } }
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value))
 const deepMerge = (base: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> => { const out: Record<string, unknown> = { ...base }; for (const [key, value] of Object.entries(incoming)) { const current = out[key]; if (isRecord(current) && isRecord(value)) out[key] = deepMerge(current, value); else out[key] = value } return out }
+const fileRuntimeConfig = (): Record<string, unknown> => {
+  try {
+    const parsed = yaml.load(readFileSync(path.join(configDir, "agent.yaml"), "utf8"))
+    return isRecord(parsed) ? parsed : {}
+  } catch (error) {
+    console.warn(`[miki] could not load agent.yaml: ${error instanceof Error ? error.message : String(error)}`)
+    return {}
+  }
+}
+// agent.yaml is the human-authored baseline; dashboard edits are an overlay.
+// Previously only SQLite was read, so autonomy silently fell back to defaults.
+const getAppConfig = () => {
+  const raw = setting("app_config")?.value
+  let overlay: Record<string, unknown> = {}
+  if (raw) {
+    try { overlay = JSON.parse(raw) as Record<string, unknown> } catch (error) { console.warn(`[miki] invalid persisted app_config: ${error instanceof Error ? error.message : String(error)}`) }
+  }
+  return deepMerge(fileRuntimeConfig(), overlay)
+}
 const fileMemory = new FileMemoryService({
   identityDir: path.join(workspaceRoot, "identity"),
   agentMemoryConfig: (getAppConfig() as any)?.agent?.memory,
@@ -816,7 +857,7 @@ const autonomy = new AutonomousSupervisor({
     const model = agent.llmFor()
     return model
       ? { ok: true, detail: `LLM provider ready: ${model.model}` }
-      : { ok: false, detail: "No LLM provider is currently ready." }
+      : { ok: false, detail: `No LLM provider is currently ready. ${agent.resolveCurrentModel().reason ?? ""}`.trim() }
   },
   recordExperience: (input) => {
     autonomyLearningStore.recordExperience({
@@ -848,7 +889,7 @@ getLifecycleBus().on("message:sent", (payload) => forwardToAutonomy("message:sen
 getLifecycleBus().emit("gateway:startup", { pid: process.pid, reason: "gateway_initialized" })
 agent.mount(app)
 
-app.get("/api/autonomy/status", requireAuth, (_req, res) => res.json(autonomy.status()))
+app.get("/api/autonomy/status", requireAuth, (_req, res) => res.json({ ...autonomy.status(), model: describeResolution(agent.resolveCurrentModel()) }))
 app.post("/api/autonomy/tick", requireAuth, async (_req, res) => {
   try {
     return res.json(await autonomy.tick("manual"))
@@ -857,6 +898,15 @@ app.post("/api/autonomy/tick", requireAuth, async (_req, res) => {
     appendGatewayLog(`Manual autonomy tick failed: ${message}`)
     return res.status(500).json({ status: "blocked", error: message })
   }
+})
+
+app.post("/api/autonomy/pause", requireAuth, (_req, res) => {
+  autonomy.pause()
+  return res.json({ ok: true, autonomous: autonomy.status() })
+})
+app.post("/api/autonomy/resume", requireAuth, (_req, res) => {
+  autonomy.resume()
+  return res.json({ ok: true, autonomous: autonomy.status() })
 })
 
 // Persistent autonomous task/schedule queue. All endpoints require gateway auth.
@@ -1083,13 +1133,13 @@ app.get("/api/tools", async (_req, res) => {
   }
   const browserBlocked = (await browserReady()) ? undefined : "browser_not_installed"
   res.json({ tools: [
-    group("filesystem", "filesystem", "Read, search, organize and (with approval) write, delete or run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run"]),
+    group("filesystem", "filesystem", "Read, search, organize, write, delete and run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run"]),
     group("memory", "memory", "Search and store long-term memory notes.", "memory", true, ["memory_search", "memory_add"]),
-    group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
-    group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
+    group("skills", "skills", "Discover, read, run, install and delete installed skills.", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
+    group("control", "agent-control", "Typed agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
     group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"], browserBlocked),
-    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to add approval and guard rails).", "system", true, ["terminal_run", "terminal_status", "terminal_kill"]),
+    group("terminal", "terminal", "Run shell commands like a human at a terminal according to the user execution preference.", "system", true, ["terminal_run", "terminal_status", "terminal_kill"]),
   ] })
 })
 app.put("/api/tools/:name/state", requireAuth, async (req, res) => {

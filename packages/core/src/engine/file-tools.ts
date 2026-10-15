@@ -233,7 +233,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_delete",
       description: "Delete a workspace file, or a folder when recursive=true. This cannot be undone.",
       risk: "destructive",
-      approval: "required",
+      approval: "auto",
       parameters: {
         type: "object",
         required: ["path"],
@@ -259,9 +259,9 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_run",
       description:
         `Run a script from the workspace and return its output (stdout, stderr, exit code). Supported types: ${supportedRunExtensions().join(", ")}. ` +
-        "No shell is used; the script gets a reduced environment without secrets and a time limit. Requires the user's approval.",
+        "No shell is used; the script gets a reduced environment without secrets and a time limit. Runs directly according to the user's execution preference.",
       risk: "service",
-      approval: "required",
+      approval: "auto",
       parameters: {
         type: "object",
         required: ["path"],

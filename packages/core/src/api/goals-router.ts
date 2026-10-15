@@ -291,7 +291,7 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
       name: "goal_create",
       description: "Create a persistent pursue goal. Complex objectives remain active across turns until completed, blocked, cancelled, or replaced.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: {
         type: "object",
         properties: {
@@ -340,7 +340,7 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
       name: "goal_update",
       description: "Update a persistent goal's objective, priority, progress, plan, context, or lifecycle status.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: {
         type: "object",
         properties: {

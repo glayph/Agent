@@ -1,8 +1,8 @@
-import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
+import { resolveContextWindowTokens, resolveMaxToolIterations, resolveMaxWallTimeMs } from "./runtime-settings.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AgentControlService, createControlRouter, createControlToolFactory, } from "@miki/core/control";
-import { AgentEngine, ApprovalStore, ToolRegistry, buildSkillsContext, createControlTools, createFileManagementTools, createFetchLLMClient, createMemoryTools, createSkillTools, createWorkspaceTools, describePlan, } from "@miki/core/engine";
+import { AgentEngine, ApprovalStore, DurableTaskStore, ToolRegistry, buildSkillsContext, createControlTools, createFileManagementTools, createFetchLLMClient, createMemoryTools, createSkillTools, createWorkspaceTools, describePlan, } from "@miki/core/engine";
 import { searchWeb } from "@miki/core/web-search-service";
 import { BrowserTool, ComputerAgent } from "@miki/core/plugins";
 import { getLifecycleBus } from "@miki/core/hooks";
@@ -53,6 +53,7 @@ function providerDefaults(provider) {
 export function createAgentRuntime(deps) {
     const { db } = deps;
     const now = () => new Date().toISOString();
+    const taskStore = new DurableTaskStore(db, now);
     // ---- model resolution ---------------------------------------------------
     const llmFor = (requested) => {
         const stored = deps.storedModels();
@@ -235,7 +236,7 @@ export function createAgentRuntime(deps) {
             name: "browser_navigate",
             description: "Open an HTTP or HTTPS page in the isolated headless browser. External navigation requires approval.",
             risk: "config_write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { url: { type: "string", description: "HTTP(S) URL to open." } }, required: ["url"], additionalProperties: false },
             async execute(input) { return browser.navigate(String(input.url || "")); },
         },
@@ -243,7 +244,7 @@ export function createAgentRuntime(deps) {
             name: "browser_click",
             description: "Click a visible element by a Playwright selector on the current page. Requires approval.",
             risk: "config_write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
             async execute(input) { return browser.click(String(input.selector || "")); },
         },
@@ -251,7 +252,7 @@ export function createAgentRuntime(deps) {
             name: "browser_type",
             description: "Type text into a browser selector. Requires approval.",
             risk: "config_write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { selector: { type: "string" }, text: { type: "string", maxLength: 4000 } }, required: ["selector", "text"], additionalProperties: false },
             async execute(input) { return browser.type(String(input.selector || ""), String(input.text || "")); },
         },
@@ -309,7 +310,7 @@ export function createAgentRuntime(deps) {
             name: "computer_focus",
             description: "Focus a native desktop window.",
             risk: "write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
             async execute(input) { return computer.focus(input); },
         },
@@ -317,7 +318,7 @@ export function createAgentRuntime(deps) {
             name: "computer_invoke",
             description: "Invoke an accessible desktop UI element observed by computer_observe.",
             risk: "write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
             async execute(input) { return computer.invoke(input); },
         },
@@ -325,7 +326,7 @@ export function createAgentRuntime(deps) {
             name: "computer_set_text",
             description: "Set text in an accessible native UI field.",
             risk: "write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, text: { type: "string", maxLength: 4000 }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["text"], additionalProperties: false },
             async execute(input) { return computer.setText(input); },
         },
@@ -333,7 +334,7 @@ export function createAgentRuntime(deps) {
             name: "computer_hotkey",
             description: "Send a deterministic keyboard shortcut to the focused desktop window.",
             risk: "write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { keys: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["keys"], additionalProperties: false },
             async execute(input) { return computer.hotkey(input); },
         },
@@ -341,7 +342,7 @@ export function createAgentRuntime(deps) {
             name: "computer_clipboard",
             description: "Read, set, or clear the system clipboard.",
             risk: "write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { action: { type: "string", enum: ["get", "set", "clear"] }, text: { type: "string", maxLength: 10000 } }, additionalProperties: false },
             async execute(input) { return computer.clipboard(input); },
         },
@@ -349,7 +350,7 @@ export function createAgentRuntime(deps) {
             name: "computer_launch",
             description: "Launch a local application without shell command interpretation.",
             risk: "write",
-            approval: "required",
+            approval: "auto",
             parameters: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, required: ["command"], additionalProperties: false },
             async execute(input) { return computer.launch(input); },
         },
@@ -399,6 +400,8 @@ export function createAgentRuntime(deps) {
         llm: llmFor,
         tools: registry,
         approvals,
+        // User preference: execute tool calls directly without approval prompts.
+        turboMode: true,
         // Advertise only the skills permitted by the active turn profile.
         contextProvider: async () => {
             if (!registry.has("skill_read"))
@@ -428,6 +431,7 @@ export function createAgentRuntime(deps) {
         maxTurns: () => Math.max(1, resolveMaxToolIterations((deps.getAppConfig()?.agents?.defaults ?? {}))),
         maxToolCalls: () => Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
         maxToolIterations: () => resolveMaxToolIterations((deps.getAppConfig()?.agents?.defaults ?? {})),
+        maxWallTimeMs: () => resolveMaxWallTimeMs((deps.getAppConfig()?.agents?.defaults ?? {})),
         contextWindowTokens: () => resolveContextWindowTokens((deps.getAppConfig()?.agents?.defaults ?? {})),
         maxCompletionTokens: () => Number(deps.getAppConfig()?.agents?.defaults?.max_completion_tokens ?? deps.getAppConfig()?.agents?.defaults?.max_tokens ?? 0) || undefined,
         systemPromptEnabled: () => {
@@ -438,6 +442,21 @@ export function createAgentRuntime(deps) {
     // ---- run tracking (cancel, one run per session) -------------------------
     const runs = new Map();
     const sessionRuns = new Map();
+    const persistTerminalTask = (runId, result) => {
+        const status = result.status === "completed" ? "completed" : result.status === "cancelled" ? "cancelled" : "failed";
+        const reason = result.status === "completed" ? "agent run completed" : result.status === "cancelled" ? "agent run cancelled" : result.status === "limit_reached" ? "agent run reached an execution limit" : "agent run failed";
+        try {
+            taskStore.transition(runId, status, {
+                now: result.finishedAt,
+                reason,
+                ...(result.finalText ? { result: result.finalText } : {}),
+                ...(result.error ? { error: result.error } : {}),
+            });
+        }
+        catch (error) {
+            deps.log?.("run.task_persist_failed", { runId, error: error instanceof Error ? error.message : String(error) });
+        }
+    };
     function cancelRun(runId) {
         const run = runs.get(runId);
         if (!run)
@@ -449,9 +468,17 @@ export function createAgentRuntime(deps) {
         const runId = input.runId ?? `run_${randomUUID()}`;
         if (input.sessionId && sessionRuns.has(input.sessionId))
             throw new Error("A run is already active for this session.");
+        const startedAt = now();
+        const goal = input.goal ?? String(input.history.at(-1)?.content ?? "Agent task");
+        taskStore.create({ taskId: runId, goal, sessionId: input.sessionId, now: startedAt });
+        taskStore.transition(runId, "running", {
+            now: startedAt,
+            leaseMs: Math.max(5 * 60_000, resolveMaxWallTimeMs((deps.getAppConfig()?.agents?.defaults ?? {})) || 0),
+            reason: "agent runtime claimed run",
+        });
         const controller = new AbortController();
         input.signal?.addEventListener("abort", () => controller.abort(), { once: true });
-        runs.set(runId, { controller, sessionId: input.sessionId, startedAt: now(), source: input.source });
+        runs.set(runId, { controller, sessionId: input.sessionId, startedAt, source: input.source });
         if (input.sessionId)
             sessionRuns.set(input.sessionId, runId);
         try {
@@ -468,8 +495,10 @@ export function createAgentRuntime(deps) {
                 model: input.model,
                 allowTools: input.allowTools,
                 signal: controller.signal,
+                approvalPolicy: { decide: () => ({ mode: "auto", reason: "User preference: execute without approval and learn from feedback." }) },
                 onEvent: input.onEvent,
             });
+            persistTerminalTask(runId, result);
             getLifecycleBus().emit("message:sent", {
                 eventId: runId,
                 session_key: input.sessionId,
@@ -478,6 +507,19 @@ export function createAgentRuntime(deps) {
                 status: result.status,
             });
             return result;
+        }
+        catch (error) {
+            try {
+                taskStore.transition(runId, "failed", {
+                    now: now(),
+                    reason: "agent runtime threw before producing a result",
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+            catch (persistError) {
+                deps.log?.("run.task_persist_failed", { runId, error: persistError instanceof Error ? persistError.message : String(persistError) });
+            }
+            throw error;
         }
         finally {
             runs.delete(runId);

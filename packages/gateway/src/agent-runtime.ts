@@ -1,4 +1,4 @@
-import { resolveContextWindowTokens, resolveMaxToolIterations } from "./runtime-settings.js";
+import { resolveContextWindowTokens, resolveMaxToolIterations, resolveMaxWallTimeMs } from "./runtime-settings.js";
 import { createTerminalTools } from "./terminal-tool.js";
 import { ProcessManager } from "./process-manager.js";
 import { resolveModel } from "./model-resolution.js";
@@ -6,6 +6,7 @@ import { buildIdentityContext } from "./identity-prompt.js";
 import express from "express"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
+import fs from "node:fs"
 import type Database from "better-sqlite3"
 import {
   AgentControlService,
@@ -16,6 +17,7 @@ import {
 import {
   AgentEngine,
   ApprovalStore,
+  DurableTaskStore,
   ToolRegistry,
   buildSkillsContext,
   createControlTools,
@@ -101,6 +103,7 @@ function deepMerge(base: Json, patch: Json): Json {
 export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const { db } = deps
   const now = () => new Date().toISOString()
+  const taskStore = new DurableTaskStore(db, now)
 
   // ---- model resolution ---------------------------------------------------
   // Commands started by the agent. A slow command is never killed by a timeout: it keeps running,
@@ -176,7 +179,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const browser = new BrowserTool(true, deps.dataRoot)
   const effectiveWorkspaceRoot = () => {
     const configured = (deps.getAppConfig() as any)?.agents?.defaults?.workspace
-    return typeof configured === "string" && configured.trim() ? path.resolve(configured) : deps.workspaceRoot
+    if (typeof configured !== "string" || !configured.trim()) return deps.workspaceRoot
+    const candidate = path.resolve(configured)
+    // Ignore stale absolute paths from a different installation/user.
+    return fs.existsSync(candidate) ? candidate : deps.workspaceRoot
   }
   browser.setWorkspaceDir(effectiveWorkspaceRoot())
   const computer = new ComputerAgent()
@@ -384,7 +390,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_focus",
       description: "Focus a native desktop window.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
       async execute(input) { return computer.focus(input) },
     },
@@ -392,7 +398,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_invoke",
       description: "Invoke an accessible desktop UI element observed by computer_observe.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
       async execute(input) { return computer.invoke(input) },
     },
@@ -400,7 +406,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_set_text",
       description: "Set text in an accessible native UI field.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, text: { type: "string", maxLength: 4000 }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["text"], additionalProperties: false },
       async execute(input) { return computer.setText(input) },
     },
@@ -408,7 +414,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_hotkey",
       description: "Send a deterministic keyboard shortcut to the focused desktop window.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { keys: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["keys"], additionalProperties: false },
       async execute(input) { return computer.hotkey(input) },
     },
@@ -416,7 +422,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_clipboard",
       description: "Read, set, or clear the system clipboard.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { action: { type: "string", enum: ["get", "set", "clear"] }, text: { type: "string", maxLength: 10000 } }, additionalProperties: false },
       async execute(input) { return computer.clipboard(input) },
     },
@@ -424,7 +430,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_launch",
       description: "Launch a local application without shell command interpretation.",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       parameters: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, required: ["command"], additionalProperties: false },
       async execute(input) { return computer.launch(input) },
     },
@@ -485,6 +491,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       return notices
     },
     llm: llmFor,
+    describeNoModel: (requested) => resolveCurrentModel(requested).reason,
     tools: registry,
     approvals,
     // Dynamic budget: a run that hits its turn / tool limit while still making
@@ -521,7 +528,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         persona,
         identityDirs: [path.join(deps.workspaceRoot, "identity"), path.join(deps.workspaceRoot, "config", "identity")],
       })
-      return `${DEFAULT_SYSTEM_PROMPT}\n\n${identity}`
+      return `${DEFAULT_SYSTEM_PROMPT}\n\nUser execution preference: do not ask for permission before taking actions. Execute the requested task directly, while respecting tool and workspace constraints. Treat explicit user corrections as durable feedback: record the correction in memory and apply it to future similar tasks.\n\n${identity}`
     },
     // Inject curated memory every turn and advertise only the skills permitted
     // by the active turn profile. Episodic notes remain retrieval-only.
@@ -594,11 +601,23 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         ? defaults.fallback_models.filter((name: unknown): name is string => typeof name === "string" && name.trim().length > 0).map((name: string) => name.trim())
         : []
     },
-    maxTurns: () => Math.max(1, resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>)),
-    maxToolCalls: () => Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
-    maxToolIterations: () => resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
+    // FULL_AGENT mode intentionally has no internal call/turn/time budget.
+    maxTurns: () => (deps.getAppConfig() as any)?.autonomy?.unlimited_budgets === true
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1, resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>)),
+    maxToolCalls: () => (deps.getAppConfig() as any)?.autonomy?.unlimited_budgets === true
+      ? Number.POSITIVE_INFINITY
+      : Number(process.env.MIKI_AGENT_MAX_TOOL_CALLS || 40),
+    maxToolIterations: () => (deps.getAppConfig() as any)?.autonomy?.unlimited_budgets === true
+      ? Number.POSITIVE_INFINITY
+      : resolveMaxToolIterations(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
+    maxWallTimeMs: () => (deps.getAppConfig() as any)?.autonomy?.unlimited_budgets === true
+      ? 0
+      : resolveMaxWallTimeMs(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
     contextWindowTokens: () => resolveContextWindowTokens(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>),
-    maxCompletionTokens: () => Number((deps.getAppConfig() as any)?.agents?.defaults?.max_completion_tokens ?? (deps.getAppConfig() as any)?.agents?.defaults?.max_tokens ?? 0) || undefined,
+    maxCompletionTokens: () => (deps.getAppConfig() as any)?.autonomy?.unlimited_budgets === true
+      ? undefined
+      : Number((deps.getAppConfig() as any)?.agents?.defaults?.max_completion_tokens ?? (deps.getAppConfig() as any)?.agents?.defaults?.max_tokens ?? 0) || undefined,
     systemPromptEnabled: () => {
       const p = (deps.getAppConfig() as any)?.agents?.defaults?.turn_profile;
       return !p || p.enabled !== true || String(p?.system_prompt?.mode || "default") !== "off";
@@ -683,11 +702,41 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const runOrigins = new Map<string, { source: string; peerId?: string; sessionId?: string; taskTitle?: string }>()
   const executionLanes = new Map<string, string>()
 
+  const persistTerminalTask = (runId: string, result: RunResult): void => {
+    const status = result.status === "completed"
+      ? "completed"
+      : result.status === "cancelled"
+        ? "cancelled"
+        : "failed"
+    const reason = result.status === "completed"
+      ? "agent run completed"
+      : result.status === "cancelled"
+        ? "agent run cancelled"
+        : result.status === "limit_reached"
+          ? "agent run reached an execution limit"
+          : "agent run failed"
+    try {
+      taskStore.transition(runId, status, {
+        now: result.finishedAt,
+        reason,
+        ...(result.finalText ? { result: result.finalText } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      })
+    } catch (error) {
+      deps.log?.("run.task_persist_failed", { runId, error: error instanceof Error ? error.message : String(error) } as Json)
+    }
+  }
+
   function cancelRun(runId: string): boolean {
     const run = runs.get(runId)
     if (!run) return false
     run.controller.abort()
     return true
+  }
+
+  /** Deliver a user message to a run that is already working. False when no such run is active. */
+  function steerRun(runId: string, text: string): boolean {
+    return runs.has(runId) && engine.steer(runId, text)
   }
 
   async function startRun(input: {
@@ -711,12 +760,20 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     signal?: AbortSignal
   }): Promise<RunResult> {
     const runId = input.runId ?? `run_${randomUUID()}`
+    const runGoal = input.goal ?? lastUserContent(input.history)
     const laneId = input.executionLaneId ?? input.sessionId
     if (laneId && executionLanes.has(laneId))
       throw new Error("A run is already active for this execution lane.")
+    const startedAt = now()
+    taskStore.create({ taskId: runId, goal: runGoal, sessionId: input.sessionId, now: startedAt })
+    taskStore.transition(runId, "running", {
+      now: startedAt,
+      leaseMs: Math.max(5 * 60_000, resolveMaxWallTimeMs(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>) || 0),
+      reason: "agent runtime claimed run",
+    })
     const controller = new AbortController()
     input.signal?.addEventListener("abort", () => controller.abort(), { once: true })
-    runs.set(runId, { controller, sessionId: input.sessionId, startedAt: now(), source: input.source })
+    runs.set(runId, { controller, sessionId: input.sessionId, startedAt, source: input.source })
     if (laneId) executionLanes.set(laneId, runId)
     if (input.sessionId && !input.executionLaneId) sessionRuns.set(input.sessionId, runId)
     runOrigins.set(runId, { source: input.source, peerId: input.peerId, sessionId: input.sessionId, taskTitle: input.taskTitle })
@@ -744,10 +801,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         model: input.model,
         allowTools: input.allowTools,
         tools: runTools,
-        approvalPolicy: input.approvalPolicy,
+        approvalPolicy: { decide: () => ({ mode: "auto", reason: "User preference: execute without approval and learn from feedback." }) },
         signal: controller.signal,
         onEvent: input.onEvent,
       })
+      persistTerminalTask(runId, result)
       try {
         recordRunToMemory(result, input.source)
       } catch (error) {
@@ -775,6 +833,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         status: result.status,
       })
       return result
+    } catch (error) {
+      try {
+        taskStore.transition(runId, "failed", {
+          now: now(),
+          reason: "agent runtime threw before producing a result",
+          error: error instanceof Error ? error.message : String(error),
+        })
+      } catch (persistError) {
+        deps.log?.("run.task_persist_failed", { runId, error: persistError instanceof Error ? persistError.message : String(persistError) } as Json)
+      }
+      throw error
     } finally {
       runOrigins.delete(runId)
       runs.delete(runId)
@@ -873,7 +942,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     const result = await controller.setToolState(name, enabled)
     return { ...result, status: enabled ? "enabled" : "disabled", name }
   }
-  return { engine, control, approvals, registry, processes, llmFor, resolveCurrentModel, mount, startRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
+  return { engine, control, approvals, registry, processes, llmFor, resolveCurrentModel, mount, startRun, steerRun, cancelRun, syncTools, setToolState, allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>
