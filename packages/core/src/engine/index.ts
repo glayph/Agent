@@ -1,7 +1,5 @@
 export { AgentEngine, NoModelConfiguredError } from "./agent-engine.js";
 export type { AgentEngineOptions, LLMResolver, SelfCheckConfig, DynamicBudgetConfig } from "./agent-engine.js";
-export { DurableTaskStore } from "./durable-task-store.js";
-export type { DurableTaskStatus } from "./durable-task-store.js";
 export { verifyAnswer, parseVerdict, buildEvidence } from "./verifier.js";
 export type { AnswerVerdict } from "./verifier.js";
 export { ToolRegistry } from "./tool-registry.js";
@@ -53,3 +51,22 @@ export { redactSecrets, stableStringify } from "./util.js";
 export type * from "./types.js";
 export { assessProgress } from "./budget.js";
 export type { ProgressAssessment, ProgressOptions } from "./budget.js";
+export {
+  InvalidTaskTransitionError,
+  canTransitionTaskStatus,
+  isTerminalTaskStatus,
+  taskStatusTransitions,
+  transitionTask,
+} from "../task-state.js";
+export type { TaskLifecycle, TaskStatus } from "../task-state.js";
+export { DurableTaskStore } from "../task-store.js";
+export type {
+  CreateTaskInput,
+  DurableTask,
+  TaskTransitionEvent,
+} from "../task-store.js";
+export { DurableTaskWorker } from "../task-worker.js";
+export type {
+  DurableTaskHandler,
+  DurableTaskWorkerOptions,
+} from "../task-worker.js";

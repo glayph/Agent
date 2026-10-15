@@ -101,3 +101,41 @@ describe("probeModelProvider", () => {
     expect(result).toMatchObject({ reachable: false, state: "unreachable" })
   })
 })
+
+describe("resolveModel: DEFAULT_MODEL / GOOGLE_API_KEY env fallbacks", () => {
+  const FAKE = "test-key-0123456789abcdef"
+
+  it("honours DEFAULT_MODEL with a provider prefix when nothing is stored", () => {
+    const r = resolveModel([], undefined, { DEFAULT_MODEL: "gemini/gemini-3.5-flash-lite", GEMINI_API_KEY: FAKE })
+    expect(r).toMatchObject({ configured: true, provider: "gemini", model: "gemini-3.5-flash-lite" })
+  })
+
+  it("accepts GOOGLE_API_KEY for Gemini", () => {
+    const r = resolveModel([], undefined, { DEFAULT_MODEL: "google/gemini-2.0-flash-001", GOOGLE_API_KEY: FAKE })
+    expect(r).toMatchObject({ configured: true, provider: "gemini", model: "gemini-2.0-flash-001" })
+  })
+
+  it("never invents a key: DEFAULT_MODEL without credentials stays unconfigured with an API-key reason", () => {
+    const r = resolveModel([], undefined, { DEFAULT_MODEL: "gemini/gemini-3.5-flash-lite" })
+    expect(r.configured).toBe(false)
+    expect(r.reason).toMatch(/API key/)
+  })
+
+  it("keeps precedence: stored default > MIKI_MODEL > DEFAULT_MODEL", () => {
+    const stored = resolveModel(
+      [{ isDefault: true, payload: { provider: "openai-compatible", model: "stored-one", api_base: "http://127.0.0.1:1/v1", enabled: true } }],
+      undefined,
+      { DEFAULT_MODEL: "gemini/x", GEMINI_API_KEY: FAKE },
+    )
+    expect(stored.model).toBe("stored-one")
+    const env = resolveModel([], undefined, { MIKI_MODEL: "env-one", MIKI_PROVIDER: "openai-compatible", DEFAULT_MODEL: "gemini/x", GEMINI_API_KEY: FAKE })
+    expect(env.model).toBe("env-one")
+  })
+
+  it("explains an empty configuration instead of a bare 'no model'", () => {
+    const r = resolveModel([], undefined, {})
+    expect(r.configured).toBe(false)
+    expect(r.reason).toMatch(/No model name is configured.*DEFAULT_MODEL/)
+  })
+})
+

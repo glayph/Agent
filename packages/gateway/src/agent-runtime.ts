@@ -316,7 +316,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "browser_navigate",
       description: "Open an HTTP or HTTPS page in the headless browser.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { url: { type: "string", description: "HTTP(S) URL to open." } }, required: ["url"], additionalProperties: false },
       async execute(input) { return browser.navigate(String(input.url || "")) },
     },
@@ -324,7 +324,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "browser_click",
       description: "Click a visible element by a Playwright selector on the current page.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
       async execute(input) { return browser.click(String(input.selector || "")) },
     },
@@ -332,7 +332,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "browser_type",
       description: "Type text into a browser selector.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { selector: { type: "string" }, text: { type: "string", maxLength: 4000 } }, required: ["selector", "text"], additionalProperties: false },
       async execute(input) { return browser.type(String(input.selector || ""), String(input.text || "")) },
     },
@@ -390,7 +390,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_focus",
       description: "Focus a native desktop window.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
       async execute(input) { return computer.focus(input) },
     },
@@ -398,7 +398,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_invoke",
       description: "Invoke an accessible desktop UI element observed by computer_observe.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
       async execute(input) { return computer.invoke(input) },
     },
@@ -406,7 +406,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_set_text",
       description: "Set text in an accessible native UI field.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { element_id: { type: "string" }, name: { type: "string" }, automation_id: { type: "string" }, control_type: { type: "string" }, text: { type: "string", maxLength: 4000 }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["text"], additionalProperties: false },
       async execute(input) { return computer.setText(input) },
     },
@@ -414,7 +414,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_hotkey",
       description: "Send a deterministic keyboard shortcut to the focused desktop window.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { keys: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, required: ["keys"], additionalProperties: false },
       async execute(input) { return computer.hotkey(input) },
     },
@@ -422,7 +422,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_clipboard",
       description: "Read, set, or clear the system clipboard.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { action: { type: "string", enum: ["get", "set", "clear"] }, text: { type: "string", maxLength: 10000 } }, additionalProperties: false },
       async execute(input) { return computer.clipboard(input) },
     },
@@ -430,7 +430,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       name: "computer_launch",
       description: "Launch a local application without shell command interpretation.",
       risk: "config_write",
-      approval: "auto",
+      approval: "required",
       parameters: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, required: ["command"], additionalProperties: false },
       async execute(input) { return computer.launch(input) },
     },
@@ -494,6 +494,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     describeNoModel: (requested) => resolveCurrentModel(requested).reason,
     tools: registry,
     approvals,
+    // Interactive Miki runs execute user-directed tool calls directly. Tool
+    // metadata still records risk and autonomy policies may hard-block calls,
+    // but ordinary chat must not stall waiting for an approval queue.
+    turboMode: true,
     // Dynamic budget: a run that hits its turn / tool limit while still making
     // progress gets a bounded extension. Disable with agent.dynamic_budget.enabled=false.
     dynamicBudget: () => {
@@ -528,7 +532,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         persona,
         identityDirs: [path.join(deps.workspaceRoot, "identity"), path.join(deps.workspaceRoot, "config", "identity")],
       })
-      return `${DEFAULT_SYSTEM_PROMPT}\n\nUser execution preference: do not ask for permission before taking actions. Execute the requested task directly, while respecting tool and workspace constraints. Treat explicit user corrections as durable feedback: record the correction in memory and apply it to future similar tasks.\n\n${identity}`
+      return `${DEFAULT_SYSTEM_PROMPT}\n\n${identity}`
     },
     // Inject curated memory every turn and advertise only the skills permitted
     // by the active turn profile. Episodic notes remain retrieval-only.
@@ -801,7 +805,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         model: input.model,
         allowTools: input.allowTools,
         tools: runTools,
-        approvalPolicy: { decide: () => ({ mode: "auto", reason: "User preference: execute without approval and learn from feedback." }) },
+        approvalPolicy: input.approvalPolicy,
         signal: controller.signal,
         onEvent: input.onEvent,
       })

@@ -43,6 +43,27 @@ describe("AgentEngine", () => {
     ]);
   });
 
+  it("turns a plan-only operational reply into real tool execution", async () => {
+    const execute = jest.fn(async () => ({ ok: true, path: "docs/demo_test.txt" }));
+    const { engine, llm } = setup(
+      [
+        { text: "First I will call file_write, then I will verify the result." },
+        { calls: [{ name: "file_write", args: { path: "docs/demo_test.txt", content: "demo" } }] },
+        { text: "Done — the file was written and verified." },
+      ],
+      [tool({
+        name: "file_write",
+        execute,
+        parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+      })],
+    );
+    const result = await engine.run({ history: user("Show me a real example: write a file and verify it") });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toContain("written");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(llm.requests).toHaveLength(3);
+  });
+
   it("forwards streamed text as message.delta events before the final answer", async () => {
     const llm = {
       model: "stream-model",

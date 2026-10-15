@@ -619,8 +619,12 @@ export async function sendChatMessage({
   }
 
   const socket = wsRef
-  activeCheckpointId = null
-  activeSequence = -1
+  // A message sent while the agent is already working is steered into that run:
+  // keep the live stream's checkpoint so the ongoing run is not disturbed.
+  if (!getChatState().isTyping) {
+    activeCheckpointId = null
+    activeSequence = -1
+  }
   const id = `msg-${++msgIdCounter}-${Date.now()}`
 
   updateChatStore((prev) => ({
@@ -851,6 +855,10 @@ export async function stopChatGeneration(): Promise<boolean> {
   }
 
   const taskId = state.activeRunId
+  // Stop is terminal for the interactive turn. Do not let a reconnect replay
+  // the old stream checkpoint while the server is still unwinding the abort.
+  activeCheckpointId = null
+  activeSequence = -1
   let cancelled = false
 
   if (wsRef && wsRef.readyState === WebSocket.OPEN && taskId) {

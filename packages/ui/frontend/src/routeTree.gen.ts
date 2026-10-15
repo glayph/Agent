@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
 import { Route as ConfigRouteImport } from './routes/config'
-import { Route as ControlRouteImport } from './routes/control'
 import { Route as DriveRouteImport } from './routes/drive'
 import { Route as HealthRouteImport } from './routes/health'
 import { Route as LauncherLoginRouteImport } from './routes/launcher-login'
@@ -38,11 +37,6 @@ const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
 const ConfigRoute = ConfigRouteImport.update({
   id: '/config',
   path: '/config',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ControlRoute = ControlRouteImport.update({
-  id: '/control',
-  path: '/control',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DriveRoute = DriveRouteImport.update({
@@ -105,7 +99,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/config': typeof ConfigRoute
-  '/control': typeof ControlRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
   '/launcher-login': typeof LauncherLoginRoute
@@ -122,7 +115,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/config': typeof ConfigRoute
-  '/control': typeof ControlRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
   '/launcher-login': typeof LauncherLoginRoute
@@ -140,7 +132,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/config': typeof ConfigRoute
-  '/control': typeof ControlRoute
   '/drive': typeof DriveRoute
   '/health': typeof HealthRoute
   '/launcher-login': typeof LauncherLoginRoute
@@ -159,7 +150,6 @@ export interface FileRouteTypes {
     | '/'
     | '/channels'
     | '/config'
-    | '/control'
     | '/drive'
     | '/health'
     | '/launcher-login'
@@ -176,7 +166,6 @@ export interface FileRouteTypes {
     | '/'
     | '/channels'
     | '/config'
-    | '/control'
     | '/drive'
     | '/health'
     | '/launcher-login'
@@ -193,7 +182,6 @@ export interface FileRouteTypes {
     | '/'
     | '/channels'
     | '/config'
-    | '/control'
     | '/drive'
     | '/health'
     | '/launcher-login'
@@ -211,7 +199,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChannelsRouteRoute: typeof ChannelsRouteRouteWithChildren
   ConfigRoute: typeof ConfigRoute
-  ControlRoute: typeof ControlRoute
   DriveRoute: typeof DriveRoute
   HealthRoute: typeof HealthRoute
   LauncherLoginRoute: typeof LauncherLoginRoute
@@ -245,13 +232,6 @@ declare module '@tanstack/react-router' {
       path: '/config'
       fullPath: '/config'
       preLoaderRoute: typeof ConfigRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/control': {
-      id: '/control'
-      path: '/control'
-      fullPath: '/control'
-      preLoaderRoute: typeof ControlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/drive': {
@@ -350,7 +330,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChannelsRouteRoute: ChannelsRouteRouteWithChildren,
   ConfigRoute: ConfigRoute,
-  ControlRoute: ControlRoute,
   DriveRoute: DriveRoute,
   HealthRoute: HealthRoute,
   LauncherLoginRoute: LauncherLoginRoute,

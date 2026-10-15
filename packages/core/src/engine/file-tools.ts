@@ -172,6 +172,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_mkdir",
       description: "Create a folder (and missing parents) inside the workspace.",
       risk: "config_write",
+      approval: "auto",
       parameters: { type: "object", required: ["path"], properties: { path: { type: "string" } }, additionalProperties: false },
       execute(input) {
         const abs = resolve(input.path);
@@ -188,6 +189,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_rename",
       description: "Rename a workspace file or folder (new name only, no path).",
       risk: "config_write",
+      approval: "auto",
       parameters: {
         type: "object",
         required: ["path", "newName"],
@@ -209,6 +211,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_move",
       description: "Move a file or folder to another workspace folder (or to a new path). Never overwrites.",
       risk: "config_write",
+      approval: "auto",
       parameters: {
         type: "object",
         required: ["path", "destination"],
@@ -221,6 +224,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_copy",
       description: "Copy a file or folder (recursively) to another workspace location. Never overwrites.",
       risk: "config_write",
+      approval: "auto",
       parameters: {
         type: "object",
         required: ["path", "destination"],
@@ -233,7 +237,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_delete",
       description: "Delete a workspace file, or a folder when recursive=true. This cannot be undone.",
       risk: "destructive",
-      approval: "auto",
+      approval: "required",
       parameters: {
         type: "object",
         required: ["path"],
@@ -259,9 +263,9 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_run",
       description:
         `Run a script from the workspace and return its output (stdout, stderr, exit code). Supported types: ${supportedRunExtensions().join(", ")}. ` +
-        "No shell is used; the script gets a reduced environment without secrets and a time limit. Runs directly according to the user's execution preference.",
+        "No shell is used; the script gets a reduced environment without secrets and a time limit. Requires the user's approval.",
       risk: "service",
-      approval: "auto",
+      approval: "required",
       parameters: {
         type: "object",
         required: ["path"],

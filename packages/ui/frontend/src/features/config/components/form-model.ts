@@ -76,6 +76,7 @@ export interface LauncherForm {
   publicAccess: boolean
   allowedCIDRsText: string
   sessionTimeoutMinutes: string
+  currentDashboardPassword: string
   dashboardPassword: string
   dashboardPasswordConfirm: string
 }
@@ -167,6 +168,7 @@ export const EMPTY_LAUNCHER_FORM: LauncherForm = {
   publicAccess: false,
   allowedCIDRsText: "",
   sessionTimeoutMinutes: "0",
+  currentDashboardPassword: "",
   dashboardPassword: "",
   dashboardPasswordConfirm: "",
 }

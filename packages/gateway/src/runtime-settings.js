@@ -2,14 +2,24 @@
  * has the same effective behavior as the UI's default state. */
 export const DEFAULT_MAX_COMPLETION_TOKENS = 32768;
 export const DEFAULT_MAX_TOOL_ITERATIONS = 50;
+export const DEFAULT_MAX_WALL_TIME_MS = 0;
 function positiveInteger(value) {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined;
+}
+function nonNegativeInteger(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : undefined;
 }
 export function resolveMaxToolIterations(defaults, env = process.env) {
     return positiveInteger(defaults.max_tool_iterations)
         ?? positiveInteger(env.MIKI_AGENT_MAX_TURNS)
         ?? DEFAULT_MAX_TOOL_ITERATIONS;
+}
+export function resolveMaxWallTimeMs(defaults, env = process.env) {
+    return nonNegativeInteger(defaults.max_wall_time_ms)
+        ?? nonNegativeInteger(env.MIKI_AGENT_MAX_WALL_TIME_MS)
+        ?? DEFAULT_MAX_WALL_TIME_MS;
 }
 export function resolveContextWindowTokens(defaults) {
     const explicit = positiveInteger(defaults.context_window);

@@ -110,6 +110,16 @@ describe("StreamHub", () => {
     expect(run.done).toBe(true);
   });
 
+  it("drops late events published after cancellation", () => {
+    const socket = new FakeSocket();
+    const run = hub.createRun({ runId: "r1", sessionId: "s1", contextId: "c1", socket: asSocket(socket) });
+    hub.finish(run, "cancelled");
+    hub.publish(run, "message.final", { content: "stale work" });
+
+    expect(socket.sent.map((message) => message.type)).toEqual(["stream_done"]);
+    expect(run.events).toHaveLength(1);
+  });
+
   it("includes the error in stream_done when there is one", () => {
     const socket = new FakeSocket();
     const run = hub.createRun({ runId: "r1", sessionId: "s1", contextId: "c1", socket: asSocket(socket) });

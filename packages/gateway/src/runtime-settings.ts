@@ -2,11 +2,16 @@
  * has the same effective behavior as the UI's default state. */
 export const DEFAULT_MAX_COMPLETION_TOKENS = 32768;
 export const DEFAULT_MAX_TOOL_ITERATIONS = 50;
-export const DEFAULT_MAX_WALL_TIME_MS = 30 * 60_000;
+export const DEFAULT_MAX_WALL_TIME_MS = 0;
 
 function positiveInteger(value: unknown): number | undefined {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : undefined;
 }
 
 export function resolveMaxToolIterations(defaults: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): number {
@@ -15,12 +20,15 @@ export function resolveMaxToolIterations(defaults: Record<string, unknown>, env:
     ?? DEFAULT_MAX_TOOL_ITERATIONS;
 }
 
+export function resolveMaxWallTimeMs(defaults: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): number {
+  return nonNegativeInteger(defaults.max_wall_time_ms)
+    ?? nonNegativeInteger(env.MIKI_AGENT_MAX_WALL_TIME_MS)
+    ?? DEFAULT_MAX_WALL_TIME_MS;
+}
+
 export function resolveContextWindowTokens(defaults: Record<string, unknown>): number | undefined {
   const explicit = positiveInteger(defaults.context_window);
   if (explicit !== undefined) return explicit;
   const maxTokens = positiveInteger(defaults.max_completion_tokens ?? defaults.max_tokens) ?? DEFAULT_MAX_COMPLETION_TOKENS;
   return maxTokens * 4;
-}
-export function resolveMaxWallTimeMs(defaults: Record<string, unknown>): number {
-  return positiveInteger(defaults.max_wall_time_ms ?? defaults.max_wall_time) ?? DEFAULT_MAX_WALL_TIME_MS;
 }

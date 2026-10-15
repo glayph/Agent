@@ -72,7 +72,7 @@ export function isLocalUrl(url: string): boolean {
 
 export function providerDefaults(provider: string, env: Env = process.env): { baseUrl: string; apiKey: string } {
   const p = normalizeProvider(provider)
-  if (isGemini(p)) return { baseUrl: env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/", apiKey: env.GEMINI_API_KEY || "" }
+  if (isGemini(p)) return { baseUrl: env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/", apiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "" }
   if (isOpenRouter(p)) return { baseUrl: "https://openrouter.ai/api/v1", apiKey: env.OPENROUTER_API_KEY || "" }
   if (isCompatible(p)) return { baseUrl: env.OPENAI_COMPATIBLE_BASE_URL || env.OPENAI_API_BASE || "http://127.0.0.1:8000/v1", apiKey: env.OPENAI_COMPATIBLE_API_KEY || env.OPENAI_API_KEY || "" }
   if (isLocalProvider(p)) return { baseUrl: env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1", apiKey: "" }
@@ -126,6 +126,28 @@ export function pickDefaultEntry(stored: StoredModelEntry[]): StoredModelEntry |
   return enabled.find((item) => item.isDefault) ?? enabled[0] ?? stored.find((item) => item.isDefault) ?? stored[0]
 }
 
+const DEFAULT_MODEL_PREFIXES: Array<[RegExp, string]> = [
+  [/^(?:gemini|google)\//i, "gemini"],
+  [/^(?:llama\.cpp|llama-cpp|llamacpp|local)\//i, "llama.cpp"],
+  [/^openrouter\//i, "openrouter"],
+  [/^openai\//i, "openai"],
+]
+
+/**
+ * `.env.example` and the Config class document `DEFAULT_MODEL` (e.g. "gemini/gemini-3.5-flash-lite"), but
+ * the runtime used to read only MIKI_MODEL / OPENAI_MODEL, so a user who followed the template got
+ * "No model name is configured". An explicit provider prefix selects the provider (it is only used when
+ * MIKI_PROVIDER is unset and no model is stored); anything else is passed through untouched.
+ */
+export function interpretDefaultModel(raw: unknown): { provider?: string; model: string } | undefined {
+  const value = typeof raw === "string" ? raw.trim() : ""
+  if (!value) return undefined
+  for (const [pattern, provider] of DEFAULT_MODEL_PREFIXES) {
+    if (pattern.test(value)) return { provider, model: value.replace(pattern, "") }
+  }
+  return { model: value }
+}
+
 export function resolveModel(stored: StoredModelEntry[], requested?: string, env: Env = process.env): ResolvedModel {
   const wanted = (requested ?? "").trim()
   const matched = wanted ? stored.find((item) => matchesRequested(item, wanted)) : undefined
@@ -136,8 +158,9 @@ export function resolveModel(stored: StoredModelEntry[], requested?: string, env
   const source: ResolvedModel["source"] = entry ? "stored" : "env"
 
   const envModel = (env.MIKI_MODEL || env.OPENAI_MODEL || "").trim()
-  const model = String(payload.model || payload.model_name || (!entry ? wanted : "") || envModel).trim()
-  const provider = String(payload.provider || env.MIKI_PROVIDER || "openai-compatible").trim()
+  const fromDefaultEnv = !entry && !envModel ? interpretDefaultModel(env.DEFAULT_MODEL) : undefined
+  const model = String(payload.model || payload.model_name || (!entry ? wanted : "") || envModel || fromDefaultEnv?.model || "").trim()
+  const provider = String(payload.provider || env.MIKI_PROVIDER || fromDefaultEnv?.provider || "openai-compatible").trim()
   const defaults = providerDefaults(provider, env)
   const baseUrl = String(payload.api_base || defaults.baseUrl || env.OPENAI_API_BASE || "https://api.openai.com/v1").trim()
   const apiKey = String(payload.api_key || defaults.apiKey || "").trim()
@@ -147,7 +170,7 @@ export function resolveModel(stored: StoredModelEntry[], requested?: string, env
   const keyCheck = localConfigured ? ({ status: "not_required" } as ApiKeyCheck) : checkApiKey(provider, apiKey, { baseUrl })
 
   let reason: string | undefined
-  if (!model) reason = "No model name is configured."
+  if (!model) reason = "No model name is configured: the Models page has no default model and MIKI_MODEL / OPENAI_MODEL / DEFAULT_MODEL are not set."
   else if (entry && entry.payload.enabled === false) reason = `Model "${modelName}" is disabled.`
   else if (keyCheck.status === "missing" || keyCheck.status === "placeholder" || keyCheck.status === "malformed") reason = keyCheck.reason
 

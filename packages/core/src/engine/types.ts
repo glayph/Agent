@@ -216,12 +216,20 @@ export type EngineEvent =
   | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
   | { type: "message.final"; runId: string; content: string }
+  | { type: "user.steer"; runId: string; turn: number; count: number }
   | {
       type: "context.compacted";
       runId: string;
       turn: number;
       droppedMessages: number;
       summaryChars: number;
+    }
+  | {
+      type: "run.budget";
+      runId: string;
+      elapsedMs: number;
+      wallTimeMs: number;
+      outcome: RunStatus;
     }
   | { type: "model.fallback"; runId: string; turn: number; from: string; to: string; reason: string }
   | {
@@ -255,6 +263,8 @@ export interface RunRequest {
   maxToolCalls?: number;
   /** Optional per-run completion-token budget override. */
   maxCompletionTokens?: number;
+  /** Optional per-run wall-clock budget override in ms. Zero disables the deadline. */
+  maxWallTimeMs?: number;
   signal?: AbortSignal;
   /** Optional per-run approval policy (used by bounded autonomous execution). */
   approvalPolicy?: ToolApprovalPolicy;

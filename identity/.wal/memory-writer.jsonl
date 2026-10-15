@@ -1,8 +1,0 @@
-{"id":"j1791013232213_1","job":{"type":"flush","sessionId":"miki-main-chat","turns":[{"role":"user","content":"এই workspace-এর বর্তমান অবস্থা সম্পর্কে আমাকে একটি নির্ভরযোগ্য সংক্ষিপ্ত প্রতিবেদন দাও এবং প্রয়োজনীয় artifact তৈরি করে কাজটি সম্পন্ন করো।"}]},"done":false,"ts":1791013232213}
-{"id":"j1791013232213_1","done":true,"ts":1791013232927}
-{"id":"j1791024740484_1","job":{"type":"flush","sessionId":"miki-main-chat","turns":[{"role":"user","content":"Miki একটি Agentic Ai হওয়া সত্ত্বেও কেন Agentic Ai এর মতো behaved করে না? এই সমস্যা খুঁজে বের করো!!"}]},"done":false,"ts":1791024740484}
-{"id":"j1791024740484_1","done":true,"ts":1791024741378}
-{"id":"j1791024957513_1","job":{"type":"flush","sessionId":"miki-main-chat","turns":[{"role":"assistant","content":"হ্যাঁ, আমি টার্মিনাল ব্যবহার করতে পারি। আপনার কি কোনো কমান্ড বা কাজ করাতে হবে?"},{"role":"user","content":"Ls"},{"role":"assistant","content":"কমান্ডের ফলাফল:\n\nExecution Error: Command failed: Ls\n/bin/bash: line 1: Ls: command not found"},{"role":"user","content":"Miki, নিজের source code এবং runtime configuration inspect করে কেন Agentic AI-এর মতো behave করছো না তার প্রকৃত root cause বের করো, প্রয়োজন হলে safe fix করো, তারপর test করে ফলাফল জানাও।"}]},"done":false,"ts":1791024957513}
-{"id":"j1791024957513_1","done":true,"ts":1791024958322}
-{"id":"j1791025114577_1","job":{"type":"flush","sessionId":"miki-main-chat","turns":[{"role":"user","content":"packages/core/src/execution-pipeline.ts ফাইলটি read করে Bengali investigation markers-এর exact list দাও। অনুমান করবে না; file_read ব্যবহার করে যাচাই করো।"}]},"done":false,"ts":1791025114577}
-{"id":"j1791025114577_1","done":true,"ts":1791025115321}

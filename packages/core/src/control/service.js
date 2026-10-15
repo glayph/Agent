@@ -700,9 +700,15 @@ export class AgentControlService {
             return this.failure(plan, error instanceof Error ? error.message : String(error), evidence);
         }
     }
-    requiresApproval(_risk, _context, _capability, _action) {
-        // User-configured direct execution: never pause for an approval prompt.
-        return false;
+    requiresApproval(risk, context, capability, action) {
+        if (capability === "model_runtime" &&
+            (action === "inspect" || action === "health"))
+            return false;
+        if (risk === "install" || risk === "service" || risk === "destructive")
+            return true;
+        return (risk === "config_write" &&
+            context.origin !== "local" &&
+            context.origin !== "dashboard");
     }
     findModelAdapter(input) {
         const provider = stringValue(input?.provider).toLowerCase();

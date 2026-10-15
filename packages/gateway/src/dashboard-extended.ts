@@ -963,10 +963,15 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const previous = (() => { try { return JSON.parse(String((deps.db.prepare("SELECT value FROM settings WHERE key='launcher_config'").get() as { value?: string } | undefined)?.value || "{}")) as Record<string, unknown> } catch { return {} } })()
     deps.db.prepare("INSERT INTO settings(key,value) VALUES('launcher_config',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(value))
     const changedRuntime = Number(previous.port || process.env.GATEWAY_PORT || 18800) !== port || Boolean(previous.public) !== publicAccess
-    if (timeout > 0 || timeout === 0) {
-      const minutes = timeout > 0 ? timeout : 30 * 24 * 60
-      const expiresAt = new Date(Date.now() + minutes * 60_000).toISOString()
-      deps.db.prepare("UPDATE auth_sessions SET expires_at=? WHERE expires_at>?").run(expiresAt, deps.now())
+    const noExpiry = "9999-12-31T23:59:59.999Z"
+    const expiresAt = timeout > 0
+      ? new Date(Date.now() + timeout * 60_000).toISOString()
+      : noExpiry
+    deps.db.prepare("UPDATE auth_sessions SET expires_at=? WHERE expires_at>? OR expires_at=?").run(expiresAt, deps.now(), noExpiry)
+    const currentToken = req.headers.cookie?.match(/(?:^|;\s*)miki_session=([^;]+)/)?.[1]
+    if (currentToken) {
+      const maxAge = timeout > 0 ? `; Max-Age=${timeout * 60}` : ""
+      res.setHeader("Set-Cookie", `miki_session=${currentToken}; Path=/; HttpOnly; SameSite=Lax${maxAge}`)
     }
     let runtimeApplyStatus: "applied" | "pending_restart" | "failed" = changedRuntime ? "pending_restart" : "applied"
     let runtimeApplyError: string | undefined

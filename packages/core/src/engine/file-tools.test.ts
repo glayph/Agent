@@ -24,8 +24,8 @@ describe("file management tools", () => {
   it("declares risk and approval so the engine gates the dangerous ones", () => {
     const { tools } = setup();
     expect(tools.file_info.risk).toBe("read");
-    expect(tools.file_delete).toMatchObject({ risk: "destructive", approval: "auto" });
-    expect(tools.file_run).toMatchObject({ risk: "service", approval: "auto" });
+    expect(tools.file_delete).toMatchObject({ risk: "destructive", approval: "required" });
+    expect(tools.file_run).toMatchObject({ risk: "service", approval: "required" });
     for (const name of ["file_mkdir", "file_rename", "file_move", "file_copy"]) expect(tools[name].risk).toBe("config_write");
   });
 

@@ -33,7 +33,7 @@ import { resolveContextWindowTokens } from "./runtime-settings.js"
 import { FileMemoryService, retrieveRelevantTurns } from "@miki/core/memory-files"
 import { SqliteMemoryIndex } from "./memory-index.js"
 import { wrapAsyncRoutes } from "./async-route.js"
-import { checkApiKey, describeResolution, probeModelProvider, resolveModel } from "./model-resolution.js"
+import { checkApiKey, describeResolution, interpretDefaultModel, probeModelProvider, resolveModel } from "./model-resolution.js"
 import { createGatewayErrorMiddleware } from "./error-middleware.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -195,7 +195,7 @@ const ensureSession = (id: string) => {
 }
 const sessionSummary = (id: string) => {
   ensureSession(id)
-  const row = db.prepare(`SELECT s.id,s.title,s.created_at created,s.updated_at updated,COUNT(m.id) message_count,COALESCE((SELECT content FROM chat_messages WHERE session_id=s.id ORDER BY created_at DESC LIMIT 1),'') preview,s.pinned FROM chat_sessions s LEFT JOIN chat_messages m ON m.session_id=s.id WHERE s.id=? GROUP BY s.id`).get(id) as Record<string, unknown>
+  const row = db.prepare(`SELECT s.id,s.title,s.created_at created,s.updated_at updated,COUNT(CASE WHEN m.context_id IS NULL OR m.context_id NOT LIKE 'proactive:%' THEN m.id END) message_count,COALESCE((SELECT content FROM chat_messages WHERE session_id=s.id AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') ORDER BY created_at DESC LIMIT 1),'') preview,s.pinned FROM chat_sessions s LEFT JOIN chat_messages m ON m.session_id=s.id WHERE s.id=? GROUP BY s.id`).get(id) as Record<string, unknown>
   return row
 }
 const workspaceRoot = path.resolve(process.env.MIKI_WORKSPACE_DIR || projectRoot)
@@ -386,7 +386,7 @@ app.get("/api/sessions", (_req, res) => {
 app.get("/api/sessions/:id", (req, res) => {
   const id = req.params.id; ensureSession(id)
   const summary = sessionSummary(id)
-  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,status,status_detail FROM chat_messages WHERE session_id=? ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
+  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,status,status_detail FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
     let attachments: unknown
     try { attachments = message.attachments_json ? JSON.parse(String(message.attachments_json)) : undefined } catch { attachments = undefined }
     const { attachments_json: _attachmentsJson, ...rest } = message
@@ -421,7 +421,7 @@ app.post("/api/sessions/:id/fork", (req, res) => {
   const sessionId = req.params.id
   ensureSession(sessionId)
   const targetId = String(req.body?.message_id || "")
-  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? ORDER BY created_at ASC").all(sessionId) as Array<Record<string, unknown>>
+  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(sessionId) as Array<Record<string, unknown>>
   const targetIndex = messages.findIndex((message) => message.id === targetId)
   if (targetIndex < 0) return res.status(404).json({ error: "Message not found" })
   const forkId = randomUUID()
@@ -460,7 +460,7 @@ const providerKeyOptional = (provider: unknown): boolean => {
   const normalized = String(provider || "").trim().toLowerCase()
   return ["llama.cpp", "llama-cpp", "llamacpp", "local", "openai-compatible", "compatible", "openai_compatible"].includes(normalized)
 }
-const configuredModel = () => process.env.MIKI_MODEL || process.env.OPENAI_MODEL || (providerEnvironmentApiKey(process.env.MIKI_PROVIDER) ? "gpt-5-mini" : "")
+const configuredModel = () => process.env.MIKI_MODEL || process.env.OPENAI_MODEL || interpretDefaultModel(process.env.DEFAULT_MODEL)?.model || (providerEnvironmentApiKey(process.env.MIKI_PROVIDER) ? "gpt-5-mini" : "")
 const providerDefaultApiBase = (provider: unknown) => {
   const normalized = String(provider || "").trim().toLowerCase()
   if (normalized === "gemini" || normalized === "google") return process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -489,7 +489,7 @@ const modelPayload = (row: { id: number; payload: string; is_default: number }) 
 }
 const storedModels = () => db.prepare("SELECT id,payload,is_default FROM model_configs ORDER BY id").all() as { id: number; payload: string; is_default: number }[]
 const envModel = () => {
-  const provider = process.env.MIKI_PROVIDER || "openai-compatible"
+  const provider = process.env.MIKI_PROVIDER || interpretDefaultModel(process.env.DEFAULT_MODEL)?.provider || "openai-compatible"
   return {
     model_name: configuredModel(),
     model: configuredModel(),
@@ -828,7 +828,6 @@ const broadcastProactive = async (input: { text: string; runId?: string; goalId?
   db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,kind,model_name,context_id) VALUES(?,?,?,?,?,?,?,?)").run(
     messageId, sessionId, "assistant", text, createdAt, "normal", null, `proactive:${input.runId || messageId}`,
   )
-  db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(createdAt, sessionId)
   const payload = {
     message_id: messageId,
     content: text,
@@ -1133,13 +1132,13 @@ app.get("/api/tools", async (_req, res) => {
   }
   const browserBlocked = (await browserReady()) ? undefined : "browser_not_installed"
   res.json({ tools: [
-    group("filesystem", "filesystem", "Read, search, organize, write, delete and run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run"]),
+    group("filesystem", "filesystem", "Read, search, organize and (with approval) write, delete or run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run"]),
     group("memory", "memory", "Search and store long-term memory notes.", "memory", true, ["memory_search", "memory_add"]),
-    group("skills", "skills", "Discover, read, run, install and delete installed skills.", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
-    group("control", "agent-control", "Typed agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
+    group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
+    group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
     group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"], browserBlocked),
-    group("terminal", "terminal", "Run shell commands like a human at a terminal according to the user execution preference.", "system", true, ["terminal_run", "terminal_status", "terminal_kill"]),
+    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to add approval and guard rails).", "system", true, ["terminal_run", "terminal_status", "terminal_kill"]),
   ] })
 })
 app.put("/api/tools/:name/state", requireAuth, async (req, res) => {
@@ -1490,6 +1489,12 @@ app.use(createGatewayErrorMiddleware((entry) => {
 async function configureRuntimeLoop() {
   try {
     await autonomy.stop()
+    const configured = getAppConfig()?.autonomy
+    const explicitlyDisabled = process.env.MIKI_AUTONOMY_ENABLED === "false" || (isRecord(configured) && configured.enabled === false)
+    if (explicitlyDisabled) {
+      appendGatewayLog("24/7 FULL_AGENT autonomy loop is disabled; interactive chat remains available.")
+      return
+    }
     autonomy.start()
     appendGatewayLog("24/7 FULL_AGENT autonomy loop started.")
   } catch (error) {

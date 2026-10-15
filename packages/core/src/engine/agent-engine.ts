@@ -19,6 +19,7 @@ import { verifyAnswer } from "./verifier.js";
 import { assessProgress } from "./budget.js";
 import { compactRunContext, pruneToolResults } from "./context-manager.js";
 import { TokenBudgetManager } from "../token-budget-manager.js";
+import { globalMetricsCollector, type MetricsCollector } from "../metrics-collector.js";
 import {
   describeParameters,
   errorMessage,
@@ -34,11 +35,16 @@ export type LLMResolver = (model?: string) => EngineLLMClient | undefined;
 export interface AgentEngineOptions {
   /** A fixed client, or a resolver that picks one per run (requested model, vault keys...). */
   llm: EngineLLMClient | LLMResolver;
-  /** Optional host-provided diagnostic description when no model is configured. */
-  describeNoModel?: (requested?: string) => string;
+  /** Optional: explains why `llm` resolved to nothing (missing key, disabled model...). Appended to the error. */
+  describeNoModel?: (model?: string) => string | undefined;
   tools: ToolRegistry;
   /** Decides tool calls that need confirmation. Without a gate, such calls are denied. */
   approvals?: ApprovalGate;
+  /**
+   * Turbo mode: run approval-gated tool calls immediately instead of asking the user.
+   * On by default; only an explicit `false` brings the approval gate back.
+   */
+  turboMode?: boolean;
   /** Base system prompt, or a resolver evaluated at the start of every run. */
   systemPrompt?: string | (() => string);
   /** Extra system-prompt context evaluated at the start of every run (skills catalog, ...). */
@@ -60,12 +66,12 @@ export interface AgentEngineOptions {
   maxToolCalls?: number | (() => number);
   /** Maximum model turns that actually produce tool calls. */
   maxToolIterations?: number | (() => number);
+  /** Maximum wall-clock time for a run in ms. Zero or undefined disables the deadline. */
+  maxWallTimeMs?: number | (() => number);
   /** Optional approximate context-window cap in tokens. */
   contextWindowTokens?: number | (() => number);
   /** Maximum completion tokens requested from the model. */
   maxCompletionTokens?: number | (() => number);
-  /** Maximum wall-clock time allowed for a run, when enforced by the host. */
-  maxWallTimeMs?: number | (() => number);
   /** Controls whether the configured base system prompt is included. */
   systemPromptEnabled?: boolean | (() => boolean);
   toolTimeoutMs?: number;
@@ -80,6 +86,8 @@ export interface AgentEngineOptions {
   duplicateCallLimit?: number;
   /** Diagnostic hook for non-fatal problems (planner fallback, listener errors). */
   logger?: (message: string, details?: Record<string, unknown>) => void;
+  /** Metrics sink for terminal run latency and outcome counters. */
+  metrics?: Pick<MetricsCollector, "recordLatency" | "incrementCounter">;
   /**
    * In-run context management. Old tool results are pruned from the prompt and,
    * when the context is still close to the window, the oldest agent steps are
@@ -159,11 +167,12 @@ function requestApprovalPolicy(
 }
 
 export class NoModelConfiguredError extends Error {
-  constructor(model?: string) {
+  constructor(model?: string, detail?: string) {
     super(
-      model
+      (model
         ? `Model "${model}" is not configured or has no credentials.`
-        : "No model is configured. Add a model in the Models page or set OPENAI_API_KEY and OPENAI_MODEL.",
+        : "No model is configured. Add a model in the Models page or set OPENAI_API_KEY and OPENAI_MODEL.")
+        + (detail ? ` Reason: ${detail}` : ""),
     );
     this.name = "NoModelConfiguredError";
   }
@@ -323,10 +332,53 @@ function lastUserText(history: EngineMessage[]): string {
  * protection, budgets, cancellation and event emission. It is transport-agnostic;
  * the gateway maps its events onto WebSocket/HTTP responses.
  */
+function isPlanOnlyResponse(text: string, goal: string, availableToolNames: string[]): boolean {
+  const draft = text.trim();
+  if (!draft || draft.length > 2400) return false;
+  const operational = /\b(show|create|write|read|list|run|check|inspect|test|search|open|make|execute|demonstrate|দেখাও|লিখ|পড়|তালিকা|চালাও|পরীক্ষা|খুঁজে)\b/i.test(goal);
+  if (!operational) return false;
+  const mentionsTool = availableToolNames.some((name) => draft.split(/[^A-Za-z0-9_]+/).some((part) => part.toLowerCase() === name.toLowerCase()));
+  const futurePlan = /\b(i['’]?m|i am|i will|i['’]?ll|first|next|then|going to|plan to|let me|now i)\b/i.test(draft)
+    || /\b(প্রথমে|এরপর|এখন|করব|করবো|লিখব|পড়ব|চালাব)\b/.test(draft);
+  return mentionsTool || futurePlan;
+}
+
 export class AgentEngine {
+  /**
+   * Messages the user sent while a run was in flight. They are delivered to the
+   * model on its next turn so the agent can answer them and adjust course
+   * without being stopped (autonomous "steering").
+   */
+  private readonly steerInboxes = new Map<string, string[]>();
+
+  /** Queue a user message for an active run. Returns false when the run is not active. */
+  steer(runId: string, text: string): boolean {
+    const inbox = this.steerInboxes.get(runId);
+    const clean = text.trim();
+    if (!inbox || !clean) return false;
+    inbox.push(clean);
+    return true;
+  }
+
+  private drainSteering(state: RunState, turn: number): number {
+    const inbox = this.steerInboxes.get(state.runId);
+    if (!inbox?.length) return 0;
+    const items = inbox.splice(0);
+    state.messages.push({
+      role: "user",
+      content:
+        "[New message from the user, sent while you were working. Reply to it briefly and directly, " +
+        "follow any instruction or feedback in it, then continue the task you were doing unless told otherwise.]\n" +
+        items.join("\n---\n"),
+    });
+    state.emit({ type: "user.steer", runId: state.runId, turn, count: items.length });
+    return items.length;
+  }
+
   private readonly maxTurns: number | (() => number);
   private readonly maxToolCalls: number | (() => number);
   private readonly maxToolIterations: number | (() => number);
+  private readonly maxWallTimeMs: number | (() => number);
   private readonly contextWindowTokens?: number | (() => number);
   private readonly maxCompletionTokens?: number | (() => number);
   private readonly systemPromptEnabled: boolean | (() => boolean);
@@ -338,6 +390,7 @@ export class AgentEngine {
     this.maxTurns = options.maxTurns ?? 12;
     this.maxToolCalls = options.maxToolCalls ?? 40;
     this.maxToolIterations = options.maxToolIterations ?? 12;
+    this.maxWallTimeMs = options.maxWallTimeMs ?? 0;
     this.contextWindowTokens = options.contextWindowTokens;
     this.maxCompletionTokens = options.maxCompletionTokens;
     this.systemPromptEnabled = options.systemPromptEnabled ?? true;
@@ -348,11 +401,6 @@ export class AgentEngine {
 
   get tools(): ToolRegistry {
     return this.options.tools;
-  }
-
-  /** Compatibility hook for transports that offer follow-up steering. */
-  steer(_runId: string, _text: string): boolean {
-    return false;
   }
 
   /** Resolve the model client for a run; undefined when nothing usable is configured. */
@@ -375,6 +423,7 @@ export class AgentEngine {
 
   async run(request: RunRequest): Promise<RunResult> {
     const runId = request.runId ?? `run_${randomUUID()}`;
+    const startedAtMs = Date.now();
     const startedAt = new Date().toISOString();
     const goal = (request.goal ?? lastUserText(request.history)).trim();
     const usage = EMPTY_USAGE();
@@ -389,6 +438,17 @@ export class AgentEngine {
         });
     }
     const signal = controller.signal;
+    const configuredWallTimeMs = request.maxWallTimeMs ?? (typeof this.maxWallTimeMs === "function" ? this.maxWallTimeMs() : this.maxWallTimeMs);
+    const wallTimeMs = Number.isFinite(configuredWallTimeMs) ? Math.max(0, Math.floor(configuredWallTimeMs)) : 0;
+    let wallTimeExceeded = false;
+    const wallTimer = wallTimeMs > 0
+      ? setTimeout(() => {
+          wallTimeExceeded = true;
+          this.options.logger?.("run.wall_time_exceeded", { runId, wallTimeMs });
+          controller.abort();
+        }, wallTimeMs)
+      : undefined;
+    wallTimer?.unref?.();
 
     const emit = (event: EngineEvent) => {
       try {
@@ -410,6 +470,7 @@ export class AgentEngine {
       loopDetected: false,
     };
 
+    this.steerInboxes.set(runId, []);
     let llm = this.resolveLLM(request.model);
     let model = llm?.model ?? request.model ?? "";
 
@@ -418,25 +479,43 @@ export class AgentEngine {
       finalText: string,
       error?: string,
     ): RunResult => {
+      clearTimeout(wallTimer);
+      this.steerInboxes.delete(runId);
+      const finalStatus = wallTimeExceeded && status === "cancelled" ? "limit_reached" : status;
+      const finalError = wallTimeExceeded
+        ? `Run wall-time budget of ${wallTimeMs} ms reached.`
+        : error;
+      const elapsedMs = Date.now() - startedAtMs;
+      const metrics = this.options.metrics ?? globalMetricsCollector;
+      metrics.recordLatency("agent_run", elapsedMs, { outcome: finalStatus });
+      metrics.incrementCounter("agent_runs_total", 1, { outcome: finalStatus });
+      if (wallTimeExceeded) metrics.incrementCounter("agent_runs_wall_time_exceeded_total", 1);
+      emit({
+        type: "run.budget",
+        runId,
+        elapsedMs,
+        wallTimeMs,
+        outcome: finalStatus,
+      });
       this.settlePlan(state, status);
       const finishedAt = new Date().toISOString();
       emit({
         type: "run.finished",
         runId,
-        status,
+        status: finalStatus,
         turns,
         toolCalls: state.records.length,
         usage,
-        ...(error ? { error } : {}),
+        ...(finalError ? { error: finalError } : {}),
       });
       return {
         runId,
         sessionId: request.sessionId,
-        status,
+        status: finalStatus,
         model,
         goal,
         finalText,
-        ...(error ? { error } : {}),
+        ...(finalError ? { error: finalError } : {}),
         turns,
         toolCalls: state.records,
         ...(state.plan ? { plan: state.plan } : {}),
@@ -455,7 +534,7 @@ export class AgentEngine {
       at: startedAt,
     });
 
-    if (!llm) return finish("failed", "", new NoModelConfiguredError(request.model).message);
+    if (!llm) return finish("failed", "", new NoModelConfiguredError(request.model, this.options.describeNoModel?.(request.model)).message);
     if (!goal) return finish("failed", "", "The request has no user message.");
 
     const tools = request.tools ?? this.tools;
@@ -536,6 +615,7 @@ export class AgentEngine {
 
     // 2. Agent loop.
     let nudged = false;
+    let planOnlyNudged = false;
     let revisions = 0;
     let limitReason: string | undefined;
     let toolIterations = 0;
@@ -598,6 +678,7 @@ export class AgentEngine {
           this.options.logger?.("notifications.failed", { error: errorMessage(error) });
         }
       }
+      this.drainSteering(state, turn);
       // Pruned once per turn; recomputed only when compaction replaces the messages.
       let visibleMessages = compactionEnabled
         ? pruneToolResults(state.messages, { keepRecentToolResults })
@@ -685,6 +766,16 @@ export class AgentEngine {
       const calls = runToolsEnabled ? normalizeToolCalls(message.tool_calls) : [];
       if (calls.length > 0) toolIterations += 1;
 
+      if (calls.length === 0 && !planOnlyNudged && runToolsEnabled && isPlanOnlyResponse(text, goal, tools.names())) {
+        planOnlyNudged = true;
+        state.messages.push({ role: "assistant", content: text });
+        state.messages.push({
+          role: "user",
+          content: "Your previous response only described a plan. Execute the requested work now using the available tools. Do not narrate future actions; emit the structured tool calls, inspect their results, and continue until the request is actually done.",
+        });
+        continue;
+      }
+
       if (calls.length === 0) {
         if (!text.trim()) {
           // Providers occasionally return an empty completion. Ask once, in the
@@ -732,6 +823,11 @@ export class AgentEngine {
           }
         }
 
+        // A message that arrived while this answer was being written must not be dropped.
+        if (this.steerInboxes.get(runId)?.length) {
+          state.messages.push({ role: "assistant", content: finalText });
+          continue;
+        }
         emit({ type: "message.final", runId, content: finalText });
         return finish("completed", finalText);
       }
@@ -996,7 +1092,9 @@ export class AgentEngine {
     const requiresApproval = policyDecision
       ? policyDecision.mode === "approval"
       : ToolRegistry.needsApproval(tool);
-    if (requiresApproval) {
+    // Turbo mode (core default, always on): approval-mode calls are granted automatically so the
+    // agent never interrupts the user. Hard "block" policy decisions above are still enforced.
+    if (requiresApproval && this.options.turboMode === false) {
       record.status = "awaiting_approval";
       this.snapshot(state, turn, record);
       const gate = this.options.approvals;

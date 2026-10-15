@@ -6,9 +6,10 @@ import { GoalStore } from "../api/goals-router.js";
 import { AutonomyPolicy } from "./autonomy-policy.js";
 import { AutonomyReplanner, type ReplanContext } from "./autonomy-replanner.js";
 import { verifyGoalAcceptance, type GoalAcceptanceContract } from "./goal-acceptance.js";
-import type { EngineEvent } from "../engine/types.js";
+import type { EngineEvent, EngineTool } from "../engine/types.js";
 import type { AgentEngine } from "../engine/agent-engine.js";
 import { ToolRegistry } from "../engine/tool-registry.js";
+import { DurableTaskStore } from "../task-store.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -157,10 +158,13 @@ export class AutonomousSupervisor {
   private wakeRequested = false;
   private wakeResolver: (() => void) | null = null;
   private lastOutcome: AutonomyTickResult = { status: "idle", reason: "Not run yet." };
+  private readonly durableTasks: DurableTaskStore;
+  private readonly durableTaskIds = new Map<number, string>();
 
   constructor(private readonly options: AutonomousSupervisorOptions) {
     this.goals = new GoalStore(options.db);
     this.now = options.now ?? (() => new Date().toISOString());
+    this.durableTasks = new DurableTaskStore(options.db, this.now);
     options.db.exec(`
       CREATE TABLE IF NOT EXISTS autonomy_goal_runs (
         run_id TEXT PRIMARY KEY,
@@ -298,9 +302,19 @@ export class AutonomousSupervisor {
     const failureBackoffBaseSeconds = Math.max(5, Math.min(3600, Number(proactive.failure_backoff_base_seconds ?? 30) || 30));
     const failureBackoffMaxSeconds = Math.max(failureBackoffBaseSeconds, Math.min(86400, Number(proactive.failure_backoff_max_seconds ?? 1800) || 1800));
     const decisionBackoffMultiplier = Math.max(1.25, Math.min(4, Number(proactive.decision_backoff_multiplier ?? 2) || 2));
-    const maxActions = Math.max(1, Math.min(3, Number(autoActions.max_actions_per_cycle ?? 1) || 1));
+    const unlimitedBudgets = autonomy.unlimited_budgets === true;
+    const maxActions = unlimitedBudgets
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1, Math.min(3, Number(autoActions.max_actions_per_cycle ?? 1) || 1));
+    // A goal cycle (read, write, verify...) needs more tool calls than a heartbeat "action". Reusing
+    // auto_actions.max_actions_per_cycle (1-3) made realistic goals stop at the budget and burn retries.
+    const maxToolCallsPerGoalCycle = unlimitedBudgets
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1, Math.min(40, Math.floor(Number(autonomy.max_tool_calls_per_goal_cycle ?? 12)) || 12));
     const resourceLimits = record(heartbeat.resource_limits);
-    const maxTokensPerCycle = Math.max(1024, Math.min(100_000, Number(resourceLimits.max_tokens_per_cycle ?? 8192) || 8192));
+    const maxTokensPerCycle = unlimitedBudgets
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1024, Math.min(100_000, Number(resourceLimits.max_tokens_per_cycle ?? 8192) || 8192));
     const maxIdleMinutes = Math.max(1, Math.min(1440, Number(resourceLimits.max_idle_minutes ?? 5) || 5));
     const checklistPath = typeof heartbeat.checklist_path === "string" && heartbeat.checklist_path.trim() ? heartbeat.checklist_path.trim() : "identity/HEARTBEAT.md";
     const policy = record(autonomy.tool_policy);
@@ -328,6 +342,7 @@ export class AutonomousSupervisor {
     return {
       enabled,
       maxActions,
+      maxToolCallsPerGoalCycle,
       maxTokensPerCycle,
       maxIdleMinutes,
       checklistPath,
@@ -642,6 +657,7 @@ export class AutonomousSupervisor {
 
   private recoverPersistentTasks() {
     const now = this.now();
+    this.durableTasks.recoverExpired(now);
     const rows = this.options.db.prepare(`SELECT task_id,status,goal_id FROM autonomy_task_queue WHERE status IN ('running','queued')`).all() as Array<Record<string, unknown>>;
     const updateQueued = this.options.db.prepare(`UPDATE autonomy_task_queue SET status='queued',lease_expires_at=NULL,updated_at=? WHERE task_id=?`);
     const markCompleted = this.options.db.prepare(`UPDATE autonomy_task_queue SET status='completed',completed_at=COALESCE(completed_at,?),lease_expires_at=NULL,updated_at=? WHERE task_id=?`);
@@ -657,6 +673,46 @@ export class AutonomousSupervisor {
     }
   }
 
+  private mirrorDurableTask(taskId: number, title: string, status: "running" | "queued" | "completed" | "failed", fields: { result?: string; error?: string } = {}): void {
+    const timestamp = this.now();
+    let durableId = this.durableTaskIds.get(taskId) ?? `autonomy:${taskId}`;
+    let current = this.durableTasks.get(durableId);
+    if (status === "running" && current && ["completed", "failed", "cancelled"].includes(current.status)) {
+      durableId = `autonomy:${taskId}:${timestamp}`;
+      current = null;
+    }
+    try {
+      if (!current) {
+        this.durableTasks.create({ taskId: durableId, goal: title, now: timestamp });
+        current = this.durableTasks.get(durableId);
+      }
+      this.durableTaskIds.set(taskId, durableId);
+      if (!current) return;
+      if (status === "running") {
+        if (current.status === "queued" || current.status === "retrying") {
+          this.durableTasks.transition(durableId, "running", { now: timestamp, leaseMs: 300_000, reason: "autonomous supervisor claimed task" });
+        } else if (current.status === "running") {
+          this.durableTasks.renewLease(durableId, timestamp, 300_000);
+        }
+      } else if (status === "queued") {
+        if (current.status === "running") {
+          this.durableTasks.transition(durableId, "retrying", { now: timestamp, reason: fields.error ?? "autonomous task queued for retry", error: fields.error });
+        }
+      } else if (status === "completed") {
+        if (current.status === "running") this.durableTasks.transition(durableId, "verifying", { now: timestamp, reason: "autonomous result ready for verification", result: fields.result });
+        const verifying = this.durableTasks.get(durableId);
+        if (verifying?.status === "verifying") this.durableTasks.transition(durableId, "completed", { now: timestamp, reason: "autonomous acceptance completed", result: fields.result });
+      } else if (status === "failed") {
+        const latest = this.durableTasks.get(durableId);
+        if (latest?.status === "queued") this.durableTasks.transition(durableId, "running", { now: timestamp, leaseMs: 300_000, reason: "autonomous failure recorded" });
+        const running = this.durableTasks.get(durableId);
+        if (running?.status === "running" || running?.status === "retrying") this.durableTasks.transition(durableId, "failed", { now: timestamp, reason: fields.error ?? "autonomous task failed", error: fields.error });
+      }
+    } catch (error) {
+      this.options.log(`Durable autonomy task mirror failed for ${taskId}: ${errorText(error)}`);
+    }
+  }
+
   private markTaskForGoal(goalId: number, status: 'running' | 'queued' | 'completed' | 'failed', fields: { result?: string; error?: string; retryAt?: string | null } = {}) {
     const now = this.now();
     const task = this.options.db.prepare(`SELECT * FROM autonomy_task_queue WHERE goal_id=? AND status IN ('queued','running','scheduled')
@@ -666,11 +722,13 @@ export class AutonomousSupervisor {
     if (status === 'running') {
       const lease = new Date(Date.parse(now) + 300_000).toISOString();
       this.options.db.prepare(`UPDATE autonomy_task_queue SET status='running',last_started_at=?,lease_expires_at=?,updated_at=? WHERE task_id=?`).run(now, lease, now, taskId);
+      this.mirrorDurableTask(taskId, String(task.title || `Autonomous task ${taskId}`), "running");
       return;
     }
     if (status === 'queued') {
       this.options.db.prepare(`UPDATE autonomy_task_queue SET status='queued',last_error=?,last_result=?,retry_at=?,lease_expires_at=NULL,
         retry_count=retry_count+1,updated_at=? WHERE task_id=?`).run(fields.error ?? null, fields.result ?? null, fields.retryAt ?? null, now, taskId);
+      this.mirrorDurableTask(taskId, String(task.title || `Autonomous task ${taskId}`), "queued", fields);
       return;
     }
     if (status === 'completed') {
@@ -680,6 +738,7 @@ export class AutonomousSupervisor {
       } else {
         this.options.db.prepare(`UPDATE autonomy_task_queue SET status='completed',last_error=NULL,last_result=?,retry_at=NULL,lease_expires_at=NULL,completed_at=?,updated_at=? WHERE task_id=?`).run(fields.result ?? null, now, now, taskId);
       }
+      this.mirrorDurableTask(taskId, String(task.title || `Autonomous task ${taskId}`), "completed", fields);
       return;
     }
     if (task.interval_seconds) {
@@ -693,6 +752,7 @@ export class AutonomousSupervisor {
       this.options.db.prepare(`UPDATE autonomy_task_queue SET status='failed',last_error=?,last_result=?,retry_at=NULL,lease_expires_at=NULL,completed_at=?,updated_at=? WHERE task_id=?`)
         .run(fields.error ?? 'Autonomous task failed.', fields.result ?? null, now, now, taskId);
     }
+    this.mirrorDurableTask(taskId, String(task.title || `Autonomous task ${taskId}`), "failed", fields);
   }
 
   /** Materialize due persistent schedules into goals; safe across process restarts. */
@@ -855,6 +915,103 @@ export class AutonomousSupervisor {
     return Math.max(0, this.ambientLastAt + intervalSeconds * 1000 - Date.now());
   }
 
+  /**
+   * The only way the idle (no active goal) decision can turn an idea into work. It is deliberately NOT the
+   * generic goal_create tool (which needs an explicit policy grant): it is bounded, needs deterministic
+   * acceptance checks confined to the safe write roots, de-duplicates, and is capped, so the 24/7 loop
+   * can pick new work without being able to rewrite or flood the goal list.
+   */
+  private buildProposeGoalTool(config: ReturnType<AutonomousSupervisor["config"]>, proposals: Array<{ id: number; title: string }>): EngineTool {
+    const MAX_OPEN = 3;
+    const MAX_PER_DAY = 10;
+    const norm = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
+    const withinSafeRoot = (p: string) => {
+      const rel = path.posix.normalize(p.replace(/\\/g, "/")).replace(/^\.\//, "");
+      if (!rel || rel === ".." || rel.startsWith("../") || path.posix.isAbsolute(rel) || /^[A-Za-z]:\//.test(rel)) return false;
+      return config.safeWriteRoots.some((root) => {
+        const r = path.posix.normalize(root.replace(/\\/g, "/")).replace(/\/$/, "");
+        return rel === r || rel.startsWith(`${r}/`);
+      });
+    };
+    return {
+      name: "autonomy_propose_goal",
+      description: `Queue ONE bounded follow-up goal that the autonomous supervisor will execute and independently verify in its own cycle. Requires 1-5 deterministic acceptance checks. File checks must point inside the safe write roots (${config.safeWriteRoots.join(", ")}). Limits: ${MAX_OPEN} open proposed goals, ${MAX_PER_DAY} per 24h; duplicates are ignored.`,
+      risk: "config_write",
+      approval: "auto",
+      parameters: {
+        type: "object",
+        required: ["title", "description", "acceptance"],
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", minLength: 3, maxLength: 200 },
+          description: { type: "string", maxLength: 4000 },
+          priority: { type: "integer", minimum: 0, maximum: 10 },
+          acceptance: {
+            type: "object",
+            required: ["checks"],
+            properties: {
+              mode: { type: "string", enum: ["all", "any"] },
+              checks: {
+                type: "array", minItems: 1, maxItems: 5,
+                items: {
+                  type: "object", required: ["type"],
+                  properties: {
+                    type: { type: "string", enum: ["file_exists", "file_contains", "final_text_contains", "tool_called"] },
+                    path: { type: "string" }, text: { type: "string" }, name: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      execute: (input) => {
+        const title = typeof input.title === "string" ? input.title.trim().slice(0, 200) : "";
+        const description = typeof input.description === "string" ? input.description.trim().slice(0, 4000) : "";
+        if (title.length < 3) throw new Error("title must be at least 3 characters.");
+        const acceptanceIn = record(input.acceptance);
+        const rawChecks = Array.isArray(acceptanceIn.checks) ? acceptanceIn.checks.slice(0, 5) : [];
+        if (!rawChecks.length) throw new Error("acceptance.checks needs at least one deterministic check.");
+        const checks: GoalAcceptanceContract["checks"] = [];
+        for (const raw of rawChecks) {
+          const c = record(raw);
+          const text = typeof c.text === "string" ? c.text : "";
+          const file = typeof c.path === "string" ? c.path : "";
+          if (c.type === "file_exists" || c.type === "file_contains") {
+            if (!withinSafeRoot(file)) throw new Error(`Acceptance file path "${file}" must be inside the safe write roots: ${config.safeWriteRoots.join(", ")}.`);
+            if (c.type === "file_exists") checks.push({ type: "file_exists", path: file });
+            else { if (!text) throw new Error("file_contains needs non-empty text."); checks.push({ type: "file_contains", path: file, text }); }
+          } else if (c.type === "final_text_contains") {
+            if (!text) throw new Error("final_text_contains needs non-empty text.");
+            checks.push({ type: "final_text_contains", text });
+          } else if (c.type === "tool_called") {
+            const name = typeof c.name === "string" ? c.name : "";
+            if (!name || !this.options.tools.has(name)) throw new Error(`tool_called needs the name of a registered tool; "${name}" is not one.`);
+            checks.push({ type: "tool_called", name });
+          } else {
+            throw new Error(`Unsupported acceptance check type "${String(c.type)}".`);
+          }
+        }
+        const since = new Date(Date.parse(this.now()) - 24 * 3600 * 1000).toISOString();
+        const db = this.options.db;
+        const duplicate = (db.prepare("SELECT id,status,title FROM pursue_goals WHERE created_at >= ?").all(since) as Array<{ id: number; status: string; title: string }>)
+          .find((g) => norm(g.title) === norm(title));
+        if (duplicate) return { created: false, reason: `A goal with this title already exists in the last 24h (#${duplicate.id}, ${duplicate.status}). Pick different work or answer NO_ACTION.` };
+        const open = Number((db.prepare("SELECT COUNT(*) c FROM pursue_goals WHERE source='ambient_proposal' AND status IN ('pending','active')").get() as { c: number }).c);
+        if (open >= MAX_OPEN) throw new Error(`Already ${open} proposed goals are open (limit ${MAX_OPEN}). Let them finish first.`);
+        const today = Number((db.prepare("SELECT COUNT(*) c FROM pursue_goals WHERE source='ambient_proposal' AND created_at >= ?").get(since) as { c: number }).c);
+        if (today >= MAX_PER_DAY) throw new Error(`Daily proposal limit (${MAX_PER_DAY}) reached.`);
+        const priority = Number.isInteger(input.priority) ? Math.max(0, Math.min(10, Number(input.priority))) : 5;
+        const goal = this.goals.create({
+          title, description: description || null, priority, source: "ambient_proposal",
+          acceptance: { mode: acceptanceIn.mode === "any" ? "any" : "all", checks }, replaceExisting: false,
+        });
+        proposals.push({ id: goal.id, title });
+        return { created: true, goal_id: goal.id, status: goal.status, note: "The supervisor will execute and verify this goal in its own cycle; do not do the work inline." };
+      },
+    };
+  }
+
   private async runAmbientDecision(trigger: "startup" | "idle"): Promise<boolean> {
     const config = this.config();
     if (!config.proactiveEnabled) return false;
@@ -870,21 +1027,26 @@ export class AutonomousSupervisor {
     const memoryRows = this.options.db.prepare(`SELECT region,summary,content FROM memory_chunks ORDER BY importance DESC,updated_at DESC LIMIT 8`).all() as Array<{ region: string; summary: string; content: string }>;
     const recentChat = this.options.db.prepare(`SELECT role,content FROM chat_messages WHERE session_id = 'miki-main-chat' ORDER BY created_at DESC LIMIT 8`).all() as Array<{ role: string; content: string }>;
     recentChat.reverse();
+    const identityBrief = ["identity/IDENTITY.md", "identity/SOUL.md", "identity/USER.md"]
+      .map((file) => this.heartbeatChecklist(file).trim().slice(0, 1800))
+      .filter(Boolean)
+      .join("\n\n");
     const prompt = [
       "You are Miki's main FULL_AGENT running the background autonomous loop. There is no router and no specialist agent. You are the same agent that serves interactive chat.",
       `Trigger: ${trigger}. Decide whether any useful proactive action should be taken now.`,
       active ? `ACTIVE GOAL: #${active.id} ${active.title} [${active.status}] progress=${active.progress}` : "ACTIVE GOAL: none",
       pending.length ? `PENDING TASKS:
 ${pending.map((task) => `- #${task.task_id} ${task.title} [${task.status}] due=${task.due_at}`).join("\n")}` : "PENDING TASKS: none",
+      identityBrief ? `WHO YOU ARE AND WHO YOU WORK FOR (act in line with this):\n${identityBrief}` : "",
       checklist ? `HEARTBEAT CHECKLIST:
 ${checklist.slice(0, 6000)}` : "HEARTBEAT CHECKLIST: unavailable",
       memoryRows.length ? `RECENT LONG-TERM MEMORY:
 ${memoryRows.map((row) => `- [${row.region}] ${row.summary || row.content.slice(0, 220)}`).join("\n")}` : "RECENT LONG-TERM MEMORY: none",
       recentChat.length ? `RECENT INTERACTIVE CONTEXT:
 ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n")}` : "RECENT INTERACTIVE CONTEXT: none",
-      "First decide internally. If nothing is worth doing, return exactly NO_ACTION as the first line and do not call tools. If useful work exists, take it with the available tools. You may create or update an autonomous goal when that is the right next action; when creating a goal, include deterministic acceptance checks whenever the goal type supports them.",
+      "You are a 24/7 agent, not a chatbot waiting for a query. Your default is to ACT: use your identity, long-term memory, recent conversation and the heartbeat checklist to find the most useful next piece of work for the user, define it as your own goal, and start on it with your tools. Follow up on unfinished work, check on running tasks, and improve things the user cares about. Return exactly NO_ACTION as the first line only when you have honestly checked all of that and nothing useful remains. When the next piece of work needs more than a trivial step, or its outcome should be verified, do NOT do it inline: call autonomy_propose_goal with a clear title, description and 1-5 deterministic acceptance checks (file_exists / file_contains inside the safe write roots, final_text_contains, tool_called). The supervisor executes that goal in its own cycle and independently verifies the checks before marking it completed. Quick lookups may be done inline.",
       "Do not generate routine chatter. Only send a proactive user notification when there is a concrete result, milestone, blocker, or materially useful discovery.",
-    ].join("\n\n");
+    ].filter(Boolean).join("\n\n");
 
     const allow = [...new Set([
       ...SAFE_AUTONOMOUS_TOOLS,
@@ -894,6 +1056,8 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     ])].filter((name) => this.options.tools.has(name));
     const tools = new ToolRegistry();
     for (const name of allow) { const tool = this.options.tools.get(name); if (tool) tools.register(tool); }
+    const proposals: Array<{ id: number; title: string }> = [];
+    tools.register(this.buildProposeGoalTool(config, proposals));
     const runId = `autonomy-ambient-${Date.now()}`;
     try {
       const result = await this.options.agent.run({
@@ -903,8 +1067,8 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         plan: false,
         allowTools: true,
         tools,
-        maxToolCalls: config.maxActions,
-        maxCompletionTokens: Math.min(config.maxTokensPerCycle, 4096),
+        ...(Number.isFinite(config.maxActions) ? { maxToolCalls: Math.max(config.maxActions, 8) } : {}),
+        ...(Number.isFinite(config.maxTokensPerCycle) ? { maxCompletionTokens: config.maxTokensPerCycle } : {}),
         approvalPolicy: new AutonomyPolicy({
           safeWriteRoots: config.safeWriteRoots,
           allowBrowser: config.allowBrowser,
@@ -927,9 +1091,14 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       this.recordProviderSuccess();
       const text = result.finalText.trim();
       const noAction = /^NO_ACTION\b/i.test(text) || !text;
-      const actionable = !noAction && result.status === "completed";
+      const actionable = proposals.length > 0 || (!noAction && result.status === "completed");
+      if (!noAction && proposals.length === 0 && result.status === "completed") {
+        this.options.log("Ambient decision returned text but queued no goal (the model did not call autonomy_propose_goal); nothing will be executed or verified for it.");
+      }
       if (actionable) {
-        await this.notifySafe({ text: truncate(text, 3000), runId, kind: "result" });
+        await this.notifySafe(proposals.length > 0
+          ? { text: `Autonomous goal queued: ${proposals.map((p) => `#${p.id} ${p.title}`).join("; ")}`, runId, goalId: proposals[0].id, kind: "progress" }
+          : { text: truncate(text, 3000), runId, kind: "result" });
         this.ambientBackoffSeconds = config.minPollSeconds;
         this.ambientNoActionStreak = 0;
         this.ambientStateKey = null;
@@ -951,6 +1120,20 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     }
   }
 
+  /** Pause new autonomous work without cancelling a currently running tool call. */
+  pause(): void {
+    this.paused = true;
+    this.wake();
+    this.options.log("Autonomy paused by operator.");
+  }
+
+  /** Resume autonomous work and immediately wake the supervisor loop. */
+  resume(): void {
+    this.paused = false;
+    this.wake();
+    this.options.log("Autonomy resumed by operator.");
+  }
+
   start(): void {
     if (this.running) return;
     try {
@@ -961,7 +1144,6 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       this.options.log(`Autonomy config unreadable at start (starting anyway): ${errorText(error)}`);
     }
     this.running = true;
-    this.paused = false;
     this.wakeRequested = true;
     this.loopAbort = new AbortController();
     this.loopPromise = this.runLoop();
@@ -971,14 +1153,6 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
   wake(): void {
     this.wakeRequested = true;
     this.wakeResolver?.();
-  }
-  pause(): void {
-    this.paused = true;
-    this.wake();
-  }
-  resume(): void {
-    this.paused = false;
-    this.wake();
   }
 
   async stop(): Promise<void> {
@@ -1013,10 +1187,6 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     // block shutdown for up to max_poll_seconds.
     const loopSignal = this.loopAbort?.signal;
     while (this.running && !loopSignal?.aborted) {
-      if (this.paused) {
-        await this.sleepInterruptible(1000, loopSignal);
-        continue;
-      }
       let sleepMs: number;
       try {
         const config = this.config();
@@ -1024,7 +1194,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         startup = false;
         await this.tick(tickTrigger);
         const hasGoal = Boolean(this.goals.active()) || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)));
-        if (!hasGoal && (
+        if (!this.paused && !hasGoal && (
           (this.ambientLastAt === 0 && config.startupDecision)
           || this.wakeRequested
           || this.ambientDueInMs(config) === 0
@@ -1055,6 +1225,9 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     const config = this.config();
     if (!config.enabled) {
       return (this.lastOutcome = { status: "disabled", reason: "Autonomy is disabled by configuration." });
+    }
+    if (this.paused) {
+      return (this.lastOutcome = { status: "idle", reason: "Autonomy is paused by the operator." });
     }
     if (this.inFlight) {
       return { status: "busy", reason: "An autonomous cycle is already running." };
@@ -1173,8 +1346,8 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         plan: false,
         allowTools: true,
         tools: autonomousTools,
-        maxToolCalls: config.maxActions,
-        maxCompletionTokens: config.maxTokensPerCycle,
+        ...(Number.isFinite(config.maxToolCallsPerGoalCycle) ? { maxToolCalls: config.maxToolCallsPerGoalCycle } : {}),
+        ...(Number.isFinite(config.maxTokensPerCycle) ? { maxCompletionTokens: config.maxTokensPerCycle } : {}),
         approvalPolicy: new AutonomyPolicy({
           safeWriteRoots: config.safeWriteRoots,
           allowBrowser: config.allowBrowser,
@@ -1206,7 +1379,10 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         workspaceRoot: this.options.workspaceRoot,
       }, 15_000);
       const legacyAccepted = !config.requireAcceptanceContract && !parsedAcceptance && result.status === "completed" && !blockedByModel;
-      const succeeded = result.status === "completed" && !blockedByModel && (acceptance.passed || legacyAccepted);
+      // A cycle that stopped only because it hit its tool/turn budget has still done the work when the
+      // independent, deterministic acceptance contract passes: trust that evidence, not the stop reason.
+      const acceptedAtLimit = result.status === "limit_reached" && !blockedByModel && Boolean(parsedAcceptance) && acceptance.passed;
+      const succeeded = (result.status === "completed" && !blockedByModel && (acceptance.passed || legacyAccepted)) || acceptedAtLimit;
       const planDigest = result.plan ? result.plan.steps.map((step) => `${step.id}:${step.title}`).join("\n") : undefined;
       const previousPlanDigest = previous?.plan_digest ?? "";
       const samePlanAsPrevious = Boolean(!succeeded && previous && previous.status !== "running" && planDigest && previousPlanDigest && planDigest === previousPlanDigest);

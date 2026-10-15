@@ -138,6 +138,7 @@ export class StreamHub {
 
   /** Sequenced event: buffered for resume and sent to every open subscriber. */
   publish(run: RunStream, type: string, payload: Record<string, unknown> = {}): void {
+    if (run.done) return
     run.sequence += 1
     const message = JSON.stringify({
       type,

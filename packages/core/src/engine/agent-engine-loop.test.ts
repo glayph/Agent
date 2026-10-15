@@ -1,8 +1,10 @@
 import { AgentEngine } from "./agent-engine.js";
+import { ApprovalStore } from "./approval-store.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { RUN_SUMMARY_SENTINEL, pruneToolResults, splitUnits } from "./context-manager.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
 import type { EngineEvent, EngineLLMClient, EngineMessage, EngineTool } from "./types.js";
+import { MetricsCollector } from "../metrics-collector.js";
 
 function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   return {
@@ -183,6 +185,79 @@ describe("model failover", () => {
     const result = await engine.run({ history: user("hi"), signal: controller.signal });
     expect(result.status).toBe("cancelled");
     expect(backup.requests).toHaveLength(0);
+  });
+});
+
+describe("run wall-clock budget", () => {
+  it("turns a model call that outlives the deadline into a limit result", async () => {
+    const llm: EngineLLMClient = {
+      model: "slow-model",
+      async complete(_messages, options) {
+        return await new Promise<never>((_resolve, reject) => {
+          if (options?.signal?.aborted) {
+            reject(new Error("aborted"));
+            return;
+          }
+          options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    };
+    const engine = new AgentEngine({ llm, tools: new ToolRegistry(), maxWallTimeMs: 25 });
+
+    const result = await engine.run({ history: user("do not hang") });
+
+    expect(result.status).toBe("limit_reached");
+    expect(result.error).toBe("Run wall-time budget of 25 ms reached.");
+    expect(result.finalText).toBe("");
+  });
+
+  it("emits a structured budget event and records the terminal outcome", async () => {
+    const llm = scriptedLLM([{ text: "done" }]);
+    const metrics = new MetricsCollector();
+    const events: EngineEvent[] = [];
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry(), metrics });
+
+    const result = await engine.run({ history: user("measure me"), onEvent: (event) => events.push(event) });
+
+    const budget = events.find((event) => event.type === "run.budget");
+    expect(budget).toMatchObject({ runId: result.runId, wallTimeMs: 0, outcome: "completed" });
+    expect(budget && budget.type === "run.budget" ? budget.elapsedMs : -1).toBeGreaterThanOrEqual(0);
+    expect(metrics.getCounter("agent_runs_total", { outcome: "completed" })).toBe(1);
+    expect(metrics.getStats("latency_agent_run")?.count).toBe(1);
+  });
+
+  it("cancels an in-flight tool when the wall-time deadline expires", async () => {
+    let resolveStarted!: () => void;
+    const toolStarted = new Promise<void>((resolve) => { resolveStarted = resolve; });
+    const registry = new ToolRegistry();
+    registry.register(tool({
+      name: "hang",
+      execute: (_input, context) => new Promise<never>((_resolve, reject) => {
+        resolveStarted();
+        context.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      }),
+    }));
+    const llm = scriptedLLM([{ calls: [{ name: "hang", id: "hang-1" }] }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, maxWallTimeMs: 30 });
+    const running = engine.run({ history: user("stop the tool") });
+    await toolStarted;
+    const result = await running;
+    expect(result.status).toBe("limit_reached");
+    expect(result.toolCalls[0].status).toBe("cancelled");
+  });
+
+  it("cancels an approval wait when the wall-time deadline expires", async () => {
+    const approvals = new ApprovalStore();
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "write", risk: "config_write" }));
+    const llm = scriptedLLM([{ calls: [{ name: "write", id: "write-1" }] }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, approvals, maxWallTimeMs: 30 });
+
+    const result = await engine.run({ history: user("approve the write") });
+
+    expect(result.status).toBe("limit_reached");
+    expect(result.toolCalls[0].status).toBe("cancelled");
+    expect(approvals.list()[0].status).toBe("denied");
   });
 });
 

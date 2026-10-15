@@ -39,6 +39,7 @@ export interface ControlPlan {
 
 export interface ApprovalRequest {
   id: string
+  kind?: "tool" | "control"
   runId: string
   actor: string
   action: string
@@ -48,6 +49,7 @@ export interface ApprovalRequest {
   status: string
   createdAt: string
   expiresAt: string
+  preview?: string
 }
 
 export interface ControlOutcome {
@@ -89,6 +91,21 @@ export async function approveApprovalRequest(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decidedBy }),
+    },
+  )
+}
+
+export async function denyApprovalRequest(
+  id: string,
+  reason = "Denied by the operator.",
+  decidedBy = "dashboard-operator",
+): Promise<{ request: ApprovalRequest }> {
+  return requestJson(
+    `/api/control/approvals/${encodeURIComponent(id)}/deny`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decidedBy, reason }),
     },
   )
 }

@@ -65,6 +65,25 @@ export async function postLauncherDashboardLogout(): Promise<boolean> {
 
 export type SetupResult = { ok: true } | { ok: false; error: string }
 
+export async function postLauncherDashboardPassword(
+  currentPassword: string,
+  password: string,
+  confirm: string,
+): Promise<SetupResult> {
+  const res = await fetch("/api/auth/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({
+      current_password: currentPassword.trim(),
+      password: password.trim(),
+      confirm: confirm.trim(),
+    }),
+  })
+  if (res.ok) return { ok: true }
+  return { ok: false, error: await readLauncherAuthError(res) }
+}
+
 export async function postLauncherDashboardSetup(
   password: string,
   confirm: string,

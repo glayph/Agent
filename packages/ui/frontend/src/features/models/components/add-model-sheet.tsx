@@ -1,9 +1,11 @@
 import {
+  IconChevronDown,
   IconDownload,
+  IconFolderOpen,
   IconLoader2,
   IconPlugConnected,
 } from "@tabler/icons-react"
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -13,27 +15,21 @@ import {
   getCatalogs,
   setDefaultModel,
 } from "@/api/models"
-import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
+import { cn } from "@/lib/utils"
 import { maskedSecretPlaceholder } from "@/shared/forms/secret-placeholder"
-import {
-  AdvancedSection,
-  Field,
-  KeyInput,
-  SwitchCardField,
-} from "@/shared/forms/shared-form"
-import { Badge } from "@/shared/ui/badge"
+import { KeyInput } from "@/shared/forms/shared-form"
 import { Button } from "@/shared/ui/button"
 import { Input } from "@/shared/ui/input"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/shared/ui/sheet"
+import { Switch } from "@/shared/ui/switch"
 import { Textarea } from "@/shared/ui/textarea"
 import { refreshGatewayState } from "@/store/gateway"
 
@@ -124,6 +120,81 @@ function placeholderText(value: string) {
   return `${trimmed}…`
 }
 
+const inputClass = "h-10 rounded-md shadow-none"
+
+/** One labelled control: sentence-case label, optional trailing action, inline error only. */
+function FormRow({
+  label,
+  htmlFor,
+  error,
+  errorId,
+  action,
+  children,
+  className,
+}: {
+  label: string
+  htmlFor?: string
+  error?: string
+  errorId?: string
+  action?: ReactNode
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      <div className="flex min-h-6 items-center justify-between gap-2">
+        <label
+          htmlFor={htmlFor}
+          className="text-foreground text-[13px] font-medium"
+        >
+          {label}
+        </label>
+        {action}
+      </div>
+      {children}
+      {error ? (
+        <p id={errorId} className="text-destructive text-xs">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function SwitchRow({
+  label,
+  checked,
+  onCheckedChange,
+  disabled,
+  title,
+}: {
+  label: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  disabled?: boolean
+  title?: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4" title={title}>
+      <span
+        className={cn(
+          "text-[13px] font-medium",
+          disabled && "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <Switch
+        size="sm"
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        disabled={disabled}
+        aria-label={label}
+      />
+    </div>
+  )
+}
+
 interface AddModelSheetProps {
   open: boolean
   onClose: () => void
@@ -151,6 +222,7 @@ export function AddModelSheet({
   const [modelValidation, setModelValidation] =
     useState<FieldValidation | null>(null)
   const [fetchOpen, setFetchOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
   const [filePickerKind, setFilePickerKind] =
     useState<ModelFilePickerKind | null>(null)
@@ -177,7 +249,6 @@ export function AddModelSheet({
     extraBody: `${formId}-extra-body`,
     customHeaders: `${formId}-custom-headers`,
   }
-  const hintId = (key: keyof typeof fieldIds) => `${fieldIds[key]}-hint`
   const errorId = (key: keyof typeof fieldIds) => `${fieldIds[key]}-error`
 
   const apiKeyPlaceholder = maskedSecretPlaceholder(
@@ -400,6 +471,10 @@ export function AddModelSheet({
   )
   const submittedApiBase = getSubmittedAPIBase(form.apiBase)
 
+  const suggestions = [
+    ...new Set([...commonModels, ...catalogModels, ...fetchedModels]),
+  ]
+
   const handleSave = async () => {
     if (!validate()) return
 
@@ -499,66 +574,37 @@ export function AddModelSheet({
     }
   }
 
+  const moreId = `${formId}-more`
+  const modelStatusClass =
+    modelValidation?.level === "error"
+      ? "text-destructive"
+      : modelValidation?.level === "warning"
+        ? "text-yellow-600 dark:text-yellow-500"
+        : "text-green-600 dark:text-green-500"
+
   return (
     <>
       <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
         <SheetContent
           side="right"
-          className="flex flex-col gap-0 p-0 data-[side=right]:!w-full data-[side=right]:sm:!w-[560px] data-[side=right]:sm:!max-w-[560px]"
+          className="flex flex-col gap-0 p-0 data-[side=right]:!w-full data-[side=right]:sm:!w-[500px] data-[side=right]:sm:!max-w-[500px]"
         >
-          <SheetHeader className="border-b-muted border-b px-6 py-5">
-            <SheetTitle className="text-base">
-              {t("models.add.title")}
+          <SheetHeader className="border-b px-7 py-5">
+            <SheetTitle className="text-[1.25rem] leading-7 font-normal tracking-[-0.005em] [font-family:Georgia,'Times_New_Roman',serif]">
+              {t("models.add.button")}
             </SheetTitle>
-            <SheetDescription className="text-xs">
-              {t("models.add.description")}
-            </SheetDescription>
           </SheetHeader>
 
           <div
             className="min-h-0 flex-1 overflow-y-auto"
             ref={scrollContainerRef}
           >
-            <div className="space-y-5 px-6 py-5">
-              <Field
-                label={t("models.add.modelName")}
-                hint={t("models.add.modelNameHint")}
-                labelFor={fieldIds.modelName}
-                descriptionId={hintId("modelName")}
-              >
-                <Input
-                  id={fieldIds.modelName}
-                  name="model_name"
-                  value={form.modelName}
-                  onChange={setField("modelName")}
-                  placeholder={placeholderText(
-                    t("models.add.modelNamePlaceholder"),
-                  )}
-                  autoComplete="off"
-                  aria-invalid={!!fieldErrors.modelName}
-                  aria-describedby={joinIds(
-                    hintId("modelName"),
-                    fieldErrors.modelName && errorId("modelName"),
-                  )}
-                />
-                {fieldErrors.modelName && (
-                  <p
-                    id={errorId("modelName")}
-                    className="text-destructive text-xs"
-                  >
-                    {fieldErrors.modelName}
-                  </p>
-                )}
-              </Field>
-
-              <Field
+            <div className="space-y-5 px-7 py-6">
+              <FormRow
                 label={t("models.field.provider")}
-                hint={t("models.field.providerHint")}
+                htmlFor={fieldIds.provider}
                 error={fieldErrors.provider}
-                labelFor={fieldIds.provider}
-                descriptionId={hintId("provider")}
                 errorId={errorId("provider")}
-                required
               >
                 <ProviderCombobox
                   id={fieldIds.provider}
@@ -568,20 +614,38 @@ export function AddModelSheet({
                     t("models.field.providerPlaceholder"),
                   )}
                   ariaDescribedBy={joinIds(
-                    hintId("provider"),
                     fieldErrors.provider && errorId("provider"),
                   )}
                   backendOptions={providerOptions}
                   filterCreateAllowed
                   containerRef={scrollContainerRef}
                 />
-              </Field>
+              </FormRow>
 
-              <Field
+              <FormRow
                 label={t("models.add.modelId")}
-                hint={t("models.add.modelIdHint")}
-                labelFor={fieldIds.model}
-                descriptionId={hintId("model")}
+                htmlFor={fieldIds.model}
+                error={
+                  fieldErrors.model && !modelValidation
+                    ? fieldErrors.model
+                    : undefined
+                }
+                errorId={errorId("model")}
+                action={
+                  providerSupportsFetch(form.provider, providerOptions) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-foreground -mr-1.5 size-7 rounded-md"
+                      onClick={() => setFetchOpen(true)}
+                      aria-label={t("models.fetch.title")}
+                      title={t("models.fetch.title")}
+                    >
+                      <IconDownload className="size-4" aria-hidden="true" />
+                    </Button>
+                  ) : undefined
+                }
               >
                 <Input
                   id={fieldIds.model}
@@ -594,12 +658,11 @@ export function AddModelSheet({
                       : placeholderText(t("models.add.modelIdPlaceholder"))
                   }
                   autoComplete="off"
-                  className="font-mono text-sm"
+                  className={cn(inputClass, "font-mono text-sm")}
                   aria-invalid={
                     !!fieldErrors.model || modelValidation?.level === "error"
                   }
                   aria-describedby={joinIds(
-                    hintId("model"),
                     modelValidation?.messageKey &&
                       `${fieldIds.model}-validation`,
                     fieldErrors.model && !modelValidation && errorId("model"),
@@ -608,13 +671,10 @@ export function AddModelSheet({
                 {modelValidation && modelValidation.messageKey && (
                   <div
                     id={`${fieldIds.model}-validation`}
-                    className={`flex items-center gap-2 text-xs ${
-                      modelValidation.level === "error"
-                        ? "text-destructive"
-                        : modelValidation.level === "warning"
-                          ? "text-yellow-600 dark:text-yellow-500"
-                          : "text-green-600 dark:text-green-500"
-                    }`}
+                    className={cn(
+                      "flex items-center gap-2 text-xs",
+                      modelStatusClass,
+                    )}
                   >
                     <span>
                       {t(
@@ -633,136 +693,104 @@ export function AddModelSheet({
                     )}
                   </div>
                 )}
-                {fieldErrors.model && !modelValidation && (
-                  <p id={errorId("model")} className="text-destructive text-xs">
-                    {fieldErrors.model}
-                  </p>
-                )}
-                {commonModels.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {commonModels.map((m) => (
-                      <Badge
-                        key={m}
-                        variant="secondary"
-                        className="hover:bg-secondary/80 cursor-pointer font-mono text-xs"
-                        asChild
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleCommonModel(m)}
-                        >
-                          {m}
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                )}
                 <ModelSuggestionBadges
-                  models={catalogModels}
+                  models={suggestions}
                   selectedModel={form.model}
                   onSelect={handleCommonModel}
+                  pageSize={8}
                 />
-                <ModelSuggestionBadges
-                  models={fetchedModels}
-                  selectedModel={form.model}
-                  onSelect={handleCommonModel}
-                />
-                <div className="flex items-center gap-2">
-                  {providerSupportsFetch(form.provider, providerOptions) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setFetchOpen(true)}
-                    >
-                      <IconDownload className="size-3" aria-hidden="true" />
-                      {t("models.fetch.title")}
-                    </Button>
-                  )}
-                  {!form.provider && (
-                    <span className="text-muted-foreground text-xs">
-                      {t("models.field.selectProviderFirst")}
-                    </span>
-                  )}
-                </div>
-              </Field>
+              </FormRow>
 
               {canonicalProvider === "llama.cpp" ? (
-                <Field
-                  label="llama.cpp runtime"
-                  hint="Use a GGUF file with llama-server, or an existing loopback OpenAI-compatible endpoint. No API key is used."
-                >
-                  <div className="grid gap-2">
+                <div className="space-y-5">
+                  <FormRow label="GGUF model">
                     <div className="flex gap-2">
                       <Input
                         value={form.localModelPath}
                         onChange={setField("localModelPath")}
-                        placeholder="/models/Miki-7B-Instruct.Q4_K_M.gguf"
-                        className="min-w-0 flex-1"
+                        placeholder="/models/model.Q4_K_M.gguf"
+                        className={cn(inputClass, "min-w-0 flex-1 font-mono text-sm")}
+                        aria-label="GGUF model"
                       />
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
+                        size="icon"
+                        className="size-10 shrink-0 rounded-md shadow-none"
                         onClick={() => setFilePickerKind("llm")}
+                        aria-label="Browse models"
+                        title="Browse models"
                       >
-                        Explore models
+                        <IconFolderOpen className="size-4" aria-hidden="true" />
                       </Button>
                     </div>
+                  </FormRow>
+                  <FormRow label="llama-server">
                     <div className="flex gap-2">
                       <Input
                         value={form.localExecutablePath}
                         onChange={setField("localExecutablePath")}
                         placeholder="/usr/local/bin/llama-server"
-                        className="min-w-0 flex-1"
+                        className={cn(inputClass, "min-w-0 flex-1 font-mono text-sm")}
+                        aria-label="llama-server"
                       />
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
+                        size="icon"
+                        className="size-10 shrink-0 rounded-md shadow-none"
                         onClick={() => setFilePickerKind("executable")}
+                        aria-label="Browse executable"
+                        title="Browse executable"
                       >
-                        Explore executable
+                        <IconFolderOpen className="size-4" aria-hidden="true" />
                       </Button>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                  </FormRow>
+                  <div className="grid grid-cols-3 gap-3">
+                    <FormRow label="Port">
                       <Input
                         value={form.localPort}
                         onChange={setField("localPort")}
                         placeholder="39200"
+                        inputMode="numeric"
+                        className={inputClass}
+                        aria-label="Port"
                       />
+                    </FormRow>
+                    <FormRow label="Context">
                       <Input
                         value={form.localContextSize}
                         onChange={setField("localContextSize")}
                         placeholder="4096"
+                        inputMode="numeric"
+                        className={inputClass}
+                        aria-label="Context size"
                       />
+                    </FormRow>
+                    <FormRow label="GPU layers">
                       <Input
                         value={form.localGpuLayers}
                         onChange={setField("localGpuLayers")}
                         placeholder="auto"
+                        className={inputClass}
+                        aria-label="GPU layers"
                       />
-                    </div>
-                    <label className="text-muted-foreground flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={form.localAutoStart}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            localAutoStart: e.target.checked,
-                          }))
-                        }
-                      />
-                      Start llama-server automatically when this model is
-                      selected
-                    </label>
+                    </FormRow>
                   </div>
-                </Field>
+                  <SwitchRow
+                    label="Auto-start"
+                    checked={form.localAutoStart}
+                    onCheckedChange={(checked) =>
+                      setForm((f) => ({ ...f, localAutoStart: checked }))
+                    }
+                  />
+                </div>
               ) : (
                 !isOAuth && (
-                  <Field
+                  <FormRow
                     label={t("models.field.apiKey")}
-                    labelFor={fieldIds.apiKey}
+                    htmlFor={fieldIds.apiKey}
                   >
                     <KeyInput
                       id={fieldIds.apiKey}
@@ -772,15 +800,13 @@ export function AddModelSheet({
                       placeholder={apiKeyPlaceholder}
                       autoComplete="off"
                     />
-                  </Field>
+                  </FormRow>
                 )
               )}
 
-              <Field
+              <FormRow
                 label={t("models.field.apiBase")}
-                hint={isOAuth ? t("models.edit.oauthNote") : undefined}
-                labelFor={fieldIds.apiBase}
-                descriptionId={isOAuth ? hintId("apiBase") : undefined}
+                htmlFor={fieldIds.apiBase}
               >
                 <Input
                   id={fieldIds.apiBase}
@@ -791,280 +817,296 @@ export function AddModelSheet({
                   type="url"
                   inputMode="url"
                   autoComplete="off"
-                  aria-describedby={isOAuth ? hintId("apiBase") : undefined}
+                  className={inputClass}
                   disabled={isOAuth}
                 />
-              </Field>
+              </FormRow>
 
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTestOpen(true)}
-                  disabled={!form.provider || !form.model}
-                >
-                  <IconPlugConnected className="size-4" aria-hidden="true" />
-                  {t("models.test.testConnection")}
-                </Button>
+              <FormRow
+                label={t("models.add.modelName")}
+                htmlFor={fieldIds.modelName}
+                error={fieldErrors.modelName}
+                errorId={errorId("modelName")}
+              >
+                <Input
+                  id={fieldIds.modelName}
+                  name="model_name"
+                  value={form.modelName}
+                  onChange={setField("modelName")}
+                  placeholder={placeholderText(
+                    t("models.add.modelNamePlaceholder"),
+                  )}
+                  autoComplete="off"
+                  className={inputClass}
+                  aria-invalid={!!fieldErrors.modelName}
+                  aria-describedby={joinIds(
+                    fieldErrors.modelName && errorId("modelName"),
+                  )}
+                />
+              </FormRow>
+
+              <div className="border-t pt-5">
+                <SwitchRow
+                  label={t("models.defaultOnSave.label")}
+                  checked={setAsDefault}
+                  onCheckedChange={setSetAsDefault}
+                  disabled={!defaultModelAllowed}
+                  title={
+                    !defaultModelAllowed && form.provider
+                      ? t("models.defaultOnSave.unsupportedProvider")
+                      : undefined
+                  }
+                />
               </div>
 
-              <SwitchCardField
-                label={t("models.defaultOnSave.label")}
-                hint={
-                  !defaultModelAllowed && form.provider
-                    ? t("models.defaultOnSave.unsupportedProvider")
-                    : t("models.defaultOnSave.description")
-                }
-                checked={setAsDefault}
-                onCheckedChange={setSetAsDefault}
-                disabled={!defaultModelAllowed}
-              />
-
-              <AdvancedSection>
-                <Field
-                  label={t("models.field.proxy")}
-                  hint={t("models.field.proxyHint")}
-                  labelFor={fieldIds.proxy}
-                  descriptionId={hintId("proxy")}
+              <div className="border-t pt-1">
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((v) => !v)}
+                  aria-expanded={moreOpen}
+                  aria-controls={moreId}
+                  className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between py-3 text-[13px] transition-colors"
                 >
-                  <Input
-                    id={fieldIds.proxy}
-                    name="proxy"
-                    value={form.proxy}
-                    onChange={setField("proxy")}
-                    placeholder={placeholderText("http://127.0.0.1:7890")}
-                    inputMode="url"
-                    autoComplete="off"
-                    aria-describedby={hintId("proxy")}
-                  />
-                </Field>
-
-                <Field
-                  label={t("models.field.authMethod")}
-                  hint={
-                    authMethodLocked
-                      ? t("models.field.authMethodManagedHint")
-                      : t("models.field.authMethodHint")
-                  }
-                  labelFor={fieldIds.authMethod}
-                  descriptionId={hintId("authMethod")}
-                >
-                  <Input
-                    id={fieldIds.authMethod}
-                    name="auth_method"
-                    value={
-                      authMethodLocked ? defaultAuthMethod : form.authMethod
-                    }
-                    onChange={setField("authMethod")}
-                    placeholder={placeholderText("oauth")}
-                    autoComplete="off"
-                    aria-describedby={hintId("authMethod")}
-                    disabled={authMethodLocked}
-                  />
-                </Field>
-
-                <Field
-                  label={t("models.field.connectMode")}
-                  hint={t("models.field.connectModeHint")}
-                  labelFor={fieldIds.connectMode}
-                  descriptionId={hintId("connectMode")}
-                >
-                  <Input
-                    id={fieldIds.connectMode}
-                    name="connect_mode"
-                    value={form.connectMode}
-                    onChange={setField("connectMode")}
-                    placeholder={placeholderText("stdio")}
-                    autoComplete="off"
-                    aria-describedby={hintId("connectMode")}
-                  />
-                </Field>
-
-                <Field
-                  label={t("models.field.workspace")}
-                  hint={t("models.field.workspaceHint")}
-                  labelFor={fieldIds.workspace}
-                  descriptionId={hintId("workspace")}
-                >
-                  <Input
-                    id={fieldIds.workspace}
-                    name="workspace"
-                    value={form.workspace}
-                    onChange={setField("workspace")}
-                    placeholder={placeholderText("/path/to/workspace")}
-                    autoComplete="off"
-                    aria-describedby={hintId("workspace")}
-                  />
-                </Field>
-
-                <Field
-                  label={t("models.field.requestTimeout")}
-                  hint={t("models.field.requestTimeoutHint")}
-                  labelFor={fieldIds.requestTimeout}
-                  descriptionId={hintId("requestTimeout")}
-                >
-                  <Input
-                    id={fieldIds.requestTimeout}
-                    name="request_timeout"
-                    value={form.requestTimeout}
-                    onChange={setField("requestTimeout")}
-                    placeholder={placeholderText("60")}
-                    type="number"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    aria-describedby={hintId("requestTimeout")}
-                    min={0}
-                  />
-                </Field>
-
-                <Field
-                  label={t("models.field.rpm")}
-                  hint={t("models.field.rpmHint")}
-                  labelFor={fieldIds.rpm}
-                  descriptionId={hintId("rpm")}
-                >
-                  <Input
-                    id={fieldIds.rpm}
-                    name="rpm"
-                    value={form.rpm}
-                    onChange={setField("rpm")}
-                    placeholder={placeholderText("60")}
-                    type="number"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    aria-describedby={hintId("rpm")}
-                    min={0}
-                  />
-                </Field>
-
-                <Field
-                  label={t("models.field.thinkingLevel")}
-                  hint={t("models.field.thinkingLevelHint")}
-                  labelFor={fieldIds.thinkingLevel}
-                  descriptionId={hintId("thinkingLevel")}
-                >
-                  <Input
-                    id={fieldIds.thinkingLevel}
-                    name="thinking_level"
-                    value={form.thinkingLevel}
-                    onChange={setField("thinkingLevel")}
-                    placeholder={placeholderText(
-                      t("models.field.providerDefault"),
+                  {t("models.advanced.toggle")}
+                  <IconChevronDown
+                    className={cn(
+                      "size-4 transition-transform duration-200 motion-reduce:transition-none",
+                      moreOpen && "rotate-180",
                     )}
-                    autoComplete="off"
-                    aria-describedby={hintId("thinkingLevel")}
+                    aria-hidden="true"
                   />
-                </Field>
+                </button>
+                {moreOpen && (
+                  <div id={moreId} className="space-y-5 pt-2 pb-1">
+                    <FormRow
+                      label={t("models.field.proxy")}
+                      htmlFor={fieldIds.proxy}
+                    >
+                      <Input
+                        id={fieldIds.proxy}
+                        name="proxy"
+                        value={form.proxy}
+                        onChange={setField("proxy")}
+                        placeholder={placeholderText("http://127.0.0.1:7890")}
+                        inputMode="url"
+                        autoComplete="off"
+                        className={inputClass}
+                      />
+                    </FormRow>
 
-                <Field
-                  label={t("models.field.maxTokensField")}
-                  hint={t("models.field.maxTokensFieldHint")}
-                  labelFor={fieldIds.maxTokensField}
-                  descriptionId={hintId("maxTokensField")}
-                >
-                  <Input
-                    id={fieldIds.maxTokensField}
-                    name="max_tokens_field"
-                    value={form.maxTokensField}
-                    onChange={setField("maxTokensField")}
-                    placeholder={placeholderText("max_completion_tokens")}
-                    autoComplete="off"
-                    aria-describedby={hintId("maxTokensField")}
-                  />
-                </Field>
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <FormRow
+                        label={t("models.field.authMethod")}
+                        htmlFor={fieldIds.authMethod}
+                      >
+                        <Input
+                          id={fieldIds.authMethod}
+                          name="auth_method"
+                          value={
+                            authMethodLocked ? defaultAuthMethod : form.authMethod
+                          }
+                          onChange={setField("authMethod")}
+                          placeholder={placeholderText("oauth")}
+                          autoComplete="off"
+                          className={inputClass}
+                          disabled={authMethodLocked}
+                        />
+                      </FormRow>
+                      <FormRow
+                        label={t("models.field.connectMode")}
+                        htmlFor={fieldIds.connectMode}
+                      >
+                        <Input
+                          id={fieldIds.connectMode}
+                          name="connect_mode"
+                          value={form.connectMode}
+                          onChange={setField("connectMode")}
+                          placeholder={placeholderText("stdio")}
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+                      </FormRow>
+                      <FormRow
+                        label={t("models.field.requestTimeout")}
+                        htmlFor={fieldIds.requestTimeout}
+                      >
+                        <Input
+                          id={fieldIds.requestTimeout}
+                          name="request_timeout"
+                          value={form.requestTimeout}
+                          onChange={setField("requestTimeout")}
+                          placeholder={placeholderText("60")}
+                          type="number"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className={inputClass}
+                          min={0}
+                        />
+                      </FormRow>
+                      <FormRow
+                        label={t("models.field.rpm")}
+                        htmlFor={fieldIds.rpm}
+                      >
+                        <Input
+                          id={fieldIds.rpm}
+                          name="rpm"
+                          value={form.rpm}
+                          onChange={setField("rpm")}
+                          placeholder={placeholderText("60")}
+                          type="number"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className={inputClass}
+                          min={0}
+                        />
+                      </FormRow>
+                      <FormRow
+                        label={t("models.field.thinkingLevel")}
+                        htmlFor={fieldIds.thinkingLevel}
+                      >
+                        <Input
+                          id={fieldIds.thinkingLevel}
+                          name="thinking_level"
+                          value={form.thinkingLevel}
+                          onChange={setField("thinkingLevel")}
+                          placeholder={placeholderText(
+                            t("models.field.providerDefault"),
+                          )}
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+                      </FormRow>
+                      <FormRow
+                        label={t("models.field.maxTokensField")}
+                        htmlFor={fieldIds.maxTokensField}
+                      >
+                        <Input
+                          id={fieldIds.maxTokensField}
+                          name="max_tokens_field"
+                          value={form.maxTokensField}
+                          onChange={setField("maxTokensField")}
+                          placeholder={placeholderText("max_completion_tokens")}
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+                      </FormRow>
+                    </div>
 
-                <Field
-                  label={t("models.field.toolSchemaTransform")}
-                  hint={t("models.field.toolSchemaTransformHint")}
-                  labelFor={fieldIds.toolSchemaTransform}
-                  descriptionId={hintId("toolSchemaTransform")}
-                >
-                  <Input
-                    id={fieldIds.toolSchemaTransform}
-                    name="tool_schema_transform"
-                    value={form.toolSchemaTransform}
-                    onChange={setField("toolSchemaTransform")}
-                    placeholder={placeholderText("google")}
-                    autoComplete="off"
-                    aria-describedby={hintId("toolSchemaTransform")}
-                  />
-                </Field>
+                    <FormRow
+                      label={t("models.field.toolSchemaTransform")}
+                      htmlFor={fieldIds.toolSchemaTransform}
+                    >
+                      <Input
+                        id={fieldIds.toolSchemaTransform}
+                        name="tool_schema_transform"
+                        value={form.toolSchemaTransform}
+                        onChange={setField("toolSchemaTransform")}
+                        placeholder={placeholderText("google")}
+                        autoComplete="off"
+                        className={inputClass}
+                      />
+                    </FormRow>
 
-                <SwitchCardField
-                  label={t("models.field.streamingEnabled")}
-                  hint={t("models.field.streamingEnabledHint")}
-                  checked={form.streamingEnabled}
-                  onCheckedChange={(checked) =>
-                    setForm((f) => ({ ...f, streamingEnabled: checked }))
-                  }
-                  ariaLabel={t("models.field.streamingEnabled")}
-                />
+                    <FormRow
+                      label={t("models.field.workspace")}
+                      htmlFor={fieldIds.workspace}
+                    >
+                      <Input
+                        id={fieldIds.workspace}
+                        name="workspace"
+                        value={form.workspace}
+                        onChange={setField("workspace")}
+                        placeholder={placeholderText("/path/to/workspace")}
+                        autoComplete="off"
+                        className={inputClass}
+                      />
+                    </FormRow>
 
-                <Field
-                  label={t("models.field.extraBody")}
-                  hint={t("models.field.extraBodyHint")}
-                  labelFor={fieldIds.extraBody}
-                  descriptionId={hintId("extraBody")}
-                >
-                  <Textarea
-                    id={fieldIds.extraBody}
-                    name="extra_body"
-                    value={form.extraBody}
-                    onChange={setField("extraBody")}
-                    placeholder={placeholderText('{"key": "value"}')}
-                    autoComplete="off"
-                    aria-describedby={hintId("extraBody")}
-                    rows={3}
-                  />
-                </Field>
+                    <FormRow
+                      label={t("models.field.extraBody")}
+                      htmlFor={fieldIds.extraBody}
+                    >
+                      <Textarea
+                        id={fieldIds.extraBody}
+                        name="extra_body"
+                        value={form.extraBody}
+                        onChange={setField("extraBody")}
+                        placeholder={placeholderText('{"key": "value"}')}
+                        autoComplete="off"
+                        className="rounded-md font-mono text-sm shadow-none"
+                        rows={3}
+                      />
+                    </FormRow>
 
-                <Field
-                  label={t("models.field.customHeaders")}
-                  hint={t("models.field.customHeadersHint")}
-                  labelFor={fieldIds.customHeaders}
-                  descriptionId={hintId("customHeaders")}
-                >
-                  <Textarea
-                    id={fieldIds.customHeaders}
-                    name="custom_headers"
-                    value={form.customHeaders}
-                    onChange={setField("customHeaders")}
-                    placeholder={placeholderText('{"X-Source": "coding-plan"}')}
-                    autoComplete="off"
-                    aria-describedby={hintId("customHeaders")}
-                    rows={3}
-                  />
-                </Field>
-              </AdvancedSection>
+                    <FormRow
+                      label={t("models.field.customHeaders")}
+                      htmlFor={fieldIds.customHeaders}
+                    >
+                      <Textarea
+                        id={fieldIds.customHeaders}
+                        name="custom_headers"
+                        value={form.customHeaders}
+                        onChange={setField("customHeaders")}
+                        placeholder={placeholderText('{"X-Source": "value"}')}
+                        autoComplete="off"
+                        className="rounded-md font-mono text-sm shadow-none"
+                        rows={3}
+                      />
+                    </FormRow>
+
+                    <SwitchRow
+                      label={t("models.field.streamingEnabled")}
+                      checked={form.streamingEnabled}
+                      onCheckedChange={(checked) =>
+                        setForm((f) => ({ ...f, streamingEnabled: checked }))
+                      }
+                    />
+                  </div>
+                )}
+              </div>
 
               {serverError && (
-                <p className="text-destructive bg-destructive/10 rounded-md px-3 py-2 text-sm">
+                <p
+                  role="alert"
+                  className="text-destructive bg-destructive/10 rounded-md px-3 py-2 text-sm"
+                >
                   {serverError}
                 </p>
               )}
             </div>
           </div>
 
-          <SheetFooter className="border-t-muted border-t px-6 py-4">
-            {isDirty && (
-              <ConfigChangeNotice
-                kind="save"
-                title={t("common.saveChangesTitle")}
-                description={t("models.unsavedPrompt")}
-              />
-            )}
-            <Button variant="ghost" onClick={onClose} disabled={saving}>
-              {t("common.cancel")}
-            </Button>
+          <SheetFooter className="flex-row items-center justify-between gap-2 border-t px-7 py-4 sm:justify-between">
             <Button
-              onClick={handleSave}
-              disabled={
-                !isDirty || saving || modelValidation?.level === "error"
-              }
+              type="button"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground -ml-2 rounded-md"
+              onClick={() => setTestOpen(true)}
+              disabled={!form.provider || !form.model}
             >
-              {saving && <IconLoader2 className="size-4 animate-spin" />}
-              {t("models.add.confirm")}
+              <IconPlugConnected className="size-4" aria-hidden="true" />
+              {t("models.test.testConnection")}
             </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                className="rounded-md"
+                onClick={onClose}
+                disabled={saving}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                className="rounded-md px-5"
+                onClick={handleSave}
+                disabled={
+                  !isDirty || saving || modelValidation?.level === "error"
+                }
+              >
+                {saving && <IconLoader2 className="size-4 animate-spin" />}
+                {t("models.add.confirm")}
+              </Button>
+            </div>
           </SheetFooter>
         </SheetContent>
 

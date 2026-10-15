@@ -184,7 +184,7 @@ export function createWorkspaceTools(options) {
             name: "file_write",
             description: "Create or overwrite a UTF-8 text file in the workspace. Requires the user's approval.",
             risk: "config_write",
-            approval: "auto",
+            approval: "required",
             parameters: {
                 type: "object",
                 required: ["path", "content"],

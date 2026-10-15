@@ -1307,6 +1307,24 @@ export function LauncherSection({
       description={t("pages.config.launcher_section_hint")}
     >
       <Field
+        label={t("pages.config.dashboard_current_password")}
+        hint={t("pages.config.dashboard_current_password_hint")}
+        layout="setting-row"
+        controlClassName="md:max-w-md"
+      >
+        <Input
+          type="password"
+          value={launcherForm.currentDashboardPassword}
+          disabled={disabled}
+          autoComplete="current-password"
+          placeholder={t("pages.config.dashboard_current_password_placeholder")}
+          onChange={(e) =>
+            onFieldChange("currentDashboardPassword", e.target.value)
+          }
+        />
+      </Field>
+
+      <Field
         label={t("pages.config.dashboard_password")}
         hint={t("pages.config.dashboard_password_hint")}
         layout="setting-row"

@@ -201,7 +201,7 @@ export function createSkillTools(options) {
             description: `Run a script that ships inside an installed skill and return its output. Pass the script path relative to the skill folder (see skill_read "scripts"). Supported types: ${supportedRunExtensions().join(", ")}. ` +
                 "No shell is used; the script gets a reduced environment without secrets, MIKI_SKILL_DIR and MIKI_WORKSPACE_DIR, and a time limit. Requires the user's approval.",
             risk: "service",
-            approval: "auto",
+            approval: "required",
             parameters: {
                 type: "object",
                 required: ["name", "script"],
@@ -273,7 +273,7 @@ export function createSkillTools(options) {
             name: "skill_install",
             description: "Install a skill from a registry (slug + registry) or from an archive / GitHub URL. Suspicious packages are refused unless `force` is set. Requires the user's approval.",
             risk: "install",
-            approval: "auto",
+            approval: "required",
             parameters: {
                 type: "object",
                 properties: {
@@ -324,7 +324,7 @@ export function createSkillTools(options) {
         name: "skill_delete",
         description: "Delete an installed (non built-in) skill. Requires the user's approval.",
         risk: "destructive",
-        approval: "auto",
+        approval: "required",
         parameters: {
             type: "object",
             required: ["name"],

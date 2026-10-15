@@ -1,0 +1,414 @@
+{
+ "schema_version": 1,
+ "agent": {
+  "name": "Miki",
+  "project": "Miki",
+  "persona": "You are Miki, \u09ac\u09be\u0982\u09b2\u09be-only RULEPLAY .\nYou operate as a systemwide computer-based agent: your files, tools, and reach are not confined to any single workspace folder. Miki is the single FULL_AGENT for interactive and autonomous work. It may execute authorized terminal, file, skill, and research operations without HITL prompts inside the isolated VirtualBox Ubuntu environment. Keep actions auditable and verify meaningful results.\nWhen the active local answer model is missing or unavailable, you may use the bounded model-runtime workflow: inspect the allow-listed catalog with `npm run model:list`, install a named approved model with `npm run model:install -- <model-id> --start`, then verify runtime health and use the registered model. Never invent a model URL, bypass checksum checks, download arbitrary binaries, or claim installation succeeded without an independent health check.\n",
+  "language": "en/english",
+  "timezone": "Asia/Dhaka",
+  "max_tokens_per_cycle": 16384,
+  "browser": {
+   "max_retries": 2,
+   "clear_state_every_n_navigations": 5,
+   "chrome_path": null
+  },
+  "resource": {
+   "mode": "balanced",
+   "message_history_limit": 4,
+   "web_search_max_calls_per_turn": 2,
+   "max_context_chars": 12000,
+   "system_index_limit": 6,
+   "system_index_cache_ttl_ms": 15000,
+   "tool_warmup_enabled": true,
+   "quality_retry_limit": 1
+  },
+  "memory": {
+   "short_term_limit": 20,
+   "long_term_enabled": true,
+   "auto_summarize": true,
+   "message_retention_days": null,
+   "vector_search_threshold": 0.5,
+   "consolidation_batch_size": 5,
+   "consolidation_debounce_ms": 60000,
+   "max_context_memories": 3,
+   "max_context_facts": 3,
+   "max_context_chars": 4000,
+   "prune_low_value_facts": true,
+   "fact_prune_threshold": 0.15,
+   "fact_prune_min_age_days": 30,
+   "global": {
+    "owner_peers": [],
+    "extraction": {
+     "enabled": false,
+     "batch_size": 3
+    }
+   },
+   "files": {
+    "enabled": true,
+    "bootstrap_max_chars": 6000,
+    "memory_md_max_chars": 3500,
+    "recent_days": 2,
+    "index_max_entries": 6,
+    "summarizer": "auto",
+    "summary_timeout_ms": 25000,
+    "summary_turns": 20,
+    "session_idle_minutes": 30,
+    "min_turns_for_summary": 2,
+    "writer": {
+     "max_slow_queue": 50
+    },
+    "compaction": {
+     "enabled": true,
+     "trigger_percent": 75,
+     "min_messages": 8,
+     "keep_recent": 6,
+     "max_summary_chars": 3000,
+     "flush_enabled": true,
+     "flush_margin_percent": 10
+    }
+   },
+   "personality_enabled": true,
+   "procedural_enabled": true,
+   "max_context_procedures": 3
+  },
+  "model_router": {
+   "enabled": true,
+   "max_attempts": 8,
+   "lanes": {
+    "default": {
+     "primary": "llama.cpp/lfm2.5-1.2b-instruct-q4_0",
+     "fallbacks": [
+      "gemini/gemini-3.5-flash-lite"
+     ]
+    },
+    "complex": {
+     "primary": "gemini/gemini-3.5-flash-lite",
+     "fallbacks": [
+      "llama.cpp/lfm2.5-1.2b-instruct-q4_0"
+     ]
+    },
+    "heartbeat": {
+     "primary": "gemini/gemini-3.5-flash-lite",
+     "fallbacks": [
+      "llama.cpp/lfm2.5-1.2b-instruct-q4_0"
+     ]
+    },
+    "subagent": {
+     "primary": "gemini/gemini-3.5-flash-lite",
+     "fallbacks": [
+      "llama.cpp/lfm2.5-1.2b-instruct-q4_0"
+     ]
+    }
+   },
+   "roles": {},
+   "credential_profiles": {}
+  },
+  "security": {
+   "bypass_restrictions": false,
+   "system_access": "full",
+   "sandbox_mode": true,
+   "risk_acceptance": false,
+   "privileged_account_required": false,
+   "audit_logging": true,
+   "approval_note": "Systemwide access is enabled for autonomous operation. Miki decides and executes actions without asking the user for interactive approval; every action remains validated, bounded, and audit-logged."
+  },
+  "visual": {
+   "screen_cooldown_seconds": 10
+  },
+  "tools": {
+   "auto_approve_safe": true,
+   "require_confirm_destructive": false,
+   "require_confirm_computer_use": false
+  }
+ },
+ "self_improvement": {
+  "enabled": true,
+  "reflection_interval_minutes": 60,
+  "optimization_interval_minutes": 180,
+  "prompt_tuning_interval_minutes": 120,
+  "max_reflections_per_day": 12,
+  "auto_apply_optimizations": false,
+  "guardrails": {
+   "enabled": true,
+   "max_prompt_drift_percent": 20
+  },
+  "behavior_learning": {
+   "enabled": true,
+   "mode": "observe",
+   "exploration_rate": 0.1,
+   "min_samples": 3,
+   "max_draft_notes": 3
+  }
+ },
+ "concurrency": {
+  "maxConcurrentTasks": 3,
+  "maxParallelToolCalls": 8,
+  "toolLockTimeoutMs": 30000,
+  "taskQueueSize": 50,
+  "schedulerIntervalMs": 100,
+  "maxScheduledTaskAttempts": 3,
+  "retryBaseDelayMs": 60000,
+  "retryMaxDelayMs": 900000,
+  "recoveryStaleAfterMs": 300000
+ },
+ "heartbeat": {
+  "enabled": true,
+  "interval_seconds": 30,
+  "checklist_path": "identity/HEARTBEAT.md",
+  "proactive": {
+   "enabled": true,
+   "startup_decision": true,
+   "min_poll_seconds": 5,
+   "max_poll_seconds": 60,
+   "idle_backoff_multiplier": 2,
+   "decision_interval_seconds": 30,
+   "max_decision_interval_seconds": 300,
+   "decision_backoff_multiplier": 1.5,
+   "failure_threshold": 3,
+   "failure_backoff_base_seconds": 30,
+   "failure_backoff_max_seconds": 300
+  },
+  "auto_actions": {
+   "enabled": true,
+   "max_actions_per_cycle": 3
+  },
+  "resource_limits": {
+   "max_tokens_per_cycle": 32768,
+   "max_idle_minutes": 1
+  }
+ },
+ "autonomy": {
+  "enabled": true,
+  "mode": "safe",
+  "unlimited_budgets": false,
+  "tool_policy": {
+   "mode": "safe",
+   "max_retries": 3,
+   "retry_backoff_seconds": 15,
+   "require_acceptance_contract": false,
+   "allow_browser": false,
+   "browser_allowed_domains": [],
+   "allow_computer_use": false,
+   "capability_profile": "safe",
+   "allowed_tools": [],
+   "allowed_external_side_effect_tools": [],
+   "safe_write_roots": [
+    "autonomy",
+    "identity/memory"
+   ]
+  },
+  "event_triggers": {
+   "max_per_minute": 30,
+   "cooldown_seconds": 5
+  }
+ },
+ "messaging": {
+  "adaptive": true,
+  "maxMessagesPerResponse": 3,
+  "enableChunking": true,
+  "enableStreaming": true,
+  "enableProgressMessages": true,
+  "maxChunkLength": 4000,
+  "avoidUnnecessaryMessages": true,
+  "streamingMinLength": 1200,
+  "multiMessageMinLength": 800,
+  "progressIntervalMs": 1800
+ },
+ "skill_governance": {
+  "enabled": true,
+  "validator": {
+   "check_syntax": true,
+   "check_dangerous_patterns": true,
+   "test_execution": true
+  }
+ },
+ "agents": {
+  "defaults": {
+   "workspace": ".",
+   "restrict_to_workspace": false,
+   "split_on_marker": false,
+   "max_completion_tokens": 16384,
+   "context_window": 0,
+   "max_tool_iterations": 12,
+   "summarize_message_threshold": 20,
+   "summarize_token_percent": 75,
+   "tool_feedback": {
+    "enabled": true,
+    "max_args_length": 300,
+    "separate_messages": true
+   },
+   "turn_profile": {
+    "enabled": true,
+    "history": {
+     "mode": "default"
+    },
+    "system_prompt": {
+     "mode": "default"
+    },
+    "skills": {
+     "mode": "default"
+    },
+    "tools": {
+     "mode": "default"
+    }
+   },
+   "system_access": "full"
+  }
+ },
+ "session": {
+  "dm_scope": "per-channel-peer"
+ },
+ "evolution": {
+  "enabled": true,
+  "mode": "observe",
+  "min_task_count": 2,
+  "min_success_ratio": 0.7,
+  "cold_path_trigger": "after_turn",
+  "cold_path_times": []
+ },
+ "tools": {
+  "cron": {
+   "allow_command": false,
+   "exec_timeout_minutes": 5
+  }
+ },
+ "devices": {
+  "enabled": true,
+  "monitor_usb": true
+ },
+ "channels": {
+  "telegram": {
+   "enabled": false,
+   "type": "telegram"
+  },
+  "discord": {
+   "enabled": false,
+   "type": "discord"
+  },
+  "slack": {
+   "enabled": false,
+   "type": "slack"
+  },
+  "feishu": {
+   "enabled": false,
+   "type": "feishu"
+  },
+  "dingtalk": {
+   "enabled": false,
+   "type": "dingtalk"
+  },
+  "qq": {
+   "enabled": false,
+   "type": "qq"
+  },
+  "weixin": {
+   "enabled": false,
+   "type": "weixin"
+  },
+  "wecom": {
+   "enabled": false,
+   "type": "wecom"
+  },
+  "line": {
+   "enabled": false,
+   "type": "line"
+  },
+  "onebot": {
+   "enabled": false,
+   "type": "onebot"
+  },
+  "whatsapp": {
+   "enabled": false,
+   "type": "whatsapp"
+  },
+  "miki": {
+   "enabled": false,
+   "type": "miki"
+  },
+  "matrix": {
+   "enabled": false,
+   "type": "matrix"
+  },
+  "irc": {
+   "enabled": false,
+   "type": "irc"
+  },
+  "mqtt": {
+   "enabled": false,
+   "type": "mqtt"
+  }
+ },
+ "channel_list": {
+  "telegram": {
+   "enabled": false,
+   "type": "telegram"
+  },
+  "discord": {
+   "enabled": false,
+   "type": "discord"
+  },
+  "slack": {
+   "enabled": false,
+   "type": "slack"
+  },
+  "feishu": {
+   "enabled": false,
+   "type": "feishu"
+  },
+  "dingtalk": {
+   "enabled": false,
+   "type": "dingtalk"
+  },
+  "qq": {
+   "enabled": false,
+   "type": "qq"
+  },
+  "weixin": {
+   "enabled": false,
+   "type": "weixin"
+  },
+  "wecom": {
+   "enabled": false,
+   "type": "wecom"
+  },
+  "line": {
+   "enabled": false,
+   "type": "line"
+  },
+  "onebot": {
+   "enabled": false,
+   "type": "onebot"
+  },
+  "whatsapp": {
+   "enabled": false,
+   "type": "whatsapp"
+  },
+  "miki": {
+   "enabled": false,
+   "type": "miki"
+  },
+  "matrix": {
+   "enabled": false,
+   "type": "matrix"
+  },
+  "irc": {
+   "enabled": false,
+   "type": "irc"
+  },
+  "mqtt": {
+   "enabled": false,
+   "type": "mqtt"
+  }
+ },
+ "speech_to_text": {
+  "enabled": false,
+  "provider": "whisper.cpp",
+  "models": [],
+  "language": "auto",
+  "max_audio_seconds": 300,
+  "max_file_mb": 25,
+  "timeout_ms": 120000,
+  "concurrency": 1,
+  "retain_audio": false
+ }
+}

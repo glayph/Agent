@@ -79,22 +79,16 @@ function ComposerActionsMenu({
   attachEnabled,
   onAddImages,
   onAddAudio,
-  onModeClick,
   attachLabel,
   audioLabel,
-  modeLabel,
   menuLabel,
-  buttonClassName,
 }: {
   attachEnabled: boolean
   onAddImages: () => void
   onAddAudio?: () => void
-  onModeClick?: () => void
   attachLabel: string
   audioLabel: string
-  modeLabel: string
   menuLabel: string
-  buttonClassName?: string
 }) {
   return (
     <DropdownMenu>
@@ -103,14 +97,11 @@ function ComposerActionsMenu({
           type="button"
           variant="ghost"
           size="icon"
-          className={cn(
-            "text-muted-foreground hover:bg-primary/10 hover:text-primary rounded-full transition-colors",
-            buttonClassName,
-          )}
+          className="text-muted-foreground hover:bg-muted hover:text-foreground size-9 rounded-xl transition-colors"
           aria-label={menuLabel}
           title={menuLabel}
         >
-          <IconPlus className="size-4" />
+          <IconPlus className="size-[1.125rem]" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top">
@@ -122,12 +113,6 @@ function ComposerActionsMenu({
           <DropdownMenuItem disabled={!attachEnabled} onSelect={onAddAudio}>
             <IconFileMusic className="size-4" />
             {audioLabel}
-          </DropdownMenuItem>
-        )}
-        {onModeClick && (
-          <DropdownMenuItem onSelect={onModeClick}>
-            <IconAdjustmentsHorizontal className="size-4" />
-            {modeLabel}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -164,7 +149,8 @@ export function ChatComposer({
   const isRecording = resolvedVoiceState === "recording"
   const isTranscribing = resolvedVoiceState === "transcribing"
   const hasMessageInput = input.trim().length > 0 || attachments.length > 0
-  const showVoiceAction = !hasMessageInput && Boolean(onStartVoice)
+  // The mic takes the send button's place only while there is nothing to send.
+  const showVoiceAction = canInput && !hasMessageInput && Boolean(onStartVoice)
   const composingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const sendHintId = useId()
@@ -182,13 +168,32 @@ export function ChatComposer({
         })
   const placeholder =
     disabledMessage ??
-    t("chat.placeholderCompact", { defaultValue: "Ask anything" })
+    (isWorking
+      ? t("chat.placeholderWorking", {
+          defaultValue: "Message Miki while it works",
+        })
+      : t("chat.placeholderCompact", { defaultValue: "Ask anything" }))
   const resolvedModeLabel =
     modeLabel ?? t("chat.modeAction", { defaultValue: "Mode" })
   const actionsMenuLabel = t("chat.actionsMenu", {
     defaultValue: "Composer actions",
   })
   const textareaDescription = canInput ? sendHintId : disabledMessageId
+
+  const voiceLabel = isTranscribing
+    ? t("chat.transcribingVoice", { defaultValue: "Transcribing…" })
+    : isRecording
+      ? t("chat.stopVoice", { defaultValue: "Stop recording" })
+      : t("chat.startVoice", { defaultValue: "Record voice message" })
+  const actionLabel = showVoiceAction ? voiceLabel : t("chat.sendMessage")
+  const actionDisabled = showVoiceAction
+    ? isTranscribing || !onStartVoice
+    : !canInput || !canSend
+  const onAction = showVoiceAction
+    ? isRecording
+      ? onStopVoice
+      : onStartVoice
+    : onSend
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     const nativeEvent = e.nativeEvent as Event & {
@@ -210,16 +215,63 @@ export function ChatComposer({
 
   return (
     <div className="pointer-events-none relative z-10 shrink-0 bg-transparent px-[var(--chat-inline-padding)] pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-      <div
-        className={cn(
-          "pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col rounded-[0.625rem] border [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] [background:var(--chat-composer-bg)]",
-          canInput
-            ? "min-h-[var(--chat-composer-min-height)] rounded-[0.625rem] p-2"
-            : "min-h-12 rounded-[0.625rem] p-2",
-        )}
-      >
+      <div className="pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col overflow-hidden rounded-2xl border [background:var(--chat-composer-bg)] [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)]">
+        {isEditing && onCancelEdit ? (
+          <div className="bg-muted/60 text-muted-foreground flex items-center justify-between gap-2 border-b px-3 py-1.5 text-[12.5px] leading-5">
+            <span className="min-w-0 truncate">
+              {t("chat.editingMessage", {
+                defaultValue: "Editing message — send to apply changes",
+              })}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 rounded-lg px-2 text-[12px]"
+              onClick={onCancelEdit}
+            >
+              {t("common.cancel")}
+            </Button>
+          </div>
+        ) : null}
+
+        {isWorking ? (
+          <div
+            role="status"
+            className="bg-primary/5 border-primary/10 flex items-center gap-2.5 border-b px-3 py-1.5 text-[12.5px] leading-5"
+          >
+            <span aria-hidden className="relative flex size-2 shrink-0">
+              <span className="bg-primary absolute inline-flex size-full rounded-full opacity-60 motion-safe:animate-ping" />
+              <span className="bg-primary relative inline-flex size-2 rounded-full" />
+            </span>
+            <span className="text-foreground flex-1 font-medium sm:flex-none">
+              {t("chat.agentWorking", { defaultValue: "Miki is working" })}
+            </span>
+            <span className="text-muted-foreground hidden min-w-0 flex-1 truncate sm:block">
+              {t("chat.agentWorkingHint", {
+                defaultValue: "Anything you send now reaches it on its next step.",
+              })}
+            </span>
+            {onStopGeneration ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-foreground hover:bg-primary/10 h-7 shrink-0 gap-1.5 rounded-lg px-2 text-[12.5px]"
+                onClick={onStopGeneration}
+                aria-label={t("chat.stopGeneration", {
+                  defaultValue: "Stop generating",
+                })}
+              >
+                <IconPlayerStop className="size-3.5" />
+                {t("chat.stopAction", { defaultValue: "Stop" })}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         {attachments.length > 0 && (
-          <div className="mb-2 flex max-w-full flex-col gap-1.5 px-1.5 sm:flex-row sm:flex-wrap">
+          <div className="flex max-w-full flex-col gap-1.5 px-3 pt-3 sm:flex-row sm:flex-wrap">
             {attachments.map((attachment, index) => (
               <AttachmentCard
                 key={`${attachment.url}-${index}`}
@@ -231,224 +283,145 @@ export function ChatComposer({
           </div>
         )}
 
-        {isEditing && onCancelEdit ? (
-          <div className="text-muted-foreground mb-1.5 flex items-center justify-between gap-2 px-1 text-[12.5px] leading-5">
-            <span className="min-w-0 truncate">
-              {t("chat.editingMessage", {
-                defaultValue: "Editing message — send to apply changes",
-              })}
+        {canInput ? (
+          <TextareaAutosize
+            ref={textareaRef}
+            id={textareaId}
+            name="message"
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            onCompositionStart={() => {
+              composingRef.current = true
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={!canInput}
+            aria-label={t("chat.messageInput", { defaultValue: "Message" })}
+            aria-describedby={textareaDescription}
+            autoComplete="off"
+            data-chat-composer-input="true"
+            className="text-foreground placeholder:text-muted-foreground/70 max-h-[var(--chat-composer-text-max-height)] min-h-[3rem] w-full min-w-0 resize-none border-0 bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-6 shadow-none focus-visible:ring-0 focus-visible:outline-none dark:bg-transparent"
+            minRows={1}
+            maxRows={8}
+          />
+        ) : (
+          <div
+            role="textbox"
+            aria-disabled="true"
+            aria-label={t("chat.messageInput", { defaultValue: "Message" })}
+            aria-describedby={disabledMessageId}
+            title={disabledMessage || undefined}
+            className="text-muted-foreground flex min-h-[3rem] min-w-0 items-center gap-2 px-4 pt-3.5 pb-1 text-[14px] leading-6"
+          >
+            <IconAlertCircle className="text-warning/90 size-4 shrink-0" />
+            <span className="truncate">
+              {disabledShortMessage || disabledMessage}
             </span>
+          </div>
+        )}
+        <span id={sendHintId} className="sr-only">
+          {t("chat.sendHint")}
+        </span>
+
+        <div
+          data-chat-composer-controls="true"
+          className="flex min-h-12 items-center gap-1 px-2 pt-1 pb-2"
+        >
+          <ComposerActionsMenu
+            attachEnabled={canInput}
+            onAddImages={onAddImages}
+            onAddAudio={onAddAudio}
+            attachLabel={t("chat.attachImage")}
+            audioLabel={t("chat.attachAudio", {
+              defaultValue: "Upload audio",
+            })}
+            menuLabel={actionsMenuLabel}
+          />
+          {onModeClick ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 shrink-0 px-2 text-[12px]"
-              onClick={onCancelEdit}
+              className="text-muted-foreground hover:bg-muted hover:text-foreground h-9 max-w-[10rem] min-w-0 gap-1.5 rounded-xl px-2.5 text-[13px] font-normal"
+              onClick={onModeClick}
+              title={resolvedModeLabel}
             >
-              {t("common.cancel")}
+              <IconAdjustmentsHorizontal className="size-4 shrink-0" />
+              <span className="truncate">{resolvedModeLabel}</span>
             </Button>
-          </div>
-        ) : null}
-        {canInput ? (
-          <div
-            data-chat-composer-controls="true"
-            className="flex min-h-10 items-end gap-2"
-          >
-            <ComposerActionsMenu
-              attachEnabled={canInput}
-              onAddImages={onAddImages}
-              onAddAudio={onAddAudio}
-              onModeClick={onModeClick}
-              attachLabel={t("chat.attachImage")}
-              audioLabel={t("chat.attachAudio", {
-                defaultValue: "Upload audio",
-              })}
-              modeLabel={resolvedModeLabel}
-              menuLabel={actionsMenuLabel}
-              buttonClassName="size-9 rounded-full"
-            />
-            <TextareaAutosize
-              ref={textareaRef}
-              id={textareaId}
-              name="message"
-              value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              onCompositionStart={() => {
-                composingRef.current = true
-              }}
-              onCompositionEnd={() => {
-                composingRef.current = false
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              disabled={!canInput}
-              aria-label={t("chat.messageInput", { defaultValue: "Message" })}
-              aria-describedby={textareaDescription}
-              autoComplete="off"
-              className="text-foreground placeholder:text-muted-foreground/70 max-h-[var(--chat-composer-text-max-height)] min-h-9 min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-2 text-[15px] leading-6 shadow-none transition-colors focus-visible:ring-0 focus-visible:outline-none dark:bg-transparent"
-              minRows={1}
-              maxRows={6}
-            />
-            <span id={sendHintId} className="sr-only">
-              {t("chat.sendHint")}
-            </span>
-            <div className="flex shrink-0 items-center gap-1 pb-0.5">
-              {showVoiceAction && isRecording && (
-                <span
-                  className="text-destructive hidden text-xs tabular-nums sm:inline"
-                  aria-live="polite"
-                >
-                  {t("chat.voiceRecording", {
-                    defaultValue: "Recording {{seconds}}s",
-                    seconds: Math.max(0, Math.floor(voiceElapsedMs / 1000)),
-                  })}
-                </span>
-              )}
-              {contextUsage && (
-                <ContextUsageRing
-                  usage={contextUsage}
-                  onDetailClick={onContextDetail}
-                />
-              )}
-              <Tooltip delayDuration={700}>
-                <TooltipTrigger asChild>
-                  <span tabIndex={!showVoiceAction && !canSend ? 0 : undefined}>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant={
-                        showVoiceAction && isRecording ? "destructive" : "ghost"
-                      }
-                      className={cn(
-                        "size-8 rounded-full transition-transform hover:scale-105 active:scale-95",
-                        showVoiceAction
-                          ? "text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                          : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_4px_14px_color-mix(in_srgb,var(--primary)_32%,transparent)]",
-                      )}
-                      onClick={
-                        isWorking && onStopGeneration
-                          ? onStopGeneration
-                          : showVoiceAction
-                            ? isRecording
-                              ? onStopVoice
-                              : onStartVoice
-                            : onSend
-                      }
-                      disabled={
-                        isWorking && onStopGeneration
-                          ? false
-                          : showVoiceAction
-                            ? isTranscribing || !onStartVoice
-                            : !canSend
-                      }
-                      aria-label={
-                        isWorking && onStopGeneration
-                          ? t("chat.stopGeneration", {
-                              defaultValue: "Stop generating",
-                            })
-                          : showVoiceAction
-                            ? isTranscribing
-                              ? t("chat.transcribingVoice", {
-                                  defaultValue: "Transcribing…",
-                                })
-                              : isRecording
-                                ? t("chat.stopVoice", {
-                                    defaultValue: "Stop recording",
-                                  })
-                                : t("chat.startVoice", {
-                                    defaultValue: "Record voice message",
-                                  })
-                            : t("chat.sendMessage")
-                      }
-                      aria-describedby={sendHintId}
-                    >
-                      {isWorking && onStopGeneration ? (
-                        <IconPlayerStop className="size-3.5" />
-                      ) : showVoiceAction ? (
-                        isTranscribing ? (
-                          <IconLoader2 className="size-4 animate-spin" />
-                        ) : isRecording ? (
-                          <IconPlayerStop className="size-4" />
-                        ) : (
-                          <IconMicrophone className="size-4" />
-                        )
-                      ) : (
-                        <IconArrowUp className="size-3.5" />
-                      )}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent
-                  className="bg-muted text-foreground border-transparent text-center whitespace-pre-line shadow-none"
-                  arrowClassName="bg-muted fill-muted"
-                >
-                  {showVoiceAction
-                    ? isTranscribing
-                      ? t("chat.transcribingVoice", {
-                          defaultValue: "Transcribing…",
-                        })
-                      : isRecording
-                        ? t("chat.stopVoice", {
-                            defaultValue: "Stop recording",
-                          })
-                        : t("chat.startVoice", {
-                            defaultValue: "Record voice message",
-                          })
-                    : t("chat.sendHint")}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        ) : (
-          <div
-            data-chat-composer-controls="true"
-            className="flex min-h-10 items-center gap-2"
-          >
-            <ComposerActionsMenu
-              attachEnabled={false}
-              onAddImages={onAddImages}
-              onAddAudio={onAddAudio}
-              onModeClick={onModeClick}
-              attachLabel={t("chat.attachImage")}
-              audioLabel={t("chat.attachAudio", {
-                defaultValue: "Upload audio",
-              })}
-              modeLabel={resolvedModeLabel}
-              menuLabel={actionsMenuLabel}
-              buttonClassName="size-9 rounded-full"
-            />
-            <div
-              role="textbox"
-              aria-disabled="true"
-              aria-label={t("chat.messageInput", { defaultValue: "Message" })}
-              aria-describedby={disabledMessageId}
-              title={disabledMessage || undefined}
-              className="text-muted-foreground/80 flex min-w-0 flex-1 items-center gap-1.5 px-2 text-[13.5px] leading-5"
+          ) : null}
+
+          <div className="flex-1" />
+
+          {showVoiceAction && isRecording && (
+            <span
+              className="text-destructive flex items-center gap-1.5 pr-1 text-xs tabular-nums"
+              aria-live="polite"
             >
-              <IconAlertCircle className="text-warning/90 size-3.5 shrink-0" />
-              <span className="truncate">
-                {disabledShortMessage || disabledMessage}
+              <span
+                aria-hidden
+                className="bg-destructive size-1.5 rounded-full motion-safe:animate-pulse"
+              />
+              {t("chat.voiceRecording", {
+                defaultValue: "Recording {{seconds}}s",
+                seconds: Math.max(0, Math.floor(voiceElapsedMs / 1000)),
+              })}
+            </span>
+          )}
+          {contextUsage && (
+            <ContextUsageRing
+              usage={contextUsage}
+              onDetailClick={onContextDetail}
+            />
+          )}
+          <Tooltip delayDuration={700}>
+            <TooltipTrigger asChild>
+              <span tabIndex={actionDisabled ? 0 : undefined}>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={showVoiceAction && isRecording ? "destructive" : "ghost"}
+                  className={cn(
+                    "size-9 rounded-xl transition-[transform,background-color,color] active:scale-95",
+                    actionDisabled && !isTranscribing
+                      ? "bg-muted text-muted-foreground/50"
+                      : showVoiceAction && !isRecording
+                        ? "bg-muted text-foreground hover:bg-primary/10 hover:text-primary"
+                        : !showVoiceAction
+                          ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                          : "",
+                  )}
+                  onClick={onAction}
+                  disabled={actionDisabled}
+                  aria-label={actionLabel}
+                  aria-describedby={sendHintId}
+                >
+                  {showVoiceAction ? (
+                    isTranscribing ? (
+                      <IconLoader2 className="size-[1.125rem] animate-spin" />
+                    ) : isRecording ? (
+                      <IconPlayerStop className="size-[1.125rem]" />
+                    ) : (
+                      <IconMicrophone className="size-[1.125rem]" />
+                    )
+                  ) : (
+                    <IconArrowUp className="size-[1.125rem]" />
+                  )}
+                </Button>
               </span>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              {contextUsage && (
-                <ContextUsageRing
-                  usage={contextUsage}
-                  onDetailClick={onContextDetail}
-                />
-              )}
-              <Button
-                type="button"
-                size="icon"
-                className="bg-muted text-muted-foreground/50 size-8 rounded-full shadow-none"
-                disabled
-                aria-label={t("chat.sendMessage")}
-              >
-                <IconArrowUp className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        )}
+            </TooltipTrigger>
+            <TooltipContent
+              className="bg-muted text-foreground border-transparent text-center whitespace-pre-line shadow-none"
+              arrowClassName="bg-muted fill-muted"
+            >
+              {showVoiceAction ? voiceLabel : t("chat.sendHint")}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
         {!canInput && disabledMessage && (
           <p id={disabledMessageId} className="sr-only">
             {disabledMessage}

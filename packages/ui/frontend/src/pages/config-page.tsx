@@ -7,7 +7,7 @@ import { toast } from "sonner"
 
 import { patchAppConfig, resetAppConfig } from "@/api/channels"
 import { launcherFetch } from "@/api/http"
-import { postLauncherDashboardSetup } from "@/api/launcher-auth"
+import { postLauncherDashboardPassword } from "@/api/launcher-auth"
 import {
   getAutoStartStatus,
   getLauncherConfig,
@@ -174,6 +174,7 @@ export function ConfigPage() {
       sessionTimeoutMinutes: String(
         launcherConfig.session_timeout_minutes ?? 0,
       ),
+      currentDashboardPassword: "",
       dashboardPassword: "",
       dashboardPasswordConfirm: "",
     }
@@ -195,6 +196,7 @@ export function ConfigPage() {
     launcherForm.sessionTimeoutMinutes !==
       launcherBaseline.sessionTimeoutMinutes
   const launcherPasswordDirty =
+    launcherForm.currentDashboardPassword.trim() !== "" ||
     launcherForm.dashboardPassword.trim() !== "" ||
     launcherForm.dashboardPasswordConfirm.trim() !== ""
   const launcherDirty = launcherSettingsDirty || launcherPasswordDirty
@@ -300,10 +302,11 @@ export function ConfigPage() {
     let configApply: Awaited<ReturnType<typeof patchAppConfig>> | undefined
     try {
       setSaving(true)
+      const currentPassword = launcherForm.currentDashboardPassword.trim()
       const password = launcherForm.dashboardPassword.trim()
       const confirm = launcherForm.dashboardPasswordConfirm.trim()
       if (launcherPasswordDirty) {
-        if (!password) {
+        if (!currentPassword || !password) {
           throw new Error(t("pages.config.dashboard_password_required"))
         }
         if (password !== confirm) {
@@ -682,6 +685,7 @@ export function ConfigPage() {
           sessionTimeoutMinutes: String(
             savedLauncherConfig.session_timeout_minutes ?? 0,
           ),
+          currentDashboardPassword: "",
           dashboardPassword: "",
           dashboardPasswordConfirm: "",
         }
@@ -695,13 +699,18 @@ export function ConfigPage() {
       }
 
       if (launcherPasswordDirty) {
-        const result = await postLauncherDashboardSetup(password, confirm)
+        const result = await postLauncherDashboardPassword(
+          currentPassword,
+          password,
+          confirm,
+        )
         if (!result.ok) {
           throw new Error(result.error)
         }
 
         const clearedLauncherForm = savedLauncherForm ?? {
           ...launcherForm,
+          currentDashboardPassword: "",
           dashboardPassword: "",
           dashboardPasswordConfirm: "",
         }

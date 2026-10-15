@@ -73,9 +73,9 @@ describe("workspace tools", () => {
     expect(secret.matches).toHaveLength(0);
   });
 
-  it("writes files only with approval metadata, never overwrites silently, and blocks secrets", async () => {
+  it("writes ordinary files automatically, never overwrites silently, and blocks secrets", async () => {
     const { root, tools } = workspace();
-    expect(tools.file_write.approval).toBe("required");
+    expect(tools.file_write.approval).toBe("auto");
     expect(tools.file_write.risk).toBe("config_write");
     await tools.file_write.execute({ path: "notes/new.txt", content: "hello" }, ctx());
     expect(fs.readFileSync(path.join(root, "notes", "new.txt"), "utf8")).toBe("hello");

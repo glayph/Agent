@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto"
 import type Database from "better-sqlite3"
 import type { WebSocket } from "ws"
 import type { createWsEventMapper } from "./agent-runtime.js"
+import { GoalStore } from "@miki/core/api/goals"
 import type { planAdaptiveOutput } from "@miki/core"
 import type { getLifecycleBus } from "@miki/core/hooks"
 import type { FileMemoryService, retrieveRelevantTurns } from "@miki/core/memory-files"
@@ -42,6 +43,17 @@ export class ChatRunTimeoutError extends Error {
     this.name = "ChatRunTimeoutError"
   }
 }
+function isActionRequest(text: string): boolean {
+  return /\b(show|create|write|read|list|run|check|inspect|test|search|open|make|execute|demonstrate)\b/i.test(text)
+    || /\b(দেখাও|লিখ|পড়|তালিকা|চালাও|পরীক্ষা|খুঁজে)\b/.test(text)
+}
+
+function isPlanOnly(text: string, request: string): boolean {
+  if (!isActionRequest(request) || !text.trim() || text.length > 2400) return false
+  return /\b(i['’]?m|i am|i will|i['’]?ll|first|next|then|going to|plan to|let me|now i)\b/i.test(text)
+    || /\b(প্রথমে|এরপর|এখন|করব|করবো|লিখব|পড়ব|চালাব)\b/.test(text)
+}
+
 const TRANSIENT_ERROR = /timed? ?out|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network|\b(?:429|500|502|503|504)\b|rate.?limit|overloaded|temporarily/i
 /** Reject if `work` does not settle in time. The work itself is not cancelled here. */
 const withDeadline = <T,>(work: Promise<T>, ms: number, label: string): Promise<T> =>
@@ -82,7 +94,7 @@ export interface ChatTurnInput {
 export interface ChatTurnOutcome {
   runId?: string
   /** `rejected`: nothing was run (empty message, retry not allowed). */
-  status: StreamStatus | "rejected"
+  status: StreamStatus | "rejected" | "steered"
 }
 
 export interface AgentRunResult {
@@ -100,6 +112,8 @@ export interface ChatTurnRunnerDeps {
     llmFor(model?: string): { model?: string } | null | undefined
     startRun(input: any): Promise<AgentRunResult>
     cancelRun(runId: string): unknown
+    /** Hand a message to a run that is still working. Returns false if the run is not active. */
+    steerRun?(runId: string, text: string): boolean
   }
   fileMemory: FileMemoryService
   getAppConfig: () => Record<string, unknown>
@@ -126,6 +140,8 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
   const appendGatewayLog = deps.log
   // One serialized chat run per conversation (OpenClaw-style session lane).
   const lane = deps.lane ?? createKeyedLane()
+  // Run currently working for each conversation: new messages are steered into it instead of waiting.
+  const activeRunByContext = new Map<string, string>()
   const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value))
 
   const setMessageStatus = (messageId: string | undefined, status: "queued" | "processing" | "completed" | "failed" | "retrying", detail?: string) => {
@@ -188,6 +204,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
       const isRetry = trigger.mode === "retry"
       let releaseChatLane: (() => void) | undefined
       let ownMessageId: string | undefined
+      let ownRunId: string | undefined
       let activeStream: RunStream | undefined
       try {
         let content = String(trigger.content || "").trim()
@@ -228,6 +245,14 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           if (autoTitle) db.prepare("UPDATE chat_sessions SET title=? WHERE id=? AND title=?").run(autoTitle, sessionId, DEFAULT_CHAT_TITLE)
           ownMessageId = persistedUserMessageId
           reply?.("message.accepted", { message_id: persistedUserMessageId, client_message_id: clientMessageId || undefined, status: "queued", queue_position: lane.pending(contextId) })
+        }
+        // The agent is already working on this conversation: hand the message to the running
+        // agent right away so it can answer and follow it, instead of making the user wait.
+        const workingRunId = activeRunByContext.get(contextId)
+        if (!isRetry && workingRunId && persistedUserMessageId && agent.steerRun?.(workingRunId, content)) {
+          setMessageStatus(persistedUserMessageId, "processing", "Delivered to the running agent.")
+          reply?.("message.accepted", { message_id: persistedUserMessageId, status: "processing", steered: true, run_id: workingRunId })
+          return { runId: workingRunId, status: "steered" }
         }
         // Wait for the previous run of this conversation: this message needs its
         // persisted answer in the history, and runs must never interleave. Released
@@ -311,6 +336,8 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
         }
         if (!content && incomingAttachments.length === 0) return { status: "rejected" }
         const runId = `run_${randomUUID()}`
+        ownRunId = runId
+        activeRunByContext.set(contextId, runId)
         const requested = trigger.requestedModel?.trim() || undefined
         const stream = streamHub.createRun({ runId, sessionId, contextId, socket: input.socket })
         activeStream = stream
@@ -554,13 +581,33 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           }
           flushRunFinished()
           const recoverableLimit = result.status === "failed" && /limit|budget|step|empty response|could not make progress/i.test(result.error || "")
-          const resultText = result.finalText?.trim() || (recoverableLimit
+          let resultText = result.finalText?.trim() || (recoverableLimit
             ? "I reached the current execution limit before finishing. The work completed so far is preserved; please continue and I will resume from the latest state."
             : result.error?.trim() || "I could not complete this run.")
-          if (!result.finalText?.trim() && resultText) {
+          // A model that still narrates a plan after the engine's execution retry
+          // has not completed the user's operational request. Persist a durable
+          // goal so the always-on supervisor can continue it after this turn.
+          if (result.status === "completed" && result.toolCalls.length === 0 && isPlanOnly(resultText, content)) {
+            const handoff = new GoalStore(db).create({
+              title: content.slice(0, 500),
+              description: `Interactive run ${runId} ended with a plan-only response. Continue the request with real tool calls. Model draft:\n${resultText}`,
+              source: "interactive-handoff",
+              replaceExisting: false,
+            })
+            getLifecycleBus().emit("message:received", {
+              eventId: `handoff-${runId}`,
+              session_key: contextId,
+              text: content,
+              surface: "webchat",
+              status: "handoff",
+            })
+            resultText = `I saved this as persistent goal #${handoff.id} and the autonomous supervisor will continue with real tool execution. Initial model plan: ${resultText}`
+            appendGatewayLog(`Interactive run ${runId} handed off plan-only response to autonomous goal #${handoff.id}.`)
+          }
+          if (result.status !== "cancelled" && !result.finalText?.trim() && resultText) {
             mapper.handle({ type: "message.final", runId, content: resultText })
           }
-          if (resultText) persistAdaptiveReply(resultText, result.model)
+          if (result.status !== "cancelled" && resultText) persistAdaptiveReply(resultText, result.model)
           const streamStatus = result.status === "cancelled"
             ? "cancelled"
             : recoverableLimit
@@ -613,6 +660,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
         }
         return { runId: activeStream?.runId, status: "failed" }
       } finally {
+        if (ownRunId && activeRunByContext.get(contextId) === ownRunId) activeRunByContext.delete(contextId)
         releaseChatLane?.()
       }
     },

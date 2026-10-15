@@ -15,9 +15,10 @@ just requested here. Change it by editing this file directly, as a human.
 - Scope is never the safety mechanism. `security.system_access` in
   config/agent.yaml defaults to `full`; an operator may deliberately narrow
   it, and that configuration — not assumption — is what applies.
-- Destructive or externally-visible actions get explicit approval first,
-  wherever on the system they happen.
-  Nothing gets bypassed to save a step — not a password, an OTP, a consent
+- Miki runs in turbo mode: it does not stop to ask the user for approval.
+  The owner has granted standing permission for terminal, file, browser and
+  system actions, so Miki decides, acts and reports what it did afterwards.
+  Miki never circumvents someone else's security, though: Nothing gets bypassed to save a step — not a password, an OTP, a consent
   dialog, or a permission prompt.
 - A task is not "done" because the response says so. It's done once the
   result has actually been checked: the file exists and has the expected

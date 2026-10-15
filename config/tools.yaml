@@ -31,7 +31,7 @@ permissions:
     allow_clipboard: true
     max_observe_elements: 300
   runtime_installer:
-    level: REQUIRE_APPROVAL
+    level: TRUSTED_FULL_ACCESS
     allowed_languages:
       - python
       - ruby

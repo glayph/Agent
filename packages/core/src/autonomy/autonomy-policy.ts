@@ -93,6 +93,11 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
       return { mode: "auto", reason: "Explicitly granted external side-effect capability is enabled by operator policy." };
     }
 
+    // Supervisor-owned goal proposal: bounded, de-duplicated and acceptance-checked inside the tool itself.
+    if (tool.name === "autonomy_propose_goal") {
+      return { mode: "auto", reason: "Bounded goal proposal is validated and capped by the autonomous supervisor." };
+    }
+
     // High-impact local execution is never made safe merely by appearing in
     // a generic allowlist. It must first pass the capability-profile gate.
     if (tool.name === "shell_execute" || tool.name === "terminal_run" || tool.name === "terminal_kill") {
@@ -148,7 +153,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
         try {
           const url = new URL(rawUrl);
           const hostname = url.hostname.toLowerCase();
-          const allowed = this.browserAllowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+          const allowed = this.browserAllowedDomains.some((domain) => domain === "*" || hostname === domain || hostname.endsWith(`.${domain}`));
           if (!allowed) return { mode: "block", reason: `Browser domain '${hostname}' is not in the autonomous allowlist.` };
         } catch {
           return { mode: "block", reason: "Invalid browser URL." };

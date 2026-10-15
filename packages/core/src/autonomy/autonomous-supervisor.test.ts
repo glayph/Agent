@@ -58,6 +58,18 @@ describe("AutonomousSupervisor", () => {
 
   afterEach(() => db.close());
 
+  it("pauses and resumes autonomous work without losing persistent goals", async () => {
+    const goal = goals.create({ title: "Paused goal", steps: ["Inspect"], replaceExisting: false });
+    supervisor.pause();
+    expect(supervisor.status().paused).toBe(true);
+    expect((await supervisor.tick("paused-test")).reason).toMatch(/paused/i);
+    expect(run).not.toHaveBeenCalled();
+    expect(goals.get(goal.id)?.status).toBe("active");
+    supervisor.resume();
+    expect(supervisor.status().paused).toBe(false);
+    expect((await supervisor.tick("resumed-test")).status).toBe("completed");
+  });
+
   it("runs an active goal with only the safe tool allowlist and persists completion", async () => {
     const goal = goals.create({ title: "Inspect workspace", steps: ["Inspect"], replaceExisting: false });
     const result = await supervisor.tick("test");
@@ -69,7 +81,8 @@ describe("AutonomousSupervisor", () => {
       "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write",
     ]);
     expect(run.mock.calls[0][0].approvalPolicy).toBeDefined();
-    expect(run.mock.calls[0][0].maxToolCalls).toBe(1);
+    // Goal cycles use autonomy.max_tool_calls_per_goal_cycle (default 12), not heartbeat max_actions_per_cycle (=1 here).
+    expect(run.mock.calls[0][0].maxToolCalls).toBe(12);
     expect(run.mock.calls[0][0].maxCompletionTokens).toBe(8192);
     expect(goals.get(goal.id)?.status).toBe("completed");
     expect(db.prepare("SELECT status FROM autonomy_goal_runs WHERE run_id=?").get(result.runId)).toEqual({ status: "completed" });
@@ -165,6 +178,14 @@ describe("AutonomousSupervisor", () => {
     expect(result.status).toBe("completed");
     expect(supervisor.listScheduledTasks()[0]).toMatchObject({ status: "completed", goal_id: expect.any(Number) });
     expect(goals.get(Number(supervisor.listScheduledTasks()[0].goal_id))?.status).toBe("completed");
+    const durable = db.prepare("SELECT task_id,status,version,goal FROM miki_tasks ORDER BY created_at DESC LIMIT 1").get() as { task_id: string; status: string; version: number; goal: string };
+    expect(durable).toMatchObject({ status: "completed", version: 3, goal: "Scheduled inspection" });
+    expect(db.prepare("SELECT to_status FROM miki_task_events WHERE task_id=? ORDER BY id").all(durable.task_id)).toEqual([
+      { to_status: "queued" },
+      { to_status: "running" },
+      { to_status: "verifying" },
+      { to_status: "completed" },
+    ]);
   });
 
   it("migrates a Phase 3 task row without losing existing task data", () => {

@@ -1969,7 +1969,12 @@ body {
 [data-chat-composer-controls="true"] textarea {
   font-size: 0.875rem;
 }
-
+[data-chat-composer-input="true"]:focus,
+[data-chat-composer-input="true"]:focus-visible {
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
 [data-chat-composer-controls="true"] > button,
 [data-chat-composer-controls="true"] [data-slot="button"] {
   box-shadow: none !important;

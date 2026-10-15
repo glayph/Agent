@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { WebSocketServer } from "ws";
 import { createAgentRuntime, createWsEventMapper } from "./agent-runtime.js";
 import { createFileManagerRouter, FileManagerError } from "@miki/core/file-manager";
-import { FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine";
+import { DurableTaskStore, FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine";
 import { normalizeRuntimePaths } from "@miki/core/paths";
 import { createSkillsRouter, createSkillsService } from "@miki/core/skills";
 import { LayeredOrchestrator } from "@miki/core/engine";
@@ -37,6 +37,8 @@ const dataRoot = process.env.MIKI_DATA_DIR
 mkdirSync(dataRoot, { recursive: true });
 const db = new Database(path.join(dataRoot, "miki-runtime.sqlite"));
 db.pragma("journal_mode = WAL");
+const durableTaskStore = new DurableTaskStore(db);
+durableTaskStore.recoverExpired();
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS auth_sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
@@ -145,29 +147,31 @@ const verifyPassword = (password, stored) => {
     return actual.length === expected.length && timingSafeEqual(actual, expected);
 };
 const cookie = (req, name) => req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1] ?? null;
+const NO_AUTH_EXPIRY = "9999-12-31T23:59:59.999Z";
 const authSessionConfig = () => {
     try {
         const raw = db.prepare("SELECT value FROM settings WHERE key='launcher_config'").get();
         const value = raw?.value ? JSON.parse(raw.value) : {};
         const minutes = Number(value?.session_timeout_minutes || 0);
-        return Number.isFinite(minutes) && minutes > 0 ? Math.min(Math.floor(minutes), 31 * 24 * 60) : 30 * 24 * 60;
+        return Number.isFinite(minutes) && minutes >= 0 ? Math.min(Math.floor(minutes), 31 * 24 * 60) : 0;
     }
     catch {
-        return 30 * 24 * 60;
+        return 0;
     }
 };
 const issueAuth = (res) => {
     const token = randomBytes(32).toString("hex");
     const maxAgeMinutes = authSessionConfig();
-    const expires = new Date(Date.now() + 1000 * 60 * maxAgeMinutes).toISOString();
+    const expires = maxAgeMinutes > 0 ? new Date(Date.now() + 1000 * 60 * maxAgeMinutes).toISOString() : NO_AUTH_EXPIRY;
     db.prepare("INSERT INTO auth_sessions(token,created_at,expires_at) VALUES(?,?,?)").run(token, now(), expires);
-    res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeMinutes * 60}`);
+    const maxAge = maxAgeMinutes > 0 ? `; Max-Age=${maxAgeMinutes * 60}` : "";
+    res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax${maxAge}`);
 };
 const authenticated = (req) => {
     const token = cookie(req, "miki_session");
     if (!token)
         return false;
-    return Boolean(db.prepare("SELECT token FROM auth_sessions WHERE token=? AND expires_at>? ").get(token, now()));
+    return Boolean(db.prepare("SELECT token FROM auth_sessions WHERE token=? AND (expires_at=? OR expires_at>?)").get(token, NO_AUTH_EXPIRY, now()));
 };
 function requireAuth(req, res, next) {
     if (authenticated(req))
@@ -258,8 +262,17 @@ app.get("/api/health", (_req, res) => {
 });
 app.get("/api/auth/status", (req, res) => {
     const token = cookie(req, "miki_session");
-    const row = token ? db.prepare("SELECT expires_at FROM auth_sessions WHERE token=? AND expires_at>? ").get(token, now()) : undefined;
-    res.json({ authenticated: authenticated(req), initialized: Boolean(setting("dashboard_password")), session_timeout_minutes: authSessionConfig(), session_expires_at: row?.expires_at ? Date.parse(row.expires_at) : undefined });
+    const isAuthenticated = authenticated(req);
+    let row = token ? db.prepare("SELECT expires_at FROM auth_sessions WHERE token=? AND (expires_at=? OR expires_at>?)").get(token, NO_AUTH_EXPIRY, now()) : undefined;
+    if (isAuthenticated && token) {
+        const minutes = authSessionConfig();
+        const expires = minutes > 0 ? new Date(Date.now() + 1000 * 60 * minutes).toISOString() : NO_AUTH_EXPIRY;
+        db.prepare("UPDATE auth_sessions SET expires_at=? WHERE token=?").run(expires, token);
+        const maxAge = minutes > 0 ? `; Max-Age=${minutes * 60}` : "";
+        res.setHeader("Set-Cookie", `miki_session=${token}; Path=/; HttpOnly; SameSite=Lax${maxAge}`);
+        row = { expires_at: expires };
+    }
+    res.json({ authenticated: isAuthenticated, initialized: Boolean(setting("dashboard_password")), session_timeout_minutes: authSessionConfig(), session_expires_at: row?.expires_at && row.expires_at !== NO_AUTH_EXPIRY ? Date.parse(row.expires_at) : undefined });
 });
 app.post("/api/auth/setup", (req, res) => {
     if (setting("dashboard_password"))
@@ -272,6 +285,19 @@ app.post("/api/auth/setup", (req, res) => {
         return res.status(400).json({ error: "Passwords do not match." });
     putSetting("dashboard_password", hashPassword(password));
     issueAuth(res);
+    res.json({ ok: true });
+});
+app.post("/api/auth/password", requireAuth, (req, res) => {
+    const current = typeof req.body?.current_password === "string" ? req.body.current_password.trim() : "";
+    const password = typeof req.body?.password === "string" ? req.body.password.trim() : "";
+    const confirm = typeof req.body?.confirm === "string" ? req.body.confirm.trim() : "";
+    const stored = setting("dashboard_password")?.value;
+    if (!stored || !verifyPassword(current, stored)) return res.status(401).json({ error: "Current dashboard password is incorrect." });
+    if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+    if (password !== confirm) return res.status(400).json({ error: "Passwords do not match." });
+    putSetting("dashboard_password", hashPassword(password));
+    const token = cookie(req, "miki_session");
+    if (token) db.prepare("DELETE FROM auth_sessions WHERE token<>?").run(token);
     res.json({ ok: true });
 });
 app.post("/api/auth/login", (req, res) => {

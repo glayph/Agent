@@ -155,51 +155,44 @@ heartbeat:
   proactive:
     enabled: true
     startup_decision: true
-    min_poll_seconds: 15
-    max_poll_seconds: 300
+    min_poll_seconds: 5
+    max_poll_seconds: 60
     idle_backoff_multiplier: 2
-    decision_interval_seconds: 900
+    decision_interval_seconds: 30
     # Adaptive LLM gating: after each NO_ACTION the next paid decision waits
     # base * multiplier^streak (capped) unless chat/goals/tasks/memory changed.
-    max_decision_interval_seconds: 21600
-    decision_backoff_multiplier: 2
+    max_decision_interval_seconds: 300
+    decision_backoff_multiplier: 1.5
     # Provider failure handling: exponential retry delay, and one warning to the
     # user after this many consecutive failed decisions (self-heals on success).
     failure_threshold: 3
     failure_backoff_base_seconds: 30
-    failure_backoff_max_seconds: 1800
+    failure_backoff_max_seconds: 300
   auto_actions:
     enabled: true
     max_actions_per_cycle: 3
   resource_limits:
-    max_tokens_per_cycle: 16384
-    max_idle_minutes: 5
+    max_tokens_per_cycle: 32768
+    max_idle_minutes: 1
 autonomy:
   enabled: true
-  mode: operator
+  mode: safe
+  # Autonomous work is always bounded; tune explicit limits below instead of
+  # allowing unbounded tool calls, tokens, retries, or wall-clock execution.
+  unlimited_budgets: false
+  # Tool calls one goal cycle may use (read, write, verify...). Separate from
+  # heartbeat.auto_actions.max_actions_per_cycle, which only bounds idle decisions.
+  max_tool_calls_per_goal_cycle: 12
   tool_policy:
-    mode: operator
-    max_retries: 2
-    retry_backoff_seconds: 60
-    require_acceptance_contract: true
+    mode: safe
+    max_retries: 3
+    retry_backoff_seconds: 15
+    require_acceptance_contract: false
     allow_browser: false
     browser_allowed_domains: []
     allow_computer_use: false
-    capability_profile: operator
-    allowed_tools:
-      - terminal_run
-      - file_write
-      - file_mkdir
-      - file_copy
-      - file_delete
-      - file_move
-      - file_rename
-      - file_run
-      - skill_install
-      - skill_delete
-      - skill_run
-      - goal_create
-      - goal_update
+    capability_profile: safe
+    allowed_tools: []
     allowed_external_side_effect_tools: []
     safe_write_roots:
       - autonomy
@@ -226,7 +219,8 @@ skill_governance:
     test_execution: true
 agents:
   defaults:
-    workspace: /home/ubuntu/miki
+    # Resolve relative to the running installation; stale absolute paths are ignored by the runtime.
+    workspace: .
     restrict_to_workspace: false
     split_on_marker: false
     max_completion_tokens: 16384

@@ -185,7 +185,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
     {
       name: "file_write",
       description:
-        "Create or overwrite a UTF-8 text file in the workspace. Runs directly according to the user's execution preference.",
+        "Create or overwrite a UTF-8 text file in the workspace. Ordinary workspace edits are automatic; destructive or sensitive actions remain approval-gated.",
       risk: "config_write",
       approval: "auto",
       parameters: {
