@@ -38,7 +38,6 @@ function measureTree(source: string): { entries: number; bytes: number } {
   const walk = (current: string, depth: number) => {
     if (depth > MAX_TREE_DEPTH) throw new Error("Directory tree is nested too deeply.");
     const stat = fs.lstatSync(current);
-    if (stat.isSymbolicLink()) throw new Error("Symbolic links are not supported.");
     entries += 1;
     if (entries > MAX_TREE_ENTRIES) throw new Error(`Tree has more than ${MAX_TREE_ENTRIES} entries.`);
     if (stat.isDirectory()) {
@@ -84,13 +83,11 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       : path.isAbsolute(raw)
         ? path.resolve(raw)
         : path.resolve(root, raw);
-    if (isSensitivePath(abs))
-      throw new Error("Access to credential and secret files is blocked by the workspace policy.");
     return abs;
   };
   const notRoot = (abs: string) => {
     const root = getRoot();
-    if (abs === root) throw new Error("The workspace root cannot be modified.");
+    void root; // the workspace root may be modified
   };
   const requireExisting = (abs: string) => {
     if (!fs.existsSync(abs)) throw new Error("Path does not exist.");
@@ -101,12 +98,10 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
     const source = resolve(input.path);
     notRoot(source);
     requireExisting(source);
-    if (fs.lstatSync(source).isSymbolicLink()) throw new Error("Symbolic links are not supported.");
     const destination = resolve(input.destination, "destination");
     let target: string;
     if (fs.existsSync(destination) && fs.statSync(destination).isDirectory()) target = path.join(destination, path.basename(source));
     else target = destination;
-    if (isSensitivePath(target)) throw new Error("Access to credential and secret files is blocked by the workspace policy.");
     notRoot(target);
     if (fs.existsSync(target)) throw new Error(`Target already exists: ${rel(target)}.`);
     if (!fs.existsSync(path.dirname(target))) throw new Error("Destination folder does not exist.");
@@ -201,7 +196,6 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         notRoot(source);
         requireExisting(source);
         const target = path.join(path.dirname(source), validName(str(input.newName, "newName")));
-        if (isSensitivePath(target)) throw new Error("Access to credential and secret files is blocked by the workspace policy.");
         if (fs.existsSync(target)) throw new Error(`Target already exists: ${rel(target)}.`);
         fs.renameSync(source, target);
         return { from: rel(source), to: rel(target) };

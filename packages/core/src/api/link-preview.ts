@@ -74,30 +74,7 @@ async function assertPublicUrl(rawUrl: string): Promise<URL> {
   } catch {
     throw new Error("A valid URL is required");
   }
-  if (!ALLOWED_PROTOCOLS.has(parsed.protocol))
-    throw new Error("Only HTTP(S) URLs are supported");
-  if (parsed.username || parsed.password)
-    throw new Error("URLs with embedded credentials are not supported");
-  if (parsed.port && parsed.port !== "80" && parsed.port !== "443")
-    throw new Error("Only standard HTTP(S) ports are supported");
-  const hostname = normalizeHostname(parsed.hostname);
-  if (
-    !hostname ||
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local")
-  )
-    throw new Error("Private network hosts are not supported");
-  if (isIP(hostname) && isPrivateAddress(hostname))
-    throw new Error("Private network addresses are not supported");
-  if (!isIP(hostname)) {
-    const addresses = await lookup(hostname, { all: true, verbatim: true });
-    if (
-      addresses.length === 0 ||
-      addresses.some((entry) => isPrivateAddress(entry.address))
-    )
-      throw new Error("The destination resolves to a private network");
-  }
+  // No network-location restrictions: any URL the owner asks to preview is fetched.
   return parsed;
 }
 

@@ -769,8 +769,15 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     if (laneId && executionLanes.has(laneId))
       throw new Error("A run is already active for this execution lane.")
     const startedAt = now()
-    taskStore.create({ taskId: runId, goal: runGoal, sessionId: input.sessionId, now: startedAt })
-    taskStore.transition(runId, "running", {
+    const previousTask = taskStore.get(runId)
+    // Chat retries intentionally reuse the visible run ID for stream
+    // correlation. Durable task IDs must still be unique because a failed
+    // first attempt is terminal and cannot be transitioned back to running.
+    const durableTaskId = previousTask
+      ? `${runId}:attempt:${randomUUID()}`
+      : runId
+    taskStore.create({ taskId: durableTaskId, goal: runGoal, sessionId: input.sessionId, now: startedAt })
+    taskStore.transition(durableTaskId, "running", {
       now: startedAt,
       leaseMs: Math.max(5 * 60_000, resolveMaxWallTimeMs(((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>) || 0),
       reason: "agent runtime claimed run",
@@ -809,7 +816,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         signal: controller.signal,
         onEvent: input.onEvent,
       })
-      persistTerminalTask(runId, result)
+      persistTerminalTask(durableTaskId, result)
       try {
         recordRunToMemory(result, input.source)
       } catch (error) {
@@ -839,7 +846,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       return result
     } catch (error) {
       try {
-        taskStore.transition(runId, "failed", {
+        taskStore.transition(durableTaskId, "failed", {
           now: now(),
           reason: "agent runtime threw before producing a result",
           error: error instanceof Error ? error.message : String(error),

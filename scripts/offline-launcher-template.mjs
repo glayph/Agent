@@ -573,7 +573,7 @@ function autoInstallRequestedModel() {
 
 function usage() {
   console.log(
-    `Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and optional voice configuration\n  status        Show installation paths and selected local assets\n  model-list    Show the pinned downloadable LLM catalog\n  model-install Install and register an approved LLM model\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n  MIKI_AUTO_INSTALL_MODEL  Install an approved model automatically before start\n`,
+    `Agent Miki ${process.platform}-${process.arch} offline package\n\nCommands:\n  install       Prepare the user runtime and generate first-run credentials\n  start         Start the local dashboard and optional configured model\n  doctor        Check bundled runtime and optional voice configuration\n  status        Show installation paths and selected local assets\n  model-list    Show the pinned downloadable LLM catalog\n  model-install Install a catalog model, or any HTTPS (--url) or local (--path) GGUF\n  help          Show this help\n\nEnvironment overrides:\n  MIKI_RUNTIME_ROOT, MIKI_WORKSPACE_DIR, GATEWAY_PORT, GATEWAY_HOST\n  MIKI_MODEL, MIKI_PROVIDER, MIKI_MODEL_PATH, MIKI_MODEL_ID, MIKI_LOCAL_MODEL_NAME, MIKI_DASHBOARD_PASSWORD\n  MIKI_AUTO_INSTALL_MODEL  Install an approved model automatically before start\n`,
   );
 }
 
@@ -616,9 +616,10 @@ try {
     runModelManager(["list"]);
   } else if (command === "model-install") {
     prepareRuntimeLayout();
-    const requested = args.find((arg) => !arg.startsWith("-"));
-    if (!requested) throw new Error("model-install requires an approved model id or alias.");
-    runModelManager(["install", requested, ...(args.includes("--start") ? ["--start"] : [])]);
+    if (!args.length) {
+      throw new Error("model-install requires a catalog model id, --url <https-url-to-gguf>, or --path <absolute-gguf>.");
+    }
+    runModelManager(["install", ...args]);
   } else if (command === "start" || command === "run") {
     const auth = prepareRuntimeLayout();
     autoInstallRequestedModel();

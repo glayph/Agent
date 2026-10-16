@@ -175,6 +175,52 @@ class LearningStore {
         ON improvement_proposals(scope_key, status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_improvement_proposals_scope_time
         ON improvement_proposals(scope_key, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS learning_decisions (
+        id TEXT PRIMARY KEY,
+        scope_key TEXT NOT NULL,
+        context_bucket TEXT NOT NULL,
+        context_summary TEXT NOT NULL DEFAULT '',
+        candidate_set TEXT NOT NULL DEFAULT '[]',
+        chosen_action TEXT NOT NULL,
+        propensity REAL NOT NULL DEFAULT 1,
+        policy_version INTEGER NOT NULL DEFAULT 1,
+        mode TEXT NOT NULL DEFAULT 'observe',
+        explored INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        metadata TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE INDEX IF NOT EXISTS idx_learning_decisions_scope_time
+        ON learning_decisions(scope_key, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_learning_decisions_scope_context
+        ON learning_decisions(scope_key, context_bucket, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS learning_policy_snapshots (
+        id TEXT PRIMARY KEY,
+        scope_key TEXT NOT NULL,
+        policy_version INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'candidate',
+        action_stats TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        promoted_at TEXT,
+        retired_at TEXT,
+        approval_id TEXT,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        UNIQUE(scope_key, policy_version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_learning_snapshots_scope_status
+        ON learning_policy_snapshots(scope_key, status, policy_version DESC);
+
+      CREATE TABLE IF NOT EXISTS run_retrieved_edges (
+        run_id TEXT NOT NULL,
+        edge_id TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        retrieved_at TEXT NOT NULL,
+        credited_at TEXT,
+        PRIMARY KEY(scope_key, run_id, edge_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_run_retrieved_edges_scope_run
+        ON run_retrieved_edges(scope_key, run_id);
     `);
     this.initialized = true;
     return this;
@@ -263,6 +309,142 @@ class LearningStore {
       scope,
       row: this._deserializeExperience(stored),
     };
+  }
+
+  recordExperienceAndUpdatePolicy(input = {}) {
+    this._ensureReady();
+    const transaction = this.db.transaction((payload) => {
+      const result = this.recordExperience(payload);
+      if (!result.stored) return result;
+      const scope = this.normalizeScope(payload.scope);
+      const policy = this.readPolicyState(scope);
+      const stats = { ...(policy.actionStats || {}) };
+      const action = String(payload.actionKey || 'baseline');
+      const previous = stats[action] || { count: 0, rewardSum: 0, averageReward: 0, emaReward: 0, variance: 0 };
+      const count = Number(previous.count || 0) + 1;
+      const reward = Number(payload.reward || 0);
+      const oldMean = Number(previous.averageReward || 0);
+      const delta = reward - oldMean;
+      const emaAlpha = Number(payload.emaAlpha || 0.2);
+      const emaReward = Number.isFinite(previous.emaReward) && previous.count > 0
+        ? (1 - emaAlpha) * Number(previous.emaReward) + emaAlpha * reward : reward;
+      stats[action] = {
+        ...previous, count, rewardSum: Number(previous.rewardSum || 0) + reward,
+        averageReward: (Number(previous.rewardSum || 0) + reward) / count,
+        emaReward, variance: Math.max(0, ((Number(previous.variance || 0) * Math.max(0, count - 1)) + delta * (reward - ((Number(previous.rewardSum || 0) + reward) / count))) / count),
+      };
+      const total = Number(policy.totalDecisions || 0) + 1;
+      const averageReward = (Number(policy.averageReward || 0) * (total - 1) + reward) / total;
+      this.upsertPolicyState(scope, { ...policy, actionStats: stats, totalDecisions: total, averageReward });
+      return result;
+    });
+    return transaction(input);
+  }
+
+  recordDecision(input = {}) {
+    this._ensureReady();
+    const scope = this.normalizeScope(input.scope);
+    const id = String(input.id || this._id('decision'));
+    const candidates = Array.isArray(input.candidates) ? input.candidates.map(String).slice(0, 100) : [];
+    this.db.prepare(`INSERT INTO learning_decisions
+      (id, scope_key, context_bucket, context_summary, candidate_set, chosen_action, propensity, policy_version, mode, explored, created_at, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, scope.scopeKey, String(input.contextBucket || 'default').slice(0, 256), redactSecrets(input.contextSummary || '').slice(0, 1000), safeJson(candidates), String(input.chosenAction || 'baseline'), clamp(Number(input.propensity ?? 1), 0.0001, 1), Math.max(1, Number(input.policyVersion || 1)), String(input.mode || 'observe'), input.explored ? 1 : 0, input.createdAt ? new Date(input.createdAt).toISOString() : nowIso(), safeJson(redactPayload(input.metadata || {})));
+    return this.getDecision(scope, id);
+  }
+
+  getDecision(scopeInput, id) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const row = this.db.prepare('SELECT * FROM learning_decisions WHERE scope_key = ? AND id = ?').get(scope.scopeKey, String(id));
+    if (!row) return null;
+    return { id: row.id, scope, contextBucket: row.context_bucket, contextSummary: row.context_summary, candidates: parseJson(row.candidate_set, []), chosenAction: row.chosen_action, propensity: Number(row.propensity), policyVersion: row.policy_version, mode: row.mode, explored: Boolean(row.explored), createdAt: row.created_at, metadata: parseJson(row.metadata, {}) };
+  }
+
+  listDecisions(scopeInput, options = {}) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const limit = Math.max(1, Math.min(5000, Number(options.limit || 100)));
+    const rows = this.db.prepare('SELECT * FROM learning_decisions WHERE scope_key = ? ORDER BY created_at DESC LIMIT ?').all(scope.scopeKey, limit);
+    return rows.map(row => this.getDecision(scope, row.id));
+  }
+
+  createPolicySnapshot(scopeInput, input = {}) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const policy = this.readPolicyState(scope);
+    const version = Math.max(Number(policy.policyVersion || 1) + 1, Number(input.policyVersion || 0));
+    const id = String(input.id || this._id('snapshot'));
+    this.db.prepare(`INSERT INTO learning_policy_snapshots(id, scope_key, policy_version, status, action_stats, created_at, approval_id, metadata) VALUES (?, ?, ?, 'candidate', ?, ?, ?, ?)`)
+      .run(id, scope.scopeKey, version, safeJson(redactPayload(input.actionStats || policy.actionStats || {})), nowIso(), input.approvalId || null, safeJson(redactPayload(input.metadata || {})));
+    return this.getPolicySnapshot(scope, id);
+  }
+
+  getPolicySnapshot(scopeInput, id) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const row = this.db.prepare('SELECT * FROM learning_policy_snapshots WHERE scope_key = ? AND id = ?').get(scope.scopeKey, String(id));
+    if (!row) return null;
+    return { id: row.id, scope, policyVersion: row.policy_version, status: row.status, actionStats: parseJson(row.action_stats, {}), createdAt: row.created_at, promotedAt: row.promoted_at, retiredAt: row.retired_at, approvalId: row.approval_id, metadata: parseJson(row.metadata, {}) };
+  }
+
+  getActivePolicySnapshot(scopeInput) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const row = this.db.prepare("SELECT id FROM learning_policy_snapshots WHERE scope_key = ? AND status = 'active' ORDER BY policy_version DESC LIMIT 1").get(scope.scopeKey);
+    return row ? this.getPolicySnapshot(scope, row.id) : null;
+  }
+
+  promotePolicySnapshot(scopeInput, id, approvalId) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const tx = this.db.transaction(() => {
+      const candidate = this.getPolicySnapshot(scope, id);
+      if (!candidate || !['candidate', 'approved', 'retired'].includes(candidate.status)) throw new Error('policy snapshot is not promotable');
+      const now = nowIso();
+      this.db.prepare("UPDATE learning_policy_snapshots SET status='retired', retired_at=? WHERE scope_key=? AND status='active'").run(now, scope.scopeKey);
+      this.db.prepare("UPDATE learning_policy_snapshots SET status='active', promoted_at=?, approval_id=? WHERE scope_key=? AND id=?").run(now, String(approvalId || this._id('approval')), scope.scopeKey, String(id));
+      const policy = this.readPolicyState(scope);
+      this.upsertPolicyState(scope, { ...policy, policyVersion: candidate.policyVersion, actionStats: candidate.actionStats, metadata: { ...(policy.metadata || {}), activeSnapshotId: id } });
+      return this.getPolicySnapshot(scope, id);
+    });
+    return tx();
+  }
+
+  rollbackPolicySnapshot(scopeInput, id) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const target = this.getPolicySnapshot(scope, id);
+    if (!target || target.status !== 'retired') throw new Error('retired policy snapshot is required for rollback');
+    return this.promotePolicySnapshot(scope, id, `rollback-${this._id('approval')}`);
+  }
+
+  recordRetrievedEdges(scopeInput, runId, edgeIds = []) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const insert = this.db.prepare('INSERT OR IGNORE INTO run_retrieved_edges(run_id, edge_id, scope_key, retrieved_at) VALUES (?, ?, ?, ?)');
+    const tx = this.db.transaction(ids => { for (const edgeId of ids.slice(0, 500)) insert.run(String(runId), String(edgeId), scope.scopeKey, nowIso()); });
+    tx(Array.isArray(edgeIds) ? edgeIds : []);
+    return edgeIds.length;
+  }
+
+  creditRetrievedEdges(scopeInput, runId, reward, eta = 0.05) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const delta = clamp(Number(eta) * (clamp(Number(reward), -1, 1) - 0), -0.1, 0.1);
+    const rows = this.db.prepare('SELECT edge_id FROM run_retrieved_edges WHERE scope_key=? AND run_id=? AND credited_at IS NULL').all(scope.scopeKey, String(runId));
+    const update = this.db.prepare('UPDATE entity_edges SET weight = MIN(1.0, MAX(0.05, COALESCE(weight, 1.0) + ?)) WHERE scope_key=? AND id=?');
+    const mark = this.db.prepare('UPDATE run_retrieved_edges SET credited_at=? WHERE scope_key=? AND run_id=? AND edge_id=?');
+    const tx = this.db.transaction(() => { for (const row of rows) { update.run(delta, scope.scopeKey, row.edge_id); mark.run(nowIso(), scope.scopeKey, String(runId), row.edge_id); } });
+    tx();
+    return { credited: rows.length, delta };
+  }
+
+  pruneExperiences(scopeInput, retentionDays = 90) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const cutoff = new Date(Date.now() - Math.max(1, Number(retentionDays || 90)) * 86400000).toISOString();
+    return this.db.prepare('DELETE FROM learning_experiences WHERE scope_key=? AND created_at < ?').run(scope.scopeKey, cutoff).changes;
   }
 
   listExperiences(scopeInput, options = {}) {
@@ -564,18 +746,19 @@ class LearningStore {
     this._ensureReady();
     const current = this.getProposal(scopeInput, proposalId);
     if (!current) return null;
-    const nextStatus =
-      patch.status &&
-      [
-        "draft",
-        "pending_approval",
-        "approved",
-        "applied",
-        "rejected",
-        "rolled_back",
-      ].includes(patch.status)
-        ? patch.status
-        : current.status;
+    const transitions = {
+      draft: new Set(["draft", "pending_approval", "rejected"]),
+      pending_approval: new Set(["pending_approval", "approved", "rejected"]),
+      approved: new Set(["approved", "applied", "rejected"]),
+      applied: new Set(["applied", "rolled_back"]),
+      rejected: new Set(["rejected"]),
+      rolled_back: new Set(["rolled_back"]),
+    };
+    const requestedStatus = patch.status || current.status;
+    if (!Object.prototype.hasOwnProperty.call(transitions, requestedStatus) || !transitions[current.status]?.has(requestedStatus)) {
+      throw new Error(`invalid proposal transition: ${current.status} -> ${requestedStatus}`);
+    }
+    const nextStatus = requestedStatus;
     const appliedAt =
       nextStatus === "applied" && !current.appliedAt
         ? nowIso()
@@ -605,6 +788,22 @@ class LearningStore {
         String(proposalId),
       );
     return this.getProposal(current.scope, proposalId);
+  }
+
+  approveProposal(scopeInput, proposalId, approvalId) {
+    return this.updateProposal(scopeInput, proposalId, { status: 'approved', approvalId: String(approvalId || this._id('approval')) });
+  }
+
+  applyProposal(scopeInput, proposalId) {
+    const proposal = this.getProposal(scopeInput, proposalId);
+    if (!proposal || proposal.status !== 'approved') throw new Error('approved proposal is required before apply');
+    return this.updateProposal(scopeInput, proposalId, { status: 'applied' });
+  }
+
+  rollbackProposal(scopeInput, proposalId) {
+    const proposal = this.getProposal(scopeInput, proposalId);
+    if (!proposal || proposal.status !== 'applied') throw new Error('applied proposal is required before rollback');
+    return this.updateProposal(scopeInput, proposalId, { status: 'rolled_back' });
   }
 
   listProposals(scopeInput, options = {}) {

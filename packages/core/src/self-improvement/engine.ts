@@ -33,6 +33,11 @@ type LearningStore = {
     duplicate: boolean;
     row: LearningExperience;
   };
+  recordExperienceAndUpdatePolicy?(input: Record<string, unknown>): {
+    stored: boolean;
+    duplicate: boolean;
+    row: LearningExperience;
+  };
   listExperiences(
     scope?: Scope,
     options?: Record<string, unknown>,
@@ -71,6 +76,11 @@ type LearningStore = {
     scope: Scope | undefined,
     options?: Record<string, unknown>,
   ): Array<Record<string, unknown> | null>;
+  recordDecision?(input: Record<string, unknown>): Record<string, unknown>;
+  createPolicySnapshot?(scope: Scope | undefined, input?: Record<string, unknown>): Record<string, unknown> | null;
+  getActivePolicySnapshot?(scope: Scope | undefined): Record<string, unknown> | null;
+  promotePolicySnapshot?(scope: Scope | undefined, id: string, approvalId?: string): Record<string, unknown> | null;
+  pruneExperiences?(scope: Scope | undefined, retentionDays?: number): number;
 };
 
 type MemoryIntegration = {
@@ -96,7 +106,12 @@ export interface SelfImprovementConfig {
     exploration_rate?: number;
     min_samples?: number;
     max_draft_notes?: number;
+    exploration_floor?: number;
+    exploration_decay?: number;
+    retention_days?: number;
+    edge_credit_eta?: number;
   };
+  circuit_breaker_window_ms?: number;
 }
 
 interface CircuitBreaker {
@@ -104,6 +119,8 @@ interface CircuitBreaker {
   errorRate: number;
   totalCalls: number;
   recentErrors: string[];
+  state: "closed" | "open" | "half_open";
+  openedAt?: number;
 }
 
 type CycleType = "reflection" | "optimization" | "prompt_tuning";
@@ -148,6 +165,11 @@ function contextHash(value: unknown): string {
 function modeOf(config: SelfImprovementConfig): "observe" | "draft" | "apply" {
   const mode = config.behavior_learning?.mode;
   return mode === "apply" || mode === "draft" ? mode : "observe";
+}
+
+function stableContextBucket(input: { context?: string; taskClass?: string; tools?: string[]; modelId?: string }): string {
+  const normalized = JSON.stringify({ taskClass: input.taskClass || "unknown", tools: [...(input.tools || [])].map(String).sort(), model: input.modelId || "unknown", context: String(input.context || "").trim().toLowerCase().slice(0, 500) });
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 24);
 }
 
 export function calculateReward(input: {
@@ -197,12 +219,14 @@ export class SelfImprovementEngine {
   private readonly scope: Scope;
   private cycleRunning = false;
   private readonly recentErrors: string[] = [];
+  private readonly random: () => number;
 
   readonly _circuitBreaker: CircuitBreaker = {
     tripped: false,
     errorRate: 0,
     totalCalls: 0,
     recentErrors: this.recentErrors,
+    state: "closed",
   };
 
   constructor(
@@ -210,8 +234,10 @@ export class SelfImprovementEngine {
     _paths: unknown,
     llmCallFn: LLMCallFn,
     config: SelfImprovementConfig = {},
+    options: { random?: () => number } = {},
   ) {
     this.memory = memory;
+    this.random = options.random || Math.random;
     this.config = config;
     this.enabled = config.enabled ?? false;
     this.llmCallFn = llmCallFn;
@@ -239,17 +265,27 @@ export class SelfImprovementEngine {
   }
 
   private setCallResult(success: boolean, error?: unknown): void {
+    const now = Date.now();
     this._circuitBreaker.totalCalls += 1;
-    if (!success) {
-      this.recentErrors.unshift(safeError(error));
-      this.recentErrors.splice(5);
-    }
+    const windowMs = Math.max(10_000, Number(this.config.circuit_breaker_window_ms || 5 * 60_000));
+    const recent = this.recentErrors.filter((item) => !item.startsWith("@"));
+    this.recentErrors.length = 0;
+    this.recentErrors.push(...recent.slice(0, 5));
+    if (!success) this.recentErrors.unshift(`@${now} ${safeError(error)}`);
+    const cutoff = now - windowMs;
+    const active = this.recentErrors.filter((item) => Number(item.match(/^@(\d+)/)?.[1] || 0) >= cutoff);
+    this.recentErrors.length = 0;
+    this.recentErrors.push(...active.slice(0, 5));
     const errors = this.recentErrors.length;
-    this._circuitBreaker.errorRate =
-      errors / Math.max(1, this._circuitBreaker.totalCalls);
-    if (errors >= 3 && this._circuitBreaker.totalCalls >= 3) {
-      this._circuitBreaker.tripped = true;
+    this._circuitBreaker.errorRate = errors / Math.max(1, Math.min(this._circuitBreaker.totalCalls, 10));
+    if (success) {
+      this.recentErrors.length = 0;
+      this._circuitBreaker.state = "closed";
+      this._circuitBreaker.tripped = false;
     }
+    if (errors >= 3) { this._circuitBreaker.tripped = true; this._circuitBreaker.state = "open"; this._circuitBreaker.openedAt = now; }
+    else if (this._circuitBreaker.state === "open" && now - Number(this._circuitBreaker.openedAt || 0) >= windowMs) this._circuitBreaker.state = "half_open";
+    if (this._circuitBreaker.state === "closed") this._circuitBreaker.tripped = false;
   }
 
   private intervalMinutes(type: CycleType): number {
@@ -262,6 +298,11 @@ export class SelfImprovementEngine {
   }
 
   private cycleDue(type: CycleType): boolean {
+    const windowMs = Math.max(10_000, Number(this.config.circuit_breaker_window_ms || 5 * 60_000));
+    if (this._circuitBreaker.state === "open" && Date.now() - Number(this._circuitBreaker.openedAt || 0) >= windowMs) {
+      this._circuitBreaker.state = "half_open";
+      this._circuitBreaker.tripped = false;
+    }
     if (!this.enabled || this._circuitBreaker.tripped || this.cycleRunning)
       return false;
     const store = this.store();
@@ -339,57 +380,47 @@ export class SelfImprovementEngine {
     context?: string;
     candidates?: string[];
     baselineAction?: string;
+    taskClass?: string;
+    tools?: string[];
+    modelId?: string;
   }): {
     actionKey: string;
     explored: boolean;
+    propensity: number;
+    decisionId?: string;
+    contextBucket: string;
     policyVersion: number;
     reason: string;
   } {
     const store = this.store();
-    const policy = store?.readPolicyState(this.scope) ?? {
-      policyVersion: 1,
-      mode: "observe",
-      actionStats: {},
-      totalDecisions: 0,
-    };
-    const candidates = (
-      input.candidates || [input.baselineAction || "baseline"]
-    ).filter(Boolean);
-    const stats = (policy.actionStats || {}) as Record<
-      string,
-      Record<string, number>
-    >;
-    const learned = candidates
-      .filter(
-        (action) =>
-          Number(stats[action]?.count || 0) >=
-          positiveInt(this.config.behavior_learning?.min_samples, 3),
-      )
-      .sort(
-        (a, b) =>
-          Number(stats[b]?.averageReward || 0) -
-          Number(stats[a]?.averageReward || 0),
-      )[0];
-    const explorationRate = unit(
-      this.config.behavior_learning?.exploration_rate,
-      0.1,
-    );
-    const shouldExplore =
-      this.config.behavior_learning?.enabled !== false &&
-      Math.random() < explorationRate;
-    const actionKey = shouldExplore
-      ? candidates[Math.floor(Math.random() * candidates.length)]
-      : learned || input.baselineAction || candidates[0] || "baseline";
-    return {
-      actionKey,
-      explored: shouldExplore,
-      policyVersion: Number(policy.policyVersion || 1),
-      reason: shouldExplore
-        ? "exploration"
-        : learned
-          ? "best_observed_reward"
-          : "baseline_insufficient_samples",
-    };
+    const policy = store?.readPolicyState(this.scope) ?? { policyVersion: 1, mode: "observe", actionStats: {}, totalDecisions: 0 };
+    const candidates = [...new Set((input.candidates || [input.baselineAction || "baseline"]).filter(Boolean))];
+    const bucket = stableContextBucket(input);
+    const activeSnapshot = store?.getActivePolicySnapshot?.(this.scope);
+    const rawStats = ((activeSnapshot?.actionStats || policy.actionStats || {}) as Record<string, Record<string, number>>);
+    const stats = Object.fromEntries(candidates.map((action) => {
+      const contextual = rawStats[`${bucket}::${action}`] || rawStats[action];
+      return [action, contextual || { count: 0, averageReward: 0, emaReward: 0, variance: 1 }];
+    }));
+    const minSamples = positiveInt(this.config.behavior_learning?.min_samples, 3);
+    const floor = unit(this.config.behavior_learning?.exploration_floor, 0.02);
+    const start = unit(this.config.behavior_learning?.exploration_rate, 0.1);
+    const decay = Math.max(0, Math.min(1, Number(this.config.behavior_learning?.exploration_decay ?? 0.995)));
+    const explorationRate = Math.max(floor, start * Math.pow(decay, Number(policy.totalDecisions || 0)));
+    const scored = candidates.map((action) => {
+      const item = stats[action] || {};
+      const count = Number(item.count || 0);
+      const mean = Number(item.emaReward ?? item.averageReward ?? 0);
+      const variance = Math.max(0.0001, Number(item.variance ?? 1));
+      const sample = mean + Math.sqrt(variance / Math.max(1, count)) * (this.random() * 2 - 1);
+      return { action, count, value: sample };
+    }).sort((a, b) => b.value - a.value);
+    const learned = scored.find((item) => item.count >= minSamples)?.action;
+    const explored = this.config.behavior_learning?.enabled !== false && candidates.length > 1 && this.random() < explorationRate;
+    const actionKey = explored ? candidates[Math.floor(this.random() * candidates.length)] : (learned || input.baselineAction || candidates[0] || "baseline");
+    const propensity = explored ? explorationRate / candidates.length + (1 - explorationRate) * (actionKey === learned ? 1 : 0) : (actionKey === learned ? 1 - explorationRate + explorationRate / candidates.length : explorationRate / candidates.length);
+    const decision = store?.recordDecision?.({ scope: this.scope, contextBucket: bucket, contextSummary: input.context || "", candidates, chosenAction: actionKey, propensity: Math.max(0.0001, Math.min(1, propensity)), policyVersion: Number(policy.policyVersion || 1), mode: String(policy.mode || modeOf(this.config)), explored, metadata: { taskClass: input.taskClass || "unknown", tools: input.tools || [], modelId: input.modelId || null } });
+    return { actionKey, explored, propensity: Math.max(0.0001, Math.min(1, propensity)), decisionId: decision?.id as string | undefined, contextBucket: bucket, policyVersion: Number(policy.policyVersion || 1), reason: explored ? "exploration" : learned ? "thompson_contextual" : "baseline_insufficient_samples" };
   }
 
   recordExperience(input: {
@@ -420,7 +451,7 @@ export class SelfImprovementEngine {
     const rewardResult = input.rewardInput
       ? calculateReward(input.rewardInput)
       : { reward: clamp(Number(input.reward || 0), -1, 1), components: {} };
-    const result = store.recordExperience({
+    const recordInput = {
       scope: input.scope || this.scope,
       runId: input.runId,
       sessionId: input.sessionId,
@@ -437,11 +468,14 @@ export class SelfImprovementEngine {
       policyVersion: input.policyVersion,
       idempotencyKey: input.idempotencyKey,
       metadata: input.metadata || {},
-    });
+    };
+    const result = store.recordExperienceAndUpdatePolicy
+      ? store.recordExperienceAndUpdatePolicy(recordInput)
+      : store.recordExperience(recordInput);
 
     // Update only after a newly stored experience. Duplicate retries must not
     // bias the bandit statistics or advance its decision count.
-    if (result.stored && this.config.behavior_learning?.enabled !== false) {
+    if (result.stored && !store.recordExperienceAndUpdatePolicy && this.config.behavior_learning?.enabled !== false) {
       const policy = store.readPolicyState(input.scope || this.scope);
       const actionStats = {
         ...((policy.actionStats || {}) as Record<
@@ -551,16 +585,15 @@ export class SelfImprovementEngine {
       };
 
     this.cycleRunning = true;
-    const cycle = store.startCycle(this.scope, type, {
-      mode: modeOf(this.config),
-    });
+    let cycle: Record<string, unknown> | null = null;
     try {
+      cycle = store.startCycle(this.scope, type, { mode: modeOf(this.config) });
       const experiences = store.listExperiences(this.scope, {
         limit: 100,
         since: isoDaysAgo(7),
       });
       if (experiences.length === 0) {
-        const finished = store.finishCycle(String(cycle.id), {
+        const finished = store.finishCycle(String(cycle?.id || "cycle-unavailable"), {
           status: "skipped",
           inputCount: 0,
           outputCount: 0,
@@ -591,7 +624,7 @@ export class SelfImprovementEngine {
           })
           .filter(Boolean).length >= maxDraftNotes
       ) {
-        const finished = store.finishCycle(String(cycle.id), {
+        const finished = store.finishCycle(String(cycle?.id || "cycle-unavailable"), {
           status: "skipped",
           inputCount: experiences.length,
           outputCount: 0,
@@ -616,14 +649,10 @@ export class SelfImprovementEngine {
       if (type === "optimization") {
         const policy = store.readPolicyState(this.scope);
         const nextVersion = Number(policy.policyVersion || 1) + 1;
-        store.upsertPolicyState(this.scope, {
+        const snapshot = store.createPolicySnapshot?.(this.scope, {
           policyVersion: nextVersion,
-          mode: modeOf(this.config),
           actionStats,
-          totalDecisions: experiences.length,
-          averageReward: Number(stats.averageReward || 0),
-          baselineAction: bestAction || policy.baselineAction || "baseline",
-          metadata: { lastOptimizationCycle: cycle.id },
+          metadata: { lastOptimizationCycle: cycle.id, averageReward: Number(stats.averageReward || 0), baselineAction: bestAction || policy.baselineAction || "baseline" },
         });
         proposal = store.createProposal({
           scope: this.scope,
@@ -635,11 +664,7 @@ export class SelfImprovementEngine {
             mode: modeOf(this.config),
           },
           evidenceIds: experiences.slice(0, 20).map((item) => item.id),
-          status:
-            modeOf(this.config) === "apply" &&
-            this.config.auto_apply_optimizations === true
-              ? "approved"
-              : "draft",
+          status: "pending_approval",
           metadata: { cycleId: cycle.id },
         });
         outputCount = 1;
@@ -667,7 +692,8 @@ export class SelfImprovementEngine {
         outputCount = proposal ? 1 : 0;
       }
 
-      const finished = store.finishCycle(String(cycle.id), {
+      store.pruneExperiences?.(this.scope, this.config.behavior_learning?.retention_days || 90);
+      const finished = store.finishCycle(String(cycle?.id || "cycle-unavailable"), {
         status: this._circuitBreaker.tripped ? "degraded" : "completed",
         inputCount: experiences.length,
         outputCount,
@@ -687,7 +713,7 @@ export class SelfImprovementEngine {
       };
     } catch (error) {
       this.setCallResult(false, error);
-      const finished = store.finishCycle(String(cycle.id), {
+      const finished = store.finishCycle(String(cycle?.id || "cycle-unavailable"), {
         status: "failed",
         error: safeError(error),
       });
@@ -750,7 +776,7 @@ export class SelfImprovementEngine {
           .filter(Boolean).length || 0,
       circuitBreaker: {
         ...this._circuitBreaker,
-        recentErrors: [...this.recentErrors],
+        recentErrors: this.recentErrors.map((item) => item.replace(/^@\d+\s*/, "")),
       },
       learning,
       behaviorLearning: {

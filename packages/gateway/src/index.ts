@@ -23,6 +23,7 @@ import { LearningStore } from "@miki/memory"
 import { globalErrorHandler } from "@miki/core/error-handler"
 import { getLifecycleBus } from "@miki/core/hooks"
 import { planAdaptiveOutput } from "@miki/core"
+import { calculateReward } from "@miki/core/self-improvement"
 import { createDashboardExtendedRouter } from "./dashboard-extended.js"
 import { MEDIA_ROUTE, describeFile, resolveMediaPath } from "./chat-attachments.js"
 import { validateRuntimeConfig, migrateRuntimeConfig } from "@miki/config"
@@ -1317,6 +1318,29 @@ async function completeWithProvider(messages: { role: string; content: string }[
 
 const wss = new WebSocketServer({ noServer: true })
 const streamHub = new StreamHub()
+const recordLearningExperience = (input: { runId: string; sessionId: string; taskClass: string; context: string; actionKey: string; modelId?: string; outcome: string; rewardInput: Record<string, unknown>; metadata?: Record<string, unknown> }) => {
+  const integration = initMemory(dataRoot)
+  const store = integration.tkg.learningStore
+  if (!store) return
+  const reward = calculateReward(input.rewardInput as Parameters<typeof calculateReward>[0])
+  const record = {
+    scope: { agentId: process.env.MIKI_AGENT_ID || "miki", ownerId: process.env.MIKI_OWNER_ID || "default-owner", workspaceId: process.env.MIKI_WORKSPACE_ID || "default-workspace" },
+    runId: input.runId,
+    sessionId: input.sessionId,
+    taskId: input.runId,
+    taskClass: input.taskClass,
+    contextSummary: input.context.slice(0, 2000),
+    actionKey: input.actionKey,
+    modelId: input.modelId,
+    outcome: input.outcome,
+    reward: reward.reward,
+    rewardComponents: reward.components,
+    idempotencyKey: `run:${input.runId}`,
+    metadata: input.metadata || {},
+  }
+  if (typeof store.recordExperienceAndUpdatePolicy === "function") store.recordExperienceAndUpdatePolicy(record)
+  else store.recordExperience(record)
+}
 const chatTurns = createChatTurnRunner({
   db,
   streamHub,
@@ -1332,6 +1356,7 @@ const chatTurns = createChatTurnRunner({
   getLifecycleBus,
   retrieveRelevantTurns,
   resolveContextWindowTokens,
+  recordLearningExperience,
 })
 // Anything still queued/processing when the process starts belonged to a run that died with the previous process.
 try {

@@ -58,6 +58,7 @@ export interface ConsolidationReport {
 export interface AddRelationResult {
   id: string;
   contradicted: string | null;
+  contradictedIds?: string[];
   reinforced: boolean;
 }
 
@@ -160,6 +161,16 @@ export interface LearningStore {
     duplicate: boolean;
     row: LearningExperience;
   };
+  recordExperienceAndUpdatePolicy?(input: Record<string, unknown>): { stored: boolean; duplicate: boolean; row: LearningExperience };
+  recordDecision?(input: Record<string, unknown>): Record<string, unknown>;
+  listDecisions?(scope?: Record<string, string>, options?: Record<string, unknown>): Array<Record<string, unknown> | null>;
+  createPolicySnapshot?(scope?: Record<string, string>, input?: Record<string, unknown>): Record<string, unknown> | null;
+  getActivePolicySnapshot?(scope?: Record<string, string>): Record<string, unknown> | null;
+  promotePolicySnapshot?(scope: Record<string, string> | undefined, id: string, approvalId?: string): Record<string, unknown> | null;
+  rollbackPolicySnapshot?(scope: Record<string, string> | undefined, id: string): Record<string, unknown> | null;
+  recordRetrievedEdges?(scope: Record<string, string> | undefined, runId: string, edgeIds: string[]): number;
+  creditRetrievedEdges?(scope: Record<string, string> | undefined, runId: string, reward: number, eta?: number): Record<string, unknown>;
+  pruneExperiences?(scope: Record<string, string> | undefined, retentionDays?: number): number;
   listExperiences(
     scope?: Record<string, string>,
     options?: Record<string, unknown>,

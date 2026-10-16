@@ -1078,55 +1078,51 @@ class TemporalKnowledgeGraph {
   addEntityRelation(sourceId, targetId, relationType, metadata = {}, scopeInput) {
     const scope = this._scope(scopeInput);
     const now = this._now();
-    const factText = metadata.factText || relationType;
-
+    const factText = String(metadata.factText || relationType);
     const existingActive = this.db.prepare(`
       SELECT * FROM entity_edges
       WHERE scope_key = ? AND source_id = ? AND target_id = ? AND relation_type = ? AND valid_until IS NULL
       ORDER BY created_at DESC
     `).all(scope.scopeKey, sourceId, targetId, relationType);
 
-    let contradicted = null;
-    let reinforced = false;
-
+    let bestRepeat = null;
+    const contradictions = [];
     for (const oldEdge of existingActive) {
-      const oldFactText = this._extractFactTextFromEdge(oldEdge);
-      const similarity = this._factSimilarity(factText, oldFactText);
-
-      if (similarity >= this.REPEAT_SIMILARITY_THRESHOLD) {
-        // Same fact restated: reinforce the existing edge rather than
-        // inserting a duplicate. updated_at is bumped alongside weight so
-        // runConsolidation's staleness check (30 days since last
-        // confirmation) treats this edge as freshly re-confirmed, not as
-        // 30-days-old-and-untouched just because created_at is old.
-        const newWeight = Math.min(1.0, (oldEdge.weight || 1.0) + this.REINFORCE_STEP);
-        this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ? AND scope_key = ?').run(newWeight, now, oldEdge.id, scope.scopeKey);
-        reinforced = true;
-        return { id: oldEdge.id, contradicted: null, reinforced: true };
-      }
-
-      if (similarity >= this.CONTRADICTION_SIMILARITY_THRESHOLD) {
-        // Same topic, different content: this is a contradiction. Decay the
-        // old edge's connection weight - never delete or overwrite it - so
-        // fact history is fully preserved but retrieval naturally favors the
-        // newer, more-trusted version. updated_at is bumped too: a
-        // contradiction is itself evidence the edge is still "live" (someone
-        // is actively talking about this topic), so it shouldn't silently
-        // archive on the old created_at timestamp either.
-        const decayedWeight = Math.max(0, (oldEdge.weight || 1.0) * this.CONTRADICTION_DECAY_FACTOR);
-        this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ? AND scope_key = ?').run(decayedWeight, now, oldEdge.id, scope.scopeKey);
-        contradicted = oldEdge.id;
+      const similarity = this._factSimilarity(factText, this._extractFactTextFromEdge(oldEdge));
+      if (similarity >= this.REPEAT_SIMILARITY_THRESHOLD && (!bestRepeat || similarity > bestRepeat.similarity)) {
+        bestRepeat = { oldEdge, similarity };
+      } else if (similarity >= this.CONTRADICTION_SIMILARITY_THRESHOLD) {
+        contradictions.push({ oldEdge, similarity });
       }
     }
 
+    if (bestRepeat) {
+      const oldWeight = Number.isFinite(Number(bestRepeat.oldEdge.weight)) ? Number(bestRepeat.oldEdge.weight) : 1.0;
+      const newWeight = Math.min(1.0, Math.max(0.05, oldWeight) + this.REINFORCE_STEP);
+      // Confirmation is evidence of use; contradiction is not (see below).
+      this.db.prepare('UPDATE entity_edges SET weight = ?, updated_at = ? WHERE id = ? AND scope_key = ?')
+        .run(newWeight, now, bestRepeat.oldEdge.id, scope.scopeKey);
+      return { id: bestRepeat.oldEdge.id, contradicted: null, contradictedIds: [], reinforced: true };
+    }
+
+    const contradictedIds = [];
+    for (const { oldEdge } of contradictions) {
+      const oldWeight = Number.isFinite(Number(oldEdge.weight)) ? Number(oldEdge.weight) : 1.0;
+      const decayedWeight = Math.max(0, oldWeight * this.CONTRADICTION_DECAY_FACTOR);
+      // Do not refresh updated_at: contradiction is not confirmation of truth.
+      this.db.prepare('UPDATE entity_edges SET weight = ? WHERE id = ? AND scope_key = ?')
+        .run(decayedWeight, oldEdge.id, scope.scopeKey);
+      contradictedIds.push(oldEdge.id);
+    }
+
     const id = this._uuid();
-    const weight = typeof metadata.weight === 'number' ? metadata.weight : 1.0;
+    const weight = typeof metadata.weight === 'number' ? Math.max(0.05, Math.min(1, metadata.weight)) : 1.0;
     this.db.prepare(`
       INSERT INTO entity_edges (id, scope_key, agent_id, owner_id, workspace_id, source_id, target_id, relation_type, weight, valid_from, valid_until, metadata, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId, sourceId, targetId, relationType, weight, metadata.validFrom || now, metadata.validUntil || null, JSON.stringify(metadata), now, now);
 
-    return { id, contradicted, reinforced };
+    return { id, contradicted: contradictedIds[0] || null, contradictedIds, reinforced: false };
   }
 
   /**
@@ -1679,6 +1675,7 @@ class TemporalKnowledgeGraph {
     }
 
     const archiveDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const edgeWeightFloor = 0.05;
     const staleEntities = this.db.prepare('SELECT * FROM entities WHERE last_seen_at < ? AND access_count < 3').all(archiveDate);
     for (const ent of staleEntities) {
       this.db.prepare('UPDATE entities SET is_active = 0 WHERE id = ?').run(ent.id);
@@ -1692,8 +1689,14 @@ class TemporalKnowledgeGraph {
     // actively true stays exempt indefinitely even if it was first recorded
     // long ago. Only edges nobody has touched in 30 days — genuinely stale —
     // get archived here.
-    const oldEdges = this.db.prepare('SELECT * FROM entity_edges WHERE valid_until IS NULL AND updated_at < ?').all(archiveDate);
+    const oldEdges = this.db.prepare('SELECT * FROM entity_edges WHERE valid_until IS NULL AND updated_at < ? AND COALESCE(weight, 0) < 1.0').all(archiveDate);
     for (const edge of oldEdges) {
+      this.db.prepare('UPDATE entity_edges SET valid_until = ? WHERE id = ?').run(archiveDate, edge.id);
+      report.edgesDeprecated++;
+    }
+
+    const lowWeightEdges = this.db.prepare('SELECT * FROM entity_edges WHERE valid_until IS NULL AND updated_at < ? AND COALESCE(weight, 0) < ?').all(archiveDate, edgeWeightFloor);
+    for (const edge of lowWeightEdges) {
       this.db.prepare('UPDATE entity_edges SET valid_until = ? WHERE id = ?').run(archiveDate, edge.id);
       report.edgesDeprecated++;
     }
@@ -1732,13 +1735,20 @@ class TemporalKnowledgeGraph {
    */
   _tokenizeForSimilarity(text) {
     const freq = new Map();
-    const tokens = (text || '')
-      .toLowerCase()
+    const normalized = String(text || '').normalize('NFKC').toLowerCase();
+    const tokens = normalized
       .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
-      .split(/\s+/)
-      .filter(t => t.length > 2);
-    for (const t of tokens) {
-      freq.set(t, (freq.get(t) || 0) + 1);
+      .split(/\s+/u)
+      .filter(Boolean);
+    for (const token of tokens) {
+      // Keep short Unicode words (including Bengali); for Latin, ignore only
+      // one-character noise. Character trigrams bridge inflection and
+      // transliterated/alternate wording better than a hard 3-char cutoff.
+      if (token.length > 1) freq.set(`w:${token}`, (freq.get(`w:${token}`) || 0) + 1);
+      if (token.length >= 3) for (let i = 0; i + 2 < token.length; i += 1) {
+        const gram = token.slice(i, i + 3);
+        freq.set(`g:${gram}`, (freq.get(`g:${gram}`) || 0) + 0.35);
+      }
     }
     return freq;
   }

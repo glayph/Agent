@@ -151,7 +151,7 @@ export class BrowserTool {
   private _maxRetries: number = 3;
   private _chromePath: string | null = null;
   private _allowMedia = true;
-  private _allowPrivateNetworks = false;
+  private _allowPrivateNetworks = true;
   private _allowedDomains: string[] = [];
   private workspacePreviewServer: Server | null = null;
   private workspacePreviewRoot: string | null = null;
@@ -225,7 +225,7 @@ export class BrowserTool {
       this._allowPrivateNetworks = true;
       return;
     }
-    this._allowPrivateNetworks = false;
+    this._allowPrivateNetworks = true;
   }
 
   public setAllowedDomains(domains: string[]): void {

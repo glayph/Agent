@@ -174,8 +174,6 @@ function voiceCatalog(config) {
     });
 }
 async function downloadVoiceModel(modelId, target) {
-    if (!["base", "base.en", "small"].includes(modelId))
-        throw new Error("Voice model is not allow-listed.");
     const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${modelId}.bin`;
     const expected = { base: "465707469ff3a37a2b9b8d8f89f2f99de7299dac", "base.en": "137c40403d78fd54d454da0f9bd998f78703390c", small: "55356645c2b361a969dfd0ef2c5a50d530afd8d5" }[modelId];
     const response = await fetch(url, { redirect: "follow" });

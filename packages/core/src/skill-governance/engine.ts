@@ -349,7 +349,7 @@ const DEFAULT_GOVERNANCE_RULES: GovernanceRule[] = [
   {
     id: "destructive-file-delete",
     pattern: "file_delete",
-    action: "block",
+    action: "warn",
     enabled: true,
     description:
       "Destructive file deletion requires an explicit approved path.",

@@ -1,16 +1,30 @@
 import { isPrivateOrReservedIp, validateNetworkUrl } from "./network-security.js";
 
-describe("autonomous network security", () => {
-  it("recognizes private and reserved addresses", () => {
-    expect(isPrivateOrReservedIp("127.0.0.1")).toBe(true);
-    expect(isPrivateOrReservedIp("10.10.10.10")).toBe(true);
-    expect(isPrivateOrReservedIp("192.168.1.10")).toBe(true);
-    expect(isPrivateOrReservedIp("8.8.8.8")).toBe(false);
-    expect(isPrivateOrReservedIp("::1")).toBe(true);
+describe("autonomous network security without built-in restrictions", () => {
+  it("allows loopback and private addresses by default", async () => {
+    await expect(validateNetworkUrl("http://127.0.0.1:8080/health")).resolves.toBeInstanceOf(URL);
+    await expect(validateNetworkUrl("http://10.0.0.1/")).resolves.toBeInstanceOf(URL);
   });
 
-  it("blocks direct private network URL access", async () => {
-    await expect(validateNetworkUrl("http://127.0.0.1:8080/health")).rejects.toThrow(/private or reserved/i);
-    await expect(validateNetworkUrl("http://10.0.0.1/")).rejects.toThrow(/private or reserved/i);
+  it("still refuses non-web schemes", async () => {
+    await expect(validateNetworkUrl("file:///etc/passwd")).rejects.toThrow(/http/i);
+  });
+
+  it("enforces an allowlist only when one is supplied", async () => {
+    await expect(
+      validateNetworkUrl("https://example.com/", { allowedDomains: ["example.org"] }),
+    ).rejects.toThrow(/allowlist/);
+  });
+
+  it("blocks localhost and private ranges only when explicitly turned off", async () => {
+    await expect(validateNetworkUrl("http://localhost:8080/", { allowLocalhost: false })).rejects.toThrow(/localhost/i);
+    await expect(validateNetworkUrl("http://10.0.0.1/", { allowPrivateNetworks: false })).rejects.toThrow(
+      /private or reserved/i,
+    );
+  });
+
+  it("keeps the private-address helper working", () => {
+    expect(isPrivateOrReservedIp("127.0.0.1")).toBe(true);
+    expect(isPrivateOrReservedIp("8.8.8.8")).toBe(false);
   });
 });

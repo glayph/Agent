@@ -1,4 +1,8 @@
-import { IconActivityHeartbeat, IconLoader2 } from "@tabler/icons-react"
+import {
+  IconActivityHeartbeat,
+  IconAlertTriangle,
+  IconLoader2,
+} from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -54,6 +58,105 @@ import { refreshGatewayState } from "@/store/gateway"
 
 interface ChannelConfigPageProps {
   channelName: string
+}
+
+function channelCatalogStatus(channel: SupportedChannel): {
+  label: string
+  className: string
+} {
+  if (channel.configured) {
+    return {
+      label: "Configured",
+      className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    }
+  }
+  return {
+    label: "Not connected",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  }
+}
+
+export function ChannelCatalogPage() {
+  const { t } = useTranslation()
+  const [channels, setChannels] = useState<SupportedChannel[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    let active = true
+    void getChannelsCatalog()
+      .then((response) => {
+        if (active) setChannels(response.channels)
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Unable to load channels.")
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const configuredCount = channels.filter((channel) => channel.configured).length
+
+  return (
+    <div className="flex h-full flex-col">
+      <PageHeader
+        title={t("channels.title", { defaultValue: "Channels" })}
+        titleExtra={
+          <Badge variant="outline" className="text-muted-foreground">
+            {configuredCount}/{channels.length} configured
+          </Badge>
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-6">
+        <div className="mx-auto w-full max-w-6xl space-y-4 pt-4">
+          <div className="flex items-center justify-between gap-4 px-1">
+            <p className="text-muted-foreground text-sm">Configure a channel, then run its health check.</p>
+            <span className="text-muted-foreground hidden text-xs sm:inline">Select a channel to continue</span>
+          </div>
+
+          {loading ? (
+            <div className="text-muted-foreground flex justify-center py-16"><IconLoader2 className="size-6 animate-spin" /></div>
+          ) : error ? (
+            <div className="text-destructive bg-destructive/10 rounded-xl px-4 py-3 text-sm">{error}</div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {channels.map((channel) => {
+                const connection = channelCatalogStatus(channel)
+                const runtime = channel.runtime_status === "functional" ? "Live adapter available" : channel.runtime_status === "config_only" ? "Configuration only" : "Adapter status: partial"
+                return (
+                  <a
+                    key={channel.name}
+                    href={`/channels/${channel.name}`}
+                    className="border-border/60 bg-card hover:border-primary/40 group rounded-lg border p-4 transition-colors hover:shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate font-semibold">{getChannelDisplayName(channel, t)}</h3>
+                        <p className="text-muted-foreground mt-1 truncate text-[11px]">{runtime}</p>
+                      </div>
+                      <Badge variant="outline" className={connection.className}>{connection.label}</Badge>
+                    </div>
+                    <div className="text-muted-foreground mt-3 text-xs font-medium group-hover:text-foreground">Configure →</div>
+                  </a>
+                )
+              })}
+            </div>
+          )}
+
+          {!loading && !error && channels.length > 0 && (
+            <div className="text-muted-foreground flex items-start gap-2 rounded-lg border border-dashed px-3 py-2.5 text-xs leading-5">
+              <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
+              <span>External channels need their own adapter. Built-in Web chat is ready.</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

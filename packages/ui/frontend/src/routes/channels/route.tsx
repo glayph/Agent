@@ -1,6 +1,6 @@
 import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 
-import { ChannelsPage } from "@/pages/channels-page"
+import { ChannelCatalogPage } from "@/pages/channels-page"
 
 export const Route = createFileRoute("/channels")({
   component: ChannelsLayout,
@@ -12,7 +12,7 @@ function ChannelsLayout() {
   })
 
   if (pathname === "/channels") {
-    return <ChannelsPage channelName="miki" />
+    return <ChannelCatalogPage />
   }
 
   return <Outlet />

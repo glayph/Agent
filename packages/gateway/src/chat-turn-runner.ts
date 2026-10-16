@@ -126,6 +126,7 @@ export interface ChatTurnRunnerDeps {
   getLifecycleBus: typeof getLifecycleBus
   retrieveRelevantTurns: typeof retrieveRelevantTurns
   resolveContextWindowTokens: typeof resolveContextWindowTokens
+  recordLearningExperience?: (input: { runId: string; sessionId: string; taskClass: string; context: string; actionKey: string; modelId?: string; outcome: string; rewardInput: Record<string, unknown>; metadata?: Record<string, unknown> }) => void
   /** One run per conversation at a time. Defaults to a private lane. */
   lane?: KeyedLane
 }
@@ -138,6 +139,9 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
   const { db, streamHub, agent, fileMemory, getAppConfig, now, workspaceRoot, dataRoot } = deps
   const { createWsEventMapper, planAdaptiveOutput, getLifecycleBus, retrieveRelevantTurns, resolveContextWindowTokens } = deps
   const appendGatewayLog = deps.log
+  const recordLearning = (input: Parameters<NonNullable<ChatTurnRunnerDeps["recordLearningExperience"]>>[0]) => {
+    try { deps.recordLearningExperience?.(input) } catch (error) { appendGatewayLog(`Learning record skipped for ${input.runId}: ${error instanceof Error ? error.message : String(error)}`) }
+  }
   // One serialized chat run per conversation (OpenClaw-style session lane).
   const lane = deps.lane ?? createKeyedLane()
   // Run currently working for each conversation: new messages are steered into it instead of waiting.
@@ -446,7 +450,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
             progressIntervalMs: Math.max(500, Number(messaging.progressIntervalMs ?? 1800) || 1800),
           }
         }, () => ({ workspaceRoot, dataRoot }))
-        const persistAdaptiveReply = (text: string, modelName: string | undefined) => {
+        const persistAdaptiveReply = (text: string, modelName: string | undefined, messageKind: "normal" | "error" = "normal") => {
           if (!text) return
           const finalIds = mapper.finalIds.length > 0 ? mapper.finalIds : [mapper.finalId]
           const messaging = (getAppConfig() as any)?.messaging || {}
@@ -474,7 +478,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
             const id = finalIds[i] || item.id
             const createdAt = new Date(Date.now() + i).toISOString()
             const proof = i === chunks.length - 1 ? mapper.attachments() : []
-            db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,model_name,context_id,attachments_json) VALUES(?,?,?,?,?,?,?,?)").run(id, sessionId, "assistant", item.content, createdAt, modelName || null, contextId, proof.length > 0 ? JSON.stringify(proof) : null)
+            db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,kind,model_name,context_id,attachments_json) VALUES(?,?,?,?,?,?,?,?,?)").run(id, sessionId, "assistant", item.content, createdAt, messageKind, modelName || null, contextId, proof.length > 0 ? JSON.stringify(proof) : null)
           }
           db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
           getLifecycleBus().emit("message:sent", {
@@ -607,7 +611,6 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           if (result.status !== "cancelled" && !result.finalText?.trim() && resultText) {
             mapper.handle({ type: "message.final", runId, content: resultText })
           }
-          if (result.status !== "cancelled" && resultText) persistAdaptiveReply(resultText, result.model)
           const streamStatus = result.status === "cancelled"
             ? "cancelled"
             : recoverableLimit
@@ -615,9 +618,21 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
               : result.finalText
                 ? "completed"
                 : "failed"
+          if (result.status !== "cancelled" && resultText) persistAdaptiveReply(resultText, result.model, streamStatus === "failed" ? "error" : "normal")
           setMessageStatus(persistedUserMessageId, streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
           emitMessageStatus(streamStatus === "failed" ? "failed" : "completed", streamStatus === "failed" ? result.error : undefined)
           streamHub.finish(stream, streamStatus, result.error)
+          recordLearning({
+            runId,
+            sessionId: contextId,
+            taskClass: "interactive_chat",
+            context: content,
+            actionKey: `model:${result.model || model || "baseline"}`,
+            modelId: result.model || model || undefined,
+            outcome: streamStatus === "failed" ? "failure" : streamStatus === "cancelled" ? "cancelled" : "success",
+            rewardInput: { outcome: streamStatus === "failed" ? "failure" : "success", completionQuality: streamStatus === "failed" ? 0 : 1, taskSuccess: streamStatus === "failed" ? 0 : 1, verificationSuccess: streamStatus === "failed" ? 0 : 1, retryCount: transientFailure(result) ? 1 : 0, latencyScore: Math.max(0, Math.min(1, 1 - ((Date.now() - runStartedAt) / 120000))) },
+            metadata: { toolCalls: result.toolCalls.length, status: streamStatus },
+          })
           outcome = { runId, status: streamStatus }
         } catch (error) {
           heldRunFinished.length = 0 // the single terminal event is emitted below
@@ -634,6 +649,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           streamHub.publish(stream, "typing.stop", { run_id: runId })
           streamHub.publish(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })
           streamHub.finish(stream, "failed", clientMessage)
+          recordLearning({ runId, sessionId: contextId, taskClass: "interactive_chat", context: content, actionKey: `model:${model || "baseline"}`, modelId: model || undefined, outcome: "failure", rewardInput: { outcome: "failure", completionQuality: 0, taskSuccess: 0, verificationSuccess: 0, safetyViolation: 0, latencyScore: 0 }, metadata: { error: detail.slice(0, 300) } })
         } finally {
           clearInterval(heartbeat)
           streamHub.settle(stream)

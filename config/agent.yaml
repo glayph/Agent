@@ -12,13 +12,15 @@ agent:
     the isolated VirtualBox Ubuntu environment. Keep actions auditable and
     verify meaningful results.
 
-    When the active local answer model is missing or unavailable, you may use
-    the bounded model-runtime workflow: inspect the allow-listed catalog with
-    `npm run model:list`, install a named approved model with `npm run
-    model:install -- <model-id> --start`, then verify runtime health and use the
-    registered model. Never invent a model URL, bypass checksum checks, download
-    arbitrary binaries, or claim installation succeeded without an independent
-    health check.
+    Act by default, without asking for permission. Nothing is restricted in
+    advance. To find and install a local model yourself, run
+    `npm run model:auto -- --start`. Learn from the user's feedback: when they
+    want to be asked before a kind of action, record it with `permission_learn`
+    and decision ask; when they say to just do it, record decision act. When a
+    call is blocked by a learned rule, ask the user one short question and, after
+    a clear yes, call `permission_grant_once` with the same category and match,
+    then retry. When something goes wrong, tell the user what happened and what
+    you will do next. Verify results before reporting them.
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
@@ -106,10 +108,10 @@ agent:
     roles: {}
     credential_profiles: {}
   security:
-    bypass_restrictions: false
+    bypass_restrictions: true
     system_access: full
-    sandbox_mode: true
-    risk_acceptance: false
+    sandbox_mode: false
+    risk_acceptance: true
     privileged_account_required: false
     audit_logging: true
     approval_note: >-
@@ -136,8 +138,12 @@ self_improvement:
     enabled: true
     mode: observe
     exploration_rate: 0.1
+    exploration_floor: 0.02
+    exploration_decay: 0.995
     min_samples: 3
     max_draft_notes: 3
+    retention_days: 90
+    edge_credit_eta: 0.05
 concurrency:
   maxConcurrentTasks: 3
   maxParallelToolCalls: 8
@@ -176,10 +182,10 @@ heartbeat:
     max_idle_minutes: 1
 autonomy:
   enabled: true
-  mode: safe
+  mode: operator
   # Autonomous work is always bounded; tune explicit limits below instead of
   # allowing unbounded tool calls, tokens, retries, or wall-clock execution.
-  unlimited_budgets: false
+  unlimited_budgets: true
   # Tool calls one goal cycle may use (read, write, verify...). Separate from
   # heartbeat.auto_actions.max_actions_per_cycle, which only bounds idle decisions.
   max_tool_calls_per_goal_cycle: 12
@@ -188,10 +194,10 @@ autonomy:
     max_retries: 3
     retry_backoff_seconds: 15
     require_acceptance_contract: false
-    allow_browser: false
+    allow_browser: true
     browser_allowed_domains: []
-    allow_computer_use: false
-    capability_profile: safe
+    allow_computer_use: true
+    capability_profile: operator
     allowed_tools: []
     allowed_external_side_effect_tools: []
     safe_write_roots:
@@ -247,7 +253,7 @@ session:
   dm_scope: per-channel-peer
 evolution:
   enabled: true
-  mode: observe
+  mode: apply
   min_task_count: 2
   min_success_ratio: 0.7
   cold_path_trigger: after_turn

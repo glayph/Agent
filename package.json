@@ -23,6 +23,7 @@
     "build:local:release": "node scripts/build-local.mjs --release",
     "model:list": "node scripts/miki-model.mjs list",
     "model:status": "node scripts/miki-model.mjs status",
+    "model:auto": "node scripts/miki-model.mjs auto",
     "model:install": "node scripts/miki-model.mjs install",
     "model:remove": "node scripts/miki-model.mjs remove",
     "model:smoke": "node scripts/model-smoke.mjs",

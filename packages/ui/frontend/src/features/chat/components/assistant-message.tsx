@@ -5,6 +5,7 @@ import {
   IconClock,
   IconGauge,
   IconKey,
+  IconRefresh,
   IconTool,
 } from "@tabler/icons-react"
 import { Suspense, lazy, memo, useMemo, useState } from "react"
@@ -150,6 +151,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     () => (isError && hasText ? classifyErrorContent(trimmedContent) : null),
     [isError, hasText, trimmedContent],
   )
+  const showErrorDetails = !(isError && errorCategory === "rate-limit")
   const visibleContent = isActionUpdate
     ? visibleAssistantContent(trimmedContent)
     : trimmedContent
@@ -168,6 +170,9 @@ export const AssistantMessage = memo(function AssistantMessage({
             isToolCalls && hasToolCalls && "cursor-pointer",
             isError &&
               "[border-color:var(--chat-error-border)] [background:var(--chat-error-bubble)] [box-shadow:none]",
+            isError &&
+              errorCategory === "rate-limit" &&
+              "border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2",
           )}
           onClick={() => {
             onSelect?.()
@@ -346,9 +351,17 @@ export const AssistantMessage = memo(function AssistantMessage({
               <div className="py-0.5 text-[14px] leading-6">
                 <div
                   data-chat-alert={errorCategory}
-                  className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1"
+                  className={cn(
+                    "inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1",
+                    errorCategory === "rate-limit" && "gap-2 px-0 py-0",
+                  )}
                 >
-                  {errorCategory === "timeout" ? (
+                  {errorCategory === "rate-limit" ? (
+                    <IconClock
+                      className="size-4 shrink-0 text-amber-600 dark:text-amber-300"
+                      aria-hidden="true"
+                    />
+                  ) : errorCategory === "timeout" ? (
                     <IconClock
                       className="size-3.5 shrink-0 [color:var(--chat-alert-icon)]"
                       aria-hidden="true"
@@ -364,11 +377,16 @@ export const AssistantMessage = memo(function AssistantMessage({
                       aria-hidden="true"
                     />
                   )}
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] leading-5 font-semibold [color:var(--chat-alert-text)]">
+                  <span className="min-w-0 flex-1 text-[12.5px] leading-5 font-semibold [color:var(--chat-alert-text)]">
                     {errorCategory === "rate-limit" &&
-                      t("chat.errors.rateLimitTitle", {
-                        defaultValue: "Model quota or rate limit reached",
-                      })}
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate text-amber-900 dark:text-amber-100">
+                          {t("chat.errors.rateLimitTitle", { defaultValue: "Model is taking a breather" })}
+                        </span>
+                        <span className="font-normal text-[11px] text-amber-800/70 dark:text-amber-200/70">
+                          {t("chat.errors.rateLimitHint", { defaultValue: "Try again in a moment" })}
+                        </span>
+                      </span>}
                     {errorCategory === "credential" &&
                       t("chat.errors.credentialsTitle", {
                         defaultValue: "Model needs credentials",
@@ -386,6 +404,21 @@ export const AssistantMessage = memo(function AssistantMessage({
                         defaultValue: "Something went wrong",
                       })}
                   </span>
+                  {errorCategory === "rate-limit" && canRetry && onRetry && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 rounded-md px-2 text-[11px] font-semibold text-amber-900 hover:bg-amber-500/10 hover:text-amber-950 dark:text-amber-100 dark:hover:text-amber-50"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onRetry()
+                      }}
+                    >
+                      <IconRefresh className="mr-1.5 size-3.5" aria-hidden="true" />
+                      {t("chat.actions.retry", { defaultValue: "Retry" })}
+                    </Button>
+                  )}
                   {errorCategory === "credential" && (
                     <Button
                       asChild
@@ -413,7 +446,8 @@ export const AssistantMessage = memo(function AssistantMessage({
             {!isActionUpdate &&
               (!isCollapsedBlock || isExpanded) &&
               !isToolCalls &&
-              hasText && (
+              hasText &&
+              showErrorDetails && (
                 <div
                   className={cn(
                     "prose dark:prose-invert prose-headings:mt-3 prose-headings:mb-1.5 prose-headings:text-[0.95em] prose-headings:font-semibold prose-li:my-0.5 prose-ol:my-2 prose-ul:my-2 prose-p:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/50 prose-pre:p-0 prose-pre:text-foreground prose-table:my-3 relative max-w-none [overflow-wrap:anywhere] break-words",

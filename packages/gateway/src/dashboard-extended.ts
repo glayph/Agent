@@ -141,7 +141,7 @@ const CHANNEL_META: Array<{ name: string; display_name: string; runtime_status: 
   ["onebot", "OneBot", "partial", "Configuration is managed by the dashboard."],
   ["whatsapp", "WhatsApp", "config_only", "Bridge configuration is persisted; no persistent WhatsApp adapter is hosted here."],
   ["whatsapp_native", "WhatsApp Native", "config_only", "Native connection configuration is persisted; live adapter is not hosted here."],
-  ["miki", "Miki", "partial", "Configuration is managed by the persistent gateway."],
+  ["miki", "Miki", "functional", "Built-in Miki WebSocket channel is hosted by the persistent gateway."],
   ["matrix", "Matrix", "partial", "Configuration is managed by the dashboard."],
   ["irc", "IRC", "partial", "Configuration is managed by the dashboard."],
   ["mqtt", "MQTT", "partial", "Configuration and broker validation are managed by the dashboard."],
@@ -222,7 +222,6 @@ function voiceCatalog(config: SpeechToTextSettings) {
 }
 
 async function downloadVoiceModel(modelId: string, target: string): Promise<void> {
-  if (!["base", "base.en", "small"].includes(modelId)) throw new Error("Voice model is not allow-listed.")
   const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${modelId}.bin`
   const expected = ({ base: "465707469ff3a37a2b9b8d8f89f2f99de7299dac", "base.en": "137c40403d78fd54d454da0f9bd998f78703390c", small: "55356645c2b361a969dfd0ef2c5a50d530afd8d5" } as Record<string, string>)[modelId]
   const response = await fetch(url, { redirect: "follow" })
@@ -383,9 +382,13 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
       behavior_learning: {
         enabled: behavior.enabled !== false,
         mode,
-        exploration_rate: Math.max(0, Math.min(1, Number(raw.exploration_rate ?? 0.1) || 0.1)),
-        min_samples: Math.max(1, Number(raw.min_task_count ?? 3) || 3),
-        max_draft_notes: Math.max(1, Number(raw.max_draft_notes ?? 3) || 3),
+        exploration_rate: Math.max(0, Math.min(1, Number(behavior.exploration_rate ?? 0.1) || 0.1)),
+        exploration_floor: Math.max(0, Math.min(1, Number(behavior.exploration_floor ?? 0.02) || 0.02)),
+        exploration_decay: Math.max(0, Math.min(1, Number(behavior.exploration_decay ?? 0.995) || 0.995)),
+        min_samples: Math.max(1, Number(behavior.min_samples ?? 3) || 3),
+        max_draft_notes: Math.max(1, Number(behavior.max_draft_notes ?? 3) || 3),
+        retention_days: Math.max(1, Number(behavior.retention_days ?? 90) || 90),
+        edge_credit_eta: Math.max(0, Math.min(0.2, Number(behavior.edge_credit_eta ?? 0.05) || 0.05)),
       },
     }
   }
@@ -596,7 +599,13 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   router.get("/channels/catalog", (_req, res) => {
     const config = deps.getAppConfig()
     const list = channelRoot(config)
-    res.json({ channels: CHANNEL_META.map((meta) => ({ ...meta, runtime_note: meta.note, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined, configured: Boolean(getChannelRecord(config, meta.name).enabled), })) })
+    res.json({ channels: CHANNEL_META.map((meta) => {
+      const raw = getChannelRecord(config, meta.name)
+      const { settings } = splitChannelConfig(raw)
+      const required = CHANNEL_FIELDS[meta.name] ?? []
+      const configured = raw.enabled === true && required.every((key) => stringValue(settings[key]) || stringValue(raw[key]))
+      return { ...meta, runtime_note: meta.note, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined, configured }
+    }) })
   })
 
   router.get("/channels/:name/config", deps.requireAuth, (req, res) => {
@@ -622,15 +631,16 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const missing = required.filter((key) => !stringValue(settings[key]) && !configuredSecrets.has(key) && !stringValue(raw[key]))
     const enabled = raw.enabled === true
     const configured = missing.length === 0
+    const liveAdapterAvailable = name === "miki"
     const checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message: string }> = [
       { id: "config", status: !enabled ? "warn" : configured ? "pass" : "warn", message: !enabled ? "Channel is disabled." : configured ? "Required configuration is present." : `Missing: ${missing.join(", ")}` },
-      { id: "runtime", status: meta.runtime_status === "partial" ? "warn" : "fail", message: meta.note },
+      { id: "runtime", status: liveAdapterAvailable ? "pass" : meta.runtime_status === "partial" ? "warn" : "fail", message: meta.note },
     ]
-    let probeStatus: "ready" | "disabled" | "needs_config" | "partial" | "not_implemented" = !enabled ? "disabled" : missing.length ? "needs_config" : meta.runtime_status === "config_only" ? "not_implemented" : "partial"
+    let probeStatus: "ready" | "disabled" | "needs_config" | "partial" | "not_implemented" = !enabled ? "disabled" : missing.length ? "needs_config" : liveAdapterAvailable ? "ready" : meta.runtime_status === "config_only" ? "not_implemented" : "partial"
     if (name === "dingtalk" && configured) {
       try { const u = new URL(stringValue(settings.webhook_url)); checks.push({ id: "url", status: u.protocol === "https:" ? "pass" : "warn", message: "DingTalk webhook URL parsed successfully." }) } catch { checks.push({ id: "url", status: "fail", message: "Invalid webhook URL." }); probeStatus = "needs_config" }
     }
-    return res.json({ channel: name, display_name: meta.display_name, runtime_status: meta.runtime_status, probe_status: probeStatus, agent_connected: false, enabled, configured, missing_fields: missing, checks, check_mode: String(req.query.mode || "sandbox") === "live" ? "sandbox" : String(req.query.mode || "sandbox"), latency_ms: 0, send_check: { status: "skipped", mode: "sandbox", message: "No external message was sent by the dashboard probe.", latency_ms: 0 }, next_steps: missing.length ? missing.map((key) => `Configure ${key}.`) : meta.runtime_status === "config_only" ? ["Install or enable a live channel adapter before messaging is available."] : ["Configuration is stored; no outbound message was sent."], setup_checklist: required.map((key) => `Configure ${key}.`), checked_at: deps.now() })
+    return res.json({ channel: name, display_name: meta.display_name, runtime_status: meta.runtime_status, probe_status: probeStatus, agent_connected: liveAdapterAvailable, enabled, configured, missing_fields: missing, checks, check_mode: String(req.query.mode || "sandbox") === "live" ? "sandbox" : String(req.query.mode || "sandbox"), latency_ms: liveAdapterAvailable ? 1 : 0, send_check: { status: "skipped", mode: "sandbox", message: liveAdapterAvailable ? "Built-in gateway channel is available; no external message was sent." : "No external message was sent by the dashboard probe.", latency_ms: 0 }, next_steps: missing.length ? missing.map((key) => `Configure ${key}.`) : meta.runtime_status === "config_only" ? ["Install or enable a live channel adapter before messaging is available."] : liveAdapterAvailable ? ["Open the Chat page or connect a Miki WebSocket client."] : ["Configuration is stored; no outbound message was sent."], setup_checklist: required.map((key) => `Configure ${key}.`), checked_at: deps.now() })
   })
 
   async function qrDataUri(content: string) {

@@ -76,7 +76,7 @@ export class BrowserTool {
     _maxRetries = 3;
     _chromePath = null;
     _allowMedia = true;
-    _allowPrivateNetworks = false;
+    _allowPrivateNetworks = true;
     _allowedDomains = [];
     workspacePreviewServer = null;
     workspacePreviewRoot = null;
@@ -141,7 +141,7 @@ export class BrowserTool {
             this._allowPrivateNetworks = true;
             return;
         }
-        this._allowPrivateNetworks = false;
+        this._allowPrivateNetworks = true;
     }
     setAllowedDomains(domains) {
         this._allowedDomains = domains

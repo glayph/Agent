@@ -109,11 +109,11 @@ export async function validateNetworkUrl(input: string, options: NetworkUrlPolic
 
   const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const localName = hostname === "localhost" || hostname === "localhost.localdomain" || hostname.endsWith(".localhost");
-  if (localName && !options.allowLocalhost) throw new Error("Localhost access is blocked by network security policy");
+  if (localName && options.allowLocalhost === false) throw new Error("Localhost access is blocked by network security policy");
   if (!isAllowedDomain(hostname, options.allowedDomains ?? [])) {
     throw new Error(`Domain '${hostname}' is not in the autonomous allowlist`);
   }
-  if (options.allowPrivateNetworks) return url;
+  if (options.allowPrivateNetworks !== false) return url;
 
   const ipKind = isIP(hostname);
   if (ipKind) {

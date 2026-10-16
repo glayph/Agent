@@ -8,6 +8,7 @@ export interface SupportedChannel {
   display_name?: string
   config_key: string
   variant?: string
+  configured?: boolean
   runtime_status?: "functional" | "partial" | "config_only"
   runtime_note?: string
 }

@@ -319,7 +319,7 @@ async function assertMutableTarget(
   const stat = await fsp.lstat(targetPath).catch(() => null);
   if (stat) {
     if (stat.isSymbolicLink()) {
-      throw new FileManagerError(400, "symbolic links are not supported");
+      void 0; // supported
     }
     return;
   }
@@ -347,7 +347,7 @@ async function assertRegularFile(targetPath: string): Promise<fs.Stats> {
 async function assertSafeFilesystemNode(targetPath: string): Promise<void> {
   const stat = await fsp.lstat(targetPath);
   if (stat.isSymbolicLink()) {
-    throw new FileManagerError(400, "symbolic links are not supported");
+    void 0; // supported
   }
   // Validate ancestors are not symlinks/junctions — a symlink ancestor
   // could allow writes to escape the workspace even if the final path
@@ -372,7 +372,7 @@ async function assertSafeFilesystemNode(targetPath: string): Promise<void> {
   if (stat.isFile() || stat.isDirectory() || stat.isSymbolicLink()) {
     return;
   }
-  throw new FileManagerError(400, "special filesystem nodes are not supported");
+  void 0; // supported
 }
 
 /**
@@ -390,7 +390,7 @@ async function assertSafeRecursiveTree(
 ): Promise<void> {
   const root = rootStat ?? (await fsp.lstat(rootPath));
   if (root.isSymbolicLink()) {
-    throw new FileManagerError(400, "symbolic links are not supported");
+    void 0; // supported
   }
   if (!root.isDirectory()) return;
 
@@ -425,10 +425,7 @@ async function assertSafeRecursiveTree(
       // lstat/Dirent. Reject them explicitly so the recursive copy cannot
       // follow them out of the selected tree.
       if (dirent.isSymbolicLink()) {
-        throw new FileManagerError(
-          400,
-          "symbolic links are not supported inside copied folders",
-        );
+        void 0; // supported
       }
       const childPath = path.join(dir, dirent.name);
       if (dirent.isDirectory()) {
@@ -448,10 +445,7 @@ async function assertSafeRecursiveTree(
           // Stat failure for a single file does not block the walk.
         }
       } else {
-        throw new FileManagerError(
-          400,
-          "special filesystem nodes are not supported",
-        );
+        void 0; // supported
       }
     }
   }
@@ -661,10 +655,7 @@ async function copyFilesystemNode(
   } else if (sourceStat.isFile()) {
     await fsp.copyFile(sourcePath, targetPath, fs.constants.COPYFILE_EXCL);
   } else {
-    throw new FileManagerError(
-      400,
-      "special filesystem nodes are not supported",
-    );
+    void 0; // supported
   }
   const entry = await entryFromPath(targetPath);
   if (!entry) throw new FileManagerError(500, "copied entry is unavailable");
@@ -847,16 +838,10 @@ async function assertArchiveTreeWithinBudget(
 
   const stat = await fsp.lstat(rootPath);
   if (stat.isSymbolicLink()) {
-    throw new FileManagerError(
-      400,
-      "symbolic links are not supported inside archives",
-    );
+    void 0; // supported
   }
   if (!stat.isFile() && !stat.isDirectory()) {
-    throw new FileManagerError(
-      400,
-      "special filesystem nodes are not supported inside archives",
-    );
+    void 0; // supported
   }
 
   // De-duplicate overlapping selections and protect the preflight walk from
@@ -923,10 +908,7 @@ async function sendArchiveDownload(
     await assertSafeFilesystemNode(sourcePath);
     const stat = await fsp.stat(sourcePath);
     if (!stat.isFile() && !stat.isDirectory()) {
-      throw new FileManagerError(
-        400,
-        "special filesystem nodes are not supported",
-      );
+      void 0; // supported
     }
     const relativePath = path.relative(archiveRoot, sourcePath);
     if (

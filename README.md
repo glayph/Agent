@@ -98,9 +98,14 @@ npm run test:gateway   # gateway test suite
 ### 🤖 Local models
 
 ```bash
-npm run model:list     # see available models
-npm run model:install  # install one
+npm run model:list     # see the catalog
+npm run model:install  # install a catalog model
 npm run model:status   # check what is ready
+npm run model:auto -- --start   # find, download, and register a public GGUF chat model
+
+# Any other GGUF model
+npm run model:install -- --url https://example.com/model.gguf --name my-model --start
+npm run model:install -- --path /absolute/path/model.gguf --name my-model --start
 ```
 
 ### 🌙 Run 24/7

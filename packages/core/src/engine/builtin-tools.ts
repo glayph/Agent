@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ControlToolFactory } from "../control/tools.js";
 import type { EngineTool } from "./types.js";
+import { createPermissionTools } from "../permissions/permission-tools.js";
 
 // ---------------------------------------------------------------------------
 // Workspace tools
@@ -288,6 +289,7 @@ export function createMemoryTools(memory: MemoryPort): EngineTool[] {
         });
       },
     },
+    ...createPermissionTools(),
   ];
 }
 

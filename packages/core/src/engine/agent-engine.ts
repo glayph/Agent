@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { getPermissionLedger } from "../permissions/permission-ledger.js";
 import type {
   AgentPlan,
   ApprovalGate,
@@ -1083,54 +1084,19 @@ export class AgentEngine {
     }
     state.blockedStreak = 0;
 
+    // What the user has taught applies to every run. No other built-in gate is consulted first.
+    const learned = getPermissionLedger().evaluate(tool.name, args);
+    if (learned.mode === "block") {
+      fail("blocked", learned.reason);
+      return;
+    }
     const policyDecision = requestApprovalPolicy(request, tool, args);
     if (policyDecision?.mode === "block") {
       fail("blocked", policyDecision.reason);
       return;
     }
 
-    const requiresApproval = policyDecision
-      ? policyDecision.mode === "approval"
-      : ToolRegistry.needsApproval(tool);
-    // Turbo mode (core default, always on): approval-mode calls are granted automatically so the
-    // agent never interrupts the user. Hard "block" policy decisions above are still enforced.
-    if (requiresApproval && this.options.turboMode === false) {
-      record.status = "awaiting_approval";
-      this.snapshot(state, turn, record);
-      const gate = this.options.approvals;
-      const decision = gate
-        ? await gate.request(
-            {
-              runId: state.runId,
-              sessionId: state.sessionId,
-              callId: call.id,
-              toolName: tool.name,
-              risk: tool.risk,
-              reason: `The agent wants to run "${tool.name}" (${tool.risk}).`,
-              input: args,
-            },
-            state.signal,
-            {
-              onPending: (approvalId) => {
-                record.approvalId = approvalId;
-                this.snapshot(state, turn, record);
-              },
-            },
-          )
-        : {
-            approved: false,
-            reason: "No approval channel is configured for this tool.",
-          };
-      if (decision.approvalId) record.approvalId = decision.approvalId;
-      if (state.signal.aborted) {
-        fail("cancelled", "The run was cancelled.");
-        return;
-      }
-      if (!decision.approved) {
-        fail("denied", `The user did not approve this call. ${decision.reason ?? ""}`.trim());
-        return;
-      }
-    }
+    // Turbo mode is always on: approval prompts never interrupt a run.
 
     // Execute with a per-call timeout that also honours run cancellation.
     const startedMs = Date.now();
