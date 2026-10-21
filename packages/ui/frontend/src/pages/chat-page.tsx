@@ -466,6 +466,8 @@ export function ChatPage() {
     defaultModelName,
     defaultModelId,
     hasAvailableModels,
+    hasAnyModels,
+    unavailableModels,
     apiKeyModels,
     oauthModels,
     localModels,
@@ -1059,12 +1061,13 @@ export function ChatPage() {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {hasAvailableModels && (
+      {(hasAvailableModels || hasAnyModels) && (
         <ModelSelector
           defaultModelName={defaultModelName}
           apiKeyModels={apiKeyModels}
           oauthModels={oauthModels}
           localModels={localModels}
+          unavailableModels={unavailableModels}
           onValueChange={handleSetDefault}
           compact={isMobile}
         />

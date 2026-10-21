@@ -93,9 +93,6 @@ export async function getSpeechModels(): Promise<SpeechModelsResponse> {
   return request<SpeechModelsResponse>("/api/speech-to-text/models")
 }
 
-export async function getVoiceRuntimeStatus(): Promise<VoiceRuntimeStatus> {
-  return request<VoiceRuntimeStatus>("/api/speech-to-text/status")
-}
 
 export async function installVoiceModel(
   modelId: string,
@@ -120,18 +117,6 @@ export async function healthCheckVoiceModel(): Promise<SpeechModelActionResponse
   })
 }
 
-export async function updateSpeechConfig(
-  input: Partial<SpeechToTextSettings> & {
-    enabled?: boolean
-    active_model_id?: string | null
-  },
-): Promise<SpeechModelActionResponse> {
-  return request<SpeechModelActionResponse>("/api/speech-to-text/config", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  })
-}
 
 export async function addSpeechModel(
   model: Omit<SpeechToTextModel, "enabled"> & {

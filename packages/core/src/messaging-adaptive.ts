@@ -2,8 +2,6 @@ import type { ChannelName } from "./event-envelope.js";
 
 export type MessagingStrategy =
   | "single"
-  | "multi_message"
-  | "chunked"
   | "streaming"
   | "progressive";
 
@@ -20,14 +18,10 @@ export interface ChannelMessagingCapabilities {
 
 export interface AdaptiveMessagingConfig {
   adaptive: boolean;
-  maxMessagesPerResponse: number;
-  enableChunking: boolean;
   enableStreaming: boolean;
   enableProgressMessages: boolean;
-  maxChunkLength: number;
   avoidUnnecessaryMessages: boolean;
   streamingMinLength: number;
-  multiMessageMinLength: number;
   progressIntervalMs: number;
 }
 
@@ -70,14 +64,10 @@ export interface MessageGroupState {
 
 export const DEFAULT_ADAPTIVE_MESSAGING_CONFIG: AdaptiveMessagingConfig = {
   adaptive: true,
-  maxMessagesPerResponse: 3,
-  enableChunking: true,
   enableStreaming: true,
   enableProgressMessages: true,
-  maxChunkLength: 4000,
   avoidUnnecessaryMessages: true,
   streamingMinLength: 1200,
-  multiMessageMinLength: 800,
   progressIntervalMs: 1800,
 };
 
@@ -167,10 +157,7 @@ export function normalizeMessagingConfig(
   input?: Partial<AdaptiveMessagingConfig>,
 ): AdaptiveMessagingConfig {
   const next = { ...DEFAULT_ADAPTIVE_MESSAGING_CONFIG, ...(input ?? {}) };
-  next.maxMessagesPerResponse = Math.max(1, Math.min(3, Math.floor(next.maxMessagesPerResponse)));
-  next.maxChunkLength = Math.max(256, Math.floor(next.maxChunkLength));
   next.streamingMinLength = Math.max(256, Math.floor(next.streamingMinLength));
-  next.multiMessageMinLength = Math.max(256, Math.floor(next.multiMessageMinLength));
   next.progressIntervalMs = Math.max(500, Math.floor(next.progressIntervalMs));
   return next;
 }
@@ -199,167 +186,8 @@ export function chooseMessagingStrategy(
     return "streaming";
   }
 
-  const limit = Math.min(capabilities.maxMessageLength, cfg.maxChunkLength);
-  if (content.length > limit && cfg.enableChunking) return "chunked";
-
-  const sections = splitLogicalSections(content);
-  if (
-    cfg.adaptive &&
-    cfg.maxMessagesPerResponse > 1 &&
-    capabilities.supportsMultipleMessages &&
-    content.length >= cfg.multiMessageMinLength &&
-    sections.length >= 2
-  ) {
-    return "multi_message";
-  }
-
+  // A message is never split automatically: one reply stays one message at any length.
   return "single";
-}
-
-export function splitLogicalSections(content: string): string[] {
-  const blocks = splitPreservingCodeAndTables(content)
-    .map((block) => block.trim())
-    .filter(Boolean);
-  const sections: string[] = [];
-  for (let index = 0; index < blocks.length; index += 1) {
-    const current = blocks[index];
-    if (/^#{1,6}\s+/.test(current) && index + 1 < blocks.length) {
-      sections.push(`${current}\n\n${blocks[index + 1]}`.trim());
-      index += 1;
-      continue;
-    }
-    sections.push(current);
-  }
-  return sections;
-}
-
-/**
- * Split on semantic blank-line boundaries while treating fenced code and
- * markdown tables as indivisible blocks. This deliberately prefers a slightly
- * oversized block to corrupting a command, JSON, URL, table, or code fence.
- */
-export function splitPreservingCodeAndTables(content: string): string[] {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  const blocks: string[] = [];
-  let current: string[] = [];
-  let inFence = false;
-
-  const flush = () => {
-    if (current.length) {
-      blocks.push(current.join("\n").trim());
-      current = [];
-    }
-  };
-
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const fence = /^\s*(```|~~~)/.test(line);
-    const table = isMarkdownTableStart(lines, i);
-
-    if (fence) {
-      inFence = !inFence;
-      current.push(line);
-      i += 1;
-      if (!inFence) flush();
-      continue;
-    }
-
-    if (inFence) {
-      current.push(line);
-      i += 1;
-      continue;
-    }
-
-    if (table) {
-      flush();
-      const tableLines: string[] = [];
-      while (i < lines.length && lines[i].trim()) {
-        tableLines.push(lines[i]);
-        i += 1;
-      }
-      blocks.push(tableLines.join("\n").trim());
-      while (i < lines.length && !lines[i].trim()) i += 1;
-      continue;
-    }
-
-    if (!line.trim()) {
-      flush();
-      i += 1;
-      continue;
-    }
-
-    current.push(line);
-    i += 1;
-  }
-  flush();
-  return blocks;
-}
-
-function isMarkdownTableStart(lines: string[], index: number): boolean {
-  if (index + 1 >= lines.length) return false;
-  const header = lines[index].trim();
-  const separator = lines[index + 1].trim();
-  return header.includes("|") && /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(separator);
-}
-
-function mergeSectionsForMessageCount(sections: string[], maxMessages: number): string[] {
-  if (sections.length <= maxMessages) return sections;
-  const limit = Math.max(2, maxMessages);
-  const groups: string[] = [];
-  const remaining = [...sections];
-  for (let index = 0; index < limit; index += 1) {
-    const remainingGroups = limit - index;
-    const take = Math.max(1, Math.ceil(remaining.length / remainingGroups));
-    groups.push(remaining.splice(0, take).join("\n\n"));
-  }
-  return groups.filter(Boolean);
-}
-
-function splitOversizeBlock(block: string, maxLength: number): string[] {
-  if (block.length <= maxLength) return [block];
-  if (/^\s*(```|~~~)[\s\S]*\1\s*$/.test(block)) return [block];
-  if (block.includes("|") && block.split("\n").length > 1 && /^\|?/.test(block)) {
-    return [block];
-  }
-  const tokens = block.split(/\s+/);
-  if (tokens.some((token) => token.length > maxLength || /^https?:\/\//i.test(token))) {
-    return [block];
-  }
-  const pieces: string[] = [];
-  let remaining = block;
-  while (remaining.length > maxLength) {
-    const target = remaining.slice(0, maxLength + 1);
-    let cut = Math.max(target.lastIndexOf("\n"), target.lastIndexOf("\n\n"));
-    if (cut < maxLength * 0.55) cut = target.lastIndexOf(" ");
-    if (cut < maxLength * 0.55) cut = maxLength;
-    pieces.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trimStart();
-  }
-  if (remaining) pieces.push(remaining);
-  return pieces;
-}
-
-export function chunkContent(content: string, maxLength: number): string[] {
-  const limit = Math.max(256, Math.floor(maxLength));
-  const sections = splitPreservingCodeAndTables(content);
-  if (!sections.length) return [];
-  const chunks: string[] = [];
-  let current = "";
-  for (const section of sections) {
-    for (const piece of splitOversizeBlock(section, limit)) {
-      if (!current) {
-        current = piece;
-      } else if (current.length + 2 + piece.length <= limit) {
-        current = `${current}\n\n${piece}`;
-      } else {
-        chunks.push(current);
-        current = piece;
-      }
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
 }
 
 export function planAdaptiveOutput(
@@ -380,32 +208,16 @@ export function planAdaptiveOutput(
     conversationId: candidate.conversationId,
   };
 
-  if (strategy === "single" || strategy === "streaming" || strategy === "progressive") {
-    return [{
-      ...base,
-      id: `${candidate.id}:1`,
-      sequence: 1,
-      total: 1,
-      strategy,
-      content,
-      final: candidate.final !== false,
-      ...(strategy === "streaming" ? { stream: true } : {}),
-    }];
-  }
-
-  const sections = strategy === "multi_message"
-    ? mergeSectionsForMessageCount(splitLogicalSections(content), cfg.maxMessagesPerResponse)
-    : chunkContent(content, Math.min(capabilities.maxMessageLength, cfg.maxChunkLength));
-
-  return sections.map((section, index) => ({
+  return [{
     ...base,
-    id: `${candidate.id}:${index + 1}`,
-    sequence: index + 1,
-    total: sections.length,
+    id: `${candidate.id}:1`,
+    sequence: 1,
+    total: 1,
     strategy,
-    content: section,
-    final: candidate.final !== false && index === sections.length - 1,
-  }));
+    content,
+    final: candidate.final !== false,
+    ...(strategy === "streaming" ? { stream: true } : {}),
+  }];
 }
 
 export function progressAllowed(

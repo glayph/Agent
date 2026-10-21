@@ -117,7 +117,20 @@ export function checkApiKey(provider: unknown, rawKey: unknown, options: { baseU
 }
 
 function matchesRequested(entry: StoredModelEntry, requested: string): boolean {
-  return entry.payload.model === requested || entry.payload.model_name === requested
+  if (entry.payload.model === requested || entry.payload.model_name === requested) return true
+  const interpreted = interpretDefaultModel(requested)
+  if (!interpreted?.provider) return false
+  const aliases: Record<string, string> = {
+    google: "gemini", "open-router": "openrouter", compatible: "openai-compatible",
+    openai_compatible: "openai-compatible", "llama-cpp": "llama.cpp", llamacpp: "llama.cpp", local: "llama.cpp",
+    gpt: "openai", chatgpt: "openai",
+  }
+  const provider = normalizeProvider(entry.payload.provider)
+  const wantedProvider = aliases[normalizeProvider(interpreted.provider)] || normalizeProvider(interpreted.provider)
+  const actualProvider = aliases[provider] || provider
+  const storedModel = String(entry.payload.model || "")
+  const storedLabel = String(entry.payload.model_name || "")
+  return actualProvider === wantedProvider && (storedModel === interpreted.model || storedLabel === interpreted.model)
 }
 
 /** Entry that should run when the caller did not (or could not) pick one. */

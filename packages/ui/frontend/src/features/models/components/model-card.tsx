@@ -214,10 +214,10 @@ export function ModelCard({
           <span className="text-muted-foreground bg-muted rounded px-1.5 py-0.5 text-[10px] font-medium">
             OAuth
           </span>
-        ) : status === "available" && model.api_key ? (
-          <span className="text-muted-foreground/70 flex items-center gap-1 font-mono text-[11px]">
+        ) : model.api_key_set ? (
+          <span className="text-muted-foreground/70 flex items-center gap-1 text-[11px]">
             <IconKey className="size-3" aria-hidden="true" />
-            {model.api_key}
+            {t("models.apiKeySaved")}
           </span>
         ) : (
           <span className="text-muted-foreground/50 text-[11px]">

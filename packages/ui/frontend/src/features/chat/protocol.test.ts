@@ -27,6 +27,7 @@ function resetChatState() {
     recentRunIds: [],
     runStatus: undefined,
     runError: undefined,
+    workStatus: undefined,
   })
   toastError.mockClear()
 }
@@ -155,7 +156,7 @@ describe("chat protocol flow", () => {
         message_group_id: "group-1",
         message_sequence: 1,
         message_total: 2,
-        message_strategy: "multi_message",
+        message_strategy: "chunked",
       } },
       "session-1",
     )
@@ -168,14 +169,14 @@ describe("chat protocol flow", () => {
         message_group_id: "group-1",
         message_sequence: 2,
         message_total: 2,
-        message_strategy: "multi_message",
+        message_strategy: "chunked",
       } },
       "session-1",
     )
 
     expect(getChatState().messages).toMatchObject([
-      { id: "group-1:1", messageGroupId: "group-1", messageSequence: 1, messageTotal: 2, messageStrategy: "multi_message" },
-      { id: "group-1:2", messageGroupId: "group-1", messageSequence: 2, messageTotal: 2, messageStrategy: "multi_message" },
+      { id: "group-1:1", messageGroupId: "group-1", messageSequence: 1, messageTotal: 2, messageStrategy: "chunked" },
+      { id: "group-1:2", messageGroupId: "group-1", messageSequence: 2, messageTotal: 2, messageStrategy: "chunked" },
     ])
   })
 
@@ -389,6 +390,26 @@ describe("chat protocol flow", () => {
       runStatus: "failed",
       runError: "artifact verification failed",
     })
+  })
+
+  it("hides transient error bubbles when a later run completes successfully", () => {
+    updateChatStore({
+      messages: [{ id: "error-1", role: "assistant", content: "miki_error_provider_network", kind: "error", timestamp: 1 }],
+      activeRunId: "run-1",
+      runningRunIds: ["run-1"],
+      runStatus: "running",
+      isTyping: true,
+    })
+    handlemikiMessage(
+      {
+        type: "node.run_end",
+        session_id: "session-1",
+        payload: { run_id: "run-1", status: "completed" },
+      },
+      "session-1",
+    )
+    expect(getChatState().messages).toEqual([])
+    expect(getChatState().runError).toBeUndefined()
   })
 
   it("ignores late lifecycle and typing events from an older active run", () => {
@@ -666,6 +687,40 @@ describe("chat protocol flow", () => {
 
     send("message.status", { message_id: "req-1", status: "completed" })
     expect(getChatState().messages[0].deliveryStatus).toBeUndefined()
+  })
+
+  it("clears pending delivery state when the server confirms an idempotent duplicate", () => {
+    updateChatStore({ messages: [{ id: "req-1", role: "user", content: "hello", timestamp: 1, deliveryStatus: "queued" }] })
+    handlemikiMessage({
+      type: "message.duplicate",
+      session_id: "session-1",
+      payload: { message_id: "req-1", client_message_id: "req-1", status: "completed", duplicate: true },
+    }, "session-1")
+    expect(getChatState().messages[0].deliveryStatus).toBeUndefined()
+  })
+
+  it("shows a transient acknowledgment while work is starting and clears it on output or completion", () => {
+    updateChatStore({
+      messages: [{ id: "req-1", role: "user", content: "hello", timestamp: 1 }],
+    })
+    const send = (type: string, payload: Record<string, unknown>) =>
+      handlemikiMessage({ type, session_id: "session-1", payload }, "session-1")
+
+    send("message.status", { message_id: "req-1", status: "processing", run_id: "run-1" })
+    expect(getChatState().workStatus).toEqual({ messageId: "req-1", runId: "run-1" })
+
+    send("message.create", { message_id: "tool-1", run_id: "run-1", content: "Tool browser_click: running", kind: "tool_calls" })
+    expect(getChatState().workStatus).toEqual({ messageId: "req-1", runId: "run-1" })
+    send("message.update", { message_id: "tool-1", run_id: "run-1", content: "Tool browser_click: succeeded", kind: "tool_calls" })
+    expect(getChatState().workStatus).toEqual({ messageId: "req-1", runId: "run-1" })
+
+    send("message.create", { message_id: "assistant-1", run_id: "run-1", content: "Working", kind: "normal" })
+    expect(getChatState().workStatus).toBeUndefined()
+
+    send("message.status", { message_id: "req-1", status: "processing", run_id: "run-2" })
+    expect(getChatState().workStatus).toEqual({ messageId: "req-1", runId: "run-2" })
+    send("node.run_end", { run_id: "run-2", status: "completed" })
+    expect(getChatState().workStatus).toBeUndefined()
   })
 
   it("adopts the server-minted id when the client id collided", () => {

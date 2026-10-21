@@ -22,9 +22,9 @@ function normalizeRelative(value: string): string {
 }
 
 /**
- * Autonomous tool policy with no built-in restrictions: every tool call is
- * allowed. Behaviour the user has taught is enforced separately by the
- * permission ledger, which the engine consults before this policy runs.
+ * Miki executes assigned tasks independently: every tool call is decided "auto"
+ * and no approval is requested from the user. The permission ledger (rules the
+ * user has taught through feedback) is evaluated separately by the engine.
  */
 export class AutonomyPolicy implements ToolApprovalPolicy {
   private readonly safeWriteRoots: string[];
@@ -51,6 +51,6 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
   }
 
   decide(tool: EngineTool, _input: Record<string, unknown>): ToolApprovalDecision {
-    return { mode: "auto", reason: `No built-in restriction applies to "${tool.name}".` };
+    return { mode: "auto", reason: `Tool "${tool.name}" runs autonomously under the autonomy policy.` };
   }
 }

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
 import { RunActivityLine } from "@/features/chat/components/run-activity-line"
+import { WorkStartStatus } from "@/features/chat/components/work-start-status"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { Button } from "@/shared/ui/button"
 import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
@@ -48,17 +49,40 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const { t } = useTranslation()
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
-  const renderableMessages = useMemo(
-    () =>
-      messages.filter((message) =>
-        shouldShowAssistantMessage(
-          assistantDetailVisibility,
-          message.kind,
-          message.inspectorOnly,
-        ),
+  const renderableMessages = useMemo(() => {
+    const filtered = messages.filter((message) =>
+      shouldShowAssistantMessage(
+        assistantDetailVisibility,
+        message.kind,
+        message.inspectorOnly,
       ),
-    [assistantDetailVisibility, messages],
-  )
+    )
+    const correlated = filtered.filter(
+      (message) => message.role === "assistant" && message.replyToMessageId,
+    )
+    if (correlated.length === 0) return filtered
+
+    const repliesByUser = new Map<string, ChatMessage[]>()
+    for (const message of correlated) {
+      const parentId = message.replyToMessageId
+      if (!parentId) continue
+      const replies = repliesByUser.get(parentId) ?? []
+      replies.push(message)
+      repliesByUser.set(parentId, replies)
+    }
+    const parentIds = new Set(repliesByUser.keys())
+    const ordered: ChatMessage[] = []
+    for (const message of filtered) {
+      if (message.role === "assistant" && message.replyToMessageId && parentIds.has(message.replyToMessageId)) {
+        continue
+      }
+      ordered.push(message)
+      if (message.role === "user") {
+        ordered.push(...(repliesByUser.get(message.id) ?? []))
+      }
+    }
+    return ordered
+  }, [assistantDetailVisibility, messages])
   const {
     hiddenCount,
     showMore,
@@ -131,6 +155,7 @@ export function ChatMessageList({
           />
         ))}
 
+        <WorkStartStatus />
         <RunActivityLine />
       </div>
     </div>

@@ -37,7 +37,7 @@ interface AssistantMessageProps {
   kind?: AssistantMessageKind
   modelName?: string
   toolCalls?: ChatToolCall[]
-  messageStrategy?: "single" | "multi_message" | "chunked" | "streaming" | "progressive"
+  messageStrategy?: "single" | "chunked" | "streaming" | "progressive"
   messageSequence?: number
   messageTotal?: number
   timestamp?: string | number
@@ -97,6 +97,9 @@ type ErrorCategory =
   "rate-limit" | "credential" | "timeout" | "budget" | "generic"
 
 function classifyErrorContent(content: string): ErrorCategory {
+  if (content === "miki_error_provider_api_key") return "credential"
+  if (content === "miki_error_token_limit" || content === "miki_error_execution_limit") return "budget"
+  if (content === "miki_error_provider_network" || content === "miki_error_local_model_unavailable") return "timeout"
   if (isRateLimitConnectionError(content)) return "rate-limit"
   if (isCredentialConnectionError(content)) return "credential"
   if (isTimeoutError(content)) return "timeout"
@@ -130,6 +133,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   const isError = kind === "error"
   const isCollapsedBlock = isThought || isToolCalls
   const trimmedContent = content.trim()
+  const errorCode = isError && trimmedContent.startsWith("miki_error_") ? trimmedContent.slice("miki_error_".length) : ""
+  const translatedSystemError = errorCode ? t(`chat.errors.codes.${errorCode}`, { defaultValue: t("chat.errors.genericTitle", { defaultValue: "Something went wrong" }) }) : trimmedContent
   const hasText = trimmedContent.length > 0
   const hasToolCalls = toolCalls.length > 0
   const imageAttachments = useMemo(
@@ -154,7 +159,9 @@ export const AssistantMessage = memo(function AssistantMessage({
   const showErrorDetails = !(isError && errorCategory === "rate-limit")
   const visibleContent = isActionUpdate
     ? visibleAssistantContent(trimmedContent)
-    : trimmedContent
+    : isError && errorCode
+      ? translatedSystemError
+      : trimmedContent
   return (
     <div className="group/message flex w-full max-w-[var(--chat-message-max)] flex-col gap-1 px-0">
       {(hasText || isCollapsedBlock || hasToolCalls) && (

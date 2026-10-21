@@ -2,7 +2,6 @@ import { promises as fsp } from "node:fs"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import * as fs from "node:fs"
-import { diffUsbDevices, scanLinuxUsbDevices } from "./usb-monitor.js"
 import path from "node:path"
 import { randomUUID, createHash } from "node:crypto"
 import { Router, type Express, type Request, type Response } from "express"
@@ -18,9 +17,14 @@ import { SelfImprovementEngine, type SelfImprovementConfig } from "@miki/core/se
 import { LearningStore } from "@miki/memory"
 import type { McpRuntimeConfig, McpServerConfig } from "@miki/core/mcp/types"
 import type { SpeechToTextSettings } from "@miki/config"
+import { createWorkspaceSecretVault } from "@miki/config"
+import { CHANNEL_CONFIG_METADATA, CHANNEL_SECRET_FIELD_KEYS } from "@miki/config/channel-meta"
+import { publicChannelConfig, splitChannelConfig } from "./channel-config-helpers.js"
 import { getLifecycleBus } from "@miki/core/hooks"
 import { wrapAsyncRoutes } from "./async-route.js"
+import { sessionCookie } from "./session-cookie.js"
 import { IGNORED_DIRS as SECRET_IGNORED_DIRS, isFixturePath, isIgnoredPath, isScannableFile, parseIgnoreFile, scanLine } from "./secret-scan-rules.js"
+import { createZipArchive } from "./zip-archive.js"
 
 export interface DashboardExtendedDeps {
   db: Database.Database
@@ -44,6 +48,7 @@ export interface DashboardExtendedDeps {
   }
   getGatewayLogs: (offset: number, runId?: number) => { logs: string[]; log_total: number; log_run_id: number }
   appendGatewayLog: (message: string) => void
+  channelRuntimeStatus?: (name: string) => { runtime_live: boolean; connected: boolean; enabled: boolean; configured: boolean; lastError?: string; lastConnectedAt?: string; lastEventAt?: string }
   approvals: {
     requestApproval: (request: { operationId: string; capability: string; action: string; risk: "install"; reason: string; sanitizedInput: Record<string, unknown>; context: { origin: "dashboard"; actor: string } }) => Promise<{ requestId: string }>
     isApproved: (request: { operationId: string; capability: string; action: string; risk: "install"; reason: string; sanitizedInput: Record<string, unknown>; context: { origin: "dashboard"; actor: string }; approvalRequestId?: string }) => boolean
@@ -65,6 +70,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
+}
+
+function parseAllowedPeers(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[\s,;]+/) : []
+  return [...new Set(raw.map((item) => String(item).trim()).filter(Boolean))]
 }
 
 function appMcpConfig(config: Record<string, unknown>): McpRuntimeConfig {
@@ -119,39 +129,13 @@ function deepMergeLocal(base: Record<string, unknown>, incoming: Record<string, 
 
 const execFileAsync = promisify(execFile)
 
-const CHANNEL_FIELDS: Record<string, string[]> = {
-  telegram: ["token"], discord: ["token"], slack: ["bot_token", "app_token"],
-  feishu: ["app_id", "app_secret"], dingtalk: ["webhook_url"],
-  line: ["token", "channel_secret"], qq: ["bot_id", "token"], onebot: ["server_url"],
-  weixin: ["account_id"], wecom: ["bot_id", "secret"], whatsapp: ["bridge_url"],
-  whatsapp_native: ["config"], miki: ["token"], matrix: ["homeserver_url", "user_id", "access_token"],
-  irc: ["server", "nick"], mqtt: ["broker", "agent_id"],
-}
-
-const CHANNEL_META: Array<{ name: string; display_name: string; runtime_status: "functional" | "partial" | "config_only"; note: string }> = [
-  ["telegram", "Telegram", "partial", "Configuration is persisted; live bot adapter is not managed by the persistent gateway."],
-  ["discord", "Discord", "partial", "Configuration is persisted; live bot adapter is not managed by the persistent gateway."],
-  ["slack", "Slack", "partial", "Configuration is persisted; live Socket Mode adapter is not managed here."],
-  ["feishu", "Feishu", "partial", "Configuration and validation are managed by the dashboard."],
-  ["dingtalk", "DingTalk", "partial", "Configuration and webhook validation are managed by the dashboard."],
-  ["qq", "QQ", "partial", "Configuration is managed by the dashboard."],
-  ["weixin", "Weixin", "partial", "QR binding is managed by the persistent gateway; live message transport remains adapter-owned."],
-  ["wecom", "WeCom", "partial", "QR binding is managed by the persistent gateway; live message transport remains adapter-owned."],
-  ["line", "LINE", "partial", "Configuration is managed by the dashboard."],
-  ["onebot", "OneBot", "partial", "Configuration is managed by the dashboard."],
-  ["whatsapp", "WhatsApp", "config_only", "Bridge configuration is persisted; no persistent WhatsApp adapter is hosted here."],
-  ["whatsapp_native", "WhatsApp Native", "config_only", "Native connection configuration is persisted; live adapter is not hosted here."],
-  ["miki", "Miki", "functional", "Built-in Miki WebSocket channel is hosted by the persistent gateway."],
-  ["matrix", "Matrix", "partial", "Configuration is managed by the dashboard."],
-  ["irc", "IRC", "partial", "Configuration is managed by the dashboard."],
-  ["mqtt", "MQTT", "partial", "Configuration and broker validation are managed by the dashboard."],
-].map(([name, display_name, runtime_status, note]) => ({ name, display_name, runtime_status: runtime_status as "functional" | "partial" | "config_only", note }))
-
-const CHANNEL_SECRET_KEYS = new Set([
-  "token", "app_secret", "client_secret", "corp_secret", "channel_secret", "channel_access_token",
-  "access_token", "webhook_token", "webhook_url", "bot_token", "app_token", "encoding_aes_key",
-  "encrypt_key", "verification_token", "secret", "username", "password", "nickserv_password", "sasl_password",
-])
+const CHANNEL_FIELDS: Record<string, string[]> = Object.fromEntries(
+  Object.entries(CHANNEL_CONFIG_METADATA).map(([name, meta]) => [name, [...meta.requiredFields]]),
+)
+const CHANNEL_META = Object.entries(CHANNEL_CONFIG_METADATA).map(([name, meta]) => ({
+  name, display_name: meta.displayName, runtime_status: meta.runtimeStatus, note: meta.note,
+}))
+const CHANNEL_SECRET_KEYS = new Set<string>(CHANNEL_SECRET_FIELD_KEYS)
 
 function channelRoot(config: Record<string, unknown>): Record<string, unknown> {
   const current = asRecord(config.channel_list)
@@ -160,17 +144,6 @@ function channelRoot(config: Record<string, unknown>): Record<string, unknown> {
 
 function getChannelRecord(config: Record<string, unknown>, name: string): Record<string, unknown> {
   return asRecord(channelRoot(config)[name])
-}
-
-function splitChannelConfig(raw: Record<string, unknown>): { common: Record<string, unknown>; settings: Record<string, unknown> } {
-  const common: Record<string, unknown> = {}
-  const settings: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(raw)) {
-    if (["enabled", "type", "allow_from", "group_trigger", "placeholder", "reasoning_channel_id", "typing"].includes(key)) common[key] = value
-    else settings[key] = value
-  }
-  if (isRecord(raw.settings)) Object.assign(settings, raw.settings)
-  return { common, settings }
 }
 
 function getSpeechConfigPath(configDir: string): string {
@@ -283,6 +256,21 @@ function snapshotTable(db: Database.Database, table: string): unknown[] {
   try { return db.prepare(`SELECT * FROM ${table}`).all() } catch { return [] }
 }
 
+function snapshotModelConfigs(db: Database.Database): unknown[] {
+  return snapshotTable(db, "model_configs").map((raw) => {
+    if (!isRecord(raw) || typeof raw.payload !== "string") return raw
+    try {
+      const payload = JSON.parse(raw.payload) as Record<string, unknown>
+      // Secret values belong in the encrypted vault, never in JSON backups.
+      delete payload.api_key
+      delete payload.api_key_ref
+      return { ...raw, payload: JSON.stringify(payload) }
+    } catch {
+      return raw
+    }
+  })
+}
+
 async function loadBackups(dir: string): Promise<Array<{ id: string; createdAt: string; entries: Array<{ source: string; kind: "file" | "directory"; sizeBytes: number }>; file: string }>> {
   await fsp.mkdir(dir, { recursive: true })
   const names = await fsp.readdir(dir).catch(() => [])
@@ -335,6 +323,78 @@ async function scanSecrets(root: string) {
 export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Router {
   const router = wrapAsyncRoutes(Router())
   const backupsDir = path.join(deps.dataRoot, "backups")
+  router.get("/runtime/export", deps.requireAuth, async (_req, res) => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+    const tempDir = path.join(backupsDir, `.runtime-export-${randomUUID()}`)
+    const snapshotPath = path.join(tempDir, "miki-runtime.sqlite")
+    try {
+      await fsp.mkdir(tempDir, { recursive: true, mode: 0o700 })
+      await deps.db.backup(snapshotPath)
+      await fsp.chmod(snapshotPath, 0o600).catch(() => undefined)
+      const entries: Array<{ name: string; data: Buffer }> = [
+        { name: "data/miki-runtime.sqlite", data: await fsp.readFile(snapshotPath) },
+      ]
+      const vaultDir = path.join(deps.configDir, "data")
+      const vaultPath = path.join(vaultDir, "secret-vault.json")
+      const vaultKeyPath = path.join(vaultDir, "secret-vault.key")
+      let hasVault = await fsp.access(vaultPath).then(() => true, () => false)
+      let hasVaultKey = await fsp.access(vaultKeyPath).then(() => true, () => false)
+      if (hasVault && !hasVaultKey) {
+        let envelope: Record<string, unknown> = {}
+        try { envelope = JSON.parse(await fsp.readFile(vaultPath, "utf8")) as Record<string, unknown> } catch { /* validation below fails closed */ }
+        const passphraseVault = envelope.kdf === "passphrase" || Boolean(process.env.MIKI_VAULT_KEY || process.env.MIKI_SECRET_VAULT_KEY)
+        if (!passphraseVault && envelope.version === 1) {
+          // Version 1 derives its key from the original machine/path. Reading and
+          // writing every secret upgrades it to the portable v2 key-file format.
+          const vault = createWorkspaceSecretVault(deps.configDir)
+          const keys = vault.list()
+          try {
+            for (const key of keys) {
+              const value = vault.get(key)
+              if (typeof value !== "string") throw new Error("legacy vault contains an unreadable secret")
+              vault.set(key, value)
+            }
+            // A legacy vault with zero entries still needs a portable key file
+            // so the exported vault/key pair remains restorable on another host.
+            if (keys.length === 0) {
+              const marker = `__miki_internal_export_migration_${randomUUID()}`
+              vault.set(marker, randomUUID())
+              vault.delete(marker)
+            }
+          } catch (error) {
+            return res.status(409).json({ error: `Legacy secret vault could not be upgraded for a portable backup: ${error instanceof Error ? error.message : "vault upgrade failed"}` })
+          }
+          hasVaultKey = await fsp.access(vaultKeyPath).then(() => true, () => false)
+          hasVault = await fsp.access(vaultPath).then(() => true, () => false)
+        }
+        if (hasVault && !hasVaultKey && !passphraseVault) return res.status(409).json({ error: "The encrypted secret vault exists but its key file is missing. Export stopped to avoid creating an incomplete backup." })
+      }
+      if (hasVault) entries.push({ name: "config/data/secret-vault.json", data: await fsp.readFile(vaultPath) })
+      if (hasVaultKey) entries.push({ name: "config/data/secret-vault.key", data: await fsp.readFile(vaultKeyPath) })
+      const agentConfig = path.join(deps.configDir, "agent.yaml")
+      if (await fsp.access(agentConfig).then(() => true, () => false)) {
+        entries.push({ name: "config/agent.yaml", data: await fsp.readFile(agentConfig) })
+      }
+      const instructions = [
+        "Miki runtime backup",
+        `Created: ${new Date().toISOString()}`,
+        "Contains a consistent SQLite backup and, when present, the encrypted secret vault and its decryption key.",
+        "SECURITY: this archive may contain credentials and the key that decrypts them. Store it privately; never send it to another person or upload it to public storage.",
+        "Restore data/miki-runtime.sqlite to the configured runtime data directory. Restore config/data/secret-vault.json and secret-vault.key together to the configured config/data directory. If the vault uses MIKI_VAULT_KEY, preserve that environment variable separately; it is not included in this archive.",
+        "The ZIP does not contain program source or installed dependencies.",
+      ].join("\n") + "\n"
+      entries.push({ name: "BACKUP-README.txt", data: Buffer.from(instructions, "utf8") })
+      const zip = createZipArchive(entries)
+      res.setHeader("Content-Type", "application/zip")
+      res.setHeader("Content-Disposition", `attachment; filename="miki-runtime-backup-${stamp}.zip"`)
+      res.setHeader("Cache-Control", "no-store")
+      return res.status(200).send(zip)
+    } catch (error) {
+      return res.status(500).json({ error: `Runtime export failed: ${error instanceof Error ? error.message : "backup could not be created"}` })
+    } finally {
+      await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
   const jobsDbInit = () => deps.db.exec(`
     CREATE TABLE IF NOT EXISTS runtime_jobs (id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2, progress REAL NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, run_after INTEGER NOT NULL DEFAULT 0, error_json TEXT);
     CREATE TABLE IF NOT EXISTS delivery_receipts (id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -496,20 +556,6 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
 
   router.use("/goals", deps.requireAuth, createGoalsRouter(new GoalStore(deps.db)))
 
-  router.get("/credentials/status", deps.requireAuth, (_req, res) => {
-    const models = deps.db.prepare("SELECT payload,is_default FROM model_configs ORDER BY id").all() as Array<{ payload: string; is_default: number }>
-    const parsed = models.map((row) => JSON.parse(row.payload) as Record<string, unknown>)
-    const gemini = parsed.find((m) => ["gemini", "google", "provider.gemini"].includes(String(m.provider || "").toLowerCase()))
-    const llama = parsed.find((m) => String(m.provider || "").toLowerCase().includes("llama"))
-    const geminiKey = stringValue(gemini?.api_key) || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || ""
-    const llamaConfigured = Boolean(llama?.local && isRecord(llama.local) && stringValue(llama.local.model_path)) || Boolean(llama?.runtime === "llama.cpp")
-    res.json({
-      providers: {
-        gemini: { status: geminiKey ? "connected" : "not_logged_in", configured: Boolean(geminiKey), authMethod: "api_key", apiKeyMask: jsonMask(geminiKey) },
-        llama: { status: llamaConfigured ? "connected" : "not_logged_in", configured: llamaConfigured, authMethod: "local", apiKeyMask: "" },
-      },
-    })
-  })
 
   router.post("/mcp/test", deps.requireAuth, async (req, res) => {
     const name = stringValue(req.body?.name)
@@ -532,69 +578,9 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     }
   })
 
-  router.get("/mcp/status", deps.requireAuth, async (_req, res) => {
-    const config = appMcpConfig(deps.getAppConfig())
-    const manager = getMcpManager()
-    const started = Date.now()
-    const entries = await manager.listCatalogEntries(true)
-    const servers = Object.values(config.servers).map((server) => {
-      const tools = entries.filter((entry) => entry.serverName === server.name).length
-      return { name: server.name, enabled: server.enabled, type: server.type, tools, status: server.enabled ? (tools > 0 ? "connected" : "unavailable") : "disabled" }
-    })
-    res.json({ enabled: config.enabled, servers, tools: entries.length, latency_ms: Date.now() - started, checked_at: deps.now() })
-  })
 
-  router.post("/mcp/reconnect", deps.requireAuth, async (_req, res) => {
-    await mcpManager.close()
-    mcpManager = new ExternalMcpConnectorManager(deps.workspaceRoot, appMcpConfig(deps.getAppConfig()))
-    mcpSignature = JSON.stringify(appMcpConfig(deps.getAppConfig()))
-    res.json({ ok: true, status: "reconnected", checked_at: deps.now() })
-  })
 
-  let lastUsbDevices: string[] | undefined;
-  let lastUsbEvent: { type: "connected" | "disconnected"; device: string; at: string } | null = null;
-  const usbMonitorTimer = setInterval(() => {
-    if (dashboardShuttingDown) return
-    const devices = asRecord(deps.getAppConfig().devices);
-    if (devices.enabled !== true || devices.monitor_usb !== true || process.platform !== "linux") {
-      lastUsbDevices = undefined;
-      return;
-    }
-    try {
-      const current = scanLinuxUsbDevices();
-      const diff = diffUsbDevices(lastUsbDevices, current);
-      for (const device of diff.added) {
-        lastUsbEvent = { type: "connected", device, at: deps.now() };
-        deps.appendGatewayLog(`USB connected: ${device}`);
-      }
-      for (const device of diff.removed) {
-        lastUsbEvent = { type: "disconnected", device, at: deps.now() };
-        deps.appendGatewayLog(`USB disconnected: ${device}`);
-      }
-      lastUsbDevices = current;
-    } catch (error) {
-      deps.appendGatewayLog(`USB monitor failed: ${error instanceof Error ? error.message : String(error)}`);
-      lastUsbDevices = undefined;
-    }
-  }, 2000);
-  usbMonitorTimer.unref?.();
 
-  router.get("/devices/status", deps.requireAuth, (_req, res) => {
-    const devices = asRecord(deps.getAppConfig().devices);
-    let usbSupported = false;
-    let usbDevices: string[] = [];
-    try {
-      if (process.platform === "linux" && fs.existsSync("/sys/bus/usb/devices")) {
-        usbSupported = true;
-        usbDevices = scanLinuxUsbDevices();
-      }
-    } catch {}
-    res.json({
-      enabled: devices.enabled === true,
-      monitor_usb: devices.monitor_usb === true,
-      usb: { supported: usbSupported, connected: usbDevices.length, devices: usbDevices, last_event: lastUsbEvent },
-    });
-  });
 
   router.get("/channels/catalog", (_req, res) => {
     const config = deps.getAppConfig()
@@ -603,8 +589,17 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
       const raw = getChannelRecord(config, meta.name)
       const { settings } = splitChannelConfig(raw)
       const required = CHANNEL_FIELDS[meta.name] ?? []
-      const configured = raw.enabled === true && required.every((key) => stringValue(settings[key]) || stringValue(raw[key]))
-      return { ...meta, runtime_note: meta.note, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined, configured }
+      const allowFrom = parseAllowedPeers(raw.allow_from ?? settings.allow_from)
+      const hasRuntimeSecrets = meta.name === "slack"
+        ? Boolean(stringValue(settings.bot_token) && stringValue(settings.app_token))
+        : meta.name === "telegram" || meta.name === "discord"
+          ? Boolean(stringValue(settings.token))
+          : true
+      const configured = raw.enabled !== false && required.every((key) => stringValue(settings[key]) || stringValue(raw[key])) && hasRuntimeSecrets
+      const senderGated = meta.name === "telegram" || meta.name === "discord" || meta.name === "slack"
+      const allowFromNote = configured && senderGated && allowFrom.length === 0 ? "Connected, but allow_from is empty so every sender is ignored. Add trusted sender IDs (or * to allow everyone)." : undefined
+      const runtime = deps.channelRuntimeStatus?.(meta.name)
+      return { ...meta, runtime_note: allowFromNote ?? meta.note, runtime_live: meta.name === "miki" ? true : Boolean(runtime?.runtime_live), runtime_connected: meta.name === "miki" ? true : Boolean(runtime?.connected), runtime_error: runtime?.lastError, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined, configured }
     }) })
   })
 
@@ -613,10 +608,19 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const meta = CHANNEL_META.find((item) => item.name === name)
     if (!meta) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
     const raw = getChannelRecord(deps.getAppConfig(), name)
-    const { common, settings } = splitChannelConfig(raw)
-    const configuredSecrets = Object.keys(settings).filter((key) => CHANNEL_SECRET_KEYS.has(key) && stringValue(settings[key]))
-    const safeSettings = Object.fromEntries(Object.entries(settings).filter(([key]) => !CHANNEL_SECRET_KEYS.has(key)))
-    res.json({ config: { ...common, ...safeSettings, enabled: Boolean(raw.enabled), type: raw.type ?? meta.name }, configured_secrets: configuredSecrets, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined })
+    const safe = publicChannelConfig(raw, meta.name)
+    res.json({ ...safe, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined })
+  })
+
+  // Authenticated owner view of the saved credentials, so a saved token can be seen again when the form is reopened.
+  // The list/config responses stay masked; only this endpoint returns values.
+  router.get("/channels/:name/secrets", deps.requireAuth, (req, res) => {
+    const name = req.params.name
+    if (!CHANNEL_META.some((item) => item.name === name)) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
+    const { settings } = splitChannelConfig(getChannelRecord(deps.getAppConfig(), name))
+    const secrets = Object.fromEntries(Object.entries(settings).filter(([key, value]) => CHANNEL_SECRET_KEYS.has(key) && typeof value === "string" && value.trim() !== "").map(([key, value]) => [key, String(value)]))
+    res.setHeader("Cache-Control", "no-store")
+    res.json({ secrets })
   })
 
   router.get("/channels/:name/probe", deps.requireAuth, async (req, res) => {
@@ -629,18 +633,25 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const required = CHANNEL_FIELDS[name] ?? []
     const configuredSecrets = new Set(Object.keys(settings).filter((key) => CHANNEL_SECRET_KEYS.has(key) && stringValue(settings[key])))
     const missing = required.filter((key) => !stringValue(settings[key]) && !configuredSecrets.has(key) && !stringValue(raw[key]))
-    const enabled = raw.enabled === true
+    const enabled = raw.enabled !== false
+    const implementedAdapter = ["miki", "telegram", "discord", "slack"].includes(name)
+    const allowFrom = parseAllowedPeers(raw.allow_from ?? settings.allow_from)
     const configured = missing.length === 0
-    const liveAdapterAvailable = name === "miki"
+    const runtime = deps.channelRuntimeStatus?.(name)
+    const liveAdapterAvailable = name === "miki" || ["telegram", "discord", "slack"].includes(name)
+    const connected = name === "miki" ? true : Boolean(runtime?.connected)
     const checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message: string }> = [
       { id: "config", status: !enabled ? "warn" : configured ? "pass" : "warn", message: !enabled ? "Channel is disabled." : configured ? "Required configuration is present." : `Missing: ${missing.join(", ")}` },
-      { id: "runtime", status: liveAdapterAvailable ? "pass" : meta.runtime_status === "partial" ? "warn" : "fail", message: meta.note },
+      { id: "runtime", status: !liveAdapterAvailable ? meta.runtime_status === "config_only" ? "fail" : "warn" : connected ? "pass" : "warn", message: !liveAdapterAvailable ? meta.note : connected ? "Live adapter is connected." : runtime?.lastError ? `Adapter is reconnecting: ${runtime.lastError}` : meta.name === "Miki" ? "Built-in Miki WebSocket channel is available." : "Adapter is implemented but not yet connected." },
     ]
-    let probeStatus: "ready" | "disabled" | "needs_config" | "partial" | "not_implemented" = !enabled ? "disabled" : missing.length ? "needs_config" : liveAdapterAvailable ? "ready" : meta.runtime_status === "config_only" ? "not_implemented" : "partial"
+    if (enabled && configured && ["telegram", "discord", "slack"].includes(name) && allowFrom.length === 0) {
+      checks.push({ id: "allow_from", status: "warn", message: "allow_from is empty, so every sender is ignored. Add trusted sender IDs (or * to allow everyone)." })
+    }
+    let probeStatus: "ready" | "disabled" | "needs_config" | "partial" | "not_implemented" = !enabled ? "disabled" : missing.length ? "needs_config" : connected ? "ready" : !liveAdapterAvailable ? meta.runtime_status === "config_only" ? "not_implemented" : "partial" : "partial"
     if (name === "dingtalk" && configured) {
       try { const u = new URL(stringValue(settings.webhook_url)); checks.push({ id: "url", status: u.protocol === "https:" ? "pass" : "warn", message: "DingTalk webhook URL parsed successfully." }) } catch { checks.push({ id: "url", status: "fail", message: "Invalid webhook URL." }); probeStatus = "needs_config" }
     }
-    return res.json({ channel: name, display_name: meta.display_name, runtime_status: meta.runtime_status, probe_status: probeStatus, agent_connected: liveAdapterAvailable, enabled, configured, missing_fields: missing, checks, check_mode: String(req.query.mode || "sandbox") === "live" ? "sandbox" : String(req.query.mode || "sandbox"), latency_ms: liveAdapterAvailable ? 1 : 0, send_check: { status: "skipped", mode: "sandbox", message: liveAdapterAvailable ? "Built-in gateway channel is available; no external message was sent." : "No external message was sent by the dashboard probe.", latency_ms: 0 }, next_steps: missing.length ? missing.map((key) => `Configure ${key}.`) : meta.runtime_status === "config_only" ? ["Install or enable a live channel adapter before messaging is available."] : liveAdapterAvailable ? ["Open the Chat page or connect a Miki WebSocket client."] : ["Configuration is stored; no outbound message was sent."], setup_checklist: required.map((key) => `Configure ${key}.`), checked_at: deps.now() })
+    return res.json({ channel: name, display_name: meta.display_name, runtime_status: meta.runtime_status, probe_status: probeStatus, agent_connected: connected, enabled, configured, missing_fields: missing, checks, check_mode: String(req.query.mode || "sandbox") === "live" ? "sandbox" : String(req.query.mode || "sandbox"), latency_ms: connected ? 1 : 0, send_check: { status: "skipped", mode: "sandbox", message: connected ? "Adapter connection was checked; no external message was sent." : "No external message was sent by the dashboard probe.", latency_ms: 0 }, next_steps: missing.length ? missing.map((key) => key === "allow_from" ? "Add trusted sender IDs to allow_from; use * only if you intentionally want to allow every sender." : `Configure ${key}.`) : !liveAdapterAvailable ? ["This channel is configuration-only; a live adapter is not implemented."] : !connected ? ["The adapter is starting or reconnecting. Check the runtime error and network access."] : ["The live adapter is connected and only accepts sender IDs listed in allow_from."], setup_checklist: [...required, ...(implementedAdapter && name !== "miki" ? ["allow_from (trusted sender IDs)"] : [])].map((key) => `Configure ${key}.`), checked_at: deps.now() })
   })
 
   async function qrDataUri(content: string) {
@@ -797,7 +808,6 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
       res.json({ provider: "whisper.cpp", enabled: settings.enabled, active_model_id: settings.active_model_id ?? null, models: settings.models, settings: publicSpeechSettings(settings), local_runtime: await modelRuntimeStatus(deps.configDir) })
     } catch (error) { res.status(error instanceof SpeechToTextError ? error.status : 503).json({ error: error instanceof Error ? error.message : String(error) }) }
   })
-  router.get("/speech-to-text/status", deps.requireAuth, async (_req, res) => res.json(await modelRuntimeStatus(deps.configDir)))
 
   async function mutateSpeechConfig(mutator: (current: SpeechToTextSettings) => SpeechToTextSettings) {
     const configPath = getSpeechConfigPath(deps.configDir)
@@ -808,13 +818,6 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     return loadSpeechToTextSettings(deps.configDir)
   }
 
-  router.put("/speech-to-text/config", deps.requireAuth, async (req, res) => {
-    try {
-      const body = asRecord(req.body)
-      const next = await mutateSpeechConfig((current) => ({ ...current, ...Object.fromEntries(Object.entries(body).filter(([k]) => ["enabled", "language", "max_audio_seconds", "max_file_mb", "timeout_ms", "concurrency", "retain_audio"].includes(k))) }))
-      res.json({ status: "applied", ...next, models: next.models, local_runtime: await modelRuntimeStatus(deps.configDir) })
-    } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }) }
-  })
 
   router.post("/speech-to-text/models", deps.requireAuth, async (req, res) => {
     try {
@@ -934,20 +937,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     })
   })
 
-  router.get("/improvement/status", deps.requireAuth, (_req, res) => {
-    const status = getEvolutionEngine().getStatus()
-    res.json({ self_improvement: status })
-  })
 
-  router.post("/improvement/run", deps.requireAuth, async (req, res) => {
-    try {
-      const force = req.body?.force === true
-      const result = await runTrackedEvolutionCycle(force)
-      res.json(result)
-    } catch (error) {
-      res.status(502).json({ status: "failed", error: error instanceof Error ? error.message : String(error) })
-    }
-  })
 
   router.get("/models/catalog", deps.requireAuth, (_req, res) => {
     const rows = deps.db.prepare("SELECT id,provider,api_base,api_key_mask,models_json,fetched_at FROM model_catalogs ORDER BY fetched_at DESC").all() as Array<Record<string, unknown>>
@@ -980,8 +970,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     deps.db.prepare("UPDATE auth_sessions SET expires_at=? WHERE expires_at>? OR expires_at=?").run(expiresAt, deps.now(), noExpiry)
     const currentToken = req.headers.cookie?.match(/(?:^|;\s*)miki_session=([^;]+)/)?.[1]
     if (currentToken) {
-      const maxAge = timeout > 0 ? `; Max-Age=${timeout * 60}` : ""
-      res.setHeader("Set-Cookie", `miki_session=${currentToken}; Path=/; HttpOnly; SameSite=Lax${maxAge}`)
+      res.setHeader("Set-Cookie", sessionCookie(currentToken, timeout > 0 ? timeout * 60 : undefined, req.secure))
     }
     let runtimeApplyStatus: "applied" | "pending_restart" | "failed" = changedRuntime ? "pending_restart" : "applied"
     let runtimeApplyError: string | undefined
@@ -1109,61 +1098,85 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
         { source: "settings", kind: "file", sizeBytes: 0 }, { source: "model_configs", kind: "file", sizeBytes: 0 },
         { source: "memory_chunks", kind: "file", sizeBytes: 0 }, { source: "memory_vectors", kind: "file", sizeBytes: 0 },
         { source: "chat_sessions", kind: "file", sizeBytes: 0 }, { source: "chat_messages", kind: "file", sizeBytes: 0 },
-      ], snapshot: { settings: snapshotTable(deps.db, "settings"), model_configs: snapshotTable(deps.db, "model_configs"), memory_chunks: snapshotTable(deps.db, "memory_chunks"), memory_vectors: snapshotTable(deps.db, "memory_vectors"), chat_sessions: snapshotTable(deps.db, "chat_sessions"), chat_messages: snapshotTable(deps.db, "chat_messages"), runtime_jobs: snapshotTable(deps.db, "runtime_jobs") },
+      ], snapshot: { settings: snapshotTable(deps.db, "settings"), model_configs: snapshotModelConfigs(deps.db), memory_chunks: snapshotTable(deps.db, "memory_chunks"), memory_vectors: snapshotTable(deps.db, "memory_vectors"), chat_sessions: snapshotTable(deps.db, "chat_sessions"), chat_messages: snapshotTable(deps.db, "chat_messages"), runtime_jobs: snapshotTable(deps.db, "runtime_jobs") },
     }
     await fsp.writeFile(file, JSON.stringify(state, null, 2), { mode: 0o600 })
     res.json({ backup: { id, createdAt: state.createdAt, entries: state.entries } })
   })
   router.post("/enhancements/safety/rollback", deps.requireAuth, async (req, res) => {
-    const id = stringValue(req.body?.backupId); if (!id) return res.status(400).json({ error: "backupId is required" })
+    const id = stringValue(req.body?.backupId)
+    if (!id || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) return res.status(400).json({ error: "A valid backupId is required" })
     const file = path.join(backupsDir, `${id}.json`)
     let backup: any
     try { backup = JSON.parse(await fsp.readFile(file, "utf8")) } catch { return res.status(404).json({ error: "Backup not found" }) }
     const tables = ["settings", "model_configs", "memory_chunks", "memory_vectors", "chat_sessions", "chat_messages", "runtime_jobs"]
-    const tx = deps.db.transaction(() => {
-      for (const table of tables) {
-        const rows = Array.isArray(backup.snapshot?.[table]) ? backup.snapshot[table] : []
-        const cols = deps.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-        const valid = new Set(cols.map((c) => c.name))
-        deps.db.prepare(`DELETE FROM ${table}`).run()
-        for (const row of rows) {
-          const entries = Object.entries(row as Record<string, unknown>).filter(([key]) => valid.has(key))
-          if (!entries.length) continue
-          const names = entries.map(([key]) => key); const placeholders = names.map(() => "?").join(",")
-          deps.db.prepare(`INSERT INTO ${table} (${names.join(",")}) VALUES (${placeholders})`).run(...entries.map(([, value]) => value))
+    await fsp.mkdir(backupsDir, { recursive: true, mode: 0o700 })
+    // Always capture the current state before restoring anything. If this write
+    // fails, stop; rollback must never run without a recovery point.
+    const beforeId = `pre-rollback-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`
+    const beforeFile = path.join(backupsDir, `${beforeId}.json`)
+    const beforeSnapshot: Record<string, unknown[]> = {}
+    for (const table of tables) beforeSnapshot[table] = table === "model_configs" ? snapshotModelConfigs(deps.db) : snapshotTable(deps.db, table)
+    try { await fsp.writeFile(beforeFile, JSON.stringify({ id: beforeId, createdAt: deps.now(), type: "pre-rollback-recovery", entries: [], snapshot: beforeSnapshot }, null, 2), { mode: 0o600 }) }
+    catch (error) { return res.status(500).json({ error: `Rollback stopped because a recovery backup could not be created: ${error instanceof Error ? error.message : "backup write failed"}` }) }
+
+    let restoredEntries = 0
+    try {
+      const tx = deps.db.transaction(() => {
+        for (const table of tables) {
+          const rows = Array.isArray(backup.snapshot?.[table]) ? backup.snapshot[table] : []
+          const cols = deps.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; pk: number }>
+          const valid = new Set(cols.map((c) => c.name))
+          const primaryKeys = cols.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk).map((c) => c.name)
+          for (const rawRow of rows) {
+            if (!isRecord(rawRow)) continue
+            const safeRow = { ...rawRow }
+            if (table === "model_configs" && typeof safeRow.payload === "string") {
+              // Older backup JSON can contain plaintext keys. Do not reintroduce them.
+              try {
+                const payload = JSON.parse(safeRow.payload) as Record<string, unknown>
+                delete payload.api_key
+                delete payload.api_key_ref
+                safeRow.payload = JSON.stringify(payload)
+              } catch { /* skip only if fields can't be interpreted below */ }
+            }
+            const entries = Object.entries(safeRow).filter(([key]) => valid.has(key))
+            if (!entries.length) continue
+            const q = (name: string) => `"${name.replace(/"/g, '""')}"`
+            const names = entries.map(([key]) => q(key))
+            const placeholders = entries.map(() => "?").join(",")
+            const updates = entries.map(([key]) => key).filter((key) => !primaryKeys.includes(key))
+            let sql = `INSERT INTO ${q(table)} (${names.join(",")}) VALUES (${placeholders})`
+            if (primaryKeys.length) {
+              const conflict = primaryKeys.map(q).join(",")
+              sql += updates.length
+                ? ` ON CONFLICT(${conflict}) DO UPDATE SET ${updates.map((key) => `${q(key)}=excluded.${q(key)}`).join(",")}`
+                : ` ON CONFLICT(${conflict}) DO NOTHING`
+            } else {
+              sql = sql.replace("INSERT INTO", "INSERT OR IGNORE INTO")
+            }
+            deps.db.prepare(sql).run(...entries.map(([, value]) => value))
+            restoredEntries += 1
+          }
         }
-      }
-    })
-    tx()
-    res.json({ rollback: { restoredBackupId: id, restoredEntries: Object.values(backup.snapshot || {}).reduce((sum: number, rows: unknown) => sum + (Array.isArray(rows) ? rows.length : 0), 0) } })
+      })
+      tx()
+    } catch (error) {
+      return res.status(500).json({ error: `Rollback merge failed; current state is available in recovery backup ${beforeId}: ${error instanceof Error ? error.message : "database merge failed"}`, recoveryBackupId: beforeId })
+    }
+    res.json({ rollback: { restoredBackupId: id, recoveryBackupId: beforeId, restoredEntries, mode: "merge", deletedRows: 0 } })
   })
   router.post("/enhancements/safety/secret-scan", deps.requireAuth, async (_req, res) => res.json({ report: await scanSecrets(deps.workspaceRoot) }))
   router.post("/enhancements/safety/watchdog/restart", deps.requireAuth, (_req, res) => res.json({ watchdog: { enabled: true, services: [{ name: "gateway", healthy: true, failures: 0, lastMessage: "Watchdog probe refreshed.", lastCheckedAt: deps.now() }] } }))
   router.post("/enhancements/safety/safe-mode/clear", deps.requireAuth, (_req, res) => { const value = { enabled: false, reasons: [], updatedAt: deps.now() }; deps.db.prepare("INSERT INTO settings(key,value) VALUES('safe_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(value)); res.json({ safeMode: value }) })
 
-  router.get("/enhancements/runtime/jobs/dead-letter", deps.requireAuth, (_req, res) => {
-    const jobs = deps.db.prepare("SELECT * FROM runtime_jobs WHERE status='dead_letter' ORDER BY updated_at DESC").all() as Array<Record<string, unknown>>
-    res.json({ jobs: jobs.map((job) => ({ id: job.id, type: job.type, status: String(job.status ?? "unknown"), priority: Number(job.priority), attempts: Number(job.attempts), maxAttempts: Number(job.max_attempts), progress: Number(job.progress), updatedAt: job.updated_at, runAfter: Number(job.run_after) })), count: jobs.length })
-  })
   router.delete("/enhancements/runtime/jobs/:id", deps.requireAuth, (req, res) => { const result = deps.db.prepare("UPDATE runtime_jobs SET status='cancelled',updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled','dead_letter')").run(deps.now(), req.params.id); res.json({ cancelled: result.changes > 0 }) })
   router.post("/enhancements/runtime/jobs/:id/retry", deps.requireAuth, (req, res) => { const result = deps.db.prepare("UPDATE runtime_jobs SET status='pending',attempts=0,progress=0,updated_at=?,error_json=NULL WHERE id=?").run(deps.now(), req.params.id); if (!result.changes) return res.status(404).json({ error: "Runtime job not found" }); const job = deps.db.prepare("SELECT * FROM runtime_jobs WHERE id=?").get(req.params.id) as Record<string, unknown>; res.json({ job: { id: job.id, type: job.type, status: String(job.status ?? "unknown"), priority: Number(job.priority), attempts: Number(job.attempts), maxAttempts: Number(job.max_attempts), progress: Number(job.progress), updatedAt: job.updated_at, runAfter: Number(job.run_after) } }) })
   router.get("/enhancements/runtime/deliveries", deps.requireAuth, (_req, res) => { const rows = deps.db.prepare("SELECT payload_json FROM delivery_receipts ORDER BY updated_at DESC").all() as Array<{ payload_json: string }>; const receipts = rows.map((r) => JSON.parse(r.payload_json)); const stats: Record<string, number> = {}; for (const receipt of receipts) stats[receipt.status] = (stats[receipt.status] || 0) + 1; res.json({ receipts, stats }) })
-  router.post("/enhancements/runtime/deliveries/mock", deps.requireAuth, (req, res) => {
-    const body = asRecord(req.body); const id = randomUUID(); const now = deps.now(); const previewHash = createHash("sha256").update(stringValue(body.body)).digest("hex").slice(0, 16)
-    const risk = stringValue(body.risk) || "read"; const approvalRequired = !["read", "low"].includes(risk.toLowerCase()); const approvalId = approvalRequired ? `delivery-approval-${randomUUID()}` : undefined
-    const receipt = { id, runId: stringValue(body.runId) || undefined, stepId: stringValue(body.stepId) || undefined, correlationId: stringValue(body.correlationId) || undefined, channel: stringValue(body.channel), destination: stringValue(body.destination), body: stringValue(body.body), idempotencyKey: stringValue(body.idempotencyKey) || randomUUID(), status: approvalRequired ? "waiting_approval" : "pending", attempts: 0, maxAttempts: Number(body.maxAttempts || 2), approvalRequired, approvalRequestId: approvalId, previewHash, nextAction: approvalRequired ? "Approve then dispatch." : "Dispatch when ready.", replayAllowed: true, updatedAt: now }
-    deps.db.prepare("INSERT INTO delivery_receipts(id,payload_json,status,updated_at) VALUES(?,?,?,?)").run(id, JSON.stringify(receipt), receipt.status, now)
-    res.json({ preview: { externalSideEffect: false, previewHash, bodyPreview: receipt.body.slice(0, 280) }, receipt, approval: { id: approvalId || "none", status: approvalRequired ? "pending" : "not_required", tokenIssued: false } })
-  })
-  router.get("/enhancements/runtime/deliveries/:id", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); res.json({ receipt, approval: receipt.approvalRequestId ? { id: receipt.approvalRequestId, status: receipt.status === "waiting_approval" ? "pending" : "approved" } : null, replayEligible: receipt.replayAllowed !== false }) })
-  router.post("/enhancements/runtime/deliveries/:id/approve", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); receipt.status = "pending"; receipt.approvalRequired = false; receipt.updatedAt = deps.now(); deps.db.prepare("UPDATE delivery_receipts SET payload_json=?,status=?,updated_at=? WHERE id=?").run(JSON.stringify(receipt), receipt.status, receipt.updatedAt, req.params.id); res.json({ receipt, approval: { id: receipt.approvalRequestId, status: "approved", decidedBy: stringValue(req.body?.decidedBy) || "dashboard-operator" } }) })
-  router.post("/enhancements/runtime/deliveries/:id/mock-dispatch", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); const outcome = stringValue(req.body?.outcome) || "sent"; receipt.attempts += 1; receipt.status = outcome; receipt.updatedAt = deps.now(); receipt.lastError = outcome === "failed" ? "Mock dispatch failed by requested outcome." : undefined; deps.db.prepare("UPDATE delivery_receipts SET payload_json=?,status=?,updated_at=? WHERE id=?").run(JSON.stringify(receipt), receipt.status, receipt.updatedAt, req.params.id); res.json({ receipt, outcome: { status: outcome, externalSideEffect: false } }) })
-  router.post("/enhancements/runtime/deliveries/:id/replay", deps.requireAuth, (req, res) => { const row = deps.db.prepare("SELECT payload_json FROM delivery_receipts WHERE id=?").get(req.params.id) as { payload_json?: string } | undefined; if (!row) return res.status(404).json({ error: "Delivery not found" }); const receipt = JSON.parse(String(row.payload_json)); if (stringValue(req.body?.idempotencyKey) === receipt.idempotencyKey) return res.status(409).json({ error: "Replay requires a new idempotency key." }); receipt.replayOf = receipt.id; receipt.id = randomUUID(); receipt.idempotencyKey = stringValue(req.body?.idempotencyKey); receipt.status = "pending"; receipt.updatedAt = deps.now(); deps.db.prepare("INSERT INTO delivery_receipts(id,payload_json,status,updated_at) VALUES(?,?,?,?)").run(receipt.id, JSON.stringify(receipt), receipt.status, receipt.updatedAt); res.json({ receipt, preview: { externalSideEffect: false, previewHash: receipt.previewHash, bodyPreview: receipt.body.slice(0, 280) }, approval: {} }) })
 
   deps.registerShutdownHandler?.(async () => {
     dashboardShuttingDown = true
     if (evolutionTimer) clearInterval(evolutionTimer)
-    clearInterval(usbMonitorTimer)
     unsubscribeMessageSent?.()
     await evolutionTask?.catch((error) => {
       deps.appendGatewayLog(`Evolution cycle did not stop cleanly: ${error instanceof Error ? error.message : String(error)}`)

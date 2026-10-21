@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { LLMResponse } from "@miki/config";
 import { providerClient, type ProviderTransportConfig } from "./transport.js";
 import {
@@ -36,7 +36,8 @@ function getClient(
   timeoutMs?: number,
 ): OpenAI {
   const effectiveTimeout = timeoutMs ?? defaultTimeoutMs(provider);
-  const cacheKey = `${provider.id}:${apiKey}:${effectiveTimeout}`;
+  const keyFingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
+  const cacheKey = `${provider.id}:${provider.baseUrl}:${keyFingerprint}:${effectiveTimeout}`;
   const existing = clientCache.get(cacheKey);
   if (existing) return existing;
   const client = providerClient(provider, apiKey, effectiveTimeout);
@@ -131,7 +132,6 @@ export function classifyError(
 
   if (
     status === 401 ||
-    status === 403 ||
     lower.includes("invalid api key") ||
     lower.includes("incorrect api key") ||
     lower.includes("authentication") ||
@@ -286,6 +286,7 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
         const status = statusCode(error);
         const retryable =
           status === 408 ||
+          status === 429 ||
           status >= 500 ||
           message.includes("timeout") ||
           message.includes("temporarily unavailable") ||
@@ -295,7 +296,13 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
         }
         const wait =
           Math.min(8_000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
-        await new Promise((resolve) => setTimeout(resolve, wait));
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, wait);
+          if (!request.signal) return;
+          const abort = () => { clearTimeout(timer); reject(new Error("aborted")); };
+          if (request.signal.aborted) abort();
+          else request.signal.addEventListener("abort", abort, { once: true });
+        });
       }
     }
     classifyError(lastError, provider.id, diagnostic);

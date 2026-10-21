@@ -3,24 +3,19 @@ agent:
   name: Miki
   project: Miki
   persona: >
-    You are Miki, বাংলা-only RULEPLAY .
-
-    You operate as a systemwide computer-based agent: your files, tools, and
-    reach are not confined to any single workspace folder. Miki is the single
-    FULL_AGENT for interactive and autonomous work. It may execute authorized
-    terminal, file, skill, and research operations without HITL prompts inside
-    the isolated VirtualBox Ubuntu environment. Keep actions auditable and
-    verify meaningful results.
-
-    Act by default, without asking for permission. Nothing is restricted in
-    advance. To find and install a local model yourself, run
-    `npm run model:auto -- --start`. Learn from the user's feedback: when they
-    want to be asked before a kind of action, record it with `permission_learn`
-    and decision ask; when they say to just do it, record decision act. When a
-    call is blocked by a learned rule, ask the user one short question and, after
-    a clear yes, call `permission_grant_once` with the same category and match,
-    then retry. When something goes wrong, tell the user what happened and what
-    you will do next. Verify results before reporting them.
+    You are Miki, a composed, concise, professional AI agent with a JARVIS-like
+    manner. Understand the goal, act autonomously within configured permissions
+    and safety boundaries, use available tools whenever the task requires current
+    information, research, file or system inspection, or verification, and check
+    results before reporting. Never claim an action without performing it; clearly
+    distinguish verified facts from uncertainty. Prefer execution and useful
+    outcomes over conversation. Write every message to the user yourself, in their
+    language, with no templates; announce the start only for large or slow work and
+    report small work after finishing it. Accept and act on user messages that arrive
+    while you work. Do not imply continuous background activity
+    unless the runtime supports it and it is actually active. Learn from explicit
+    user feedback using the permission-learning tools when available. If blocked,
+    state the concrete obstacle and report what was actually achieved.
   language: en/english
   timezone: Asia/Dhaka
   max_tokens_per_cycle: 16384
@@ -160,6 +155,8 @@ heartbeat:
   checklist_path: identity/HEARTBEAT.md
   proactive:
     enabled: true
+    # Allow periodic/background LLM decisions while idle; queued goals continue through the same supervisor.
+    llm_when_idle: true
     startup_decision: true
     min_poll_seconds: 5
     max_poll_seconds: 60
@@ -208,14 +205,10 @@ autonomy:
     cooldown_seconds: 5
 messaging:
   adaptive: true
-  maxMessagesPerResponse: 3
-  enableChunking: true
   enableStreaming: true
-  enableProgressMessages: true
-  maxChunkLength: 4000
+  enableProgressMessages: false
   avoidUnnecessaryMessages: true
   streamingMinLength: 1200
-  multiMessageMinLength: 800
   progressIntervalMs: 1800
 skill_governance:
   enabled: true
@@ -267,95 +260,95 @@ devices:
   monitor_usb: true
 channels:
   telegram:
-    enabled: false
+    enabled: true
     type: telegram
   discord:
-    enabled: false
+    enabled: true
     type: discord
   slack:
-    enabled: false
+    enabled: true
     type: slack
   feishu:
-    enabled: false
+    enabled: true
     type: feishu
   dingtalk:
-    enabled: false
+    enabled: true
     type: dingtalk
   qq:
-    enabled: false
+    enabled: true
     type: qq
   weixin:
-    enabled: false
+    enabled: true
     type: weixin
   wecom:
-    enabled: false
+    enabled: true
     type: wecom
   line:
-    enabled: false
+    enabled: true
     type: line
   onebot:
-    enabled: false
+    enabled: true
     type: onebot
   whatsapp:
-    enabled: false
+    enabled: true
     type: whatsapp
   miki:
-    enabled: false
+    enabled: true
     type: miki
   matrix:
-    enabled: false
+    enabled: true
     type: matrix
   irc:
-    enabled: false
+    enabled: true
     type: irc
   mqtt:
-    enabled: false
+    enabled: true
     type: mqtt
 channel_list:
   telegram:
-    enabled: false
+    enabled: true
     type: telegram
   discord:
-    enabled: false
+    enabled: true
     type: discord
   slack:
-    enabled: false
+    enabled: true
     type: slack
   feishu:
-    enabled: false
+    enabled: true
     type: feishu
   dingtalk:
-    enabled: false
+    enabled: true
     type: dingtalk
   qq:
-    enabled: false
+    enabled: true
     type: qq
   weixin:
-    enabled: false
+    enabled: true
     type: weixin
   wecom:
-    enabled: false
+    enabled: true
     type: wecom
   line:
-    enabled: false
+    enabled: true
     type: line
   onebot:
-    enabled: false
+    enabled: true
     type: onebot
   whatsapp:
-    enabled: false
+    enabled: true
     type: whatsapp
   miki:
-    enabled: false
+    enabled: true
     type: miki
   matrix:
-    enabled: false
+    enabled: true
     type: matrix
   irc:
-    enabled: false
+    enabled: true
     type: irc
   mqtt:
-    enabled: false
+    enabled: true
     type: mqtt
 speech_to_text:
   enabled: false

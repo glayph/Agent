@@ -1,44 +1,11 @@
 import type { ChannelConfig } from "@/api/channels"
+import { CHANNEL_CONFIG_METADATA, CHANNEL_SECRET_FIELD_MAP } from "@miki/config/channel-meta"
 
-export const SECRET_FIELD_MAP = {
-  token: "_token",
-  app_secret: "_app_secret",
-  client_secret: "_client_secret",
-  corp_secret: "_corp_secret",
-  channel_secret: "_channel_secret",
-  channel_access_token: "_channel_access_token",
-  access_token: "_access_token",
-  webhook_token: "_webhook_token",
-  webhook_url: "_webhook_url",
-  bot_token: "_bot_token",
-  app_token: "_app_token",
-  encoding_aes_key: "_encoding_aes_key",
-  encrypt_key: "_encrypt_key",
-  verification_token: "_verification_token",
-  secret: "_secret",
-  username: "_username",
-  password: "_password",
-  nickserv_password: "_nickserv_password",
-  sasl_password: "_sasl_password",
-} as const
+export const SECRET_FIELD_MAP = CHANNEL_SECRET_FIELD_MAP
 
-const CHANNEL_SECRET_FIELDS: Record<string, string[]> = {
-  weixin: ["token", "encoding_aes_key"],
-  telegram: ["token"],
-  discord: ["token"],
-  slack: ["bot_token", "app_token"],
-  feishu: ["app_secret", "encrypt_key", "verification_token"],
-  dingtalk: ["webhook_url", "client_secret"],
-  line: ["token", "channel_secret"],
-  qq: ["token"],
-  onebot: ["access_token"],
-  whatsapp: ["webhook_token"],
-  wecom: ["secret", "corp_secret", "webhook_url"],
-  miki: ["token"],
-  matrix: ["access_token"],
-  irc: ["password", "nickserv_password", "sasl_password"],
-  mqtt: ["username", "password"],
-}
+const CHANNEL_SECRET_FIELDS: Record<string, readonly string[]> = Object.fromEntries(
+  Object.entries(CHANNEL_CONFIG_METADATA).map(([name, meta]) => [name, meta.secretFields]),
+)
 
 const SECRET_FIELD_SET = new Set(Object.keys(SECRET_FIELD_MAP))
 
@@ -53,6 +20,8 @@ export function isSecretField(key: string): boolean {
 export function buildEditConfig(
   channelName: string,
   config: ChannelConfig,
+  /** Saved credentials (authenticated owner view) to show again in the secret inputs. */
+  secretValues: Readonly<Record<string, string>> = {},
 ): ChannelConfig {
   const edit: ChannelConfig = { ...config }
 
@@ -62,7 +31,7 @@ export function buildEditConfig(
     }
     const editKey = SECRET_FIELD_MAP[key as keyof typeof SECRET_FIELD_MAP]
     if (editKey) {
-      edit[editKey] = ""
+      edit[editKey] = secretValues[key] ?? ""
     }
   }
 

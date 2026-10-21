@@ -10,6 +10,9 @@ export interface SupportedChannel {
   variant?: string
   configured?: boolean
   runtime_status?: "functional" | "partial" | "config_only"
+  runtime_live?: boolean
+  runtime_connected?: boolean
+  runtime_error?: string
   runtime_note?: string
 }
 
@@ -124,6 +127,16 @@ export async function getChannelConfig(
   return request<ChannelConfigResponse>(
     `/api/channels/${encodeURIComponent(channelName)}/config`,
   )
+}
+
+/** Saved credentials of one channel (authenticated owner view), keyed by field name. */
+export async function getChannelSecrets(
+  channelName: string,
+): Promise<Record<string, string>> {
+  const response = await request<{ secrets?: Record<string, string> }>(
+    `/api/channels/${encodeURIComponent(channelName)}/secrets`,
+  )
+  return response.secrets ?? {}
 }
 
 export async function probeChannelRuntime(

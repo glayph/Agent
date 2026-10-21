@@ -101,8 +101,9 @@ describe("AutonomousSupervisor", () => {
     });
     run.mockResolvedValueOnce(makeResult("Service completed."));
     const result = await supervisor.tick("acceptance-test");
-    expect(result.status).toBe("blocked");
-    expect(goals.get(goal.id)?.status).toBe("blocked");
+    // No retry cap: the unaccepted attempt is retried, never completed.
+    expect(result.status).toBe("idle");
+    expect(goals.get(goal.id)?.status).toBe("active");
     const row = db.prepare("SELECT acceptance_result FROM autonomy_goal_runs WHERE goal_id=?").get(goal.id) as { acceptance_result: string };
     expect(JSON.parse(row.acceptance_result).passed).toBe(false);
   });
@@ -351,13 +352,13 @@ describe("AutonomousSupervisor", () => {
     expect(result.goalId).toBe(goal.id);
   });
 
-  it("retains recurring schedules after a terminal failure", async () => {
+  it("keeps a recurring schedule queued for retry after a failed run (no retry cap)", async () => {
     run.mockResolvedValueOnce(makeResult("BLOCKED: recurring failure"));
     config = { autonomy: { enabled: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5 } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } } };
     const task = supervisor.enqueueTask({ title: "Recurring failure", intervalSeconds: 3600 });
     const result = await supervisor.tick("schedule");
-    expect(result.status).toBe("blocked");
-    expect(supervisor.listScheduledTasks().find((item) => item.task_id === task?.task_id)).toMatchObject({ status: "scheduled", goal_id: null, interval_seconds: 3600 });
+    expect(result.status).toBe("idle");
+    expect(supervisor.listScheduledTasks().find((item) => item.task_id === task?.task_id)).toMatchObject({ status: "queued", interval_seconds: 3600 });
   });
 
   it("rate-limits event triggers and keeps event payload hashing stable", () => {
@@ -447,6 +448,38 @@ describe("AutonomousSupervisor", () => {
       expect(run).toHaveBeenCalledTimes(1);
     });
 
+    it("suppresses a recent foreground request when the ambient loop starts", async () => {
+      const insertedAt = new Date(nowMs).toISOString();
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES(?,?,?,?,?)")
+        .run("startup-foreground-1", "miki-main-chat", "user", "inspect the project", insertedAt);
+      await decide("startup");
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("does not replay a foreground request as an ambient run, including after restart", async () => {
+      const insertedAt = new Date(nowMs).toISOString();
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES(?,?,?,?,?)")
+        .run("foreground-1", "miki-main-chat", "user", "list the workspace files", insertedAt);
+      await decide("idle");
+      expect(run).not.toHaveBeenCalled();
+      // The foreground assistant answer changes the chat fingerprint while the
+      // interaction is still recent; the suppression row must follow that final state.
+      nowMs += 2_000;
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES(?,?,?,?,?)")
+        .run("foreground-answer-1", "miki-main-chat", "assistant", "Here are the workspace files.", new Date(nowMs).toISOString());
+      await decide("idle");
+      expect(run).not.toHaveBeenCalled();
+
+      // A fresh supervisor has no in-memory cooldown, but must retain the SQLite guard.
+      const restarted = new AutonomousSupervisor({
+        db, agent: { run }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
+        getConfig: () => config, log: () => undefined, now: () => new Date(nowMs).toISOString(),
+      });
+      nowMs += 120_000;
+      expect(await (restarted as any).runAmbientDecision("idle")).toBe(false);
+      expect(run).not.toHaveBeenCalled();
+    });
+
     it("resets the streak after an actionable decision", async () => {
       await decide("startup");
       run.mockResolvedValueOnce(makeResult("Found a blocker worth reporting."));
@@ -459,7 +492,7 @@ describe("AutonomousSupervisor", () => {
   describe("error handling", () => {
     let nowMs: number;
     let spy: jest.SpyInstance;
-    let notes: Array<{ text: string; kind?: string }>;
+    let notes: Array<{ text?: string; kind?: string }>;
     let notify: jest.Mock;
 
     const failed = (error: string) => ({ ...makeResult("", "failed"), error });
@@ -481,7 +514,7 @@ describe("AutonomousSupervisor", () => {
         heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, failure_threshold: 3, failure_backoff_base_seconds: 30, failure_backoff_max_seconds: 120 } },
       };
       notes = [];
-      notify = jest.fn(async (n: { text: string; kind?: string }) => { notes.push(n); });
+      notify = jest.fn(async (n: { text?: string; kind?: string }) => { notes.push(n); });
       supervisor = build();
     });
 
@@ -577,7 +610,7 @@ describe("AutonomousSupervisor", () => {
       expect(goals.get(goal.id)?.status).toBe("completed");
     });
 
-    it("still blocks a goal after genuine (non-infrastructure) failures", async () => {
+    it("keeps retrying a genuinely failing goal: there is no retry cap", async () => {
       run.mockResolvedValue(failed("Run exceeded the maximum number of turns."));
       const goal = goals.create({ title: "Genuinely failing", steps: ["Inspect"], replaceExisting: false });
       for (let i = 0; i < 6; i += 1) {
@@ -585,7 +618,8 @@ describe("AutonomousSupervisor", () => {
         await supervisor.tick("test");
         db.prepare("UPDATE autonomy_goal_runs SET next_retry_at=? WHERE goal_id=?").run("2000-01-01T00:00:00.000Z", goal.id);
       }
-      expect(goals.get(goal.id)?.status).toBe("blocked");
+      expect(goals.get(goal.id)?.status).toBe("active");
+      expect(run.mock.calls.length).toBe(6);
     });
   });
 });

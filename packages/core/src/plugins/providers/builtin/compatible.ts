@@ -17,7 +17,7 @@ export const openAICompatibleProviderPlugin = createOpenAICompatibleProvider({
   id: "openai-compatible",
   displayName: "OpenAI Compatible",
   aliases: ["compatible", "openai_compatible"],
-  modelPrefixes: ["compatible", "local"],
+  modelPrefixes: ["compatible"],
   apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY",
   defaultBaseUrl:
     process.env.OPENAI_COMPATIBLE_BASE_URL || "http://127.0.0.1:8000/v1",

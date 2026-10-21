@@ -34,7 +34,9 @@ export function normalizeGeminiSchema(value: unknown): JsonObject {
   }
 
   const result: JsonObject = {};
-  const type = value.type;
+  const type = Array.isArray(value.type)
+    ? value.type.find((item): item is string => typeof item === "string" && item !== "null")
+    : value.type;
   if (typeof type === "string") {
     result.type = type === "integer" ? "number" : type;
   }
@@ -56,9 +58,11 @@ export function normalizeGeminiSchema(value: unknown): JsonObject {
       ["string", "number", "boolean"].includes(typeof item),
     );
   if (Array.isArray(value.required) && value.required.length > 0) {
-    result.required = value.required.filter(
-      (item): item is string => typeof item === "string",
+    const known = isRecord(result.properties) ? Object.keys(result.properties) : [];
+    const required = value.required.filter(
+      (item): item is string => typeof item === "string" && known.includes(item),
     );
+    if (required.length > 0) result.required = required;
   }
 
   if (result.type === undefined) {
@@ -106,6 +110,8 @@ export function normalizeGeminiMessages(
         {
           role: "assistant",
           content: content || "The requested tool operation was executed.",
+          ...(Array.isArray(candidate.image_urls) ? { image_urls: candidate.image_urls } : {}),
+          ...(candidate.audio ? { audio: candidate.audio } : {}),
         } as MikiProviderMessage,
       ];
     }
@@ -114,6 +120,8 @@ export function normalizeGeminiMessages(
       {
         role,
         content: candidate.content ?? "",
+        ...(Array.isArray(candidate.image_urls) ? { image_urls: candidate.image_urls } : {}),
+        ...(candidate.audio ? { audio: candidate.audio } : {}),
       } as MikiProviderMessage,
     ];
   });

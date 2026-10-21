@@ -74,6 +74,7 @@ let managedProcess: ChildProcess | undefined;
 let managedKey = "";
 let managedBaseUrl = "";
 let managedError = "";
+let ensureInFlight: Promise<{ baseUrl: string; model: string }> | undefined;
 // A server started by the model manager is external to this core process. Keep
 // the last successful health probe so synchronous provider readiness checks do
 // not incorrectly report that healthy loopback runtime as unavailable.
@@ -190,7 +191,8 @@ export function configureLocalModels(models: unknown[]): void {
       provider !== "llama.cpp" &&
       provider !== "llama-cpp" &&
       provider !== "llamacpp" &&
-      provider !== "local-llama"
+      provider !== "local-llama" &&
+      provider !== "local"
     )
       continue;
     const keys = [entry.model_name, entry.model].filter((key): key is string =>
@@ -205,7 +207,10 @@ function localEntry(model: string): LocalModelEntry | undefined {
   return (
     configuredModels.get(lower) ||
     configuredModels.get(lower.replace(/^llama\.cpp\//, "")) ||
-    configuredModels.get(lower.replace(/^llama-cpp\//, ""))
+    configuredModels.get(lower.replace(/^llama-cpp\//, "")) ||
+    configuredModels.get(lower.replace(/^llamacpp\//, "")) ||
+    configuredModels.get(lower.replace(/^local-llama\//, "")) ||
+    configuredModels.get(lower.replace(/^local\//, ""))
   );
 }
 
@@ -356,7 +361,7 @@ function allowedModelPath(
   });
 }
 
-async function waitForReady(baseUrl: string, timeoutMs = 15000): Promise<void> {
+async function waitForReady(baseUrl: string, timeoutMs = Number.parseInt(process.env.MIKI_LLAMA_START_TIMEOUT_MS || "120000", 10)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError = "runtime did not become ready";
   while (Date.now() < deadline) {
@@ -436,7 +441,7 @@ function runtimeKey(
   });
 }
 
-export async function ensureLocalRuntime(
+async function ensureLocalRuntimeImpl(
   model: string,
 ): Promise<{ baseUrl: string; model: string }> {
   const entry = localEntry(model);
@@ -508,8 +513,11 @@ export async function ensureLocalRuntime(
     stopManagedProcess();
     managedKey = key;
     managedError = "";
+    const logDir = process.env.MIKI_DATA_DIR || path.join(process.cwd(), "data");
+    fs.mkdirSync(logDir, { recursive: true });
+    const log = fs.openSync(path.join(logDir, "llama-server.log"), "a");
     managedProcess = spawn(executable, runtimeArgs(config, modelPath, port), {
-      stdio: "ignore",
+      stdio: ["ignore", log, log],
       shell: false,
     });
     managedBaseUrl = baseUrl;
@@ -536,6 +544,13 @@ export async function ensureLocalRuntime(
     baseUrl,
     model: model.replace(/^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i, ""),
   };
+}
+
+export function ensureLocalRuntime(model: string): Promise<{ baseUrl: string; model: string }> {
+  if (!ensureInFlight) {
+    ensureInFlight = ensureLocalRuntimeImpl(model).finally(() => { ensureInFlight = undefined; });
+  }
+  return ensureInFlight;
 }
 
 export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
@@ -569,7 +584,7 @@ export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
 export function isLocalModel(model: string): boolean {
   return (
     Boolean(localEntry(model)) ||
-    /^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i.test(model)
+    /^(llama\.cpp|llama-cpp|llamacpp|local-llama|local)\//i.test(model)
   );
 }
 

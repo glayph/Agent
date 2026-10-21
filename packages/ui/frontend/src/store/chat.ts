@@ -66,10 +66,11 @@ export interface ChatMessage {
   kind?: AssistantMessageKind
   modelName?: string
   runId?: string
+  replyToMessageId?: string
   messageGroupId?: string
   messageSequence?: number
   messageTotal?: number
-  messageStrategy?: "single" | "multi_message" | "chunked" | "streaming" | "progressive"
+  messageStrategy?: "single" | "chunked" | "streaming" | "progressive"
   thoughtCategory?: AssistantThoughtCategory
   inspectorOnly?: boolean
   attachments?: ChatAttachment[]
@@ -146,6 +147,12 @@ export interface RunActivity {
   receivedAt: number
 }
 
+/** Ephemeral acknowledgment shown after a run starts but before assistant output arrives. */
+export interface WorkStatus {
+  messageId: string
+  runId: string
+}
+
 export interface ChatStoreState {
   messages: ChatMessage[]
   connectionState: ConnectionState
@@ -162,6 +169,7 @@ export interface ChatStoreState {
   runError?: string
   deliveryOutcome?: DeliveryOutcome
   runActivity?: RunActivity
+  workStatus?: WorkStatus
 }
 
 type ChatStorePatch = Partial<ChatStoreState>

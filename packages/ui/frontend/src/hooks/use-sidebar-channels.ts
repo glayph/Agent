@@ -77,7 +77,8 @@ function isChannelEnabled(
   channelsConfig: Record<string, unknown>,
 ): boolean {
   const channelConfig = asRecord(channelsConfig[channel.config_key])
-  if (channelConfig.enabled !== true) {
+  // Channels are active by default; only an explicit `enabled: false` turns one off.
+  if (channelConfig.enabled === false) {
     return false
   }
 
@@ -92,10 +93,13 @@ function buildChannelEnabledMap(
   channels: SupportedChannel[],
   appConfig: AppConfig,
 ): Record<string, boolean> {
-  const channelsConfig = asRecord(asRecord(appConfig).channels)
+  // The backend stores channels under `channel_list`; `channels` is only the legacy name.
+  const root = asRecord(appConfig)
+  const channelsConfig = asRecord(root.channel_list ?? root.channels)
   const result: Record<string, boolean> = {}
   for (const channel of channels) {
-    result[channel.name] = isChannelEnabled(channel, channelsConfig)
+    result[channel.name] =
+      isChannelEnabled(channel, channelsConfig) && channel.configured === true
   }
   return result
 }

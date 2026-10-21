@@ -5,7 +5,7 @@ const SENSITIVE_BASENAME: RegExp[] = [
   /^\.env(\..*)?$/i,
   /\.(sqlite|sqlite3|db|pem|key|p12|pfx|kdbx)(-wal|-shm)?$/i,
   /^id_(rsa|dsa|ecdsa|ed25519)/i,
-  /^secret-vault\.json$/i,
+  /^secret-vault(\.v1-backup)?\.json$/i,
   /^(credentials|auth|token|tokens)\.json$/i,
   /^\.npmrc$/i,
 ];

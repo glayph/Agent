@@ -59,6 +59,10 @@ const AUTONOMOUS_COMPUTER_TOOLS = [
   "computer_launch",
   "computer_verify",
   "computer_screenshot",
+  "computer_click_at",
+  "computer_drag",
+  "computer_scroll",
+  "computer_terminate_app",
   "computer_list_processes",
   "computer_get_system_info",
   "computer_list_displays",
@@ -99,6 +103,21 @@ function truncate(value: string, max = 12_000): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
+/**
+ * A notice for the user about background work. The supervisor never writes the wording of a
+ * notice: it hands over the facts (`event`) and the receiver has the model write the message.
+ * `text` is only for wording that the model itself already produced (e.g. a result it wrote), and
+ * `detail` is a raw provider/model string that may be shown as-is if no model can write the notice.
+ */
+export interface AutonomyNotice {
+  text?: string;
+  event?: Record<string, unknown>;
+  detail?: string;
+  runId?: string;
+  goalId?: number;
+  kind?: "progress" | "result" | "warning";
+}
+
 export interface AutonomousSupervisorOptions {
   db: Database.Database;
   agent: Pick<AgentEngine, "run">;
@@ -107,7 +126,7 @@ export interface AutonomousSupervisorOptions {
   getConfig(): JsonRecord;
   log(message: string): void;
   workspaceRoot?: string;
-  notify?: (input: { text: string; runId?: string; goalId?: number; kind?: "progress" | "result" | "warning" }) => void | Promise<void>;
+  notify?: (input: AutonomyNotice) => void | Promise<void>;
   recordExperience?: (input: {
     runId: string;
     goalId: number;
@@ -160,12 +179,19 @@ export class AutonomousSupervisor {
   private lastOutcome: AutonomyTickResult = { status: "idle", reason: "Not run yet." };
   private readonly durableTasks: DurableTaskStore;
   private readonly durableTaskIds = new Map<number, string>();
+  private readonly gateNoticeGoals = new Set<number>();
 
   constructor(private readonly options: AutonomousSupervisorOptions) {
     this.goals = new GoalStore(options.db);
     this.now = options.now ?? (() => new Date().toISOString());
     this.durableTasks = new DurableTaskStore(options.db, this.now);
     options.db.exec(`
+      CREATE TABLE IF NOT EXISTS autonomy_ambient_suppression (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        interaction_key TEXT NOT NULL,
+        state_key TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS autonomy_goal_runs (
         run_id TEXT PRIMARY KEY,
         goal_id INTEGER NOT NULL,
@@ -294,6 +320,8 @@ export class AutonomousSupervisor {
     const proactive = record(heartbeat.proactive);
     const proactiveEnabled = proactive.enabled !== false;
     const startupDecision = proactive.startup_decision !== false;
+    // Background LLM decisions are opt-in; queued/active goals continue through tick().
+    const llmWhenIdle = proactive.llm_when_idle === true;
     const minPollSeconds = Math.max(5, Math.min(300, Number(proactive.min_poll_seconds ?? 15) || 15));
     const maxPollSeconds = Math.max(minPollSeconds, Math.min(3600, Number(proactive.max_poll_seconds ?? 300) || 300));
     const idleBackoffMultiplier = Math.max(1.25, Math.min(4, Number(proactive.idle_backoff_multiplier ?? 2) || 2));
@@ -360,6 +388,7 @@ export class AutonomousSupervisor {
       allowedTools,
       proactiveEnabled,
       startupDecision,
+      llmWhenIdle,
       minPollSeconds,
       maxPollSeconds,
       idleBackoffMultiplier,
@@ -370,6 +399,8 @@ export class AutonomousSupervisor {
       failureBackoffBaseSeconds,
       failureBackoffMaxSeconds,
       allowedExternalSideEffectTools,
+      // Assigned goals and tasks have no retry cap: they run until complete or the user stops them, whatever unlimited_budgets says.
+      unlimitedRetries: true,
     };
   }
 
@@ -417,9 +448,9 @@ export class AutonomousSupervisor {
       capability_profile: config.capabilityProfile,
       allowed_tools: config.allowedTools,
       allowed_external_side_effect_tools: config.allowedExternalSideEffectTools,
-      retry: { max_retries: config.maxRetries, retry_backoff_seconds: config.retryBackoffSeconds },
+      retry: { max_retries: config.unlimitedRetries ? null : config.maxRetries, retry_backoff_seconds: config.retryBackoffSeconds, unlimited: config.unlimitedRetries },
       resource_limits: { max_tokens_per_cycle: config.maxTokensPerCycle, max_idle_minutes: config.maxIdleMinutes },
-      proactive_loop: { enabled: config.proactiveEnabled, startup_decision: config.startupDecision, min_poll_seconds: config.minPollSeconds, max_poll_seconds: config.maxPollSeconds, idle_backoff_multiplier: config.idleBackoffMultiplier, decision_interval_seconds: config.decisionIntervalSeconds, max_decision_interval_seconds: config.maxDecisionIntervalSeconds, no_action_streak: this.ambientNoActionStreak, failure_streak: this.failureStreak, circuit_open: this.circuitOpen, last_failure: this.lastFailure, next_decision_in_seconds: Math.ceil(this.ambientDueInMs(config) / 1000) },
+      proactive_loop: { enabled: config.proactiveEnabled, startup_decision: config.startupDecision, llm_when_idle: config.llmWhenIdle, min_poll_seconds: config.minPollSeconds, max_poll_seconds: config.maxPollSeconds, idle_backoff_multiplier: config.idleBackoffMultiplier, decision_interval_seconds: config.decisionIntervalSeconds, max_decision_interval_seconds: config.maxDecisionIntervalSeconds, no_action_streak: this.ambientNoActionStreak, failure_streak: this.failureStreak, circuit_open: this.circuitOpen, last_failure: this.lastFailure, next_decision_in_seconds: Math.ceil(this.ambientDueInMs(config) / 1000) },
       heartbeat_checklist: config.checklistPath,
       event_triggers: { max_per_minute: config.eventMaxPerMinute, cooldown_seconds: config.eventCooldownSeconds },
       policy: {
@@ -857,7 +888,7 @@ export class AutonomousSupervisor {
   }
 
   /** Delivery of a notification must never break (or be mistaken for) the work it reports on. */
-  private async notifySafe(input: { text: string; runId?: string; goalId?: number; kind?: "progress" | "result" | "warning" }): Promise<void> {
+  private async notifySafe(input: AutonomyNotice): Promise<void> {
     try {
       await this.options.notify?.(input);
     } catch (error) {
@@ -873,7 +904,8 @@ export class AutonomousSupervisor {
       this.circuitOpen = true;
       const waitSeconds = Math.min(config.failureBackoffMaxSeconds, config.failureBackoffBaseSeconds * Math.pow(2, this.failureStreak - 1));
       void this.notifySafe({
-        text: `Background autonomy is degraded: ${this.failureStreak} consecutive model failures (${kind}): ${truncate(message, 300)}. Retrying with backoff (next attempt in about ${Math.round(waitSeconds)}s); interactive chat is unaffected.`,
+        event: { type: "background_autonomy_degraded", consecutive_failures: this.failureStreak, failure_kind: kind, error: truncate(message, 300), next_attempt_in_seconds: Math.round(waitSeconds), interactive_chat_affected: false },
+        detail: truncate(message, 300),
         kind: "warning",
       });
     }
@@ -886,7 +918,7 @@ export class AutonomousSupervisor {
     this.circuitOpen = false;
     this.lastFailure = null;
     this.options.log("Autonomy provider recovered.");
-    if (wasOpen) void this.notifySafe({ text: "Background autonomy recovered: model calls are succeeding again.", kind: "progress" });
+    if (wasOpen) void this.notifySafe({ event: { type: "background_autonomy_recovered" }, kind: "progress" });
   }
 
   /** Exponential delay before retrying a goal whose run failed for environmental reasons. */
@@ -899,17 +931,23 @@ export class AutonomousSupervisor {
    * Pure SQLite reads: no LLM call. If this is unchanged since the last
    * NO_ACTION decision, asking the model again would be redundant.
    */
-  private ambientStateFingerprint(config: ReturnType<AutonomousSupervisor["config"]>): string {
+  private ambientWorkStateFingerprint(config: ReturnType<AutonomousSupervisor["config"]>): string {
     const db = this.options.db;
     const one = (sql: string) => JSON.stringify(db.prepare(sql).get() ?? null);
-    const parts = [
-      one("SELECT COUNT(*) AS c, COALESCE(MAX(created_at),'') AS m FROM chat_messages WHERE session_id = 'miki-main-chat'"),
+    return [
       one("SELECT COUNT(*) AS c, COALESCE(MAX(id),0) AS m, COALESCE(SUM(status='pending'),0) AS p, COALESCE(SUM(status='active'),0) AS a, COALESCE(SUM(status='blocked'),0) AS b FROM pursue_goals"),
       one("SELECT COUNT(*) AS c, COALESCE(MAX(task_id),0) AS m FROM autonomy_task_queue WHERE status IN ('scheduled','queued','running')"),
       one("SELECT COUNT(*) AS c, COALESCE(MAX(updated_at),'') AS m FROM memory_chunks"),
       crypto.createHash("sha1").update(this.heartbeatChecklist(config.checklistPath) ?? "").digest("hex"),
-    ];
-    return parts.join("|");
+    ].join("|");
+  }
+
+  /** Includes interactive chat for ordinary idle-decision scheduling. */
+  private ambientStateFingerprint(config: ReturnType<AutonomousSupervisor["config"]>): string {
+    const chat = JSON.stringify(this.options.db.prepare(
+      "SELECT COUNT(*) AS c, COALESCE(MAX(created_at),'') AS m FROM chat_messages WHERE session_id = 'miki-main-chat'",
+    ).get() ?? null);
+    return `${chat}|${this.ambientWorkStateFingerprint(config)}`;
   }
 
   /** Milliseconds until the next LLM-backed ambient decision is allowed (0 = due now). */
@@ -1022,10 +1060,47 @@ export class AutonomousSupervisor {
     const config = this.config();
     if (!config.proactiveEnabled) return false;
     const nowMs = Date.now();
+    const stateKeyBefore = this.ambientStateFingerprint(config);
+    const workStateKey = this.ambientWorkStateFingerprint(config);
+    const db = this.options.db;
+    const latestUser = db.prepare(
+      "SELECT id, session_id, content, created_at FROM chat_messages WHERE role='user' ORDER BY created_at DESC LIMIT 1",
+    ).get() as { id?: string; session_id?: string; content?: string; created_at?: string } | undefined;
+    const interactionKey = latestUser
+      ? crypto.createHash("sha256").update(JSON.stringify([latestUser.id, latestUser.session_id, latestUser.created_at, latestUser.content])).digest("hex")
+      : "";
+    const lastInteractive = db.prepare(
+      "SELECT MAX(created_at) AS created_at FROM chat_messages WHERE role IN ('user','assistant')",
+    ).get() as { created_at?: string | null } | undefined;
+    const lastInteractiveAt = lastInteractive?.created_at ? Date.parse(lastInteractive.created_at) : Number.NaN;
+    const ageSinceInteractive = nowMs - lastInteractiveAt;
+
+    // Observe recent messages before any due/in-flight early exit, so the
+    // foreground result is recorded even while its tools are still running.
+    // The persisted suppression survives restarts and is refreshed while the
+    // foreground answer settles; an unchanged interaction is never re-run as
+    // an ambient task. A changed world fingerprint releases the suppression.
+    if (interactionKey && Number.isFinite(lastInteractiveAt) && ageSinceInteractive >= 0 && ageSinceInteractive < 60_000) {
+      db.prepare(`INSERT INTO autonomy_ambient_suppression(singleton, interaction_key, state_key, updated_at)
+        VALUES(1, ?, ?, ?) ON CONFLICT(singleton) DO UPDATE SET interaction_key=excluded.interaction_key, state_key=excluded.state_key, updated_at=excluded.updated_at`)
+        .run(interactionKey, workStateKey, this.now());
+      this.ambientLastAt = nowMs;
+      this.ambientStateKey = stateKeyBefore;
+      return false;
+    }
+
+    const suppressed = db.prepare(
+      "SELECT interaction_key, state_key FROM autonomy_ambient_suppression WHERE singleton=1",
+    ).get() as { interaction_key?: string; state_key?: string } | undefined;
+    if (interactionKey && suppressed?.interaction_key === interactionKey && suppressed.state_key === workStateKey) {
+      this.ambientLastAt = nowMs;
+      this.ambientStateKey = stateKeyBefore;
+      return false;
+    }
     if (trigger !== "startup" && this.ambientDueInMs(config) > 0) return false;
     if (this.inFlight) return false;
+    if ((this.options.activeRunCount?.() ?? 0) > 0) return false;
     this.ambientLastAt = nowMs;
-    const stateKeyBefore = this.ambientStateFingerprint(config);
 
     const pending = this.listScheduledTasks(10);
     const active = this.goals.active();
@@ -1064,7 +1139,8 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     for (const name of allow) { const tool = this.options.tools.get(name); if (tool) tools.register(tool); }
     const proposals: Array<{ id: number; title: string }> = [];
     tools.register(this.buildProposeGoalTool(config, proposals));
-    const runId = `autonomy-ambient-${Date.now()}`;
+    const runFingerprint = crypto.createHash("sha256").update(`${trigger}|${interactionKey}|${stateKeyBefore}`).digest("hex").slice(0, 32);
+    const runId = `autonomy-ambient-${runFingerprint}`;
     try {
       const result = await this.options.agent.run({
         runId,
@@ -1103,7 +1179,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       }
       if (actionable) {
         await this.notifySafe(proposals.length > 0
-          ? { text: `Autonomous goal queued: ${proposals.map((p) => `#${p.id} ${p.title}`).join("; ")}`, runId, goalId: proposals[0].id, kind: "progress" }
+          ? { event: { type: "goal_queued", goals: proposals.map((p) => ({ id: p.id, title: p.title })) }, runId, goalId: proposals[0].id, kind: "progress" }
           : { text: truncate(text, 3000), runId, kind: "result" });
         this.ambientBackoffSeconds = config.minPollSeconds;
         this.ambientNoActionStreak = 0;
@@ -1200,7 +1276,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
         startup = false;
         await this.tick(tickTrigger);
         const hasGoal = Boolean(this.goals.active()) || this.listScheduledTasks(1).some((task) => ["queued", "running"].includes(String(task.status)));
-        if (!this.paused && !hasGoal && (
+        if (!this.paused && config.llmWhenIdle && !hasGoal && (
           (this.ambientLastAt === 0 && config.startupDecision)
           || this.wakeRequested
           || this.ambientDueInMs(config) === 0
@@ -1278,7 +1354,10 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
     }
 
     const taskForGoal = this.options.db.prepare(`SELECT task_id,max_retries,retry_count,status FROM autonomy_task_queue WHERE goal_id=? AND status IN ('queued','running','scheduled') ORDER BY task_id DESC LIMIT 1`).get(goal.id) as { task_id: number; max_retries: number; retry_count: number; status: string } | undefined;
-    const retryLimit = taskForGoal ? Math.max(0, Math.min(10, Number(taskForGoal.max_retries ?? config.maxRetries))) : config.maxRetries;
+    // Under unlimited_budgets an assigned goal has no retry cap: it retries with backoff until it is complete or the user stops it.
+    const retryLimit = config.unlimitedRetries
+      ? Number.POSITIVE_INFINITY
+      : taskForGoal ? Math.max(0, Math.min(10, Number(taskForGoal.max_retries ?? config.maxRetries))) : config.maxRetries;
     const attempt = previous ? Number(previous.attempt || 1) + 1 : 1;
     if (previous && (previous.status === "failed" || previous.status === "blocked" || previous.status === "retry_wait") && attempt > retryLimit + 1) {
       this.goals.update(goal.id, { status: "blocked", statusReason: `Autonomous retry limit reached after ${retryLimit} retries.` });
@@ -1336,7 +1415,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
           : previous && (previous.status === "failed" || previous.status === "blocked" || previous.status === "retry_wait")
             ? `PREVIOUS AUTONOMOUS ATTEMPT #${previous.attempt}:\n${truncate(previous.result || previous.error || "No usable result.", 5000)}\n\n${previous.plan_digest ? `PREVIOUS PLAN DIGEST:\n${previous.plan_digest}\n` : ""}This is a re-planning cycle. Do not blindly repeat a failed approach; reassess the evidence and choose a materially different next safest useful action.`
             : "",
-        "You are operating in Miki's bounded autonomous mode. Inspect the available workspace and memory, reason about the next useful step, and use only the tools explicitly available to you.",
+        "You are operating in Miki's autonomous mode. Decide for yourself whether the next step needs a tool: inspect the workspace or memory only when the goal requires it, reason about the next useful step, and use only the tools explicitly available to you.",
         `This cycle permits the core safe tools plus these optional tools: ${uniqueOptionalTools.length ? uniqueOptionalTools.join(", ") : "none"}. File writes may target any path. Browser navigation and interactions are enabled. Computer-use is enabled.`,
         goal.acceptance_contract ? `DETERMINISTIC ACCEPTANCE CONTRACT:\n${truncate(goal.acceptance_contract, 8000)}\nThe supervisor will independently verify these checks. Do not claim success unless the required evidence is actually present.` : config.requireAcceptanceContract ? "This goal has no deterministic Goal Acceptance Contract. Do the useful work, but the supervisor will not mark the goal completed until a contract is provided." : "No acceptance contract is configured; legacy result-based completion is permitted by policy.",
         "If the goal requires a blocked capability, begin the final response with `BLOCKED:` and explain the exact next capability needed.",
@@ -1370,9 +1449,20 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
           const engineEvent = event as EngineEvent;
           if (engineEvent.type === "tool.call") {
             toolEvidence.push({ name: engineEvent.call.name, status: engineEvent.call.status });
+            // One notice per run when an approval gate stops a call. The gate stays in force and the run is not held.
+            if (engineEvent.call.gate && engineEvent.call.status === "blocked" && !this.gateNoticeGoals.has(goal.id)) {
+              this.gateNoticeGoals.add(goal.id);
+              // Keep the deduplication set bounded for long-running supervisors.
+              if (this.gateNoticeGoals.size > 1000) this.gateNoticeGoals.delete(this.gateNoticeGoals.values().next().value as number);
+              void this.notifySafe({
+                event: { type: "approval_gate_blocked", goal_id: goal.id, tool: engineEvent.call.name, reason: truncate(engineEvent.call.error ?? "blocked", 300), action_stays_blocked: true, cycle_continues_without_it: true },
+                detail: truncate(engineEvent.call.error ?? "", 300) || undefined,
+                runId, goalId: goal.id, kind: "warning",
+              });
+            }
           }
           if (engineEvent.type === "run.finished" && engineEvent.status !== "completed") {
-            void this.notifySafe({ text: `Autonomous goal #${goal.id} ${engineEvent.status}: ${engineEvent.error || "execution did not complete"}`, runId, goalId: goal.id, kind: "warning" });
+            void this.notifySafe({ event: { type: "goal_run_ended", goal_id: goal.id, status: engineEvent.status, error: engineEvent.error || null }, detail: engineEvent.error || undefined, runId, goalId: goal.id, kind: "warning" });
           }
         },
       });
@@ -1404,7 +1494,7 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       const infraFailure = !succeeded && result.status === "failed" && failureKind !== null && isInfraFailure(failureKind);
       if (infraFailure) this.recordProviderFailure(config, failureKind!, result.error ?? "model run failed");
       else if (result.status === "completed") this.recordProviderSuccess();
-      const exhausted = !infraFailure && attempt >= retryLimit + 1;
+      const exhausted = !infraFailure && attempt >= Math.min(retryLimit + 1, 5);
       const finalStatus = succeeded ? "completed" : exhausted ? "blocked" : "retry_wait";
       const nextRetryAt = !succeeded && !exhausted
         ? new Date(Date.parse(this.now()) + (infraFailure ? this.infraRetrySeconds(config) : config.retryBackoffSeconds) * 1000).toISOString()
@@ -1454,12 +1544,14 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       this.options.log(`Autonomy cycle ${finalStatus} for goal #${goal.id} (run ${runId}, attempt ${attempt}).`);
       if (succeeded) {
         await this.notifySafe({
-          text: `Autonomous goal completed: ${goal.title}. ${truncate(result.finalText || acceptance.reason, 2200)}`,
+          event: { type: "goal_completed", goal_id: goal.id, title: goal.title, result: truncate(result.finalText || acceptance.reason, 2200) },
+          detail: truncate(result.finalText || acceptance.reason, 2200),
           runId, goalId: goal.id, kind: "result",
         });
       } else if (exhausted) {
         await this.notifySafe({
-          text: `Autonomous goal blocked after ${attempt} attempt(s): ${goal.title}. ${reason}`,
+          event: { type: "goal_blocked", goal_id: goal.id, title: goal.title, attempts: attempt, reason },
+          detail: reason,
           runId, goalId: goal.id, kind: "warning",
         });
       }
@@ -1485,7 +1577,7 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       const thrownKind = classifyFailure(error);
       const infraFailure = isInfraFailure(thrownKind);
       if (infraFailure) this.recordProviderFailure(config, thrownKind, reason);
-      const exhausted = !infraFailure && attempt >= retryLimit + 1;
+      const exhausted = !infraFailure && attempt >= Math.min(retryLimit + 1, 5);
       const nextRetryAt = exhausted ? null : new Date(Date.now() + (infraFailure ? this.infraRetrySeconds(config) : config.retryBackoffSeconds) * 1000).toISOString();
       const replanContext = this.replanner.build({
         goalId: goal.id,

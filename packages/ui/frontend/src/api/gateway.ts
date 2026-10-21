@@ -92,19 +92,7 @@ export async function restartGateway(): Promise<GatewayActionResponse> {
   })
 }
 
-export async function clearGatewayLogs(): Promise<GatewayActionResponse> {
-  // Log management is owned by the Node Gateway; keep this client on the
-  // canonical /api/gateway contract.
-  return request<GatewayActionResponse>("/api/gateway/logs/clear", {
-    method: "POST",
-  })
-}
 
-export async function reloadRuntime(): Promise<RuntimeReloadResponse> {
-  return request<RuntimeReloadResponse>("/api/runtime/reload", {
-    method: "POST",
-  })
-}
 
 export type {
   GatewayStatusResponse,

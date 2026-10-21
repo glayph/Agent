@@ -39,6 +39,13 @@ describe("resolveModel", () => {
     expect(resolveModel([gemini()], "Gemini Flash Lite", {}).matchedRequested).toBe(true)
     expect(resolveModel([gemini()], "gemini-3.5-flash-lite", {}).matchedRequested).toBe(true)
   })
+  it("matches a provider-prefixed fallback to its stored provider and model id", () => {
+    const local: StoredModelEntry = { isDefault: false, payload: { model: "lfm2.5-1.2b-instruct-q4_0", model_name: "Local LFM", provider: "llama.cpp", api_base: "http://127.0.0.1:39200/v1" } }
+    const resolved = resolveModel([gemini(), local], "llama.cpp/lfm2.5-1.2b-instruct-q4_0", {})
+    expect(resolved.matchedRequested).toBe(true)
+    expect(resolved.provider).toBe("llama.cpp")
+    expect(resolved.model).toBe("lfm2.5-1.2b-instruct-q4_0")
+  })
   it("falls back to the default (no ghost client) when the requested name is unknown", () => {
     const resolved = resolveModel([gemini()], "Test", {})
     expect(resolved.configured).toBe(true)

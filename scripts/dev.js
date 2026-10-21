@@ -30,7 +30,7 @@ async function main() {
     cwd: process.cwd(),
     stdio: "inherit",
     shell: false,
-    env: process.env,
+    env: { ...process.env, GATEWAY_HOST: process.env.GATEWAY_HOST || "0.0.0.0" },
   });
   child.once("error", (error) => {
     if (!shuttingDown) {

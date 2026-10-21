@@ -95,6 +95,18 @@ npm run verify         # full verification pass
 npm run test:gateway   # gateway test suite
 ```
 
+### 💬 Telegram, Discord, and Slack channels
+
+The persistent gateway includes text adapters for Telegram Bot API long polling, Discord Gateway, and Slack Socket Mode. Channel credentials are encrypted in the workspace secret vault; configuration responses expose only whether a secret is set, not its value. Keep `config/data/secret-vault.key` and `config/data/secret-vault.json` together when moving or restoring the workspace. Runtime export includes both; treat the archive as highly sensitive.
+
+Before enabling a channel, add the trusted sender's platform ID to `allow_from`. Incoming messages are ignored when the sender is not listed. The wildcard `*` permits any sender and should only be used intentionally.
+
+- **Telegram:** configure the bot token. This adapter uses `getUpdates` long polling; Telegram does not allow polling while a webhook is configured. Disable an existing webhook before using this adapter.
+- **Discord:** configure the bot token, enable the **Message Content Intent** in the Discord Developer Portal, and grant the bot permission to view and send messages in the target channels.
+- **Slack:** configure both the bot token and an app-level token with the `connections:write` scope, enable Socket Mode, subscribe to the required message events, and grant the bot `chat:write` plus access to the channels it should read/reply in.
+
+The dashboard marks a channel as live only while its adapter is connected. If it remains disconnected, inspect the channel probe/runtime error and verify network access, token scopes, platform intents, and the trusted sender list.
+
 ### 🤖 Local models
 
 ```bash
@@ -159,3 +171,15 @@ Pull requests are welcome! Please run `npm run verify` and `npm run test:gateway
 *Miki — remember everything, forget nothing.*
 
 </div>
+
+## Runtime data, encrypted secrets, and portable backups
+
+Miki keeps its live runtime database in `data/miki-runtime.sqlite` (or the path selected by `MIKI_DATA_DIR`). This runtime data is deliberately excluded from source ZIPs and Git. Model API keys are stored in the encrypted secret vault under `config/data/secret-vault.json`; the key-file-backed vault also needs the paired `config/data/secret-vault.key`. If you move Miki to another folder or computer, preserve the runtime database and both vault files together. A vault file and its key must never be mixed with files from a different backup.
+
+After signing in to the dashboard, download a portable runtime backup by opening `GET /api/runtime/export` in the same browser session. The ZIP contains a consistent SQLite snapshot and, when present, the vault and its key. Treat it as a credential-bearing archive: anyone who obtains a key-file-backed backup can decrypt the saved secrets, so do not commit it, share it, or upload it to public storage. If your vault uses `MIKI_VAULT_KEY` or `MIKI_SECRET_VAULT_KEY`, preserve that environment variable separately; it is intentionally not exported.
+
+On startup, Miki reports when an existing runtime data directory or a key-file-backed vault appears incomplete. An empty data directory on a fresh installation is normal; an existing vault without its matching key is not. Restore from a verified backup before replacing or deleting the vault.
+
+When upgrading an older installation that stored model API keys in SQLite, Miki creates a one-time, permission-restricted recovery copy under `data/backups/` before migrating those keys into the encrypted vault. That migration recovery copy contains the old database, including plaintext model keys, and therefore remains sensitive even though its file permissions are restricted. Keep it private; after verifying that all models still connect and that a separate secure backup exists, remove it according to your retention policy.
+
+Factory Reset also creates a permission-restricted recovery JSON under `data/backups/`. That file can contain the previous `app_config`, including channel tokens. If stored web-search API keys exist, matching `secret-vault.json` and (when applicable) `secret-vault.key` recovery files are also created before those keys are removed. Treat every file from a Factory Reset as sensitive; restore a vault JSON and key only as a matching pair. Environment-variable keys are intentionally not changed by Factory Reset.

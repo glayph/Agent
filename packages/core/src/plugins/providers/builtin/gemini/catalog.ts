@@ -18,33 +18,25 @@ export async function fetchGeminiModels(
 ): Promise<GeminiDiscoveredModel[]> {
   const headers: Record<string, string> = {};
   if (apiKey) headers["x-goog-api-key"] = apiKey;
-  const response = await fetch(geminiModelsUrl(provider), {
-    headers,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await response.text();
-  let body: unknown = {};
-  try {
-    body = text.trim() ? (JSON.parse(text) as unknown) : {};
-  } catch {
-    body = text;
-  }
-  if (!response.ok) {
-    const detail =
-      typeof body === "string"
-        ? body
-        : body && typeof body === "object" && "error" in body
-          ? JSON.stringify((body as { error?: unknown }).error)
-          : `HTTP ${response.status}`;
-    throw new Error(`Gemini model discovery failed: ${detail}`);
-  }
-  const rawModels =
-    body &&
-    typeof body === "object" &&
-    Array.isArray((body as { models?: unknown }).models)
-      ? (body as { models: unknown[] }).models
-      : [];
-  return rawModels.flatMap((item) => {
+  let pageToken = "";
+  const allModels: unknown[] = [];
+  do {
+    const url = `${geminiModelsUrl(provider)}?pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    const text = await response.text();
+    let body: unknown = {};
+    try { body = text.trim() ? (JSON.parse(text) as unknown) : {}; } catch { body = text; }
+    if (!response.ok) {
+      const detail = typeof body === "string" ? body : body && typeof body === "object" && "error" in body ? JSON.stringify((body as { error?: unknown }).error) : `HTTP ${response.status}`;
+      throw new Error(`Gemini model discovery failed: ${detail}`);
+    }
+    if (body && typeof body === "object" && Array.isArray((body as { models?: unknown }).models)) {
+      allModels.push(...(body as { models: unknown[] }).models);
+    }
+    pageToken = body && typeof body === "object" && typeof (body as { nextPageToken?: unknown }).nextPageToken === "string"
+      ? (body as { nextPageToken: string }).nextPageToken : "";
+  } while (pageToken);
+  return allModels.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const record = item as {
       name?: unknown;

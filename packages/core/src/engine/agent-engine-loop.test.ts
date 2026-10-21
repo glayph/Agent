@@ -150,6 +150,27 @@ describe("model failover", () => {
     expect(fallback).toMatchObject({ from: "primary-model", to: "backup-model" });
   });
 
+  it("does not retry or fall back for an invalid API key", async () => {
+    const primary: EngineLLMClient = {
+      model: "primary-model",
+      async complete() {
+        throw Object.assign(new Error("Invalid API key"), { status: 401 });
+      },
+    };
+    const backup = scriptedLLM([{ text: "must not run" }], "backup-model");
+    const engine = new AgentEngine({
+      llm: (model?: string) => (model === "backup" ? backup.client : primary),
+      tools: new ToolRegistry(),
+      fallbackModels: ["backup"],
+    });
+
+    const result = await engine.run({ history: user("hi") });
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.toLowerCase()).toContain("invalid api key");
+    expect(backup.requests).toHaveLength(0);
+  });
+
   it("fails clearly when every fallback also fails", async () => {
     const broken = (name: string): EngineLLMClient => ({
       model: name,

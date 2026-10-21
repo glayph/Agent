@@ -1,5 +1,9 @@
 import { normalizeBrowserUrl } from "../browser/runtime.js";
-import { normalizeHotkeyForSendKeys } from "./runtime.js";
+import {
+  linuxX11UnavailableReason,
+  normalizeHotkeyForSendKeys,
+  normalizeHotkeyForXdotool,
+} from "./runtime.js";
 import { drawGridOverlay } from "./grid.js";
 
 describe("computer-use tools", () => {
@@ -26,6 +30,30 @@ describe("computer-use tools", () => {
     expect(normalizeHotkeyForSendKeys(["Ctrl", "Shift", "P"])).toBe("^+P");
     expect(normalizeHotkeyForSendKeys("Alt+F4")).toBe("%{F4}");
     expect(normalizeHotkeyForSendKeys("Enter")).toBe("{ENTER}");
+  });
+
+  it("reports headless and Wayland-only Linux sessions as unsupported for UI actions", () => {
+    expect(linuxX11UnavailableReason({})).toMatch(/DISPLAY is unset/);
+    expect(linuxX11UnavailableReason({ WAYLAND_DISPLAY: "wayland-0" })).toMatch(
+      /Wayland-only/,
+    );
+    expect(
+      linuxX11UnavailableReason({
+        DISPLAY: ":1",
+        WAYLAND_DISPLAY: "wayland-0",
+      }),
+    ).toBeNull();
+  });
+
+  it("normalizes safe X11 shortcuts and rejects command-like key names", () => {
+    expect(normalizeHotkeyForXdotool(["Ctrl", "Shift", "P"])).toBe(
+      "ctrl+shift+P",
+    );
+    expect(normalizeHotkeyForXdotool("Alt+F4")).toBe("alt+F4");
+    expect(normalizeHotkeyForXdotool("Enter")).toBe("Return");
+    expect(() => normalizeHotkeyForXdotool("Ctrl;reboot")).toThrow(
+      /Unsupported X11 shortcut key/,
+    );
   });
 
   it("draws PNG grid overlay cleanly", () => {

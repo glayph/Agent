@@ -1,4 +1,5 @@
 import type { ChannelConfig, SupportedChannel } from "@/api/channels"
+import { CHANNEL_CONFIG_METADATA } from "@miki/config/channel-meta"
 import {
   normalizeAllowFromValues,
   serializeStringArrayForSubmit,
@@ -107,42 +108,7 @@ export function buildSavePayload(
 }
 
 export function getRequiredFieldKeys(channelName: string): string[] {
-  switch (channelName) {
-    case "telegram":
-      return ["token"]
-    case "discord":
-      return ["token"]
-    case "slack":
-      return ["bot_token", "app_token"]
-    case "feishu":
-      return ["app_id", "app_secret"]
-    case "dingtalk":
-      return ["webhook_url"]
-    case "line":
-      return ["token", "channel_secret"]
-    case "qq":
-      return ["bot_id", "token"]
-    case "onebot":
-      return ["server_url"]
-    case "weixin":
-      return ["account_id"]
-    case "wecom":
-      return ["bot_id", "secret"]
-    case "whatsapp":
-      return ["bridge_url"]
-    case "whatsapp_native":
-      return ["config"]
-    case "miki":
-      return ["token"]
-    case "matrix":
-      return ["homeserver_url", "user_id", "access_token"]
-    case "irc":
-      return ["server", "nick"]
-    case "mqtt":
-      return ["broker", "agent_id"]
-    default:
-      return []
-  }
+  return [...(CHANNEL_CONFIG_METADATA[channelName]?.requiredFields ?? [])]
 }
 
 export function isMissingRequiredValue(value: unknown): boolean {

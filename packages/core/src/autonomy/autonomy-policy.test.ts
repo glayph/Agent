@@ -8,8 +8,8 @@ const tool = (name: string, risk: EngineTool["risk"]): EngineTool => ({
   parameters: {},
 });
 
-describe("autonomy policy without built-in restrictions", () => {
-  it("allows shell, install, browser, computer, and destructive tools with the default configuration", () => {
+describe("autonomy policy safety defaults", () => {
+  it("decides every tool autonomously without asking for approval", () => {
     const policy = new AutonomyPolicy();
     for (const candidate of [
       tool("shell_execute", "execute"),
@@ -17,6 +17,7 @@ describe("autonomy policy without built-in restrictions", () => {
       tool("browser_navigate", "network"),
       tool("computer_click", "execute"),
       tool("file_delete", "destructive"),
+      { ...tool("custom_action", "write"), approval: "required" as const },
     ]) {
       expect(policy.decide(candidate, {}).mode).toBe("auto");
     }

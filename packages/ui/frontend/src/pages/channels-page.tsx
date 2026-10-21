@@ -11,6 +11,7 @@ import {
   type ChannelRuntimeProbeResponse,
   type SupportedChannel,
   getChannelConfig,
+  getChannelSecrets,
   getChannelsCatalog,
   patchAppConfig,
   probeChannelRuntime,
@@ -61,18 +62,24 @@ interface ChannelConfigPageProps {
 }
 
 function channelCatalogStatus(channel: SupportedChannel): {
-  label: string
+  labelKey: "channels.page.statusLive" | "channels.page.statusSavedOnly" | "channels.page.statusNotConfigured"
   className: string
 } {
-  if (channel.configured) {
+  if (channel.configured && channel.runtime_live === true && channel.runtime_connected === true) {
     return {
-      label: "Configured",
+      labelKey: "channels.page.statusLive",
       className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
     }
   }
+  if (channel.configured) {
+    return {
+      labelKey: "channels.page.statusSavedOnly",
+      className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    }
+  }
   return {
-    label: "Not connected",
-    className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    labelKey: "channels.page.statusNotConfigured",
+    className: "border-border bg-muted text-muted-foreground",
   }
 }
 
@@ -126,7 +133,15 @@ export function ChannelCatalogPage() {
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {channels.map((channel) => {
                 const connection = channelCatalogStatus(channel)
-                const runtime = channel.runtime_status === "functional" ? "Live adapter available" : channel.runtime_status === "config_only" ? "Configuration only" : "Adapter status: partial"
+                const runtime = channel.runtime_status !== "functional"
+                  ? t("channels.page.runtimeUnavailable")
+                  : channel.runtime_connected === true
+                    ? t("channels.page.runtimeLive")
+                    : channel.configured && channel.runtime_live === true
+                      ? t("channels.page.runtimeStarting", { defaultValue: "Adapter running; waiting for connection" })
+                      : channel.configured
+                        ? t("channels.page.runtimeDisconnected")
+                        : t("channels.page.runtimeNotConfigured")
                 return (
                   <a
                     key={channel.name}
@@ -137,8 +152,9 @@ export function ChannelCatalogPage() {
                       <div className="min-w-0">
                         <h3 className="truncate font-semibold">{getChannelDisplayName(channel, t)}</h3>
                         <p className="text-muted-foreground mt-1 truncate text-[11px]">{runtime}</p>
+                        {channel.runtime_error && <p className="text-destructive mt-1 line-clamp-2 text-[11px]" title={channel.runtime_error}>{channel.runtime_error}</p>}
                       </div>
-                      <Badge variant="outline" className={connection.className}>{connection.label}</Badge>
+                      <Badge variant="outline" className={connection.className}>{t(connection.labelKey)}</Badge>
                     </div>
                     <div className="text-muted-foreground mt-3 text-xs font-medium group-hover:text-foreground">Configure →</div>
                   </a>
@@ -150,7 +166,7 @@ export function ChannelCatalogPage() {
           {!loading && !error && channels.length > 0 && (
             <div className="text-muted-foreground flex items-start gap-2 rounded-lg border border-dashed px-3 py-2.5 text-xs leading-5">
               <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
-              <span>External channels need their own adapter. Built-in Web chat is ready.</span>
+              <span>Green status means a live adapter is available. Saving channel credentials alone does not activate message transport.</span>
             </div>
           )}
         </div>
@@ -321,6 +337,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const [baseConfig, setBaseConfig] = useState<ChannelConfig>({})
   const [editConfig, setEditConfig] = useState<ChannelConfig>({})
   const [configuredSecrets, setConfiguredSecrets] = useState<string[]>([])
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({})
   const [enabled, setEnabled] = useState(false)
   const [arrayFieldResetVersion, setArrayFieldResetVersion] = useState(0)
   const arrayFieldFlushersRef = useRef(new Map<string, ArrayFieldFlusher>())
@@ -332,6 +349,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
     setBaseConfig({})
     setEditConfig({})
     setConfiguredSecrets([])
+    setSecretValues({})
     setEnabled(false)
     setFetchError("")
     setServerError("")
@@ -364,12 +382,18 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
 
         const channelConfig = await getChannelConfig(channelName)
         if (loadRequestIdRef.current !== requestId) return
+        // Saved credentials are fetched from the authenticated endpoint so they show again on reopen.
+        const secrets = await getChannelSecrets(channelName).catch(
+          () => ({}) as Record<string, string>,
+        )
+        if (loadRequestIdRef.current !== requestId) return
         const raw = asRecord(channelConfig.config)
         const normalized = normalizeConfig(matched, raw)
 
         setChannel(matched)
         setBaseConfig(normalized)
-        setEditConfig(buildEditConfig(matched.name, normalized))
+        setSecretValues(secrets)
+        setEditConfig(buildEditConfig(matched.name, normalized, secrets))
         setConfiguredSecrets(channelConfig.configured_secrets ?? [])
         setEnabled(asBool(normalized.enabled))
         setFetchError("")
@@ -409,12 +433,12 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
     if (loading || !channel || channel.name !== channelName) return false
     const basePayload = buildSavePayload(
       channel,
-      buildEditConfig(channel.name, baseConfig),
+      buildEditConfig(channel.name, baseConfig, secretValues),
       asBool(baseConfig.enabled),
     )
     const currentPayload = buildSavePayload(channel, editConfig, enabled)
     return JSON.stringify(basePayload) !== JSON.stringify(currentPayload)
-  }, [baseConfig, channel, channelName, editConfig, enabled, loading])
+  }, [baseConfig, channel, channelName, editConfig, enabled, loading, secretValues])
   useUnsavedChangesGuard(isDirty)
 
   const docsUrl = useMemo(() => {
@@ -492,7 +516,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
 
   const handleReset = () => {
     if (!channel) return
-    setEditConfig(buildEditConfig(channel.name, baseConfig))
+    setEditConfig(buildEditConfig(channel.name, baseConfig, secretValues))
     setEnabled(asBool(baseConfig.enabled))
     setServerError("")
     setFieldErrors({})

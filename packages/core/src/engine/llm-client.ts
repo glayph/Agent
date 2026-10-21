@@ -287,7 +287,7 @@ export interface RegistryLike {
       tool_call_id?: string;
       tool_calls?: unknown[];
     }>,
-    options?: { extra?: Record<string, unknown>; timeoutMs?: number; signal?: AbortSignal },
+    options?: { extra?: Record<string, unknown>; timeoutMs?: number; signal?: AbortSignal; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>> },
   ): Promise<LLMResponse>;
 }
 
@@ -295,7 +295,7 @@ export interface RegistryLike {
 export function createRegistryLLMClient(
   registry: RegistryLike,
   model: string,
-  options: { timeoutMs?: number; extra?: Record<string, unknown> } = {},
+  options: { timeoutMs?: number; extra?: Record<string, unknown>; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>> } = {},
 ): EngineLLMClient {
   return {
     model,
@@ -310,6 +310,9 @@ export function createRegistryLLMClient(
         extra,
         timeoutMs: options.timeoutMs,
         signal: callOptions.signal,
+        providerId: options.providerId,
+        baseUrl: options.baseUrl,
+        credentials: options.credentials,
       });
     },
   };

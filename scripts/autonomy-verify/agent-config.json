@@ -205,10 +205,8 @@
   "messaging": {
     "adaptive": true,
     "maxMessagesPerResponse": 3,
-    "enableChunking": true,
     "enableStreaming": true,
     "enableProgressMessages": true,
-    "maxChunkLength": 4000,
     "avoidUnnecessaryMessages": true,
     "streamingMinLength": 1200,
     "multiMessageMinLength": 800,

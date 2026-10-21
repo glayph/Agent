@@ -455,3 +455,7 @@ export {
 } from "./security.js";
 
 export default settings;
+
+export * from "./channel-meta.js";
+
+export * from "./channel-secrets.js";

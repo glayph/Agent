@@ -233,12 +233,6 @@ export function retryRuntimeJob(jobId: string): Promise<{ job: RuntimeJob }> {
   )
 }
 
-export function getDeadLetterJobs(): Promise<{
-  jobs: RuntimeJob[]
-  count: number
-}> {
-  return request("/api/enhancements/runtime/jobs/dead-letter")
-}
 
 export function getRuntimeDeliveries(): Promise<{
   receipts: DeliveryReceipt[]
@@ -259,80 +253,4 @@ export interface MockDeliveryInput {
   idempotencyKey: string
   correlationId: string
   maxAttempts?: number
-}
-
-export function createMockDelivery(input: MockDeliveryInput): Promise<{
-  preview: {
-    externalSideEffect: false
-    previewHash: string
-    bodyPreview: string
-  }
-  receipt: DeliveryReceipt
-  approval: { id: string; status: string; tokenIssued: boolean }
-}> {
-  return request("/api/enhancements/runtime/deliveries/mock", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  })
-}
-
-export function getRuntimeDelivery(deliveryId: string): Promise<{
-  receipt: DeliveryReceipt
-  approval: Record<string, unknown> | null
-  replayEligible: boolean
-}> {
-  return request(
-    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}`,
-  )
-}
-
-export function approveMockDelivery(
-  deliveryId: string,
-  decidedBy = "dashboard-operator",
-): Promise<{ receipt: DeliveryReceipt; approval: Record<string, unknown> }> {
-  return request(
-    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}/approve`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decidedBy }),
-    },
-  )
-}
-
-export function dispatchMockDelivery(
-  deliveryId: string,
-  outcome: "sent" | "failed" | "unknown_outcome",
-): Promise<{ receipt: DeliveryReceipt; outcome: Record<string, unknown> }> {
-  return request(
-    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}/mock-dispatch`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ outcome }),
-    },
-  )
-}
-
-export function replayMockDelivery(
-  deliveryId: string,
-  idempotencyKey: string,
-): Promise<{
-  receipt: DeliveryReceipt
-  preview: {
-    externalSideEffect: false
-    previewHash: string
-    bodyPreview: string
-  }
-  approval: Record<string, unknown>
-}> {
-  return request(
-    `/api/enhancements/runtime/deliveries/${encodeURIComponent(deliveryId)}/replay`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idempotencyKey }),
-    },
-  )
 }

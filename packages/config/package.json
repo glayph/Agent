@@ -21,6 +21,10 @@
     "./secret-vault": {
       "import": "./dist/secret-vault.js",
       "types": "./dist/secret-vault.d.ts"
+    },
+    "./channel-meta": {
+      "import": "./dist/channel-meta.js",
+      "types": "./dist/channel-meta.d.ts"
     }
   },
   "scripts": {

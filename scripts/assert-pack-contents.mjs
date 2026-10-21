@@ -38,7 +38,7 @@ if (missing.length > 0) {
   fail(`missing required runtime files: ${missing.join(", ")}`);
 }
 
-const forbiddenNames = new Set([".env", "secret-vault.json"]);
+const forbiddenNames = new Set([".env", "secret-vault.json", "secret-vault.v1-backup.json", "secret-vault.key"]);
 const forbidden = [];
 function walk(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {

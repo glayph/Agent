@@ -51,6 +51,18 @@
   "chat": {
     "welcome": "How can I help you today?",
     "welcomeDesc": "Ask me about weather, settings, or any other tasks. I'm here to assist you.",
+    "errors": {
+      "codes": {
+        "provider_api_key": "The model API key was rejected. Check the key on the Models page.",
+        "provider_network": "The model service could not be reached. Check the endpoint and connection, then retry.",
+        "local_model_unavailable": "The local model service is unavailable. Start it or check its endpoint, then retry.",
+        "provider_unavailable": "The model provider returned an error. Check provider status and configuration, then retry.",
+        "provider_failure": "The model request failed. Check the model configuration and try again.",
+        "token_limit": "The request exceeded the model context or output limit. Shorten the request or choose a model with a larger context window.",
+        "execution_limit": "The run reached an execution limit before producing a final answer. Retry with a smaller scope.",
+        "internal": "The request could not be completed. Retry it; if the problem continues, check the gateway logs."
+      }
+    },
     "placeholder": "Start a new message…",
     "disabledPlaceholder": {
       "gatewayUnknown": "Unable to chat: Gateway status is still being checked. Please wait, then refresh the page or restart Launcher if needed.",
@@ -67,7 +79,13 @@
     "newChat": "New Chat",
     "notConnected": "Gateway is not running. Start it to chat.",
     "thinkingMenuTitle": "Thinking",
-    "thinkingMode": { "auto": "Auto", "low": "Low", "medium": "Medium", "high": "High", "off": "Off" },
+    "thinkingMode": {
+      "auto": "Auto",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "off": "Off"
+    },
     "thinking": {
       "step1": "Thinking…",
       "step2": "Analyzing your request…",
@@ -352,7 +370,8 @@
     "description": "Configure API keys for AI providers. Only configured models are available for chat.",
     "defaultChangeSuccess": "Default model updated.",
     "unsavedPrompt": "This change has not been saved yet. Save to write it into the model configuration.",
-    "restartHint": "Model configuration changes take effect after the gateway restarts.",
+    "restartHint": "Model configuration changes take effect on the next request.",
+    "apiKeySaved": "API key saved",
     "loadError": "Failed to load models",
     "retry": "Retry",
     "providerCatalogUnavailable": "The backend provider catalog is unavailable. New provider selections are disabled until the Models API loads successfully.",
@@ -639,7 +658,14 @@
       "probeError": "Failed to run runtime probe",
       "probeSaveFirst": "Save changes before running the runtime probe.",
       "restartRequiredTitle": "Gateway restart required",
-      "restartRequiredDesc": "The latest {{name}} configuration has been saved. Restart the gateway for it to take effect."
+      "restartRequiredDesc": "The latest {{name}} configuration has been saved. Restart the gateway for it to take effect.",
+      "statusLive": "Live",
+      "statusSavedOnly": "Saved only — adapter unavailable",
+      "statusNotConfigured": "Not configured",
+      "runtimeLive": "Live adapter is available.",
+      "runtimeUnavailable": "Configuration can be saved, but no live message adapter is available for this channel.",
+      "runtimeNotConfigured": "Enter the required credentials to activate this adapter.",
+      "runtimeDisconnected": "Configured, but the adapter is not connected. Check its runtime probe and gateway logs."
     },
     "form": {
       "desc": {
@@ -1417,7 +1443,7 @@
       "unsaved_changes": "You have unsaved changes.",
       "factory_reset": "Factory Reset",
       "factory_reset_confirm_title": "Reset to Factory Defaults",
-      "factory_reset_confirm_desc": "This will reset all configuration to factory defaults. API keys and security credentials will be preserved. A backup of the current config will be created.",
+      "factory_reset_confirm_desc": "This resets channel tokens, web-search settings, and stored web-search API keys along with other app settings. The dashboard password, model records, and encrypted model API keys are preserved. Environment-variable keys are not changed. Recovery backups may contain secrets; keep them private.",
       "factory_reset_confirm": "Reset to Defaults",
       "factory_reset_success": "Configuration has been reset to factory defaults.",
       "factory_reset_error": "Failed to reset configuration."

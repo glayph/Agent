@@ -794,6 +794,108 @@ function execFileText(
   });
 }
 
+export function linuxX11UnavailableReason(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (!env.DISPLAY?.trim()) {
+    return env.WAYLAND_DISPLAY?.trim()
+      ? "Linux Wayland-only sessions are not supported. Start an X11/XWayland display and set DISPLAY, or run Miki in an X11 desktop session."
+      : "No Linux desktop display is available. Computer UI actions require an accessible X11 display (DISPLAY is unset); run Miki in a graphical desktop session. Process and system-information actions can still work headlessly.";
+  }
+  return null;
+}
+
+function execFileBuffer(
+  command: string,
+  args: string[],
+  options: { timeout: number; maxBuffer: number },
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      command,
+      args,
+      {
+        encoding: "buffer",
+        timeout: options.timeout,
+        maxBuffer: options.maxBuffer,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) reject(error);
+        else resolve(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout));
+      },
+    );
+  });
+}
+
+function setClipboardWithXclip(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("xclip", ["-selection", "clipboard", "-in"], {
+      shell: false,
+      stdio: ["pipe", "ignore", "ignore"],
+      windowsHide: true,
+    });
+    let settled = false;
+    let startupTimer: NodeJS.Timeout | undefined;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (startupTimer) clearTimeout(startupTimer);
+      child.unref();
+      if (error) reject(error);
+      else resolve();
+    };
+    child.once("error", (error) => finish(error));
+    child.once("close", (code) => {
+      if (code === 0) finish();
+      else finish(new Error(`xclip exited with status ${code}.`));
+    });
+    child.stdin.end(text, "utf8", () => {
+      startupTimer = setTimeout(() => finish(), 150);
+      startupTimer.unref();
+    });
+  });
+}
+
+function parseXdotoolGeometry(output: string): Record<string, number> {
+  const values: Record<string, number> = {};
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^(X|Y|WIDTH|HEIGHT)=(-?\d+)$/.exec(line.trim());
+    if (match) values[match[1]!.toLowerCase()] = Number(match[2]);
+  }
+  return values;
+}
+
+export function normalizeHotkeyForXdotool(keys: unknown): string {
+  const parts = (Array.isArray(keys) ? keys : String(keys ?? "").split("+"))
+    .map((part) => String(part).trim())
+    .filter(Boolean);
+  if (!parts.length) throw new Error("A keyboard shortcut is required.");
+  const aliases: Record<string, string> = {
+    ctrl: "ctrl",
+    control: "ctrl",
+    shift: "shift",
+    alt: "alt",
+    meta: "super",
+    cmd: "super",
+    win: "super",
+    enter: "Return",
+    esc: "Escape",
+    space: "space",
+    del: "Delete",
+    backspace: "BackSpace",
+    tab: "Tab",
+  };
+  const normalized = parts.map((part) => {
+    const value = aliases[part.toLowerCase()] || part;
+    if (!/^[A-Za-z0-9_]+$/.test(value)) {
+      throw new Error(`Unsupported X11 shortcut key '${part}'.`);
+    }
+    return value;
+  });
+  return normalized.join("+");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -944,15 +1046,641 @@ export class ComputerAgent {
     });
   }
 
+  private async ensureLinuxX11(): Promise<{ width: number; height: number }> {
+    const unavailable = linuxX11UnavailableReason();
+    if (unavailable) throw new Error(unavailable);
+    try {
+      const { stdout } = await execFileText("xdotool", ["getdisplaygeometry"], {
+        timeout: 10_000,
+        maxBuffer: 64 * 1024,
+      });
+      const [width, height] = stdout.trim().split(/\s+/).map(Number);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        throw new Error("xdotool returned invalid display dimensions.");
+      }
+      return { width, height };
+    } catch (error) {
+      throw new Error(
+        `X11 display is unavailable to the Linux computer-use backend. Ensure xdotool is installed and DISPLAY names an accessible X11/XWayland server. ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  private async runXdotool(args: string[]): Promise<string> {
+    const { stdout } = await execFileText("xdotool", args, {
+      timeout: this.timeoutMs,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return stdout.trim();
+  }
+
+  private async linuxWindowInfo(id: string): Promise<Record<string, unknown>> {
+    let title = "";
+    let pid: number | undefined;
+    let geometry: Record<string, number> = {};
+    try {
+      title = await this.runXdotool(["getwindowname", id]);
+    } catch {
+      /* stale window */
+    }
+    try {
+      const rawPid = await this.runXdotool(["getwindowpid", id]);
+      if (/^\d+$/.test(rawPid)) pid = Number(rawPid);
+    } catch {
+      /* not all X11 clients expose a PID */
+    }
+    try {
+      geometry = parseXdotoolGeometry(
+        await this.runXdotool(["getwindowgeometry", "--shell", id]),
+      );
+    } catch {
+      /* window may close while enumerating */
+    }
+    let processName = "";
+    if (pid) {
+      try {
+        processName = (
+          await execFileText("ps", ["-p", String(pid), "-o", "comm="], {
+            timeout: 5_000,
+            maxBuffer: 64 * 1024,
+          })
+        ).stdout.trim();
+      } catch {
+        /* process exited during lookup */
+      }
+    }
+    const handle = Number(id);
+    return {
+      name: title,
+      title,
+      processName,
+      pid,
+      windowHandle: Number.isFinite(handle) ? handle : undefined,
+      bounds: {
+        left: geometry.x || 0,
+        top: geometry.y || 0,
+        width: geometry.width || 0,
+        height: geometry.height || 0,
+      },
+      rect: {
+        x: geometry.x || 0,
+        y: geometry.y || 0,
+        width: geometry.width || 0,
+        height: geometry.height || 0,
+      },
+    };
+  }
+
+  private async linuxWindows(): Promise<Record<string, unknown>[]> {
+    let output: string;
+    try {
+      output = await this.runXdotool(["search", "--onlyvisible", "--name", ""]);
+    } catch {
+      return [];
+    }
+    const ids = output
+      .split(/\r?\n/)
+      .map((id) => id.trim())
+      .filter((id) => /^\d+$/.test(id));
+    const windows = await Promise.all(
+      ids.slice(0, 100).map((id) => this.linuxWindowInfo(id)),
+    );
+    return windows.filter((window) => window.name || window.processName);
+  }
+
+  private async findLinuxWindow(
+    target: ComputerWindowTarget,
+  ): Promise<Record<string, unknown> | null> {
+    const windows = await this.linuxWindows();
+    if (target.windowHandle != null) {
+      return (
+        windows.find(
+          (window) => window.windowHandle === target.windowHandle,
+        ) || {
+          windowHandle: target.windowHandle,
+        }
+      );
+    }
+    const title = target.windowTitle?.toLocaleLowerCase();
+    const processName = target.processName?.toLocaleLowerCase();
+    const match = windows.find(
+      (window) =>
+        (!title ||
+          String(window.title || "")
+            .toLocaleLowerCase()
+            .includes(title)) &&
+        (!processName ||
+          String(window.processName || "")
+            .toLocaleLowerCase()
+            .includes(processName)),
+    );
+    if (title || processName) return match || null;
+    try {
+      const activeId = await this.runXdotool(["getactivewindow"]);
+      return (
+        windows.find((window) => String(window.windowHandle) === activeId) ||
+        this.linuxWindowInfo(activeId)
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private async runLinux<T>(
+    action: string,
+    payload: Record<string, unknown>,
+  ): Promise<ComputerPowerShellResult<T>> {
+    const guiActions = new Set([
+      "observe",
+      "focus",
+      "invoke",
+      "set_text",
+      "hotkey",
+      "clipboard_set",
+      "clipboard_get",
+      "clipboard_clear",
+      "screenshot",
+      "list_displays",
+      "list_windows",
+      "click_at",
+      "drag",
+      "scroll",
+    ]);
+    let screen: { width: number; height: number } | undefined;
+    if (guiActions.has(action)) screen = await this.ensureLinuxX11();
+
+    if (action === "list_processes") {
+      const { stdout } = await execFileText(
+        "ps",
+        ["-eo", "pid=,comm=,%cpu=,rss=", "--sort=-%cpu"],
+        {
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        },
+      );
+      const processes = stdout
+        .split(/\r?\n/)
+        .map((line) => {
+          const match = /^\s*(\d+)\s+(\S+)\s+([\d.]+)\s+(\d+)/.exec(line);
+          if (!match) return null;
+          const pid = Number(match[1]);
+          let startTime = "";
+          try {
+            startTime = fs
+              .statSync(`/proc/${pid}`)
+              .birthtime.toISOString()
+              .replace("T", " ")
+              .slice(0, 19);
+          } catch {
+            /* proc entry unavailable */
+          }
+          return {
+            pid,
+            name: match[2],
+            cpu: Number(match[3]),
+            memoryMB: Math.round(Number(match[4]) / 102.4) / 10,
+            startTime,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .slice(0, 100);
+      return {
+        ok: true,
+        action,
+        data: { processes, count: processes.length },
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "get_system_info") {
+      return {
+        ok: true,
+        action,
+        data: {
+          os: `${os.type()} ${os.release()}`,
+          version: os.version(),
+          architecture: os.arch(),
+          totalMemoryGB: Math.round(os.totalmem() / 107374182.4) / 10,
+          processors: os.cpus().length,
+          logicalProcessors: os.cpus().length,
+          processorModel: os.cpus()[0]?.model || "",
+        },
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "terminate_app") {
+      const pid = asNumber(payload["pid"]);
+      const processName = asString(payload["processName"]);
+      if (pid == null && !processName)
+        throw new Error(
+          "pid or processName is required to terminate an application.",
+        );
+      let pids: number[] = [];
+      if (pid != null) pids = [Math.floor(pid)];
+      else {
+        const { stdout } = await execFileText("pgrep", ["-x", processName!], {
+          timeout: 10_000,
+          maxBuffer: 64 * 1024,
+        });
+        pids = stdout
+          .split(/\s+/)
+          .map(Number)
+          .filter((value) => Number.isInteger(value) && value > 1);
+      }
+      for (const targetPid of pids) {
+        if (targetPid <= 1 || targetPid === process.pid)
+          throw new Error(
+            "Refusing to terminate PID 1 or the current Miki process.",
+          );
+        process.kill(targetPid, "SIGTERM");
+      }
+      return {
+        ok: true,
+        action,
+        data: { pid, processName, terminatedCount: pids.length },
+      } as ComputerPowerShellResult<T>;
+    }
+
+    if (action === "list_windows") {
+      return {
+        ok: true,
+        action,
+        data: await this.linuxWindows(),
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "observe") {
+      const options = payload as ComputerObserveOptions;
+      let windows = await this.linuxWindows();
+      const activeWindow = await this.findLinuxWindow({});
+      if (options.activeOnly && activeWindow) windows = [activeWindow];
+      if (options.query) {
+        const needle = options.query.toLowerCase();
+        windows = windows.filter((window) =>
+          JSON.stringify(window).toLowerCase().includes(needle),
+        );
+      }
+      windows = windows.slice(0, options.maxElements || 80);
+      const targetWindow = await this.findLinuxWindow(options);
+      const elements = windows.map((window, index) => ({
+        name: window.title,
+        controlType: "Window",
+        processName: window.processName,
+        processId: window.pid,
+        windowHandle: window.windowHandle,
+        windowTitle: window.title,
+        rect: window.rect,
+        depth: 0,
+        path: `window.${index}`,
+        accessible: false,
+      }));
+      return {
+        ok: true,
+        action,
+        data: {
+          activeWindow,
+          targetWindow,
+          topWindows: windows.slice(0, 25),
+          elements,
+          elementCount: elements.length,
+        },
+        message:
+          "Observed X11 window metadata only; this backend does not expose UI Automation controls.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "focus") {
+      const window = await this.findLinuxWindow(
+        payload as ComputerWindowTarget,
+      );
+      if (!window?.windowHandle)
+        throw new Error(
+          "No matching X11 window was found. Use computer_list_windows to inspect titles.",
+        );
+      await this.runXdotool([
+        "windowactivate",
+        "--sync",
+        String(window.windowHandle),
+      ]);
+      return {
+        ok: true,
+        action,
+        data: window,
+        message: "Activated X11 window.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "invoke" || action === "set_text") {
+      throw new Error(
+        `Linux X11 does not provide UI Automation element access for '${action}'. Use computer_observe for window metadata; element invoke/text setting requires Windows UI Automation.`,
+      );
+    }
+    if (action === "hotkey") {
+      const windowTarget = payload["window"];
+      if (isRecord(windowTarget)) {
+        const window = await this.findLinuxWindow(
+          windowTarget as ComputerWindowTarget,
+        );
+        if (window?.windowHandle)
+          await this.runXdotool([
+            "windowactivate",
+            "--sync",
+            String(window.windowHandle),
+          ]);
+      }
+      const keys = normalizeHotkeyForXdotool(
+        payload["keys"] ?? payload["sendKeys"],
+      );
+      await this.runXdotool(["key", "--clearmodifiers", keys]);
+      return {
+        ok: true,
+        action,
+        data: { keys },
+        message: "Sent X11 keyboard shortcut.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "clipboard_set") {
+      try {
+        await setClipboardWithXclip(String(payload["text"] ?? ""));
+      } catch (error) {
+        throw new Error(
+          `Could not set the X11 clipboard. Ensure xclip is installed and the X server permits clipboard access. ${getErrorMessage(error)}`,
+        );
+      }
+      return {
+        ok: true,
+        action,
+        data: { length: String(payload["text"] ?? "").length },
+        message: "Clipboard updated.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "clipboard_get") {
+      try {
+        const { stdout } = await execFileText(
+          "xclip",
+          ["-selection", "clipboard", "-out"],
+          { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
+        );
+        return {
+          ok: true,
+          action,
+          data: { text: stdout },
+          message: "Clipboard read.",
+        } as ComputerPowerShellResult<T>;
+      } catch (error) {
+        throw new Error(
+          `Could not read the X11 clipboard. Ensure xclip is installed and the X server permits clipboard access. ${getErrorMessage(error)}`,
+        );
+      }
+    }
+    if (action === "clipboard_clear") {
+      try {
+        await setClipboardWithXclip("");
+      } catch (error) {
+        throw new Error(
+          `Could not clear the X11 clipboard. Ensure xclip is installed and the X server permits clipboard access. ${getErrorMessage(error)}`,
+        );
+      }
+      return {
+        ok: true,
+        action,
+        data: { length: 0 },
+        message: "Clipboard cleared.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "screenshot") {
+      try {
+        let png: Buffer | undefined;
+        try {
+          png = await execFileBuffer("import", ["-window", "root", "png:-"], {
+            timeout: this.timeoutMs,
+            maxBuffer: 32 * 1024 * 1024,
+          });
+        } catch {
+          // Fall back to ffmpeg, which is also commonly available in Linux runtimes.
+        }
+        if (
+          !png ||
+          png.length < 8 ||
+          png.subarray(0, 4).toString("hex") !== "89504e47"
+        ) {
+          const display = process.env.DISPLAY?.trim();
+          if (!display) throw new Error("DISPLAY is unset.");
+          const x11Display = /:\d+(?:\.\d+)?$/.test(display)
+            ? display
+            : `${display}.0`;
+          png = await execFileBuffer(
+            "ffmpeg",
+            [
+              "-hide_banner",
+              "-loglevel",
+              "error",
+              "-f",
+              "x11grab",
+              "-framerate",
+              "1",
+              "-video_size",
+              `${screen!.width}x${screen!.height}`,
+              "-i",
+              x11Display,
+              "-frames:v",
+              "1",
+              "-f",
+              "image2pipe",
+              "-vcodec",
+              "png",
+              "pipe:1",
+            ],
+            { timeout: this.timeoutMs, maxBuffer: 32 * 1024 * 1024 },
+          );
+        }
+        if (
+          png.length < 8 ||
+          png[0] !== 137 ||
+          png[1] !== 80 ||
+          png[2] !== 78 ||
+          png[3] !== 71
+        )
+          throw new Error("ImageMagick import did not return PNG data.");
+        return {
+          ok: true,
+          action,
+          data: {
+            screenshot: png.toString("base64"),
+            width: screen!.width,
+            height: screen!.height,
+            format: "png",
+          },
+          message: "Captured X11 screenshot.",
+        } as ComputerPowerShellResult<T>;
+      } catch (error) {
+        throw new Error(
+          `Linux screenshots require ImageMagick import or ffmpeg and an accessible X11 display. ${getErrorMessage(error)}`,
+        );
+      }
+    }
+    if (action === "list_displays") {
+      try {
+        const { stdout } = await execFileText("xrandr", ["--query"], {
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        });
+        const displays = stdout
+          .split(/\r?\n/)
+          .filter((line) => / connected(?: primary)?(?: |$)/.test(line))
+          .map((line) => {
+            const match =
+              /^(\S+) connected( primary)?(?: (\d+x\d+\+-?\d+\+-?\d+))?/.exec(
+                line,
+              );
+            return match
+              ? {
+                  deviceName: match[1],
+                  primary: Boolean(match[2]),
+                  bounds: match[3] || "unknown",
+                }
+              : null;
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null);
+        if (displays.length === 0) {
+          displays.push({
+            deviceName: "X11 screen",
+            primary: true,
+            bounds: `${screen!.width}x${screen!.height}+0+0`,
+          });
+        }
+        return {
+          ok: true,
+          action,
+          data: { displays, count: displays.length },
+        } as ComputerPowerShellResult<T>;
+      } catch {
+        return {
+          ok: true,
+          action,
+          data: {
+            displays: [
+              {
+                deviceName: "X11 screen",
+                primary: true,
+                bounds: `${screen!.width}x${screen!.height}+0+0`,
+              },
+            ],
+            count: 1,
+          },
+          message:
+            "Reported the active X11 screen; xrandr was unavailable for per-monitor details.",
+        } as ComputerPowerShellResult<T>;
+      }
+    }
+    if (action === "click_at") {
+      const x = asNumber(payload["x"]);
+      const y = asNumber(payload["y"]);
+      if (x == null || y == null)
+        throw new Error("x and y coordinates are required.");
+      const button = asString(payload["button"]) || "left";
+      const buttonNumber = (
+        { left: "1", middle: "2", right: "3" } as Record<string, string>
+      )[button];
+      if (!buttonNumber)
+        throw new Error("button must be left, middle, or right.");
+      const clickArgs = [
+        "click",
+        ...(payload["doubleClick"] ? ["--repeat", "2", "--delay", "80"] : []),
+        buttonNumber,
+      ];
+      await this.runXdotool([
+        "mousemove",
+        "--sync",
+        String(Math.round(x)),
+        String(Math.round(y)),
+        ...clickArgs,
+      ]);
+      return {
+        ok: true,
+        action,
+        data: {
+          x: Math.round(x),
+          y: Math.round(y),
+          button,
+          doubleClick: Boolean(payload["doubleClick"]),
+        },
+        message: "Clicked X11 coordinates.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "drag") {
+      const values = ["fromX", "fromY", "toX", "toY"].map((key) =>
+        asNumber(payload[key]),
+      );
+      if (values.some((value) => value == null))
+        throw new Error("fromX, fromY, toX, and toY are required for drag.");
+      const [fromX, fromY, toX, toY] = values as number[];
+      const dragArgs = [
+        "mousemove",
+        "--sync",
+        String(Math.round(fromX)),
+        String(Math.round(fromY)),
+        "mousedown",
+        "1",
+        "sleep",
+        "0.1",
+      ];
+      const steps = 15;
+      for (let step = 1; step <= steps; step += 1) {
+        dragArgs.push(
+          "mousemove",
+          "--sync",
+          String(Math.round(fromX + ((toX - fromX) * step) / steps)),
+          String(Math.round(fromY + ((toY - fromY) * step) / steps)),
+          "sleep",
+          "0.015",
+        );
+      }
+      dragArgs.push("mouseup", "1");
+      await this.runXdotool(dragArgs);
+      return {
+        ok: true,
+        action,
+        data: { fromX, fromY, toX, toY },
+        message: "Dragged across X11 coordinates.",
+      } as ComputerPowerShellResult<T>;
+    }
+    if (action === "scroll") {
+      const direction = asString(payload["direction"]) || "down";
+      const button = (
+        { up: "4", down: "5", left: "6", right: "7" } as Record<string, string>
+      )[direction];
+      if (!button)
+        throw new Error("direction must be up, down, left, or right.");
+      const amount = Math.max(
+        1,
+        Math.min(100, Math.floor(asNumber(payload["amount"]) || 3)),
+      );
+      await this.runXdotool([
+        "click",
+        "--repeat",
+        String(amount),
+        "--delay",
+        "25",
+        button,
+      ]);
+      return {
+        ok: true,
+        action,
+        data: { direction, amount },
+        message: "Scrolled using X11 wheel events.",
+      } as ComputerPowerShellResult<T>;
+    }
+    throw new Error(`Unsupported Linux computer action: ${action}`);
+  }
+
   private async runPowerShell<T>(
     action: string,
     payload: Record<string, unknown>,
   ): Promise<ComputerPowerShellResult<T>> {
+    if (process.platform === "linux") {
+      return this.runLinux<T>(action, payload);
+    }
     if (process.platform !== "win32") {
       return {
         ok: false,
         action,
-        error: "computer_use currently supports Windows UI Automation only.",
+        error:
+          "computer_use supports Windows UI Automation and Linux X11; this platform is unsupported.",
       };
     }
 
@@ -1138,6 +1866,7 @@ export class ComputerAgent {
       const result = await this.runPowerShell("hotkey", {
         window: getWindowTarget(args),
         sendKeys,
+        keys,
       });
       return this.formatResult(result);
     } catch (err) {
@@ -1348,34 +2077,9 @@ export class ComputerAgent {
     }
     if (process.platform === "linux") {
       try {
-        const { stdout } = await execFileText("wmctrl", ["-l", "-p"], {
-          timeout: 15000,
-          maxBuffer: 1024 * 1024,
-        });
-        return JSON.stringify({
-          ok: true,
-          action: "list_windows",
-          data: stdout.trim(),
-        });
-      } catch {
-        try {
-          const { stdout } = await execFileText(
-            "xdotool",
-            ["search", "--onlyvisible", "--name", ""],
-            { timeout: 15000, maxBuffer: 1024 * 1024 },
-          );
-          return JSON.stringify({
-            ok: true,
-            action: "list_windows",
-            data: stdout.trim(),
-          });
-        } catch {
-          return JSON.stringify({
-            ok: false,
-            action: "list_windows",
-            error: "wmctrl and xdotool not available",
-          });
-        }
+        return this.formatResult(await this.runPowerShell("list_windows", {}));
+      } catch (error) {
+        return this.formatError("list_windows", error);
       }
     }
     if (process.platform === "darwin") {
@@ -1407,6 +2111,11 @@ export class ComputerAgent {
 
   async verify(args: Record<string, unknown>): Promise<string> {
     try {
+      if (process.platform === "linux") {
+        throw new Error(
+          "Linux X11 observation exposes window metadata only, not accessible controls or rendered text. UI-content verification requires Windows UI Automation.",
+        );
+      }
       const contains = asString(args["contains"] ?? args["text"]);
       const notContains = asString(args["not_contains"] ?? args["notContains"]);
       if (!contains && !notContains) {

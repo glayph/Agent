@@ -24,6 +24,15 @@ export function scriptedLLM(replies: ScriptedReply[], model = "test-model") {
     model,
     async complete(messages, options) {
       requests.push({ messages: structuredClone(messages), options });
+      // Keep completion-classifier calls orthogonal to the scripted main-model
+      // sequence. This is a deterministic test double, not production routing.
+      if (options?.json === true && String(messages[0]?.content || "").includes("You classify whether the agent has completed")) {
+        const payload = JSON.parse(String(messages[1]?.content || "{}")) as { assistant_response?: string; available_tools?: string[] }
+        const draft = String(payload.assistant_response || "")
+        const names = Array.isArray(payload.available_tools) ? payload.available_tools : []
+        const pending = draft.length > 0 && (draft.includes("I will call") || draft.includes("I will ") || draft.includes("First I will") || names.some((name) => draft.includes(name)))
+        return { choices: [{ message: { role: "assistant", content: JSON.stringify({ needs_tool_execution: pending }) } }], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }
+      }
       const scripted = replies[Math.min(index, replies.length - 1)];
       index += 1;
       const reply = typeof scripted === "function" ? await scripted(messages, options) : scripted;

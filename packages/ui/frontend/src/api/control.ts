@@ -75,11 +75,6 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return body
 }
 
-export async function getApprovalRequests(): Promise<{
-  requests: ApprovalRequest[]
-}> {
-  return requestJson("/api/control/approvals")
-}
 
 export async function approveApprovalRequest(
   id: string,
@@ -93,69 +88,4 @@ export async function approveApprovalRequest(
       body: JSON.stringify({ decidedBy }),
     },
   )
-}
-
-export async function denyApprovalRequest(
-  id: string,
-  reason = "Denied by the operator.",
-  decidedBy = "dashboard-operator",
-): Promise<{ request: ApprovalRequest }> {
-  return requestJson(
-    `/api/control/approvals/${encodeURIComponent(id)}/deny`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decidedBy, reason }),
-    },
-  )
-}
-
-export async function getControlCapabilities(): Promise<{
-  capabilities: ControlCapability[]
-}> {
-  return requestJson("/api/control/capabilities")
-}
-
-export async function getControlState(): Promise<ControlStateResponse> {
-  return requestJson("/api/control/state")
-}
-
-export async function getControlOperations(limit = 20): Promise<{
-  operations: Array<Record<string, unknown>>
-}> {
-  return requestJson(`/api/control/operations?limit=${limit}`)
-}
-
-export async function planControlOperation(input: {
-  capability: string
-  action: string
-  input?: Record<string, unknown>
-  context?: ControlRequestContext
-}): Promise<{ plan: ControlPlan }> {
-  return requestJson("/api/control/plan", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...input,
-      context: input.context || { origin: "dashboard" },
-    }),
-  })
-}
-
-export async function executeControlOperation(input: {
-  capability: string
-  action: string
-  input?: Record<string, unknown>
-  plan?: ControlPlan
-  approvalRequestId?: string
-  context?: ControlRequestContext
-}): Promise<{ outcome: ControlOutcome }> {
-  return requestJson("/api/control/execute", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...input,
-      context: input.context || { origin: "dashboard" },
-    }),
-  })
 }

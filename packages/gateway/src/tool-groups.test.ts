@@ -8,6 +8,8 @@ describe("resolveToolGroupKey", () => {
     expect(resolveToolGroupKey("agent-control")).toBe("control")
     expect(resolveToolGroupKey("terminal")).toBe("terminal")
     expect(resolveToolGroupKey(" Browser ")).toBe("browser")
+    expect(resolveToolGroupKey("computer")).toBe("computer")
+    expect(resolveToolGroupKey("computer-use")).toBe("computer")
   })
   it("rejects unknown groups", () => {
     expect(resolveToolGroupKey("nope")).toBeUndefined()

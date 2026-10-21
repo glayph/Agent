@@ -10,10 +10,6 @@
       "import": "./dist/api/index.js",
       "types": "./dist/api/index.d.ts"
     },
-    "./agent": {
-      "import": "./dist/agent.js",
-      "types": "./dist/agent.d.ts"
-    },
     "./errors": {
       "import": "./dist/errors.js",
       "types": "./dist/errors.d.ts"
@@ -21,10 +17,6 @@
     "./error-handler": {
       "import": "./dist/error-handler.js",
       "types": "./dist/error-handler.d.ts"
-    },
-    "./safety": {
-      "import": "./dist/safety/index.js",
-      "types": "./dist/safety/index.d.ts"
     },
     "./llm/provider": {
       "import": "./dist/llm/provider/index.js",

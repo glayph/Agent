@@ -29,6 +29,7 @@ export interface SessionDetail {
     created_at?: string
     kind?: "normal" | "thought" | "tool_calls" | "action_update" | "error"
     run_id?: string
+    reply_to_message_id?: string
     thought_category?:
       "Plan" | "Action" | "Verification" | "Progress" | "Decision" | "Thought"
     inspector_only?: boolean
@@ -198,26 +199,6 @@ export async function forkSessionAtMessage(
   return res.json()
 }
 
-export async function retrySessionFromMessage(
-  sessionId: string,
-  messageId: string,
-): Promise<{ session_id: string; message: SessionDetail["messages"][number] }> {
-  const res = await launcherFetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/retry`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message_id: messageId }),
-    },
-  )
-  if (!res.ok) {
-    throw new SessionApiError(
-      `Failed to retry message: ${res.status}`,
-      res.status,
-    )
-  }
-  return res.json()
-}
 
 export async function deleteSession(id: string): Promise<void> {
   const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`, {

@@ -188,9 +188,12 @@ export class ProviderRegistry {
       signal?: AbortSignal;
       /** Secret name to authenticate with instead of the provider default. */
       credentialProfile?: string;
+      providerId?: string;
+      baseUrl?: string;
+      credentials?: Readonly<Record<string, string>>;
     } = {},
   ): Promise<LLMResponse> {
-    const plugin = this.pluginRegistry.resolve(model);
+    const plugin = options.providerId ? this.pluginRegistry.get(options.providerId) : this.pluginRegistry.resolve(model);
     if (!plugin) {
       throw new LLMMissingCredentialError(
         `No supported provider plugin matches model "${model}".`,
@@ -216,6 +219,9 @@ export class ProviderRegistry {
       timeoutMs: options.timeoutMs,
       signal: options.signal,
       credentialProfile: options.credentialProfile,
+      providerId: options.providerId,
+      baseUrl: options.baseUrl,
+      credentials: options.credentials,
     });
   }
 

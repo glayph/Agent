@@ -284,44 +284,6 @@ function Row({
   )
 }
 
-export function PluginHomePage() {
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Plugins" titleLevel={1} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
-        <div className="mx-auto w-full max-w-2xl pt-2">
-          <p
-            data-text-role="supporting"
-            className="text-muted-foreground mb-5 text-sm"
-          >
-            Manage runtime plugins and services.
-          </p>
-          <div className="divide-border divide-y border-y">
-            {NAVIGATION.map((item) => (
-              <a
-                key={item.to}
-                href={item.to}
-                data-page-row="true"
-                className="group flex items-center gap-3 py-4"
-              >
-                <span className="bg-muted text-muted-foreground group-hover:bg-accent group-hover:text-accent-foreground flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors">
-                  <item.icon className="size-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">
-                    {item.label}
-                  </span>
-
-                </span>
-                <IconChevronRight className="text-muted-foreground size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
-              </a>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function CatalogPage() {
   const [search, setSearch] = useState("")

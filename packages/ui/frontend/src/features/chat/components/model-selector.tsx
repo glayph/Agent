@@ -17,6 +17,8 @@ interface ModelSelectorProps {
   apiKeyModels: ModelInfo[]
   oauthModels: ModelInfo[]
   localModels: ModelInfo[]
+  /** Saved models that cannot run yet; listed but not selectable. */
+  unavailableModels?: ModelInfo[]
   onValueChange: (modelName: string) => void
   compact?: boolean
 }
@@ -26,6 +28,7 @@ export function ModelSelector({
   apiKeyModels,
   oauthModels,
   localModels,
+  unavailableModels = [],
   onValueChange,
 }: ModelSelectorProps) {
   const { t } = useTranslation()
@@ -80,6 +83,31 @@ export function ModelSelector({
               </SelectItem>
             ))}
           </SelectGroup>
+        )}
+
+        {unavailableModels.length > 0 && (
+          <>
+            {(apiKeyModels.length > 0 ||
+              oauthModels.length > 0 ||
+              localModels.length > 0) && <SelectSeparator />}
+            <SelectGroup>
+              <SelectLabel>
+                {t("chat.modelGroup.unavailable", {
+                  defaultValue: "Needs attention",
+                })}
+              </SelectLabel>
+              {unavailableModels.map((model) => (
+                <SelectItem
+                  key={model.index}
+                  value={model.model_name}
+                  disabled
+                  title={model.status_reason}
+                >
+                  {model.model_name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </>
         )}
       </SelectContent>
     </Select>

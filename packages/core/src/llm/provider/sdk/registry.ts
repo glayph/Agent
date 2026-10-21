@@ -59,6 +59,7 @@ function endpointFromCatalog(
 export class ProviderPluginRegistry {
   private readonly plugins = new Map<string, MikiProviderPlugin>();
   private readonly sources = new Map<string, "builtin" | "external">();
+  private readonly prefixOwner = new Map<string, string>();
   private readonly options: Required<
     Pick<
       ProviderPluginRegistryOptions,
@@ -70,7 +71,7 @@ export class ProviderPluginRegistry {
   constructor(options: ProviderPluginRegistryOptions) {
     this.options = {
       ...options,
-      mikiVersion: options.mikiVersion || process.env.MIKI_VERSION || "1.3.3",
+      mikiVersion: options.mikiVersion || process.env.MIKI_VERSION || "1.3.14",
       apiVersion: options.apiVersion || MIKI_PROVIDER_PLUGIN_API_VERSION,
     };
   }
@@ -117,6 +118,13 @@ export class ProviderPluginRegistry {
     }
     if (this.plugins.has(id))
       throw new Error(`duplicate provider plugin id: ${id}`);
+    for (const value of [id, ...(plugin.manifest.aliases ?? []), ...(plugin.manifest.modelPrefixes ?? [])]) {
+      const key = normalizeModel(value);
+      if (!key) continue;
+      const owner = this.prefixOwner.get(key);
+      if (owner && owner !== id) throw new Error(`provider prefix '${value}' is claimed by both ${owner} and ${id}`);
+      this.prefixOwner.set(key, id);
+    }
     this.plugins.set(id, plugin);
     this.sources.set(id, source);
     this.options.logger?.("provider.plugin.ready", {
@@ -130,12 +138,16 @@ export class ProviderPluginRegistry {
     const id = normalizeModel(providerId);
     const plugin = this.plugins.get(id);
     this.plugins.delete(id);
+    for (const [prefix, owner] of this.prefixOwner) if (owner === id) this.prefixOwner.delete(prefix);
     this.options.logger?.("provider.plugin.removed", { providerId: id });
     return plugin?.shutdown ? plugin.shutdown() : Promise.resolve();
   }
 
   get(providerId: string): MikiProviderPlugin | undefined {
-    return this.plugins.get(normalizeModel(providerId));
+    const normalized = normalizeModel(providerId);
+    return this.plugins.get(normalized) || Array.from(this.plugins.values()).find((plugin) =>
+      (plugin.manifest.aliases ?? []).some((alias) => normalizeModel(alias) === normalized),
+    );
   }
 
   descriptors(): ProviderPluginDescriptor[] {
@@ -241,9 +253,12 @@ export class ProviderPluginRegistry {
       timeoutMs?: number;
       signal?: AbortSignal;
       credentialProfile?: string;
+      providerId?: string;
+      baseUrl?: string;
+      credentials?: Readonly<Record<string, string>>;
     } = {},
   ): Promise<LLMResponse> {
-    const plugin = this.resolve(model);
+    const plugin = options.providerId ? this.get(options.providerId) : this.resolve(model);
     if (!plugin)
       throw new LLMAPIError(`No provider plugin matches model "${model}".`);
     const catalog = await plugin.catalog(this.context());
@@ -252,14 +267,15 @@ export class ProviderPluginRegistry {
         `Provider plugin ${plugin.manifest.id} has no available catalog.`,
         { providerId: plugin.manifest.id },
       );
-    const credentials = this.options.resolveCredentials
+    const credentials = options.credentials ?? (this.options.resolveCredentials
       ? await this.options.resolveCredentials(
           plugin.auth,
           plugin.manifest.id,
           options.credentialProfile,
         )
-      : {};
+      : {});
     const endpoint = endpointFromCatalog(plugin.manifest, plugin.auth, catalog);
+    if (options.baseUrl) endpoint.baseUrl = options.baseUrl;
     const request: MikiProviderCompletionRequest = {
       provider: endpoint,
       model,

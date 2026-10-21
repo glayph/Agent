@@ -20,24 +20,6 @@ export interface ChatInspectorSelection {
 
 export const chatInspectorAtom = atom<ChatInspectorSelection | null>(null)
 
-export const openChatInspectorAtom = atom(
-  null,
-  (
-    _get,
-    set,
-    selection: Omit<ChatInspectorSelection, "page"> & {
-      page?: ChatInspectorPage
-    },
-  ) => {
-    set(chatInspectorAtom, {
-      chatId: selection.chatId,
-      messageId: selection.messageId,
-      runId: selection.runId,
-      nodeId: selection.nodeId,
-      page: selection.page ?? "overview",
-    })
-  },
-)
 
 export const closeChatInspectorAtom = atom(null, (_get, set) => {
   set(chatInspectorAtom, null)
@@ -51,10 +33,3 @@ export const setChatInspectorPageAtom = atom(
     set(chatInspectorAtom, { ...current, page })
   },
 )
-
-export function isChatInspectorOpenFor(
-  selection: ChatInspectorSelection | null,
-  chatId: string,
-): boolean {
-  return selection?.chatId === chatId
-}

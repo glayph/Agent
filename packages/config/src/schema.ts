@@ -540,6 +540,28 @@ export function migrateRuntimeConfig(
   const migrated = cloneRecord(input);
   migrated.schema_version = CURRENT_CONFIG_SCHEMA_VERSION;
 
+  // `channel_list` is the canonical dashboard/runtime map. Merge legacy
+  // `channels` underneath it so explicit modern settings win, then remove the
+  // duplicate source to prevent divergent enabled/secrets values.
+  const legacyChannels = isRecord(migrated.channels) ? migrated.channels : {};
+  const canonicalChannels = isRecord(migrated.channel_list) ? migrated.channel_list : {};
+  const mergeChannel = (legacy: unknown, canonical: unknown): Record<string, unknown> => {
+    const oldEntry = isRecord(legacy) ? legacy : {};
+    const newEntry = isRecord(canonical) ? canonical : {};
+    const oldSettings = isRecord(oldEntry.settings) ? oldEntry.settings : {};
+    const newSettings = isRecord(newEntry.settings) ? newEntry.settings : {};
+    return { ...oldEntry, ...newEntry, settings: { ...oldSettings, ...newSettings } };
+  };
+  if (Object.keys(legacyChannels).length || Object.keys(canonicalChannels).length) {
+    const migratedChannels: Record<string, unknown> = {};
+    for (const name of new Set([...Object.keys(legacyChannels), ...Object.keys(canonicalChannels)])) {
+      migratedChannels[name] = mergeChannel(legacyChannels[name], canonicalChannels[name]);
+    }
+    migrated.channel_list = migratedChannels;
+  }
+  // Even an empty legacy map should not survive normalization.
+  delete migrated.channels;
+
   const agent = isRecord(migrated.agent) ? migrated.agent : {};
   for (const key of [
     "heartbeat",
@@ -594,9 +616,18 @@ export function validateRuntimeConfig(
   input: Record<string, unknown>,
   options: RuntimeConfigValidationOptions = {},
 ): ConfigValidationResult {
+  const errors: ConfigValidationIssue[] = [];
+  // Validate malformed legacy entries before migration so normalizing the old
+  // `channels` map cannot silently turn an invalid value into an empty object.
+  if (isRecord(input.channels)) {
+    for (const [name, value] of Object.entries(input.channels)) {
+      if (!isRecord(value)) {
+        errors.push(issue(`channels.${name}`, "Channel configuration must be an object.", "invalid_channel_config"));
+      }
+    }
+  }
   const config = migrateRuntimeConfig(input);
   const parsed = RuntimeConfigSchema.safeParse(config);
-  const errors: ConfigValidationIssue[] = [];
   const warnings: ConfigValidationIssue[] = [];
 
   if (!parsed.success) {

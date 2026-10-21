@@ -51,6 +51,8 @@ export interface ModelInfo {
   api_base?: string
   api_key: string
   api_key_set?: boolean
+  /** Why the model cannot run yet (missing/invalid key, disabled); absent when it can. */
+  status_reason?: string
   proxy?: string
   auth_method?: string
   // Advanced fields
@@ -194,16 +196,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function getModelResolution(options: { probe?: boolean; model?: string } = {}): Promise<ModelResolution> {
-  const query = new URLSearchParams()
-  if (options.probe) query.set("probe", "1")
-  if (options.model) query.set("model", options.model)
-  const suffix = query.toString()
-  return request<ModelResolution>(`/api/models/resolve${suffix ? `?${suffix}` : ""}`)
-}
 
 export async function getModels(): Promise<ModelsListResponse> {
   return request<ModelsListResponse>("/api/models")
+}
+
+/** The saved API key of one model (authenticated owner view); empty when none is stored. */
+export async function getModelSecret(index: number): Promise<string> {
+  const response = await request<{ api_key?: string }>(
+    `/api/models/${index}/secret`,
+  )
+  return response.api_key ?? ""
 }
 
 export async function addModel(

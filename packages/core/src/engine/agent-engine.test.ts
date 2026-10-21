@@ -33,8 +33,8 @@ describe("AgentEngine", () => {
     expect(result.finalText).toBe("Hello!");
     expect(result.turns).toBe(1);
     expect(result.plan).toBeUndefined();
-    expect(result.usage.totalTokens).toBe(15);
-    expect(llm.requests).toHaveLength(1);
+    expect(result.usage.totalTokens).toBe(27);
+    expect(llm.requests).toHaveLength(2);
     expect(events.map((e) => e.type)).toEqual([
       "run.started",
       "turn.started",
@@ -61,7 +61,7 @@ describe("AgentEngine", () => {
     expect(result.status).toBe("completed");
     expect(result.finalText).toContain("written");
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(llm.requests).toHaveLength(3);
+    expect(llm.requests).toHaveLength(5);
   });
 
   it("forwards streamed text as message.delta events before the final answer", async () => {
@@ -116,10 +116,72 @@ describe("AgentEngine", () => {
     expect(toolMessages).toHaveLength(2);
     expect(toolMessages[0].content).toContain("data:a.txt");
     expect(events.some((e) => e.type === "thought")).toBe(true);
+    // Text written next to tool calls was addressed to the user: it is marked so it is kept, not retracted.
+    const thoughts = events.filter((e): e is Extract<EngineEvent, { type: "thought" }> => e.type === "thought");
+    expect(thoughts).toEqual([expect.objectContaining({ turn: 1, content: "Reading a", interim: true })]);
     const statuses = events
       .filter((e): e is Extract<EngineEvent, { type: "tool.call" }> => e.type === "tool.call")
       .map((e) => e.call.status);
     expect(statuses).toEqual(["requested", "running", "succeeded", "requested", "running", "succeeded"]);
+  });
+
+  it("generates a user-facing task understanding before executing a tool-first action", async () => {
+    const order: string[] = [];
+    const execute = jest.fn(async () => {
+      order.push("tool");
+      return { ok: true };
+    });
+    const { engine, llm } = setup(
+      [
+        { calls: [{ name: "create_account" }] },
+        { text: "I understand you want an account created; I will complete the signup steps and verify the result." },
+        { text: "The signup process is complete." },
+      ],
+      [tool({ name: "create_account", execute })],
+    );
+    const events: EngineEvent[] = [];
+    const result = await engine.run({
+      history: user("Create an account and confirm whether signup succeeds."),
+      preActionUpdates: true,
+      onEvent: (event) => {
+        events.push(event);
+        if (event.type === "thought" && event.interim) order.push("notice");
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    expect(order).toEqual(["notice", "tool"]);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "thought",
+      interim: true,
+      content: expect.stringContaining("account created"),
+    }));
+    const noticeRequest = llm.requests.find((request) => request.options?.toolChoice === "none");
+    expect(noticeRequest?.messages.at(-1)?.content).toContain("Before the first action");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an answer as its own message when the user sends a message while it is being written", async () => {
+    let steer: (text: string) => boolean = () => false;
+    const { engine } = setup(
+      [
+        async () => { steer("one more thing"); return { text: "First answer." }; },
+        { text: "Second answer." },
+      ],
+      [],
+    );
+    const events: EngineEvent[] = [];
+    let runId = "";
+    steer = (text) => engine.steer(runId, text);
+    const result = await engine.run({
+      history: user("hello"),
+      onEvent: (e) => { runId = e.runId; events.push(e); },
+    });
+
+    expect(result.finalText).toBe("Second answer.");
+    const thoughts = events.filter((e): e is Extract<EngineEvent, { type: "thought" }> => e.type === "thought");
+    expect(thoughts).toEqual([expect.objectContaining({ content: "First answer.", interim: true })]);
+    expect(events.filter((e) => e.type === "message.final")).toHaveLength(1);
   });
 
   it("settles an LLM-created plan when the run completes", async () => {
@@ -299,6 +361,9 @@ describe("AgentEngine", () => {
       model: "test",
       complete: async (_messages: EngineMessage[], options: Record<string, unknown> = {}) => {
         requests.push({ options });
+        if (options.json === true) {
+          return { choices: [{ message: { content: JSON.stringify({ needs_tool_execution: false }) } }], usage: {} };
+        }
         if (requests.length === 1) {
           return { choices: [{ message: { content: "done" } }], usage: {} };
         }

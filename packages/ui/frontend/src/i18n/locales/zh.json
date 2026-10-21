@@ -51,6 +51,18 @@
   "chat": {
     "welcome": "今天我能为您做些什么？",
     "welcomeDesc": "您可以询问我天气、设置或其他任何任务，我随时为您效劳。",
+    "errors": {
+      "codes": {
+        "provider_api_key": "模型 API 密钥被拒绝。请在“模型”页面检查密钥。",
+        "provider_network": "无法连接到模型服务。请检查端点和网络连接后重试。",
+        "local_model_unavailable": "本地模型服务不可用。请启动服务或检查端点后重试。",
+        "provider_unavailable": "模型提供方返回了错误。请检查服务状态和配置后重试。",
+        "provider_failure": "模型请求失败。请检查模型配置后重试。",
+        "token_limit": "请求超出模型的上下文或输出限制。请缩短请求或选择上下文容量更大的模型。",
+        "execution_limit": "运行在生成最终答复前达到执行限制。请缩小任务范围后重试。",
+        "internal": "无法完成此请求。请重试；如果问题持续，请检查网关日志。"
+      }
+    },
     "placeholder": "输入新消息…",
     "disabledPlaceholder": {
       "gatewayUnknown": "无法对话：网关状态仍在检测中。请稍候重试，如仍无效请刷新页面或重启 Launcher。",
@@ -67,7 +79,13 @@
     "newChat": "新建对话",
     "notConnected": "服务未运行，请先启动以进行对话。",
     "thinkingMenuTitle": "思考",
-    "thinkingMode": { "auto": "自动", "low": "低", "medium": "中", "high": "高", "off": "关闭" },
+    "thinkingMode": {
+      "auto": "自动",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "off": "关闭"
+    },
     "thinking": {
       "step1": "思考中…",
       "step2": "分析您的请求…",
@@ -352,7 +370,8 @@
     "description": "为 AI 服务商配置 API Key。只有已配置的模型可用于对话。",
     "defaultChangeSuccess": "默认模型已更新。",
     "unsavedPrompt": "当前修改尚未保存，保存后才会写入模型配置。",
-    "restartHint": "模型配置保存后需要重启服务才能生效。",
+    "restartHint": "模型配置更改将在下一次请求时生效。",
+    "apiKeySaved": "API 密钥已保存",
     "loadError": "加载模型列表失败",
     "retry": "重试",
     "providerCatalogUnavailable": "后端 Provider catalog 暂不可用，待模型 API 成功加载后才能选择新的 Provider。",
@@ -639,7 +658,14 @@
       "probeError": "Failed to run runtime probe",
       "probeSaveFirst": "Save changes before running the runtime probe.",
       "restartRequiredTitle": "需要重启服务",
-      "restartRequiredDesc": "{{name}} 的最新配置已保存。重启服务后才能正式生效。"
+      "restartRequiredDesc": "{{name}} 的最新配置已保存。重启服务后才能正式生效。",
+      "statusLive": "运行中",
+      "statusSavedOnly": "仅已保存 — 适配器不可用",
+      "statusNotConfigured": "未配置",
+      "runtimeLive": "实时适配器可用。",
+      "runtimeUnavailable": "配置可以保存，但此频道没有可用的实时消息适配器。",
+      "runtimeNotConfigured": "请填写所需凭据以启用此适配器。",
+      "runtimeDisconnected": "已配置，但适配器未连接。请检查运行探测和网关日志。"
     },
     "form": {
       "desc": {
@@ -1417,7 +1443,7 @@
       "unsaved_changes": "您有未保存的更改",
       "factory_reset": "恢复出厂设置",
       "factory_reset_confirm_title": "恢复出厂设置",
-      "factory_reset_confirm_desc": "这将把所有配置重置为出厂默认值。API 密钥和安全凭证将被保留。当前配置将被备份。",
+      "factory_reset_confirm_desc": "此操作会重置频道令牌、网页搜索设置和已存储的网页搜索 API 密钥，以及其他应用设置。仪表板密码、模型记录和加密保存的模型 API 密钥会保留。环境变量中的密钥不会更改。恢复备份可能包含机密信息，请妥善保管。",
       "factory_reset_confirm": "确认重置",
       "factory_reset_success": "配置已重置为出厂默认值。",
       "factory_reset_error": "重置配置失败。"

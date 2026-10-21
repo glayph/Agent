@@ -23,6 +23,7 @@ import {
   createControlTools,
   createFileManagementTools,
   createFetchLLMClient,
+  createRegistryLLMClient,
   createMemoryTools,
   createSkillTools,
   createWorkspaceTools,
@@ -40,7 +41,8 @@ import type { SkillRegistryClient, SkillStore } from "@miki/core/skills"
 import { searchWeb } from "@miki/core/web-search-service"
 import { BrowserTool, ComputerAgent } from "@miki/core/plugins"
 import { createGoalTools, GoalStore } from "@miki/core/api/goals"
-import { AdaptiveMessageCoordinator, planAdaptiveOutput, type AdaptiveMessagingConfig } from "@miki/core"
+import { planAdaptiveOutput, type AdaptiveMessagingConfig } from "@miki/core"
+import { providerRegistry } from "@miki/core/llm/provider"
 import { getLifecycleBus } from "@miki/core/hooks"
 import type { FileMemoryService } from "@miki/core/memory-files"
 import { createAttachmentCollector, type AttachmentContext, type ChatAttachmentPayload } from "./chat-attachments.js"
@@ -124,6 +126,15 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     if (configuredThinking && extraBody.thinking_level === undefined) {
       extraBody.thinking_level = configuredThinking;
     }
+    const providerPlugin = providerRegistry.getPluginRegistry().get(resolved.provider)
+    if (providerPlugin) {
+      return createRegistryLLMClient(providerRegistry, resolved.model, {
+        providerId: resolved.provider,
+        baseUrl: resolved.baseUrl,
+        credentials: resolved.apiKey ? { apiKey: resolved.apiKey } : {},
+        ...(Object.keys(extraBody).length ? { extra: extraBody } : {}),
+      })
+    }
     return createFetchLLMClient({ baseUrl: resolved.baseUrl, model: resolved.model, apiKey: resolved.apiKey || undefined, ...(Object.keys(extraBody).length ? { extraBody } : {}) })
   }
 
@@ -189,11 +200,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   // ---- control service ----------------------------------------------------
   const toolState = (): Record<string, boolean> => {
-    const tools = deps.getAppConfig().tools
+    const config = deps.getAppConfig()
+    const tools = config.tools
     const state = isRecord(tools) && isRecord(tools.tool_state) ? tools.tool_state : {}
+    const autonomy = config.autonomy
+    const toolPolicy = isRecord(autonomy) && isRecord(autonomy.tool_policy) ? autonomy.tool_policy : {}
+    const computerAllowed = toolPolicy.allow_computer_use === true
     const out: Record<string, boolean> = {}
-    for (const [name, group] of Object.entries(TOOL_GROUPS))
-      out[name] = typeof state[name] === "boolean" ? (state[name] as boolean) : group.defaultEnabled
+    for (const [name, group] of Object.entries(TOOL_GROUPS)) {
+      const enabledByDefault = name === "computer" ? computerAllowed : group.defaultEnabled
+      out[name] = typeof state[name] === "boolean" ? (state[name] as boolean) : enabledByDefault
+    }
     for (const [name, value] of Object.entries(state)) if (typeof value === "boolean" && !(name in out)) out[name] = value
     return out
   }
@@ -225,7 +242,12 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       return {
         ...config,
         tools: { ...tools, tool_state: toolState() },
-        models: deps.storedModels().map((item) => ({ ...item.payload, is_default: item.isDefault })),
+        models: deps.storedModels().map((item) => {
+          const publicModel = isRecord(item.payload) ? { ...item.payload } : {}
+          delete publicModel.api_key
+          delete publicModel.api_key_ref
+          return { ...publicModel, is_default: item.isDefault }
+        }),
       }
     },
     validateConfig: (candidate) => validate(candidate),
@@ -380,7 +402,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     },
     {
       name: "computer_observe",
-      description: "Observe accessible desktop UI elements using Windows UI Automation.",
+      description: "Observe available desktop windows and UI metadata; element-level automation depends on the platform.",
       risk: "read",
       approval: "auto",
       parameters: { type: "object", properties: { active_only: { type: "boolean" }, max_elements: { type: "integer", minimum: 1, maximum: 300 }, query: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
@@ -449,6 +471,38 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       approval: "auto",
       parameters: { type: "object", properties: { grid: { type: "boolean" }, grid_step: { type: "integer", minimum: 20, maximum: 500 } }, additionalProperties: false },
       async execute(input) { return computer.screenshot(input) },
+    },
+    {
+      name: "computer_click_at",
+      description: "Click a desktop screen coordinate, optionally double-clicking or choosing a mouse button.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, button: { type: "string", enum: ["left", "middle", "right"] }, double_click: { type: "boolean" } }, required: ["x", "y"], additionalProperties: false },
+      async execute(input) { return computer.clickAt(input) },
+    },
+    {
+      name: "computer_drag",
+      description: "Drag the pointer between desktop screen coordinates.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { from_x: { type: "number" }, from_y: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" } }, required: ["from_x", "from_y", "to_x", "to_y"], additionalProperties: false },
+      async execute(input) { return computer.drag(input) },
+    },
+    {
+      name: "computer_scroll",
+      description: "Scroll the desktop pointer in a direction by a bounded number of wheel steps.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 100 } }, additionalProperties: false },
+      async execute(input) { return computer.scroll(input) },
+    },
+    {
+      name: "computer_terminate_app",
+      description: "Terminate a desktop application by process ID or process name.",
+      risk: "destructive",
+      approval: "required",
+      parameters: { type: "object", properties: { pid: { type: "integer" }, process_name: { type: "string" } }, additionalProperties: false },
+      async execute(input) { return computer.terminateApp(input) },
     },
     {
       name: "computer_list_processes",
@@ -530,6 +584,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       const identity = buildIdentityContext({
         groups: Object.keys(TOOL_GROUPS).map((key) => ({ key, enabled: state[key] === true })),
         persona,
+        specialistId: "miki",
         identityDirs: [path.join(deps.workspaceRoot, "identity"), path.join(deps.workspaceRoot, "config", "identity")],
       })
       return `${DEFAULT_SYSTEM_PROMPT}\n\n${identity}`
@@ -596,14 +651,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         "run",
       )
     },
-    // Opt-in only: switching models can send the conversation to a different
-    // provider, so failover happens only for models the user listed explicitly in
-    // agents.defaults.fallback_models.
+    // Use the explicitly configured per-agent fallback list first, followed by
+    // the default model-router lane's fallback list. Never infer alternate models.
     fallbackModels: () => {
-      const defaults = ((deps.getAppConfig() as any)?.agents?.defaults ?? {}) as Record<string, unknown>
-      return Array.isArray(defaults.fallback_models)
-        ? defaults.fallback_models.filter((name: unknown): name is string => typeof name === "string" && name.trim().length > 0).map((name: string) => name.trim())
-        : []
+      const config = (deps.getAppConfig() ?? {}) as any
+      const defaults = (config.agents?.defaults ?? {}) as Record<string, unknown>
+      const lane = config.agent?.model_router?.lanes?.default
+      const candidates = [
+        ...(Array.isArray(defaults.fallback_models) ? defaults.fallback_models : []),
+        ...(Array.isArray(lane?.fallbacks) ? lane.fallbacks : []),
+      ]
+      return [...new Set(candidates.filter((name: unknown): name is string => typeof name === "string" && name.trim().length > 0).map((name: string) => name.trim()))]
     },
     // FULL_AGENT mode intentionally has no internal call/turn/time budget.
     maxTurns: () => (deps.getAppConfig() as any)?.autonomy?.unlimited_budgets === true
@@ -720,12 +778,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
           ? "agent run reached an execution limit"
           : "agent run failed"
     try {
-      taskStore.transition(runId, status, {
+      const current = taskStore.get(runId)
+      if (!current || current.status === "completed" || current.status === "failed" || current.status === "cancelled") return
+      const options = {
         now: result.finishedAt,
         reason,
         ...(result.finalText ? { result: result.finalText } : {}),
         ...(result.error ? { error: result.error } : {}),
-      })
+      }
+      if (status === "completed" && current.status === "running") {
+        taskStore.transition(runId, "verifying", { ...options, reason: "agent run finished; verifying terminal result" })
+      }
+      taskStore.transition(runId, status, options)
     } catch (error) {
       deps.log?.("run.task_persist_failed", { runId, error: error instanceof Error ? error.message : String(error) } as Json)
     }
@@ -811,6 +875,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
         plan: input.plan,
         model: input.model,
         allowTools: input.allowTools,
+        preActionUpdates: input.source === "webchat",
         tools: runTools,
         approvalPolicy: input.approvalPolicy,
         signal: controller.signal,
@@ -965,14 +1030,15 @@ export function createWsEventMapper(
   getToolFeedbackConfig: () => { enabled: boolean; separateMessages: boolean; maxArgsLength: number } = () => ({ enabled: true, separateMessages: false, maxArgsLength: 300 }),
   getMessagingConfig: () => Partial<AdaptiveMessagingConfig> = () => ({}),
   getAttachmentContext?: () => AttachmentContext,
+  /** Called when a message written for the user mid-run (before the final answer) becomes permanent. */
+  onInterimMessage?: (message: { id: string; content: string }) => void,
 ) {
   /** Proof files (screenshots, written files) gathered from this run's tool calls. */
   const attachmentCollector = getAttachmentContext ? createAttachmentCollector(getAttachmentContext) : undefined
   const attachmentsFor = (): ChatAttachmentPayload[] => attachmentCollector?.list() ?? []
   const toolMessageId = (callId: string) => `tool-${callId}`
   const created = new Set<string>()
-  const messaging = new AdaptiveMessageCoordinator(getMessagingConfig() as AdaptiveMessagingConfig)
-  /** Id of the primary/final assistant message. For adaptive output, finalIds contains all ordered chunks. */
+  /** Id of the primary/final assistant message (finalIds holds the same single id). */
   let finalId: string = randomUUID()
   const finalIds: string[] = []
   /** Live message that is currently receiving streamed text, keyed by run. */
@@ -1040,17 +1106,6 @@ export function createWsEventMapper(
     if (finalIds[0]) finalId = finalIds[0]
   }
 
-  const emitProgress = (runId: string, id: string, content: string, thoughtCategory = "Progress") => {
-    if (!messaging.canEmitProgress(`${runId}:progress`)) return
-    send("message.create", {
-      message_id: id,
-      content,
-      kind: "thought",
-      thought_category: thoughtCategory,
-      run_id: runId,
-    })
-  }
-
   const handle = (event: EngineEvent) => {
     const runId = event.runId
     switch (event.type) {
@@ -1087,18 +1142,32 @@ export function createWsEventMapper(
         send("message.delta", { message_id: live.id, delta: event.delta, run_id: runId, ...(model ? { model_name: model } : {}) })
         break
       }
-      case "thought":
-        // This turn ended in tool calls, so its streamed text was not the answer: retract it.
-        {
-          const live = streamed.get(runId)
-          if (live && live.turn === event.turn) {
-            send("message.delete", { message_id: live.id, run_id: runId })
-            streamed.delete(runId)
+      case "thought": {
+        const live = streamed.get(runId)
+        const liveThisTurn = live && live.turn === event.turn ? live : undefined
+        const text = event.content.trim()
+        if (event.interim && text) {
+          // The model wrote this for the user while it kept working (or before it took up a new user
+          // message): it stays as its own message. It is never merged with the final answer.
+          let id = liveThisTurn?.id
+          if (id) {
+            send("message.update", { message_id: id, content: text, kind: "normal", run_id: runId, ...(model ? { model_name: model } : {}) })
+          } else {
+            id = randomUUID()
+            send("message.create", { message_id: id, content: text, kind: "normal", run_id: runId, ...(model ? { model_name: model } : {}) })
           }
+          streamed.delete(runId)
+          onInterimMessage?.({ id, content: text })
+          break
         }
-        // Raw chain-of-thought is intentionally not sent to clients.
-        emitProgress(runId, `thought-${runId}-${event.turn}`, `Working on the task (turn ${event.turn}).`)
+        // A discarded draft (e.g. rejected by the self-check): retract what streamed. Raw
+        // chain-of-thought is intentionally not sent to clients, and no placeholder text is sent.
+        if (liveThisTurn) {
+          send("message.delete", { message_id: liveThisTurn.id, run_id: runId })
+          streamed.delete(runId)
+        }
         break
+      }
       case "tool.call":
         toolFeedbackPayload(event.call, runId)
         attachmentCollector?.observe(event.call)
@@ -1107,22 +1176,13 @@ export function createWsEventMapper(
         const live = streamed.get(runId)
         streamed.delete(runId)
         if (live && live.text.trim()) {
-          // The answer already streamed into one live message: finalize it in place.
-          // Long answers that adaptive output would split are re-emitted as ordered chunks.
-          const planned = planAdaptiveOutput(
-            { id: `final-${runId}`, runId, channel: "web", kind: "response", content: event.content, final: true, longRunning: true, streamingRequested: false },
-            undefined,
-            getMessagingConfig(),
-          )
-          if (planned.length <= 1) {
-            finalId = live.id
-            finalIds.length = 0
-            finalIds.push(live.id)
-            const proof = attachmentsFor()
-            send("message.update", { message_id: live.id, content: event.content, kind: "normal", run_id: runId, ...(proof.length > 0 ? { attachments: proof } : {}), ...(model ? { model_name: model } : {}) })
-            break
-          }
-          send("message.delete", { message_id: live.id, run_id: runId })
+          // The answer already streamed into one live message: finalize it in place. It is never split.
+          finalId = live.id
+          finalIds.length = 0
+          finalIds.push(live.id)
+          const proof = attachmentsFor()
+          send("message.update", { message_id: live.id, content: event.content, kind: "normal", run_id: runId, ...(proof.length > 0 ? { attachments: proof } : {}), ...(model ? { model_name: model } : {}) })
+          break
         }
         emitAdaptiveResponse(runId, event.content, model)
         break

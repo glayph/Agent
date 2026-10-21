@@ -27,42 +27,6 @@ export function StatusDot({
   )
 }
 
-export function EmptyState({
-  icon,
-  title,
-  description,
-  action,
-  className,
-}: {
-  icon?: ReactNode
-  title: ReactNode
-  description?: ReactNode
-  action?: ReactNode
-  className?: string
-}) {
-  return (
-    <div
-      data-miki-empty-state="true"
-      className={cn(
-        "mx-auto flex min-h-[220px] max-w-[560px] flex-col items-center justify-center px-6 py-10 text-center",
-        className,
-      )}
-    >
-      {icon && (
-        <div className="bg-card/70 text-muted-foreground mb-4 flex size-11 items-center justify-center rounded-lg">
-          {icon}
-        </div>
-      )}
-      <h3 className="text-foreground text-base font-semibold">{title}</h3>
-      {description && (
-        <p className="text-muted-foreground mt-1.5 max-w-[42rem] text-[13px] leading-5">
-          {description}
-        </p>
-      )}
-      {action && <div className="mt-5">{action}</div>}
-    </div>
-  )
-}
 
 export function SectionPanel({
   title,

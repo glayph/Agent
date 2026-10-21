@@ -51,7 +51,7 @@ function setup(script: ScriptedReply[], configGuard?: () => void) {
 
   const llm = scriptedLLM(script);
   const engine = new AgentEngine({ llm: llm.client, tools: registry });
-  const notifications: Array<{ text: string; kind?: string }> = [];
+  const notifications: Array<{ text?: string; kind?: string }> = [];
   const logs: string[] = [];
   const config = {
     autonomy: { enabled: true },

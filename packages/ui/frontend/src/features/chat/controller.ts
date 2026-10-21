@@ -68,12 +68,31 @@ function latestRunIdentity(messages: ChatMessage[]): {
   return { model, provider: providerForRunModel(model) }
 }
 
+function hideResolvedErrors(messages: ChatMessage[]): ChatMessage[] {
+  const latestSuccessfulReply = messages.reduce(
+    (latest, message, index) =>
+      message.role === "assistant" && message.kind !== "error" ? index : latest,
+    -1,
+  )
+  if (latestSuccessfulReply < 0) return messages
+  return messages
+    .filter(
+      (message, index) => message.kind !== "error" || index > latestSuccessfulReply,
+    )
+    .map((message, index) =>
+      message.role === "user" &&
+      message.deliveryStatus === "failed" &&
+      index < latestSuccessfulReply
+        ? { ...message, deliveryStatus: undefined, deliveryDetail: undefined }
+        : message,
+    )
+}
+
 let wsRef: WebSocket | null = null
 let isConnecting = false
 let msgIdCounter = 0
 let activeSessionIdRef = getChatState().activeSessionId
 let initialized = false
-let unsubscribeGateway: (() => void) | null = null
 let hydratePromise: Promise<void> | null = null
 let connectionGeneration = 0
 let reconnectTimer: number | null = null
@@ -228,7 +247,7 @@ export async function connectChat() {
       ) {
         return
       }
-      updateChatStore({ connectionState: "connected" })
+      updateChatStore({ connectionState: "connected", runError: undefined })
       isConnecting = false
       reconnectAttempts = 0
       socket.send(JSON.stringify({ type: "authenticate", session_id: sessionId }))
@@ -283,6 +302,7 @@ export async function connectChat() {
           return
         }
         if (message.type === "auth.ok") {
+          updateChatStore({ runError: undefined })
           return
         }
         if (
@@ -340,6 +360,9 @@ export async function connectChat() {
             )
             const isLastRun = runningRunIds.length === 0
             return {
+              ...(isLastRun && terminalStatus === "completed"
+                ? { messages: prev.messages.filter((message) => message.kind !== "error") }
+                : {}),
               runningRunIds,
               isTyping: !isLastRun,
               runStatus: isLastRun
@@ -473,10 +496,13 @@ export async function hydrateActiveSession() {
         return
       }
 
-      const hydratedMessages =
+      const hydratedMessages = hideResolvedErrors(
+        (
         currentState.messages.length > 0
           ? mergeHistoryMessages(historyMessages, currentState.messages)
           : historyMessages
+        ),
+      )
       const identity = latestRunIdentity(hydratedMessages)
       updateChatStore({
         messages: hydratedMessages,
@@ -822,6 +848,7 @@ export async function switchChatSession(sessionId: string) {
       runStatus: undefined,
       runError: undefined,
       deliveryOutcome: undefined,
+      workStatus: undefined,
       hasHydratedActiveSession: true,
       contextUsage: undefined,
     })
@@ -952,7 +979,7 @@ export function initializeChatStore() {
     }
   }
 
-  unsubscribeGateway = store.sub(gatewayAtom, syncConnectionWithGateway)
+  store.sub(gatewayAtom, syncConnectionWithGateway)
 
   if (!needsActiveSessionHydration()) {
     updateChatStore({ hasHydratedActiveSession: true })
@@ -966,11 +993,4 @@ export function initializeChatStore() {
     }
     syncConnectionWithGateway(true)
   })
-}
-
-export function teardownChatStore() {
-  unsubscribeGateway?.()
-  unsubscribeGateway = null
-  initialized = false
-  disconnectChat()
 }

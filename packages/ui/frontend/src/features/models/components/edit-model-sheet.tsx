@@ -11,6 +11,7 @@ import {
   type ModelInfo,
   type ModelProviderOption,
   getCatalogs,
+  getModelSecret,
   setDefaultModel,
   updateModel,
 } from "@/api/models"
@@ -95,11 +96,11 @@ interface EditModelSheetProps {
   providerOptions?: ModelProviderOption[]
 }
 
-function buildInitialEditForm(model: ModelInfo): EditForm {
+function buildInitialEditForm(model: ModelInfo, savedApiKey = ""): EditForm {
   return {
     provider: getCanonicalProviderKey(model.provider),
     modelId: model.model,
-    apiKey: "",
+    apiKey: savedApiKey,
     apiBase: model.api_base ?? "",
     proxy: model.proxy ?? "",
     authMethod: model.auth_method ?? "",
@@ -178,7 +179,12 @@ export function EditModelSheet({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const providerMap = getProviderCatalogMap(providerOptions)
 
-  const initialForm = model ? buildInitialEditForm(model) : null
+  // The saved key is fetched from the authenticated endpoint so it is visible again on reopen.
+  const [savedApiKey, setSavedApiKey] = useState("")
+  // Remembers which model the fetched key belongs to, so it never leaks into another model's form.
+  const savedApiKeyRef = useRef<{ index: number; key: string } | null>(null)
+
+  const initialForm = model ? buildInitialEditForm(model, savedApiKey) : null
   const isDirty =
     model != null &&
     (JSON.stringify(form) !== JSON.stringify(initialForm) ||
@@ -187,7 +193,14 @@ export function EditModelSheet({
 
   useEffect(() => {
     if (model) {
-      setForm(buildInitialEditForm(model))
+      setForm(
+        buildInitialEditForm(
+          model,
+          savedApiKeyRef.current?.index === model.index
+            ? savedApiKeyRef.current.key
+            : "",
+        ),
+      )
       setSetAsDefault(model.is_default)
       setError("")
       setModelValidation(null)
@@ -217,6 +230,29 @@ export function EditModelSheet({
         .catch(() => {})
     }
   }, [model, providerOptions])
+
+  const modelIndex = model?.index
+  const modelHasKey = Boolean(model?.api_key_set)
+  useEffect(() => {
+    savedApiKeyRef.current = null
+    setSavedApiKey("")
+    if (!open || modelIndex === undefined || !modelHasKey) return
+    let active = true
+    getModelSecret(modelIndex)
+      .then((key) => {
+        if (!active || !key) return
+        savedApiKeyRef.current = { index: modelIndex, key }
+        setSavedApiKey(key)
+        // Fill the field unless the user already typed something else.
+        setForm((f) => (f.apiKey === "" ? { ...f, apiKey: key } : f))
+      })
+      .catch(() => {
+        // The key stays hidden behind the "saved" placeholder if it cannot be fetched.
+      })
+    return () => {
+      active = false
+    }
+  }, [open, modelIndex, modelHasKey])
 
   const setField =
     (key: keyof EditForm) =>
@@ -422,9 +458,12 @@ export function EditModelSheet({
         model_name: model.model_name,
         provider: provider,
         model: modelId,
-        // null = explicit clear (backend must distinguish from omitted)
         api_base: submittedApiBase,
-        api_key: form.apiKey.trim() || undefined,
+        // Blank means “leave the existing secret unchanged”; a new value is
+        // sent only when the user actually entered one.
+        ...(form.apiKey.trim() && form.apiKey.trim() !== savedApiKey
+          ? { api_key: form.apiKey.trim() }
+          : {}),
         proxy: form.proxy.trim() || null,
         auth_method: authMethodLocked
           ? defaultAuthMethod || undefined
@@ -462,10 +501,10 @@ export function EditModelSheet({
     }
   }
 
-  const hasSavedAPIKey = Boolean(model?.api_key)
+  const hasSavedAPIKey = Boolean(model?.api_key_set || model?.api_key)
   const apiKeyPlaceholder = hasSavedAPIKey
     ? maskedSecretPlaceholder(
-        model?.api_key ?? "",
+        "configured",
         t("models.field.apiKeyPlaceholderSet"),
       )
     : t("models.field.apiKeyPlaceholder")

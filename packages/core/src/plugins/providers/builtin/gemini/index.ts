@@ -27,7 +27,7 @@ function model(
     id,
     name,
     reasoning: false,
-    input: ["text", "image"],
+    input: ["text", "image", "audio"],
     contextWindow,
     maxTokens,
     supportsTools: true,
@@ -35,7 +35,7 @@ function model(
 }
 
 function stripProviderPrefix(modelId: string): string {
-  const value = modelId.trim();
+  const value = modelId.trim().replace(/^models\//i, "");
   for (const prefix of GEMINI_PREFIXES) {
     if (value.toLowerCase().startsWith(`${prefix}/`)) {
       return value.slice(prefix.length + 1);
@@ -110,20 +110,11 @@ export const geminiProviderPlugin: MikiProviderPlugin = {
       messages: normalizeGeminiMessages(request.messages) as never,
       extra: normalizeGeminiExtra(request.extra),
       timeoutMs: request.timeoutMs,
+      signal: request.signal,
     });
   },
   async listModels(context) {
-    const discovered = await fetchGeminiModels(
-      provider,
-      credential(context),
-      10_000,
-    ).catch((error) => {
-      context.log("provider.models.discovery_failed", {
-        providerId: provider.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return [];
-    });
+    const discovered = await fetchGeminiModels(provider, credential(context), 10_000);
     context.log("provider.models.listed", {
       providerId: provider.id,
       count: discovered.length,

@@ -107,7 +107,9 @@ export function createOpenAICompatibleProvider(
         model: request.model.includes("/")
           ? request.model.slice(request.model.indexOf("/") + 1)
           : request.model,
-        apiKey: credential(request.context),
+        // Credentials are resolved per invocation and are intentionally not
+        // stored on request.context.
+        apiKey: request.credentials.apiKey || request.credentials.default || "",
         messages: request.messages as never,
         extra: request.extra,
         timeoutMs: request.timeoutMs,
@@ -119,15 +121,7 @@ export function createOpenAICompatibleProvider(
         provider,
         credential(context),
         10_000,
-      )
-        .models.list()
-        .catch((error) => {
-          context.log("provider.models.discovery_failed", {
-            providerId: definition.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return [];
-        });
+      ).models.list();
       const items = Array.isArray(discovered)
         ? discovered
         : discovered.data || [];

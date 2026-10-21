@@ -189,6 +189,8 @@ export interface ToolCallRecord {
   resultPreview?: string;
   error?: string;
   approvalId?: string;
+  /** Set on a blocked call that stopped at an approval gate (a learned "ask" rule or a hard policy). */
+  gate?: "learned_rule" | "policy";
 }
 
 export type RunStatus = "completed" | "failed" | "cancelled" | "limit_reached";
@@ -212,7 +214,12 @@ export type EngineEvent =
   | { type: "plan.updated"; runId: string; plan: AgentPlan }
   | { type: "turn.started"; runId: string; turn: number }
   | { type: "system.notice"; runId: string; turn: number; count: number }
-  | { type: "thought"; runId: string; turn: number; content: string }
+  /**
+   * Text the model wrote in a turn that did not end the run. `interim: true` means the text was
+   * addressed to the user (written alongside tool calls, or an answer the run moved past because
+   * the user sent a new message) and must stay visible; otherwise it was a discarded draft.
+   */
+  | { type: "thought"; runId: string; turn: number; content: string; interim?: boolean }
   | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
   | { type: "message.final"; runId: string; content: string }
@@ -255,6 +262,8 @@ export interface RunRequest {
   plan?: AgentPlan | false;
   /** `false` runs a plain chat completion without tools. */
   allowTools?: boolean;
+  /** Generate a dynamic user-facing task-understanding update before the first tool call when that turn has no text. */
+  preActionUpdates?: boolean;
   /** Optional provider-compatible thinking level for this run. */
   thinkingLevel?: string;
   /** Optional per-run tool registry, useful for scoped foreground/background execution. */

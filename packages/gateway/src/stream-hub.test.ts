@@ -27,6 +27,13 @@ describe("StreamHub", () => {
   });
   afterEach(() => hub.dispose());
 
+  it("adds the originating user message id to run events", () => {
+    const socket = new FakeSocket();
+    const run = hub.createRun({ runId: "correlated", sessionId: "s1", contextId: "c1", replyToMessageId: "user-1", socket: asSocket(socket) });
+    hub.publish(run, "message.create", { message_id: "assistant-1", content: "reply" });
+    expect(socket.sent[0].payload).toMatchObject({ reply_to_message_id: "user-1", run_id: "correlated" });
+  });
+
   it("sequences and buffers events and delivers them to the subscriber", () => {
     const socket = new FakeSocket();
     const run = hub.createRun({ runId: "r1", sessionId: "s1", contextId: "c1", socket: asSocket(socket) });

@@ -165,10 +165,19 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
     [defaultSelectableModels],
   )
 
+  // Saved models that cannot run yet (missing/invalid key, disabled) stay visible in the menu
+  // instead of silently disappearing after they are saved.
+  const unavailableModels = useMemo(
+    () => defaultSelectableModels.filter((m) => !m.available),
+    [defaultSelectableModels],
+  )
+
   return {
     defaultModelName,
     defaultModelId,
     hasAvailableModels,
+    hasAnyModels: defaultSelectableModels.length > 0,
+    unavailableModels,
     resolution,
     loadFailed,
     apiKeyModels,

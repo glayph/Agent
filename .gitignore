@@ -94,3 +94,7 @@ test-results/
 skills-lock.json
 **/.agents/
 **/downloaded-skills/
+
+# Runtime memory / journals (personal, regenerated at runtime)
+identity/.wal/
+identity/memory/20*.md

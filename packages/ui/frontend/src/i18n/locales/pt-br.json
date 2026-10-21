@@ -51,6 +51,18 @@
   "chat": {
     "welcome": "Como posso te ajudar hoje?",
     "welcomeDesc": "Pergunte sobre clima, configurações ou qualquer outra tarefa. Estou aqui para ajudar.",
+    "errors": {
+      "codes": {
+        "provider_api_key": "A chave de API do modelo foi rejeitada. Confira a chave na página Modelos.",
+        "provider_network": "Não foi possível acessar o serviço do modelo. Verifique o endpoint e a conexão e tente novamente.",
+        "local_model_unavailable": "O serviço do modelo local está indisponível. Inicie-o ou confira o endpoint e tente novamente.",
+        "provider_unavailable": "O provedor do modelo retornou um erro. Confira o status e a configuração do provedor e tente novamente.",
+        "provider_failure": "A solicitação ao modelo falhou. Confira a configuração do modelo e tente novamente.",
+        "token_limit": "A solicitação excedeu o limite de contexto ou de saída do modelo. Reduza a solicitação ou escolha um modelo com contexto maior.",
+        "execution_limit": "A execução atingiu um limite antes de produzir uma resposta final. Tente novamente com um escopo menor.",
+        "internal": "Não foi possível concluir a solicitação. Tente novamente; se o problema continuar, confira os logs do gateway."
+      }
+    },
     "placeholder": "Inicie uma nova mensagem…",
     "disabledPlaceholder": {
       "gatewayUnknown": "Não é possível conversar: o status do Gateway ainda está sendo verificado. Aguarde e atualize a página ou reinicie o Launcher se necessário.",
@@ -67,7 +79,13 @@
     "newChat": "Novo Chat",
     "notConnected": "O Gateway não está rodando. Inicie-o para conversar.",
     "thinkingMenuTitle": "Pensamento",
-    "thinkingMode": { "auto": "Automático", "low": "Baixo", "medium": "Médio", "high": "Alto", "off": "Desligado" },
+    "thinkingMode": {
+      "auto": "Automático",
+      "low": "Baixo",
+      "medium": "Médio",
+      "high": "Alto",
+      "off": "Desligado"
+    },
     "thinking": {
       "step1": "Pensando…",
       "step2": "Analisando sua solicitação…",
@@ -352,7 +370,8 @@
     "description": "Configure API Keys para provedores de IA. Apenas modelos configurados ficam disponíveis para o chat.",
     "defaultChangeSuccess": "Modelo padrão atualizado.",
     "unsavedPrompt": "Esta alteração ainda não foi salva. Salve para gravá-la na configuração do modelo.",
-    "restartHint": "Alterações na configuração de modelos só têm efeito após o gateway reiniciar.",
+    "restartHint": "As alterações na configuração do modelo entram em vigor na próxima solicitação.",
+    "apiKeySaved": "Chave de API salva",
     "loadError": "Falha ao carregar modelos",
     "retry": "Tentar novamente",
     "providerCatalogUnavailable": "O catálogo de providers do backend está indisponível. A seleção de novos providers fica desabilitada até a API de Modelos carregar com sucesso.",
@@ -639,7 +658,14 @@
       "probeError": "Failed to run runtime probe",
       "probeSaveFirst": "Save changes before running the runtime probe.",
       "restartRequiredTitle": "Reinício do gateway necessário",
-      "restartRequiredDesc": "A configuração mais recente de {{name}} foi salva. Reinicie o gateway para que tenha efeito."
+      "restartRequiredDesc": "A configuração mais recente de {{name}} foi salva. Reinicie o gateway para que tenha efeito.",
+      "statusLive": "Ativo",
+      "statusSavedOnly": "Apenas salvo — adaptador indisponível",
+      "statusNotConfigured": "Não configurado",
+      "runtimeLive": "O adaptador ativo está disponível.",
+      "runtimeUnavailable": "A configuração pode ser salva, mas não há adaptador de mensagens ativo para este canal.",
+      "runtimeNotConfigured": "Informe as credenciais necessárias para ativar este adaptador.",
+      "runtimeDisconnected": "Configurado, mas o adaptador não está conectado. Verifique a sondagem de runtime e os logs do gateway."
     },
     "form": {
       "desc": {
@@ -1417,7 +1443,7 @@
       "unsaved_changes": "Você tem alterações não salvas.",
       "factory_reset": "Restaurar Padrões",
       "factory_reset_confirm_title": "Restaurar Configurações de Fábrica",
-      "factory_reset_confirm_desc": "Isso redefinirá todas as configurações para os padrões de fábrica. As chaves de API e credenciais de segurança serão preservadas. Um backup da configuração atual será criado.",
+      "factory_reset_confirm_desc": "Isso redefine os tokens dos canais, as configurações de pesquisa na web e as chaves de pesquisa na web armazenadas, além das demais configurações. A senha do painel, os modelos e as chaves de API dos modelos criptografadas serão preservados. As chaves de ambiente não são alteradas. Os backups podem conter segredos; mantenha-os privados.",
       "factory_reset_confirm": "Redefinir para Padrões",
       "factory_reset_success": "A configuração foi redefinida para os padrões de fábrica.",
       "factory_reset_error": "Falha ao redefinir a configuração."

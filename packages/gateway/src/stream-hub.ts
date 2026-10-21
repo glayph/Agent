@@ -22,6 +22,7 @@ export interface RunStream {
   runId: string
   sessionId: string
   contextId: string
+  replyToMessageId?: string
   checkpointId: string
   sequence: number
   /** Serialized, sequenced events kept for stream resume (bounded). */
@@ -101,7 +102,7 @@ export class StreamHub {
    * With no socket it streams to whichever sockets are attached to the session, possibly none
    * (a system-started run): it still buffers every event so a later `resume` can replay them.
    */
-  createRun(init: { runId: string; sessionId: string; contextId: string; socket?: WebSocket | null }): RunStream {
+  createRun(init: { runId: string; sessionId: string; contextId: string; replyToMessageId?: string; socket?: WebSocket | null }): RunStream {
     const subscribers = init.socket
       ? new Set<WebSocket>([init.socket])
       : new Set<WebSocket>(this.sessionSockets.get(init.sessionId) ?? [])
@@ -109,6 +110,7 @@ export class StreamHub {
       runId: init.runId,
       sessionId: init.sessionId,
       contextId: init.contextId,
+      ...(init.replyToMessageId ? { replyToMessageId: init.replyToMessageId } : {}),
       checkpointId: `checkpoint_${init.runId}`,
       sequence: 0,
       events: [],
@@ -146,7 +148,7 @@ export class StreamHub {
       timestamp: Date.now(),
       checkpoint_id: run.checkpointId,
       sequence: run.sequence,
-      payload: { ...payload, run_id: run.runId },
+      payload: { ...payload, run_id: run.runId, ...(run.replyToMessageId ? { reply_to_message_id: run.replyToMessageId } : {}) },
     })
     run.events.push(message)
     if (run.events.length > this.maxBufferedEvents) run.events.splice(0, run.events.length - this.maxBufferedEvents)
@@ -156,7 +158,7 @@ export class StreamHub {
   /** Live-only event (heartbeats): sent to open subscribers, never buffered or sequenced. */
   publishLive(run: RunStream, type: string, payload: Record<string, unknown> = {}): void {
     if (run.subscribers.size === 0) return
-    const message = JSON.stringify({ type, session_id: run.sessionId, timestamp: Date.now(), payload: { ...payload, run_id: run.runId } })
+    const message = JSON.stringify({ type, session_id: run.sessionId, timestamp: Date.now(), payload: { ...payload, run_id: run.runId, ...(run.replyToMessageId ? { reply_to_message_id: run.replyToMessageId } : {}) } })
     for (const socket of run.subscribers) if (isOpen(socket)) socket.send(message)
   }
 

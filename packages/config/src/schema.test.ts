@@ -26,6 +26,19 @@ describe("runtime config schema", () => {
   });
 
 
+  it("merges legacy channels into canonical channel_list and removes the duplicate map", () => {
+    const migrated = migrateRuntimeConfig({
+      channels: { telegram: { enabled: true, settings: { token: "legacy-token", parse_mode: "HTML" } } },
+      channel_list: { telegram: { enabled: false, settings: { token: "••••••••", parse_mode: "Markdown" } }, discord: { enabled: true } },
+    }) as Record<string, any>;
+    expect(migrated.channels).toBeUndefined();
+    expect(migrated.channel_list.telegram).toMatchObject({
+      enabled: false,
+      settings: { token: "••••••••", parse_mode: "Markdown" },
+    });
+    expect(migrated.channel_list.discord.enabled).toBe(true);
+  });
+
   it("uses evolution.mode as the canonical evolution behavior mode", () => {
     const migrated = migrateRuntimeConfig({
       self_improvement: {

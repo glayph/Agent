@@ -20,18 +20,26 @@ const CAPABILITY_TEXT: Record<string, string> = {
 
 const GROUP_ORDER = ["terminal", "browser", "web_search", "filesystem", "memory", "skills", "goals", "control", "computer"]
 
-const IDENTITY_FILES = ["SOUL.md", "IDENTITY.md", "AGENTS.md", "USER.md"]
+const IDENTITY_FILES = ["SOUL.md", "AGENTS.md", "IDENTITY.md", "USER.md", "TOOLS.md"]
 
-function readIdentityFiles(dirs: string[]): string {
+function readIdentityFiles(dirs: string[], specialistId = "miki"): string {
   const dir = dirs.find((candidate) => existsSync(candidate))
   if (!dir) return ""
   const parts: string[] = []
-  for (const file of IDENTITY_FILES) {
+  const files = [
+    { file: "SOUL.md", label: "SOUL" },
+    { file: "AGENTS.md", label: "AGENTS" },
+    { file: path.join("agents", specialistId, "AGENTS.md"), label: `AGENTS — ${specialistId} role override` },
+    { file: "IDENTITY.md", label: "IDENTITY" },
+    { file: "USER.md", label: "USER" },
+    { file: "TOOLS.md", label: "TOOLS" },
+  ]
+  for (const entry of files) {
     try {
-      const text = readFileSync(path.join(dir, file), "utf8").trim()
-      if (text) parts.push(`[${file.replace(/\.md$/, "")}]\n${text}`)
+      const text = readFileSync(path.join(dir, entry.file), "utf8").trim()
+      if (text) parts.push(`[${entry.label}]\n${text}`)
     } catch {
-      /* missing file is fine */
+      /* optional identity files are fine to omit */
     }
   }
   return parts.join("\n\n")
@@ -46,6 +54,7 @@ export function buildIdentityContext(input: {
   groups: ToolGroupStatus[]
   persona?: string
   identityDirs?: string[]
+  specialistId?: string
 }): string {
   const status = new Map(input.groups.map((group) => [group.key, group.enabled]))
   const known = GROUP_ORDER.filter((key) => status.has(key))
@@ -59,7 +68,7 @@ export function buildIdentityContext(input: {
   lines.push("Use tools whenever they get the job done better than guessing — run commands, browse and search instead of saying you cannot. Verify results before claiming success.")
   const persona = input.persona?.trim()
   if (persona) lines.push(`PERSONA:\n${persona}`)
-  const files = readIdentityFiles(input.identityDirs ?? [])
+  const files = readIdentityFiles(input.identityDirs ?? [], input.specialistId ?? "miki")
   if (files) lines.push(files)
   return lines.join("\n\n")
 }

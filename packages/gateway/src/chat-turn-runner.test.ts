@@ -22,11 +22,11 @@ type StartRun = (input: any) => Promise<any>;
 const SESSION = "s1";
 const CONTEXT = "channel:default-channel:peer:s1";
 
-function createHarness(startRun: StartRun) {
+function createHarness(startRun: StartRun, options: { retryDelayMs?: (retryIndex: number) => number; recallLearningFeedback?: (question: string) => string | undefined; detectFollowUpFeedback?: (input: any) => Promise<void>; steerRun?: (runId: string, text: string) => boolean } = {}) {
   const db = new Database(":memory:");
   db.exec(`
     CREATE TABLE chat_sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'normal', model_name TEXT, context_id TEXT, image_urls TEXT, attachments_json TEXT, status TEXT NOT NULL DEFAULT 'completed', status_detail TEXT);
+    CREATE TABLE chat_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'normal', model_name TEXT, context_id TEXT, image_urls TEXT, attachments_json TEXT, reply_to_message_id TEXT, status TEXT NOT NULL DEFAULT 'completed', status_detail TEXT);
   `);
   const stamp = () => new Date().toISOString();
   db.prepare("INSERT INTO chat_sessions(id,title,created_at,updated_at) VALUES(?,?,?,?)").run(SESSION, "Miki chat", stamp(), stamp());
@@ -45,6 +45,7 @@ function createHarness(startRun: StartRun) {
         return startRun(input);
       },
       cancelRun: () => undefined,
+      steerRun: options.steerRun,
     },
     fileMemory: {
       updateConfig: () => undefined,
@@ -56,18 +57,23 @@ function createHarness(startRun: StartRun) {
     workspaceRoot: "/tmp/ws",
     dataRoot: "/tmp/data",
     // The real mapper turns engine events into UI events; here it only forwards the final answer.
-    createWsEventMapper: ((emit: (type: string, payload: unknown) => void) => ({
+    createWsEventMapper: ((emit: (type: string, payload: unknown) => void, _model?: string, _tf?: unknown, _mc?: unknown, _ac?: unknown, onInterimMessage?: (message: { id: string; content: string }) => void) => ({
       finalIds: [] as string[],
       finalId: `final-${Math.random().toString(36).slice(2)}`,
       attachments: () => [],
-      handle: (event: { type?: string; content?: string; runId?: string }) => {
+      handle: (event: { type?: string; content?: string; runId?: string; interim?: boolean }) => {
         if (event.type === "message.final") emit("message.final", { content: event.content });
+        if (event.type === "thought" && event.interim && event.content) onInterimMessage?.({ id: `interim-${Math.random().toString(36).slice(2)}`, content: event.content });
       },
     })) as any,
     planAdaptiveOutput: ((message: { id: string; content: string }) => [{ id: message.id, content: message.content }]) as any,
     getLifecycleBus: (() => ({ emit: (event: string, payload: unknown) => emitted.push({ event, payload }) })) as any,
     retrieveRelevantTurns: (() => []) as any,
     resolveContextWindowTokens: (() => 8192) as any,
+    // Retries wait instantly unless a test asks for a specific schedule.
+    retryDelayMs: options.retryDelayMs ?? (() => 0),
+    recallLearningFeedback: options.recallLearningFeedback,
+    detectFollowUpFeedback: options.detectFollowUpFeedback,
   });
 
   const send = (content: string, extra: Partial<ChatTurnInput> = {}, clientMessageId?: string) => {
@@ -147,7 +153,7 @@ describe("ChatTurnRunner", () => {
     expect(title.toLowerCase()).toContain("landing page");
   });
 
-  it("serializes turns of one conversation, and the second sees the first answer in its history", async () => {
+  it("starts two turns of one conversation concurrently with independent histories", async () => {
     let releaseFirst!: () => void;
     const gate = new Promise<void>((resolve) => (releaseFirst = resolve));
     let call = 0;
@@ -163,18 +169,111 @@ describe("ChatTurnRunner", () => {
     const second = h.send("second");
     await new Promise((resolve) => setTimeout(resolve, 30));
 
-    expect(h.agentCalls).toHaveLength(1);
-    expect(second.replies[0].payload).toMatchObject({ status: "queued", queue_position: 1 });
+    expect(h.agentCalls).toHaveLength(2);
+    expect(second.replies[0].payload).toMatchObject({ status: "queued", queue_position: 0 });
 
     releaseFirst();
     await Promise.all([first.promise, second.promise]);
 
     expect(h.agentCalls).toHaveLength(2);
-    // The second turn only started after the first answer was saved, so that answer is in its history.
-    // (Order is by created_at; a queued message is stored on arrival, which is before the answer it waited for.)
+    // Each turn receives a stable snapshot at its own arrival time; the second does not
+    // accidentally consume the first turn's answer while both runs are active.
     const secondHistory = h.agentCalls[1].history.map((m: { role: string; content: string }) => `${m.role}:${m.content}`);
-    expect(secondHistory.sort()).toEqual(["assistant:reply 1", "user:first", "user:second"]);
+    expect(secondHistory.sort()).toEqual(["user:first", "user:second"]);
     expect(h.messages().map((m) => m.content).sort()).toEqual(["first", "reply 1", "reply 2", "second"]);
+  });
+
+  it("hands a message sent during a working run to that run instead of starting another", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const steered: Array<{ runId: string; text: string }> = [];
+    const h = createHarness(async (input) => {
+      await gate;
+      input.onEvent({ type: "message.final", runId: input.runId, content: "done" });
+      return { status: "completed", finalText: "done", toolCalls: [], model: "fake-model" };
+    }, { steerRun: (runId, text) => { steered.push({ runId, text }); return true; } });
+
+    const first = h.send("make 10 files");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const second = h.send("start them all with test-");
+    const outcome = await second.promise;
+
+    expect(outcome.status).toBe("steered");
+    expect(steered).toEqual([{ runId: h.agentCalls[0].runId, text: "start them all with test-" }]);
+    expect(h.agentCalls).toHaveLength(1);
+    expect(h.messages().find((m) => m.content === "start them all with test-")?.status).toBe("completed");
+
+    releaseFirst();
+    await first.promise;
+  });
+
+  it("waits for a run that is still starting, then steers into it instead of starting another", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let refusals = 3; // the agent has not registered the run yet
+    const steered: string[] = [];
+    const h = createHarness(async (input) => {
+      await gate;
+      input.onEvent({ type: "message.final", runId: input.runId, content: "done" });
+      return { status: "completed", finalText: "done", toolCalls: [], model: "fake-model" };
+    }, { steerRun: (_runId, text) => { if (refusals > 0) { refusals -= 1; return false; } steered.push(text); return true; } });
+
+    const first = h.send("make 10 files");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const outcome = await h.send("start them all with test-").promise;
+
+    expect(outcome.status).toBe("steered");
+    expect(steered).toEqual(["start them all with test-"]);
+    expect(h.agentCalls).toHaveLength(1);
+
+    releaseFirst();
+    await first.promise;
+  });
+
+  it("starts its own run when the working run ends before it can be steered", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const h = createHarness(async () => {
+      await gate;
+      return { status: "completed", finalText: "ok", toolCalls: [], model: "fake-model" };
+    }, { steerRun: () => false });
+
+    const first = h.send("one");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const second = h.send("two");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    releaseFirst();
+    await first.promise;
+    const outcome = await second.promise;
+
+    expect(outcome.status).not.toBe("steered");
+    expect(h.agentCalls).toHaveLength(2);
+  });
+
+  it("stores a message the agent wrote while working as its own message, before the final answer", async () => {
+    const h = createHarness(async (input) => {
+      input.onEvent({ type: "thought", runId: input.runId, turn: 1, content: "opening note", interim: true });
+      input.onEvent({ type: "thought", runId: input.runId, turn: 2, content: "discarded draft" });
+      input.onEvent({ type: "message.final", runId: input.runId, content: "the result" });
+      input.onEvent({ type: "run.finished" });
+      return { status: "completed", finalText: "the result", toolCalls: [], model: "fake-model" };
+    });
+    const { promise } = h.send("do the big job");
+    await promise;
+
+    expect(h.messages().map((m) => [m.role, m.content, m.kind])).toEqual([
+      ["user", "do the big job", "normal"],
+      ["assistant", "opening note", "normal"],
+      ["assistant", "the result", "normal"],
+    ]);
+  });
+
+  it("starts a new run again once the working run has finished", async () => {
+    const h = createHarness(answer("ok"), { steerRun: () => true });
+    await h.send("one").promise;
+    const outcome = await h.send("two").promise;
+    expect(outcome.status).not.toBe("steered");
+    expect(h.agentCalls).toHaveLength(2);
   });
 
   it("does not make different conversations wait for each other", async () => {
@@ -205,9 +304,9 @@ describe("ChatTurnRunner", () => {
     expect(outcome.status).toBe("failed");
     const rows = h.messages();
     expect(rows[0]).toMatchObject({ role: "user", status: "failed", status_detail: "Local model is unavailable." });
-    expect(rows[1]).toMatchObject({ role: "assistant", kind: "error", content: "Local model is unavailable." });
+    expect(rows[1]).toMatchObject({ role: "assistant", kind: "error", content: "miki_error_local_model_unavailable" });
     const error = socket.sent.find((m) => m.type === "error");
-    expect(error.payload).toMatchObject({ code: "local_model_unavailable", error_category: "local_model_unavailable", retryable: true });
+    expect(error.payload).toMatchObject({ code: "local_model_unavailable", error_category: "local_model_unavailable", message: "miki_error_local_model_unavailable", retryable: true });
     expect(socket.types.slice(-3)).toEqual(["typing.stop", "node.run_end", "stream_done"]);
     expect(socket.sent[socket.sent.length - 1].payload.status).toBe("failed");
   });
@@ -219,7 +318,7 @@ describe("ChatTurnRunner", () => {
     const socket = new FakeSocket();
     await h.send("hi", { socket: asSocket(socket) }).promise;
     const error = socket.sent.find((m) => m.type === "error");
-    expect(error.payload.message).toBe("An internal error interrupted this chat run. Your message was saved; you can retry it.");
+    expect(error.payload.message).toBe("miki_error_provider_failure");
     expect(JSON.stringify(socket.sent)).not.toContain("secret internals");
     expect(h.logs.join("\n")).toContain("secret internals");
   });
@@ -239,6 +338,63 @@ describe("ChatTurnRunner", () => {
     expect(h.agentCalls).toHaveLength(2);
     const statuses = socket.sent.filter((m) => m.type === "message.status").map((m) => m.payload.status);
     expect(statuses).toEqual(["processing", "retrying", "processing", "completed"]);
+  });
+
+  it("keeps retrying a transient failure through the 1s-16s cycle until the model answers", async () => {
+    let call = 0;
+    const retryIndexes: number[] = [];
+    const h = createHarness(async (input) => {
+      call += 1;
+      if (call <= 5) return { status: "failed", error: "fetch failed", toolCalls: [], model: "fake-model" };
+      input.onEvent({ type: "message.final", runId: input.runId, content: "finally answered" });
+      return { status: "completed", finalText: "finally answered", toolCalls: [], model: "fake-model" };
+    }, { retryDelayMs: (retryIndex) => { retryIndexes.push(retryIndex); return 0; } });
+    const socket = new FakeSocket();
+    const outcome = await h.send("hi", { socket: asSocket(socket) }).promise;
+
+    expect(outcome.status).toBe("completed");
+    expect(h.agentCalls).toHaveLength(6);
+    expect(retryIndexes).toEqual([0, 1, 2, 3, 4]);
+    const statuses = socket.sent.filter((m) => m.type === "message.status").map((m) => m.payload.status);
+    expect(statuses).toEqual(["processing", "retrying", "processing", "retrying", "processing", "retrying", "processing", "retrying", "processing", "retrying", "processing", "completed"]);
+  });
+
+  it("does not retry a failure that retrying cannot fix, such as a rejected API key", async () => {
+    const h = createHarness(async () => ({ status: "failed", error: "401 invalid api key", toolCalls: [], model: "fake-model" }));
+    const socket = new FakeSocket();
+    const outcome = await h.send("hi", { socket: asSocket(socket) }).promise;
+
+    expect(outcome.status).toBe("failed");
+    expect(h.agentCalls).toHaveLength(1);
+  });
+
+  it("stops waiting between retries as soon as the user stops the turn", async () => {
+    const h = createHarness(async (input) => {
+      setTimeout(() => h.runner.cancelRetry(input.runId), 10);
+      return { status: "failed", error: "fetch failed", toolCalls: [], model: "fake-model" };
+    }, { retryDelayMs: () => 60_000 });
+    const socket = new FakeSocket();
+    const outcome = await h.send("hi", { socket: asSocket(socket) }).promise;
+
+    expect(outcome.status).toBe("cancelled");
+    expect(h.agentCalls).toHaveLength(1);
+  });
+
+  it("shows only the token-limit error when the model exhausts its token budget", async () => {
+    const h = createHarness(async () => ({ status: "failed", error: "maximum output tokens exceeded", toolCalls: [], model: "fake-model" }));
+    const socket = new FakeSocket();
+    const outcome = await h.send("long task", { socket: asSocket(socket) }).promise;
+    expect(outcome.status).toBe("failed");
+    expect(h.messages().at(-1)).toMatchObject({ kind: "error", content: "miki_error_token_limit" });
+  });
+
+  it("normalizes network failures to the connection error", async () => {
+    // A plain network failure is retried until the model answers or the user stops, so this case
+    // needs a run that already used a tool: those are never retried (a retry could repeat side effects).
+    const h = createHarness(async () => ({ status: "failed", error: "fetch failed", toolCalls: [{ name: "shell" }], model: "fake-model" }));
+    const socket = new FakeSocket();
+    await h.send("hello", { socket: asSocket(socket) }).promise;
+    expect(h.messages().at(-1)).toMatchObject({ kind: "error", content: "miki_error_provider_network" });
   });
 
   it("rejects an empty message without touching the agent", async () => {
@@ -318,5 +474,45 @@ describe("ChatTurnRunner", () => {
     await promise;
     expect(replies[0].payload.message_id).not.toBe("shared-id");
     expect(h.messages().filter((m) => m.content === "mine")).toHaveLength(1);
+  });
+
+  it("(c) gives the next answer to a rated request the learned feedback as a note for the model", async () => {
+    const note = "Earlier user feedback on this same request:\n- The user rejected an earlier answer to this same request. Their correction: keep it under 3 lines";
+    const h = createHarness(answer("second draft"), {
+      recallLearningFeedback: (question) => (question === "Summarise the report" ? note : undefined),
+    });
+    const outcome = await h.send("Summarise the report").promise;
+    expect(outcome.status).toBe("completed");
+    const history = h.agentCalls[0].history as Array<{ role: string; content: string }>;
+    expect(history.some((m) => m.role === "system" && m.content === note)).toBe(true);
+    // The note sits before the conversation, so the model reads it first.
+    expect(history.findIndex((m) => m.content === note)).toBeLessThan(history.findIndex((m) => m.role === "user"));
+  });
+
+  it("(c) adds no feedback note for a request nobody rated", async () => {
+    const h = createHarness(answer("plain"), { recallLearningFeedback: () => undefined });
+    await h.send("Another question").promise;
+    const history = h.agentCalls[0].history as Array<{ role: string; content: string }>;
+    expect(history.some((m) => /feedback/i.test(m.content))).toBe(false);
+  });
+
+  it("checks every new message for feedback on the previous answer, in the background", async () => {
+    const detect = jest.fn().mockResolvedValue(undefined);
+    const h = createHarness(answer("first"), { detectFollowUpFeedback: detect });
+    await h.send("first question").promise;
+    await h.send("no, make it shorter").promise;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(detect).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls[1][0]).toMatchObject({ sessionId: SESSION, contextId: CONTEXT, followUp: "no, make it shorter" });
+  });
+
+  it("a failing feedback lookup never blocks the turn", async () => {
+    const h = createHarness(answer("still answered"), {
+      recallLearningFeedback: () => { throw new Error("learning store locked"); },
+    });
+    const outcome = await h.send("hello").promise;
+    expect(outcome.status).toBe("completed");
+    expect(h.messages().map((m) => m.content)).toContain("still answered");
+    expect(h.logs.some((line) => /Learning recall skipped/.test(line))).toBe(true);
   });
 });

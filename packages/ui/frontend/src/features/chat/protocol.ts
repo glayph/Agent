@@ -193,14 +193,16 @@ export function handlemikiMessage(
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
       const isPlaceholder = payload.placeholder === true
+      const workStatusCanClear = !["thought", "tool_calls", "action_update"].includes(kind)
       const modelName = parseModelName(payload)
       const runId = parseRunId(payload)
+      const replyToMessageId = typeof payload.reply_to_message_id === "string" ? payload.reply_to_message_id : undefined
       const thoughtCategory = parseThoughtCategory(payload)
       const inspectorOnly = payload.inspector_only === true
       const messageGroupId = typeof payload.message_group_id === "string" ? payload.message_group_id : undefined
       const messageSequence = Number.isFinite(Number(payload.message_sequence)) ? Number(payload.message_sequence) : undefined
       const messageTotal = Number.isFinite(Number(payload.message_total)) ? Number(payload.message_total) : undefined
-      const messageStrategy = ["single", "multi_message", "chunked", "streaming", "progressive"].includes(String(payload.message_strategy)) ? (String(payload.message_strategy) as NonNullable<ChatMessage["messageStrategy"]>) : undefined
+      const messageStrategy = ["single", "chunked", "streaming", "progressive"].includes(String(payload.message_strategy)) ? (String(payload.message_strategy) as NonNullable<ChatMessage["messageStrategy"]>) : undefined
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -221,6 +223,7 @@ export function handlemikiMessage(
           kind,
           ...(modelName ? { modelName } : {}),
           ...(runId ? { runId } : {}),
+          ...(replyToMessageId ? { replyToMessageId } : {}),
           ...(thoughtCategory ? { thoughtCategory } : {}),
           ...(inspectorOnly ? { inspectorOnly } : {}),
           ...(messageGroupId ? { messageGroupId } : {}),
@@ -243,7 +246,8 @@ export function handlemikiMessage(
               )
             : [...prev.messages, nextMessage]
         return {
-          messages,
+          messages: kind === "normal" ? messages.filter((message) => message.kind !== "error") : messages,
+          ...(workStatusCanClear && runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
           isTyping:
             !isPlaceholder &&
             (kind === "normal" || message.type === "media.create")
@@ -261,16 +265,19 @@ export function handlemikiMessage(
 
     case "message.update": {
       const messageId = payload.message_id as string
+      const updatedKind = typeof payload.kind === "string" ? payload.kind : "normal"
+      const workStatusCanClear = !["thought", "tool_calls", "action_update"].includes(updatedKind)
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
       const modelName = parseModelName(payload)
       const runId = parseRunId(payload)
+      const replyToMessageId = typeof payload.reply_to_message_id === "string" ? payload.reply_to_message_id : undefined
       const thoughtCategory = parseThoughtCategory(payload)
       const inspectorOnly = payload.inspector_only === true
       const messageGroupId = typeof payload.message_group_id === "string" ? payload.message_group_id : undefined
       const messageSequence = Number.isFinite(Number(payload.message_sequence)) ? Number(payload.message_sequence) : undefined
       const messageTotal = Number.isFinite(Number(payload.message_total)) ? Number(payload.message_total) : undefined
-      const messageStrategy = ["single", "multi_message", "chunked", "streaming", "progressive"].includes(String(payload.message_strategy)) ? (String(payload.message_strategy) as NonNullable<ChatMessage["messageStrategy"]>) : undefined
+      const messageStrategy = ["single", "chunked", "streaming", "progressive"].includes(String(payload.message_strategy)) ? (String(payload.message_strategy) as NonNullable<ChatMessage["messageStrategy"]>) : undefined
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -305,6 +312,7 @@ export function handlemikiMessage(
                 toolCalls,
                 ...(modelName ? { modelName } : {}),
                 ...(runId ? { runId } : {}),
+                ...(replyToMessageId ? { replyToMessageId } : {}),
                 ...(thoughtCategory ? { thoughtCategory } : {}),
                 ...(inspectorOnly ? { inspectorOnly } : {}),
                 ...(messageGroupId ? { messageGroupId } : {}),
@@ -315,13 +323,15 @@ export function handlemikiMessage(
               }
             })
             if (found) {
-              return messages
+              return payload.kind === "error"
+                ? messages
+                : messages.filter((candidate) => candidate.kind !== "error")
             }
 
             const { content, kind, toolCalls } =
               parseAssistantMessageUpdateState(payload)
 
-            return [
+            const nextMessages = [
               ...messages,
               {
                 id: messageId,
@@ -331,6 +341,7 @@ export function handlemikiMessage(
                 toolCalls,
                 ...(modelName ? { modelName } : {}),
                 ...(runId ? { runId } : {}),
+                ...(replyToMessageId ? { replyToMessageId } : {}),
                 ...(thoughtCategory ? { thoughtCategory } : {}),
                 ...(inspectorOnly ? { inspectorOnly } : {}),
                 ...(messageGroupId ? { messageGroupId } : {}),
@@ -341,7 +352,11 @@ export function handlemikiMessage(
                 timestamp,
               },
             ]
+            return payload.kind === "error"
+              ? nextMessages
+              : nextMessages.filter((candidate) => candidate.kind !== "error")
           })(),
+          ...(workStatusCanClear && runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
           ...(contextUsage ? { contextUsage } : {}),
           ...(modelName ? { activeRunModel: modelName } : {}),
           ...(modelName
@@ -357,6 +372,7 @@ export function handlemikiMessage(
       const delta = typeof payload.delta === "string" ? payload.delta : ""
       if (!messageId || !delta) break
       const runId = parseRunId(payload)
+      const replyToMessageId = typeof payload.reply_to_message_id === "string" ? payload.reply_to_message_id : undefined
       updateChatStore((prev) => {
         if (
           isStaleRun(prev.activeRunId, prev.runStatus, runId, prev.runningRunIds) ||
@@ -370,16 +386,18 @@ export function handlemikiMessage(
           return {
             messages: [
               ...prev.messages,
-              { id: messageId, role: "assistant" as const, content: delta, kind: "normal" as const, ...(runId ? { runId } : {}), timestamp: Date.now() },
+              { id: messageId, role: "assistant" as const, content: delta, kind: "normal" as const, ...(runId ? { runId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), timestamp: Date.now() },
             ],
             runningRunIds,
             isTyping: true,
+            ...(runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
           }
         }
         return {
-          messages: prev.messages.map((msg, i) => i === index ? { ...msg, content: `${msg.content}${delta}`, ...(runId ? { runId } : {}) } : msg),
+          messages: prev.messages.map((msg, i) => i === index ? { ...msg, content: `${msg.content}${delta}`, ...(runId ? { runId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}) } : msg),
           runningRunIds,
           isTyping: true,
+          ...(runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
         }
       })
       break
@@ -488,6 +506,7 @@ export function handlemikiMessage(
             ...prev,
             runningRunIds: remainingRuns,
             isTyping: remainingRuns.length > 0,
+            ...(runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
           }
         }
         const runningRunIds = runId
@@ -495,6 +514,7 @@ export function handlemikiMessage(
           : prev.runningRunIds
         const nextActiveRunId = runningRunIds.at(-1) ?? (runId || prev.activeRunId)
         return {
+          ...(status === "completed" ? { messages: prev.messages.filter((message) => message.kind !== "error") } : {}),
           ...(nextActiveRunId ? { activeRunId: nextActiveRunId } : {}),
           ...(modelName ? { activeRunModel: modelName } : {}),
           ...(modelName
@@ -504,6 +524,7 @@ export function handlemikiMessage(
           runStatus: runningRunIds.length ? "running" : status,
           ...(error ? { runError: error } : { runError: undefined }),
           isTyping: runningRunIds.length > 0,
+          ...(runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
         }
       })
       break
@@ -531,6 +552,7 @@ export function handlemikiMessage(
             runningRunIds,
             isTyping: runningRunIds.length > 0,
             runStatus: runningRunIds.length ? "running" : statusRaw === "cancelled" ? "cancelled" : "failed",
+            ...(taskId && prev.workStatus?.runId === taskId ? { workStatus: undefined } : {}),
           }
         }
         return prev
@@ -608,6 +630,7 @@ export function handlemikiMessage(
           ...(runId
             ? { activeRunId: runningRunIds.at(-1) ?? runId, runStatus: runningRunIds.length ? "running" as const : "failed" as const }
             : {}),
+          ...(runId && prev.workStatus?.runId === runId ? { workStatus: undefined } : {}),
         }
       })
       break
@@ -644,7 +667,8 @@ export function handlemikiMessage(
     }
 
     case "message.accepted":
-    case "message.status": {
+    case "message.status":
+    case "message.duplicate": {
       const messageId =
         typeof payload.message_id === "string" ? payload.message_id : ""
       const clientId =
@@ -655,6 +679,7 @@ export function handlemikiMessage(
         message.type === "message.accepted" ? "queued" : payload.status
       const detail =
         typeof payload.detail === "string" ? payload.detail : undefined
+      const runId = parseRunId(payload)
       if (!messageId) break
       updateChatStore((prev) => ({
         messages: prev.messages.map((item) => {
@@ -677,6 +702,11 @@ export function handlemikiMessage(
           // completed: clear any transient state
           return { ...next, deliveryStatus: undefined, deliveryDetail: undefined }
         }),
+        ...(rawStatus === "processing" && runId
+          ? { workStatus: { messageId, runId } }
+          : rawStatus !== "queued" && prev.workStatus?.messageId === messageId
+            ? { workStatus: undefined }
+            : {}),
       }))
       break
     }
