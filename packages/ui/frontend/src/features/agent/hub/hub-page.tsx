@@ -16,6 +16,7 @@ export function HubPage() {
       <PageHeader title={t("navigation.hub")}>
         <Link
           to="/agent/skills"
+          search={{ view: undefined }}
           className="text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-md px-2 text-xs font-medium transition-colors"
         >
           {t("common.back", { defaultValue: "Back" })}

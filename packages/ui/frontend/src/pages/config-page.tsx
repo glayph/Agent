@@ -818,7 +818,7 @@ function ConfigFormView() {
         children={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
-              <Link to="/plugins">Plugin Center</Link>
+              <Link to="/plugins" search={{ section: "catalog" }}>Plugin Center</Link>
             </Button>
             <Button
             variant="outline"

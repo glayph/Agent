@@ -187,7 +187,7 @@ export function useHubMarketplace() {
   }
 
   const handleViewInstalled = () => {
-    void navigate({ to: "/agent/skills" })
+    void navigate({ to: "/agent/skills", search: { view: undefined } })
   }
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {

@@ -235,7 +235,7 @@ export function RawConfigPage() {
           aria-label={t("pages.config.back_to_visual")}
           title={t("pages.config.back_to_visual")}
         >
-          <Link to="/config">
+          <Link to="/config" search={{ view: undefined }}>
             <IconAdjustments className="size-4" />
             <span className="max-sm:hidden">
               {t("pages.config.back_to_visual")}
