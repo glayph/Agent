@@ -11,6 +11,7 @@
   "scripts": {
     "postinstall": "node scripts/install-playwright-browser.mjs",
     "build": "npm run build:all",
+    "test:recovery-chaos": "node scripts/recovery-chaos.mjs",
     "build:llama": "node scripts/build-llama.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "build:go-backend": "node scripts/build-go-backend.mjs",
@@ -38,7 +39,7 @@
     "runtime:24-7": "node scripts/miki-24-7.mjs",
     "runtime:24-7:check": "node scripts/miki-24-7.mjs --check",
     "test:supervisor": "node scripts/miki-24-7.integration.test.mjs",
-    "test:gateway": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.config.cjs --runInBand --runTestsByPath packages/gateway/src/memory-index.test.ts packages/gateway/src/chat-attachments.test.ts packages/gateway/src/async-route.test.ts packages/gateway/src/error-middleware.test.ts packages/gateway/src/model-resolution.test.ts packages/gateway/src/secret-scan-rules.test.ts packages/gateway/src/process-manager.test.ts packages/gateway/src/stream-hub.test.ts packages/gateway/src/chat-turn-runner.test.ts packages/gateway/src/zip-archive.test.ts packages/gateway/src/ws-origin.test.ts packages/gateway/src/local-request.test.ts && vitest run --root . packages/gateway/src/restart-policy.test.ts packages/gateway/src/model-retry.test.ts packages/gateway/src/session-cookie.test.ts",
+    "test:gateway": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.config.cjs --runInBand --runTestsByPath packages/gateway/src/memory-index.test.ts packages/gateway/src/chat-attachments.test.ts packages/gateway/src/async-route.test.ts packages/gateway/src/error-middleware.test.ts packages/gateway/src/model-resolution.test.ts packages/gateway/src/secret-scan-rules.test.ts packages/gateway/src/process-manager.test.ts packages/gateway/src/stream-hub.test.ts packages/gateway/src/chat-turn-runner.test.ts packages/gateway/src/session-lane.test.ts packages/gateway/src/channel-runtime.test.ts packages/gateway/src/answer-feedback.test.ts packages/gateway/src/learned-behavior.test.ts packages/gateway/src/zip-archive.test.ts packages/gateway/src/ws-origin.test.ts packages/gateway/src/local-request.test.ts packages/gateway/src/ignored-config.test.ts packages/gateway/src/notice-fallback.test.ts packages/gateway/src/webhook-ingress.test.ts packages/gateway/src/outbox.test.ts packages/gateway/src/health.test.ts packages/gateway/src/replay-recovery.test.ts packages/gateway/src/recovery-learning.test.ts packages/gateway/src/process-safety.test.ts packages/gateway/src/channel-probe.test.ts packages/gateway/src/tool-call-wire.test.ts && vitest run --root . packages/gateway/src/model-retry.test.ts packages/gateway/src/session-cookie.test.ts packages/gateway/src/agent-runtime-stream-retry.test.ts",
     "soak": "node scripts/soak-agent.mjs",
     "test": "npm run test --workspaces --if-present",
     "verify": "node scripts/run-verify.mjs",
@@ -64,6 +65,9 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "globals": "^17.11.0",
-    "typescript": "^5.9.3"
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
   }
 }

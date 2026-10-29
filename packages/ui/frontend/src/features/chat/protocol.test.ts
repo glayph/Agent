@@ -97,7 +97,7 @@ describe("chat protocol flow", () => {
     })
   })
 
-  it("preserves persisted assistant error messages as error bubbles", () => {
+  it("does not add system error messages to the chat transcript", () => {
     handlemikiMessage(
       {
         type: "message.create",
@@ -112,13 +112,25 @@ describe("chat protocol flow", () => {
       "session-1",
     )
 
-    expect(getChatState().messages).toEqual([
-      expect.objectContaining({
-        id: "error-run-1",
-        role: "assistant",
-        kind: "error",
-        content: "An internal error interrupted this chat run.",
-      }),
+    expect(getChatState().messages).toEqual([])
+  })
+
+  it("keeps proactive assistant replies while hiding provider and quota log messages", () => {
+    const messages = [
+      { message_id: "proactive-1", content: "I found a useful update for you." },
+      { message_id: "provider-log", content: "[ProviderPlugin] provider.plugin.ready" },
+      { message_id: "quota-log", content: "Quota limit reached. Please wait for the quota to reset." },
+    ]
+
+    for (const payload of messages) {
+      handlemikiMessage(
+        { type: "message.create", session_id: "session-1", payload },
+        "session-1",
+      )
+    }
+
+    expect(getChatState().messages.map((message) => message.content)).toEqual([
+      "I found a useful update for you.",
     ])
   })
 
@@ -661,7 +673,10 @@ describe("chat protocol flow", () => {
       "session-1",
     )
 
-    expect(toastError).toHaveBeenCalledWith("Gateway disconnected")
+    expect(toastError).toHaveBeenCalledWith(
+      "Gateway disconnected",
+      expect.objectContaining({ id: "chat:error:Gateway disconnected", closeButton: true }),
+    )
     expect(getChatState().isTyping).toBe(false)
     expect(getChatState().messages).toEqual([])
   })

@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import Database from "better-sqlite3";
-import { feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, parseFollowUpClassification, preferenceNote, previousAnswerFor, requestContextHash } from "./answer-feedback.js";
+import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, mayBeFollowUpFeedback, parseFollowUpClassification, preferenceNote, previousAnswerFor, requestContextHash } from "./answer-feedback.js";
 
 function chatDb() {
   const db = new Database(":memory:");
@@ -90,5 +93,57 @@ describe("answer feedback (learned memory)", () => {
 
   it("writes a learned preference as a long-term note", () => {
     expect(preferenceNote("  keep it under 3 lines ")).toBe("User preference learned from feedback: keep it under 3 lines");
+  });
+});
+
+describe("follow-up feedback gate", () => {
+  it("lets through varied English feedback wording", () => {
+    for (const text of ["Thanks, perfect", "No, that's not it", "This is too long", "Actually I wanted a table", "try again", "never use bullet points", "Stop adding emojis"]) {
+      expect(mayBeFollowUpFeedback(text)).toBe(true);
+    }
+  });
+
+  it("lets through short messages in other scripts so the classifier can judge them", () => {
+    for (const text of ["ভুল হয়েছে", "这个答案不对", "ответ неверный", "شكرا لك", "ありがとう"]) {
+      expect(mayBeFollowUpFeedback(text)).toBe(true);
+    }
+  });
+
+  it("skips ordinary new requests, empty text and over-long text", () => {
+    expect(mayBeFollowUpFeedback("Summarise the quarterly report for Q3")).toBe(false);
+    expect(mayBeFollowUpFeedback("   ")).toBe(false);
+    expect(mayBeFollowUpFeedback("wrong ".repeat(300))).toBe(false);
+  });
+});
+
+describe("feedback rate limit (shared database)", () => {
+  it("allows up to the limit in a window and then refuses", () => {
+    const db = new Database(":memory:");
+    const results = Array.from({ length: 4 }, () => consumeFeedbackRateLimit(db, "alice", { nowMs: 1000, limit: 3 }));
+    expect(results.map((r) => r.allowed)).toEqual([true, true, true, false]);
+    expect(results[3].count).toBe(4);
+    db.close();
+  });
+
+  it("counts each client separately and opens a new window after it ends", () => {
+    const db = new Database(":memory:");
+    for (let i = 0; i < 3; i++) consumeFeedbackRateLimit(db, "alice", { nowMs: 1000, limit: 3 });
+    expect(consumeFeedbackRateLimit(db, "alice", { nowMs: 1500, limit: 3 }).allowed).toBe(false);
+    expect(consumeFeedbackRateLimit(db, "bob", { nowMs: 1500, limit: 3 }).allowed).toBe(true);
+    expect(consumeFeedbackRateLimit(db, "alice", { nowMs: 61_000, limit: 3 })).toEqual({ allowed: true, count: 1 });
+    db.close();
+  });
+
+  it("is shared by every connection to the same database file", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "miki-rate-"));
+    const file = path.join(dir, "gateway.db");
+    const first = new Database(file);
+    const second = new Database(file);
+    consumeFeedbackRateLimit(first, "alice", { nowMs: 1000, limit: 2 });
+    consumeFeedbackRateLimit(second, "alice", { nowMs: 1000, limit: 2 });
+    expect(consumeFeedbackRateLimit(first, "alice", { nowMs: 1000, limit: 2 }).allowed).toBe(false);
+    first.close();
+    second.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

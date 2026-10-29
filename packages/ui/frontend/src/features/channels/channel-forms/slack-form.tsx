@@ -10,6 +10,7 @@ import {
   parseAllowFromInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import { ChannelSection } from "@/features/channels/components/channel-section"
 import { Field, KeyInput } from "@/shared/forms/shared-form"
 import { Card, CardContent } from "@/shared/ui/card"
 
@@ -41,61 +42,71 @@ export function SlackForm({
 
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field
-            label={t("channels.field.botToken")}
-            required
-            hint={t("channels.form.desc.botToken")}
-            error={fieldErrors.bot_token}
-          >
-            <KeyInput
-              value={asString(config._bot_token)}
-              onChange={(v) => onChange("_bot_token", v)}
-              placeholder={getSecretInputPlaceholder(
-                configuredSecrets,
-                "bot_token",
-                t("channels.field.secretHintSet"),
-                "xoxb-xxxx",
-              )}
-            />
-          </Field>
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <Field
+              label={t("channels.field.botToken")}
+              required
+              hint={t("channels.form.desc.botToken")}
+              error={fieldErrors.bot_token}
+            >
+              <KeyInput
+                value={asString(config._bot_token)}
+                onChange={(v) => onChange("_bot_token", v)}
+                placeholder={getSecretInputPlaceholder(
+                  configuredSecrets,
+                  "bot_token",
+                  t("channels.field.secretHintSet"),
+                  "xoxb-xxxx",
+                )}
+              />
+            </Field>
 
-          <Field
-            label={t("channels.field.appToken")}
-            required
-            hint={t("channels.form.desc.appToken")}
-            error={fieldErrors.app_token}
-          >
-            <KeyInput
-              value={asString(config._app_token)}
-              onChange={(v) => onChange("_app_token", v)}
-              placeholder={getSecretInputPlaceholder(
-                configuredSecrets,
-                "app_token",
-                t("channels.field.secretHintSet"),
-                "xapp-xxxx",
-              )}
-            />
-          </Field>
-        </CardContent>
-      </Card>
+            <Field
+              label={t("channels.field.appToken")}
+              required
+              hint={t("channels.form.desc.appToken")}
+              error={fieldErrors.app_token}
+            >
+              <KeyInput
+                value={asString(config._app_token)}
+                onChange={(v) => onChange("_app_token", v)}
+                placeholder={getSecretInputPlaceholder(
+                  configuredSecrets,
+                  "app_token",
+                  t("channels.field.secretHintSet"),
+                  "xapp-xxxx",
+                )}
+              />
+            </Field>
+          </CardContent>
+        </Card>
+      </ChannelSection>
 
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <ChannelArrayListField
-            label={t("channels.field.allowFrom")}
-            hint={t("channels.form.desc.allowFrom")}
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder={t("channels.field.allowFromPlaceholder")}
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
-        </CardContent>
-      </Card>
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <ChannelArrayListField
+              label={t("channels.field.allowFrom")}
+              hint={t("channels.form.desc.allowFrom")}
+              value={asStringArray(config.allow_from)}
+              onChange={(value) => onChange("allow_from", value)}
+              placeholder={t("channels.field.allowFromPlaceholder")}
+              parser={parseAllowFromInput}
+              fieldPath="allow_from"
+              registerFlusher={registerArrayFieldFlusher}
+              resetVersion={arrayFieldResetVersion}
+            />
+          </CardContent>
+        </Card>
+      </ChannelSection>
     </div>
   )
 }

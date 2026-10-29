@@ -79,9 +79,26 @@ async function readChatCompletionStream(
   let usage: LLMResponse["usage"];
   const toolCalls: Array<{ id: string; type: "function"; function: { name: string; arguments: string }; extra_content?: Record<string, unknown> }> = [];
 
+  /** The parts of an OpenAI-style streaming chunk this parser reads. */
+  interface StreamChunk {
+    error?: string | { message?: string };
+    usage?: LLMResponse["usage"];
+    choices?: Array<{
+      finish_reason?: string;
+      delta?: {
+        content?: unknown;
+        tool_calls?: Array<{
+          index?: number;
+          id?: string;
+          function?: { name?: string; arguments?: unknown };
+          extra_content?: unknown;
+        }>;
+      };
+    }>;
+  }
   const handleData = (data: string) => {
     if (!data || data === "[DONE]") return;
-    let chunk: any;
+    let chunk: StreamChunk | null;
     try { chunk = JSON.parse(data); } catch { return; }
     if (chunk?.error) {
       const detail = typeof chunk.error === "string" ? chunk.error : chunk.error?.message;
@@ -287,7 +304,7 @@ export interface RegistryLike {
       tool_call_id?: string;
       tool_calls?: unknown[];
     }>,
-    options?: { extra?: Record<string, unknown>; timeoutMs?: number; signal?: AbortSignal; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>> },
+    options?: { extra?: Record<string, unknown>; timeoutMs?: number; onTextDelta?: (delta: string) => void; signal?: AbortSignal; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>> },
   ): Promise<LLMResponse>;
 }
 
@@ -306,9 +323,13 @@ export function createRegistryLLMClient(
         extra.tool_choice = callOptions.toolChoice ?? "auto";
       }
       if (callOptions.json) extra.response_format = { type: "json_object" };
+      if (typeof callOptions.temperature === "number") extra.temperature = callOptions.temperature;
+      if (typeof callOptions.maxCompletionTokens === "number") extra.max_completion_tokens = callOptions.maxCompletionTokens;
+      if (callOptions.thinkingLevel) extra.thinking_level = callOptions.thinkingLevel;
       return registry.complete(model, messages, {
         extra,
         timeoutMs: options.timeoutMs,
+        onTextDelta: callOptions.json ? undefined : callOptions.onTextDelta,
         signal: callOptions.signal,
         providerId: options.providerId,
         baseUrl: options.baseUrl,

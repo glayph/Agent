@@ -14,6 +14,9 @@ function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   };
 }
 const user = (content: string): EngineMessage[] => [{ role: "user", content }];
+/** Requests the run itself made; the separate "did the agent finish?" completion check is not counted. */
+const modelRequests = (llm: { requests: Array<{ messages: EngineMessage[] }> }) =>
+  llm.requests.filter((request) => !String(request.messages[0]?.content).includes("You classify whether the agent has completed"));
 
 describe("parseVerdict", () => {
   it("reads a verdict wrapped in prose or fences", () => {
@@ -95,22 +98,22 @@ describe("engine self-check", () => {
     ]);
     const second = await new AgentEngine({ llm: stubborn.client, tools: registry(), selfCheck: { maxRevisions: 1 } }).run({ history: user("save a note") });
     expect(second.finalText).toBe("draft two");
-    expect(stubborn.requests).toHaveLength(4);
+    expect(modelRequests(stubborn)).toHaveLength(4);
   });
 
   it("skips the check for chat-only runs and when disabled", async () => {
     const chat = scriptedLLM([{ text: "hello" }]);
     await new AgentEngine({ llm: chat.client, tools: registry(), selfCheck: {} }).run({ history: user("hi") });
-    expect(chat.requests).toHaveLength(1);
+    expect(modelRequests(chat)).toHaveLength(1);
 
     const off = scriptedLLM([{ calls: [{ name: "write_note", args: {} }] }, { text: "done" }]);
     await new AgentEngine({ llm: off.client, tools: registry(), selfCheck: () => false }).run({ history: user("go") });
-    expect(off.requests).toHaveLength(2);
+    expect(modelRequests(off)).toHaveLength(2);
   });
 
   it("is off unless the host enables it", async () => {
     const llm = scriptedLLM([{ calls: [{ name: "write_note", args: {} }] }, { text: "done" }]);
     await new AgentEngine({ llm: llm.client, tools: registry() }).run({ history: user("go") });
-    expect(llm.requests).toHaveLength(2);
+    expect(modelRequests(llm)).toHaveLength(2);
   });
 });

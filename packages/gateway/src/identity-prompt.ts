@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 
 export interface ToolGroupStatus {
@@ -20,12 +20,11 @@ const CAPABILITY_TEXT: Record<string, string> = {
 
 const GROUP_ORDER = ["terminal", "browser", "web_search", "filesystem", "memory", "skills", "goals", "control", "computer"]
 
-const IDENTITY_FILES = ["SOUL.md", "AGENTS.md", "IDENTITY.md", "USER.md", "TOOLS.md"]
+const identityFileCache = new Map<string, { signature: string; content: string }>()
 
 function readIdentityFiles(dirs: string[], specialistId = "miki"): string {
   const dir = dirs.find((candidate) => existsSync(candidate))
   if (!dir) return ""
-  const parts: string[] = []
   const files = [
     { file: "SOUL.md", label: "SOUL" },
     { file: "AGENTS.md", label: "AGENTS" },
@@ -34,6 +33,19 @@ function readIdentityFiles(dirs: string[], specialistId = "miki"): string {
     { file: "USER.md", label: "USER" },
     { file: "TOOLS.md", label: "TOOLS" },
   ]
+  const signature = files.map((entry) => {
+    try {
+      const stat = statSync(path.join(dir, entry.file))
+      return `${entry.file}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`
+    } catch {
+      return `${entry.file}:missing`
+    }
+  }).join("|")
+  const cacheKey = `${dir}\0${specialistId}`
+  const cached = identityFileCache.get(cacheKey)
+  if (cached?.signature === signature) return cached.content
+
+  const parts: string[] = []
   for (const entry of files) {
     try {
       const text = readFileSync(path.join(dir, entry.file), "utf8").trim()
@@ -42,7 +54,10 @@ function readIdentityFiles(dirs: string[], specialistId = "miki"): string {
       /* optional identity files are fine to omit */
     }
   }
-  return parts.join("\n\n")
+  const content = parts.join("\n\n")
+  identityFileCache.set(cacheKey, { signature, content })
+  if (identityFileCache.size > 64) identityFileCache.clear()
+  return content
 }
 
 /**

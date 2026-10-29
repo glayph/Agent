@@ -13,6 +13,7 @@
     "skills": "Skills",
     "tools": "Ferramentas",
     "monitor": "Monitor",
+    "activity": "Atividade",
     "services": "Serviços",
     "channels_group": "Canais",
     "show_more_channels": "Mais",
@@ -26,7 +27,10 @@
     "toggle_sidebar": "Alternar barra lateral",
     "channels": "Canais",
     "plugins": "Plugins",
-    "about": "Sobre"
+    "about": "Sobre",
+    "workspace_group": "Área de trabalho",
+    "manage_group": "Gerenciar",
+    "system_group": "Sistema"
   },
   "launcherLogin": {
     "title": "Entrar",
@@ -35,10 +39,12 @@
     "passwordPlaceholder": "Digite a senha",
     "submit": "Entrar",
     "errorInvalid": "Senha incorreta. Tente novamente.",
-    "errorNetwork": "Erro de rede. Tente novamente."
+    "errorNetwork": "Erro de rede. Tente novamente.",
+    "showPassword": "Mostrar senha",
+    "hidePassword": "Ocultar senha"
   },
   "launcherSetup": {
-    "title": "Definir senha do dashboard",
+    "title": "Criar senha",
     "description": "Escolha uma senha para proteger o acesso a este dashboard. Você a usará toda vez que entrar.",
     "passwordLabel": "Senha",
     "passwordPlaceholder": "Pelo menos 8 caracteres",
@@ -113,11 +119,15 @@
       "edit": "Editar mensagem",
       "delete": "Excluir mensagem",
       "deleteConfirmTitle": "Excluir mensagem?",
-      "deleteConfirmDescription": "Esta mensagem será removida da conversa.",
+      "deleteConfirmDescription": "Apenas esta mensagem será removida do chat. As outras mensagens e a memória salva permanecerão inalteradas.",
       "fork": "Criar ramificação daqui",
       "retry": "Tentar novamente",
       "retryUnavailable": "Conecte o chat antes de tentar novamente",
-      "modelInfo": "Modelo {{model}}"
+      "rateUp": "Boa resposta",
+      "rateDown": "Resposta ruim",
+      "modelInfo": "Modelo {{model}}",
+      "more": "Mais ações da mensagem",
+      "modelLabel": "Modelo"
     },
     "enableCodeWrap": "Quebrar linhas",
     "disableCodeWrap": "Desativar quebra",
@@ -211,8 +221,8 @@
       "noMemory": "O uso de contexto aparecera apos o gateway relatar o orcamento de tokens.",
       "metadata": "Metadados do agente"
     },
-    "attachImage": "Adicionar imagens",
-    "removeImage": "Remover imagem",
+    "attachImage": "Anexar arquivos",
+    "removeImage": "Remover anexo",
     "uploadedImage": "Imagem enviada",
     "attachedImage": "Imagem anexada",
     "downloadFile": "Baixar arquivo",
@@ -220,6 +230,10 @@
     "invalidImage": "\"{{name}}\" não é um arquivo de imagem suportado.",
     "imageTooLarge": "\"{{name}}\" excede o limite de {{size}}.",
     "imageReadFailed": "Falha ao ler \"{{name}}\".",
+    "attachmentLimit": "Você pode anexar até 16 arquivos por mensagem.",
+    "attachmentSlots": "Você pode anexar mais {{count}} arquivo(s).",
+    "attachmentTotalTooLarge": "Os anexos devem totalizar até 100 MB por mensagem.",
+    "attachmentUploadFailed": "Não foi possível enviar \"{{name}}\".",
     "empty": {
       "noConfiguredModel": "Nenhum Modelo Configurado",
       "noConfiguredModelDescription": "Você precisa configurar pelo menos um modelo de IA com uma API Key antes de iniciar o chat.",
@@ -234,7 +248,20 @@
       "oauth": "OAuth",
       "local": "Local"
     },
-    "assistantDetailMenuTitle": "Detalhes da resposta"
+    "assistantDetailMenuTitle": "Detalhes da resposta",
+    "delivery": {
+      "processing": "Miki está processando esta solicitação.",
+      "processingActivity": "Miki está trabalhando; esta mensagem será lida após a etapa atual ({{activity}})."
+    },
+    "tools": {
+      "used": "{{count}} ferramentas usadas",
+      "statusRunning": "Em execução",
+      "statusSuccess": "Todas as ferramentas foram bem-sucedidas",
+      "failedCount": "{{count}} com falha",
+      "durationMs": "{{value}} ms",
+      "durationSeconds": "{{value}} s",
+      "durationMinutes": "{{minutes}} min {{seconds}} s"
+    }
   },
   "header": {
     "logout": {
@@ -293,9 +320,11 @@
     "restartRequiredTitle": "Reinício do gateway necessário",
     "restartRequiredDesc": "A configuração mais recente de {{name}} foi salva. Reinicie o gateway para que tenha efeito.",
     "showMore": "Mostrar mais {{count}}",
-    "showMore_plural": "Mostrar mais {{count}}",
+    "showMore_one": "Mostrar mais {{count}}",
+    "showMore_other": "Mostrar mais {{count}}",
     "showOlder": "Mostrar {{count}} anteriores",
-    "showOlder_plural": "Mostrar {{count}} anteriores"
+    "showOlder_one": "Mostrar {{count}} anteriores",
+    "showOlder_other": "Mostrar {{count}} anteriores"
   },
   "command": {
     "open": "Abrir paleta de comandos",
@@ -422,7 +451,8 @@
       "errorDuplicateModelName": "Apelido de modelo já existe. Use um nome diferente.",
       "saveError": "Falha ao adicionar modelo",
       "saveSuccess": "Modelo adicionado.",
-      "confirm": "Adicionar Modelo"
+      "confirm": "Adicionar Modelo",
+      "batchSaveSuccess": "{{count}} modelos adicionados."
     },
     "delete": {
       "title": "Excluir Modelo?",
@@ -486,13 +516,21 @@
       "retry": "Tentar novamente",
       "filterPlaceholder": "Filtrar modelos…",
       "found": "Encontrado {{count}} modelo",
-      "found_plural": "Encontrados {{count}} modelos",
+      "found_one": "Encontrado {{count}} modelo",
+      "found_other": "Encontrados {{count}} modelos",
       "shown": "({{count}} exibidos)",
       "selectAll": "Selecionar todos",
       "deselectAll": "Desmarcar todos",
       "fill": "Preencher {{count}} Modelo Selecionado",
-      "fill_plural": "Preencher {{count}} Modelos Selecionados",
-      "failed": "Falha ao buscar modelos"
+      "fill_one": "Preencher {{count}} Modelo Selecionado",
+      "fill_other": "Preencher {{count}} Modelos Selecionados",
+      "failed": "Falha ao buscar modelos",
+      "alreadyAdded": "Já adicionado",
+      "selectedCount": "{{count}} selecionados",
+      "addSelected": "Adicionar {{count}} modelos",
+      "selectedModels": "Modelos selecionados",
+      "failedBadge": "Falhou",
+      "removeSelected": "Remover {{model}}"
     },
     "catalog": {
       "button": "Catálogos Salvos",
@@ -511,7 +549,8 @@
       "deleteSuccess": "Catálogo excluído.",
       "refresh": "Atualizar do upstream",
       "found": "Encontrado {{count}} modelo",
-      "found_plural": "Encontrados {{count}} modelos",
+      "found_one": "Encontrado {{count}} modelo",
+      "found_other": "Encontrados {{count}} modelos",
       "selectAll": "Selecionar todos",
       "deselectAll": "Desmarcar todos",
       "addSelected": "Adicionar {{count}} Selecionados",
@@ -559,6 +598,16 @@
       "noProvider": "Nenhum provider encontrado.",
       "noCatalog": "Catálogo de providers indisponível.",
       "local": "local"
+    },
+    "local": {
+      "ggufModel": "Modelo GGUF",
+      "llamaServer": "llama-server",
+      "browseModels": "Procurar modelos",
+      "browseExecutable": "Procurar executável",
+      "port": "Porta",
+      "context": "Contexto",
+      "gpuLayers": "Camadas de GPU",
+      "autoStart": "Iniciar automaticamente"
     }
   },
   "channels": {
@@ -654,6 +703,7 @@
       "enableLabel": "Habilitar canal",
       "probeTitle": "Runtime probe",
       "probeRun": "Run probe",
+      "quickCheck": "Verificação rápida",
       "probing": "Probing",
       "probeError": "Failed to run runtime probe",
       "probeSaveFirst": "Save changes before running the runtime probe.",
@@ -665,7 +715,37 @@
       "runtimeLive": "O adaptador ativo está disponível.",
       "runtimeUnavailable": "A configuração pode ser salva, mas não há adaptador de mensagens ativo para este canal.",
       "runtimeNotConfigured": "Informe as credenciais necessárias para ativar este adaptador.",
-      "runtimeDisconnected": "Configurado, mas o adaptador não está conectado. Verifique a sondagem de runtime e os logs do gateway."
+      "runtimeDisconnected": "Configurado, mas o adaptador não está conectado. Verifique a sondagem de runtime e os logs do gateway.",
+      "messagesNotDelivered": "As configurações podem ser salvas, mas este canal ainda não entrega mensagens em tempo de execução.",
+      "allowFromWarning": "allow_from está vazio. O canal pode parecer conectado, mas ignorará todos os remetentes até que IDs confiáveis sejam adicionados.",
+      "probeDetails": "Detalhes",
+      "statusBlock": "Status da conexão",
+      "connectionConnected": "Conectado",
+      "connectionConnecting": "Conectando",
+      "connectionDisabled": "Desativado",
+      "connectionError": "Erro de conexão",
+      "connectionSavedOnly": "Configurações salvas; entrega ao vivo indisponível",
+      "connectionNeedsSetup": "Precisa de configuração",
+      "credentialsTitle": "Credenciais e configurações",
+      "credentialsDescription": "Configure as credenciais necessárias e o comportamento opcional do canal.",
+      "probeStatus": {
+        "ready": "Pronto",
+        "disabled": "Desativado",
+        "needs_config": "Configuração necessária",
+        "auth_failed": "Falha de autenticação",
+        "webhook_failed": "Falha no webhook",
+        "rate_limited": "Limite de solicitações atingido",
+        "runtime_error": "Erro de execução",
+        "partial": "Parcial",
+        "not_implemented": "Somente configuração"
+      },
+      "liveAdapterCheck": "Verificação do adaptador ao vivo",
+      "testConnection": "Testar conexão",
+      "lastTest": "Último teste",
+      "neverTested": "Ainda não testado",
+      "probeMode": "Modo: {{mode}}",
+      "probeLatency": "{{latency}} ms",
+      "sendCheck": "Envio: {{status}}"
     },
     "form": {
       "desc": {
@@ -753,6 +833,31 @@
     },
     "validation": {
       "requiredField": "Este campo é obrigatório."
+    },
+    "catalog": {
+      "description": "Configure um canal e verifique seu estado em tempo de execução. Credenciais não garantem a entrega de mensagens.",
+      "searchPlaceholder": "Buscar canais…",
+      "configuredCount": "{{count}}/{{total}} configurados",
+      "noResults": "Nenhum canal corresponde à busca.",
+      "groups": {
+        "live": "Ativos",
+        "needsSetup": "Precisa de configuração",
+        "partial": "Somente salvo / Parcial",
+        "notConfigured": "Não configurado"
+      },
+      "capabilityLiveAdapter": "Adaptador ativo",
+      "capabilityPartial": "Parcial",
+      "capabilityConfigOnly": "Somente configuração",
+      "configure": "Configurar",
+      "truthNotice": "Somente canais com adaptador implementado podem trocar mensagens ao vivo. Canais parciais e somente de configuração salvam ajustes, mas ainda não oferecem entrega completa."
+    },
+    "section": {
+      "credentials": "Credenciais",
+      "credentialsDesc": "Chaves e tokens necessários para este canal.",
+      "access": "Acesso",
+      "accessDesc": "Somente os IDs de remetente listados aqui podem falar com o agente.",
+      "advanced": "Avançado",
+      "advancedDesc": "Comportamento opcional. Os padrões funcionam na maioria dos casos."
     }
   },
   "drive": {
@@ -875,7 +980,8 @@
     "trace": {
       "title": "Linha do Tempo",
       "events": "{{count}} evento",
-      "events_plural": "{{count}} eventos"
+      "events_one": "{{count}} evento",
+      "events_other": "{{count}} eventos"
     },
     "status": {
       "pending": "Pendente",
@@ -1006,10 +1112,12 @@
       "placeholder": "Buscar arquivos indexados",
       "submit": "Buscar",
       "resultsFound": "{{count}} resultado encontrado",
-      "resultsFound_plural": "{{count}} resultados encontrados",
+      "resultsFound_one": "{{count}} resultado encontrado",
+      "resultsFound_other": "{{count}} resultados encontrados",
       "scanning": "Escaneando {{path}}",
       "roots": "{{count}} raiz",
-      "roots_plural": "{{count}} raizes"
+      "roots_one": "{{count}} raiz",
+      "roots_other": "{{count}} raizes"
     },
     "status": {
       "scanned": "Escaneados",
@@ -1036,16 +1144,57 @@
     "memory": {
       "title": "Memória",
       "reindex": "Reindexar",
-      "load_error": "Não foi possível carregar os diagnósticos de memória.",
-      "search_title": "Busca seletiva de memória",
-      "search_description": "A busca é limitada ao runtime ativo e retorna apenas blocos pontuados e controlados.",
-      "search_placeholder": "Buscar fatos, tarefas, regras ou habilidades lembradas…",
-      "chunks_title": "Blocos de memória",
-      "chunks_description": "Blocos ativos recentes agrupados por região funcional.",
-      "inspect_title": "Inspetor de bloco",
-      "inspect_empty": "Selecione um bloco para inspecionar a origem e os vínculos do grafo.",
-      "forget_confirm": "Esquecer este bloco de memória? Ele será excluído das próximas buscas.",
-      "forgotten": "Bloco de memória esquecido."
+      "load_error": "Não foi possível carregar o diagnóstico da memória.",
+      "search_title": "Buscar na memória",
+      "search_description": "A busca fica limitada ao runtime ativo e retorna registros pontuados.",
+      "search_placeholder": "Busque fatos, tarefas, regras ou habilidades lembradas…",
+      "chunks_title": "Registros de memória",
+      "chunks_description": "Registros ativos recentes agrupados por região funcional.",
+      "inspect_title": "Detalhes do registro",
+      "inspect_empty": "Selecione um registro para ver a origem e os vínculos do grafo.",
+      "forget_confirm": "Esquecer este registro? Ele não será usado em buscas futuras.",
+      "forgotten": "Registro de memória esquecido.",
+      "score": "pontuação",
+      "depth": "Profundidade",
+      "retry": "Tentar novamente",
+      "search_button": "Buscar",
+      "selected": "selecionados",
+      "candidates": "candidatos",
+      "tokens": "tokens",
+      "milliseconds": "ms",
+      "no_search_matches": "Nenhum resultado correspondente.",
+      "no_chunks_region": "Não há registros nesta região.",
+      "confidence": "Confiança",
+      "importance": "Importância",
+      "uses": "Usos",
+      "edges": "Vínculos",
+      "created": "Criado",
+      "forget_chunk": "Esquecer registro",
+      "scope_fixed_notice": "A memória é limitada ao escopo ativo. Valores de credenciais nunca são exibidos aqui.",
+      "search_failed": "Falha na busca da memória.",
+      "inspect_failed": "Não foi possível inspecionar este registro.",
+      "reindex_failed": "Falha ao reindexar.",
+      "forget_failed": "Não foi possível esquecer este registro.",
+      "reindexed_count": "{{count}} registros reindexados.",
+      "metrics": {
+        "chunks": "Registros",
+        "chunks_detail": "Registros seletivos ativos",
+        "postings": "Entradas do índice",
+        "postings_detail": "Entradas do índice invertido",
+        "edges": "Arestas do grafo",
+        "edges_detail": "Vínculos de navegação limitados",
+        "retrievals": "Recuperações",
+        "retrievals_detail": "Rastros de diagnóstico"
+      },
+      "regions": {
+        "all": "Todos",
+        "long_term": "Longo prazo",
+        "day_to_day": "Dia a dia",
+        "static": "Estático",
+        "skill": "Habilidades",
+        "rule_emotion": "Regras e emoções"
+      },
+      "region_filter": "Filtrar por região da memória"
     },
     "health": {
       "title": "Saude",
@@ -1462,6 +1611,150 @@
       "waiting_gateway": "Aguardando o gateway iniciar…",
       "no_logs": "Nenhum log registrado ainda.",
       "line_count": "{{count}} linhas"
+    },
+    "activity": {
+      "title": "Atividade",
+      "runningSummary": "{{count}} / {{max}} em execução",
+      "paused": "Pausado",
+      "runningGoals": "Metas em execução",
+      "noRunningGoals": "Nenhuma meta em execução.",
+      "liveToolCalls": "Chamadas de ferramenta ativas",
+      "noToolCalls": "Ainda não há chamadas de ferramenta.",
+      "screen": "Tela",
+      "capture": "Capturar",
+      "autoRefresh": "Atualização automática",
+      "cronSchedules": "Tarefas agendadas",
+      "cronHelp": "Use campos de minuto, hora, dia, mês e dia da semana. Os agendamentos criam tarefas do Miki; não executam comandos shell arbitrários.",
+      "taskTitle": "Título da tarefa",
+      "cronExpression": "Expressão Cron",
+      "timezone": "Fuso horário",
+      "missedRunPolicy": "Política de execução perdida",
+      "skipMissed": "Ignorar execuções perdidas",
+      "runOnce": "Executar uma vez após recuperação",
+      "descriptionOptional": "Descrição (opcional)",
+      "taskPlaceholder": "Revisão matinal durante a semana",
+      "descriptionPlaceholder": "O que o Miki deve verificar ou realizar?",
+      "createSchedule": "Agendar tarefa",
+      "noSchedules": "Ainda não há tarefas agendadas.",
+      "next": "Próxima",
+      "status": "Status",
+      "missed": "Perdidas",
+      "lastRun": "Última execução",
+      "resume": "Retomar",
+      "pause": "Pausar",
+      "discard": "Descartar",
+      "learnedRules": "Regras aprendidas",
+      "noRules": "Ainda não há regras. Tudo é permitido até você orientar o Miki.",
+      "removeRule": "Remover regra {{category}}",
+      "currentScreen": "Tela atual do computador",
+      "goalLabel": "Meta",
+      "statuses": {
+        "unknown": "Desconhecido",
+        "running": "Em execução",
+        "retrying": "Tentando novamente",
+        "failed": "Falhou",
+        "paused": "Pausado",
+        "scheduled": "Agendado",
+        "completed": "Concluído",
+        "succeeded": "Concluído",
+        "success": "Sucesso",
+        "pending": "Pendente",
+        "cancelled": "Cancelado",
+        "canceled": "Cancelado",
+        "blocked": "Bloqueado",
+        "error": "Erro",
+        "waiting": "Aguardando",
+        "queued": "Na fila",
+        "done": "Concluído",
+        "active": "Ativo"
+      },
+      "decisions": {
+        "act": "Executar",
+        "ask": "Perguntar antes",
+        "block": "Bloquear"
+      }
+    },
+    "monitor": {
+      "inspector": "Inspetor de atividade ao vivo",
+      "liveInspector": "Inspetor ao vivo",
+      "closeInspector": "Fechar inspetor de atividade",
+      "status": "Status",
+      "duration": "Duração",
+      "started": "Iniciado",
+      "plannerLevel": "Nível do planejador",
+      "parallel": "Executando em paralelo com atividades relacionadas",
+      "action": "Ação",
+      "input": "Entrada",
+      "result": "Resultado",
+      "outputPreview": "Prévia da saída",
+      "error": "Erro",
+      "detailPending": "Os detalhes aparecerão aqui conforme o Miki receber eventos de execução.",
+      "run": "Execução",
+      "node": "Nó",
+      "attempt": "Tentativa",
+      "openConversation": "Abrir conversa",
+      "noActivity": "Nenhuma atividade ainda",
+      "noActivityDescription": "Inicie uma tarefa no chat para ver as etapas aqui.",
+      "openChat": "Abrir chat"
+    },
+    "plugins": {
+      "catalog": "Catálogo",
+      "coreServices": "Serviços principais",
+      "healthLogs": "Saúde e logs",
+      "availablePlugins": "Plugins disponíveis",
+      "availablePluginsDescription": "Consulte o catálogo do runtime. As ações de configuração abrem a página de gerenciamento correspondente.",
+      "searchPlugins": "Buscar plugins",
+      "allCategories": "Todas as categorias",
+      "providers": "Provedores",
+      "channels": "Canais",
+      "skillsTools": "Skills e ferramentas",
+      "loadingCatalog": "Carregando catálogo de plugins…",
+      "catalogUnavailable": "O catálogo de plugins está indisponível.",
+      "noPluginsMatch": "Nenhum plugin corresponde ao filtro atual.",
+      "retry": "Tentar novamente",
+      "moreInformation": "Mais informações",
+      "coreServicesDescription": "Estado dos serviços principais informado pelo runtime.",
+      "loadingCore": "Carregando serviços principais…",
+      "coreUnavailable": "Os dados dos serviços principais estão indisponíveis.",
+      "noCoreMetadata": "Não há metadados dos serviços principais.",
+      "restartRequested": "Reinicialização solicitada",
+      "restartFailed": "Falha ao reiniciar",
+      "healthLogsDescription": "Saúde dos plugins, serviços principais e logs recentes do gateway.",
+      "restart": "Reiniciar",
+      "loadingHealth": "Carregando saúde e logs…",
+      "healthUnavailable": "Os dados de saúde estão indisponíveis.",
+      "noPluginHealth": "Nenhuma verificação de saúde de plugin foi relatada.",
+      "services": "Serviços",
+      "noServiceHealth": "Nenhuma saúde de serviço foi relatada.",
+      "recentLogs": "Logs recentes",
+      "noRecentLogs": "Não há logs recentes.",
+      "open": "Abrir",
+      "authentication": "Autenticação",
+      "automation": "Automação",
+      "observability": "Observabilidade",
+      "storage": "Armazenamento",
+      "security": "Segurança",
+      "workflow": "Fluxo de trabalho",
+      "notifications": "Notificações",
+      "sectionNavigation": "Seções de plugins",
+      "status": {
+        "functional": "Funcional",
+        "enabled": "Ativado",
+        "ready": "Pronto",
+        "healthy": "Saudável",
+        "pass": "Aprovado",
+        "partial": "Parcial",
+        "config_only": "Somente configuração",
+        "degraded": "Degradado",
+        "warn": "Atenção",
+        "needs_config": "Requer configuração",
+        "failed": "Falhou",
+        "error": "Erro",
+        "blocked": "Bloqueado",
+        "auth_failed": "Falha de autenticação",
+        "runtime_error": "Erro de runtime",
+        "unknown": "Desconhecido"
+      }
     }
   }
 }

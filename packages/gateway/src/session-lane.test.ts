@@ -1,4 +1,4 @@
-import { createKeyedLane } from "./session-lane.js";
+import { createKeyedLane, LaneWaitTimeoutError } from "./session-lane.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -37,13 +37,14 @@ describe("createKeyedLane", () => {
     again();
   });
 
-  it("a stuck holder cannot block the next one beyond the wait cap", async () => {
+  it("rejects a waiter that reaches the cap instead of allowing concurrent entry", async () => {
     const lane = createKeyedLane();
     await lane.acquire("stuck"); // never released
     const started = Date.now();
-    const release = await lane.acquire("stuck", { maxWaitMs: 40 });
+    const attempt = lane.acquire("stuck", { maxWaitMs: 40 });
+    await expect(attempt).rejects.toBeInstanceOf(LaneWaitTimeoutError);
     expect(Date.now() - started).toBeGreaterThanOrEqual(30);
-    release();
+    expect(lane.pending("stuck")).toBe(1);
   });
 
   it("counts waiting holders", async () => {

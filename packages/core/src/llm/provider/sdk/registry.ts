@@ -251,6 +251,7 @@ export class ProviderPluginRegistry {
     options: {
       extra?: Record<string, unknown>;
       timeoutMs?: number;
+      onTextDelta?: (delta: string) => void;
       signal?: AbortSignal;
       credentialProfile?: string;
       providerId?: string;
@@ -283,6 +284,9 @@ export class ProviderPluginRegistry {
       credentials,
       extra: options.extra,
       timeoutMs: options.timeoutMs,
+      ...(plugin.manifest.capabilities.streaming && options.onTextDelta
+        ? { onTextDelta: options.onTextDelta }
+        : {}),
       signal: options.signal,
       context: this.context(),
     };

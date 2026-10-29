@@ -14,24 +14,28 @@ interface ChatMessageProps {
   message: ChatMessageModel
   isStreaming: boolean
   selected: boolean
+  subtleActions?: boolean
   canRetry: boolean
   onSelect: (messageId: string) => void
   onEdit: (message: ChatMessageModel) => void
   onDelete: (messageId: string) => void
   onFork: (messageId: string) => void
   onRetry: (messageId: string) => void
+  onInspectMessage: (messageId: string) => void
 }
 
 export const ChatMessage = memo(function ChatMessage({
   message,
   isStreaming,
   selected,
+  subtleActions = false,
   canRetry,
   onSelect,
   onEdit,
   onDelete,
   onFork,
   onRetry,
+  onInspectMessage,
 }: ChatMessageProps) {
   return (
     <article
@@ -63,12 +67,13 @@ export const ChatMessage = memo(function ChatMessage({
             messageTotal={message.messageTotal}
             timestamp={message.timestamp}
             selected={selected}
+            subtleActions={subtleActions}
             onSelect={() => onSelect(message.id)}
             canRetry={canRetry}
-            onEdit={() => onEdit(message)}
             onDelete={() => onDelete(message.id)}
             onFork={() => onFork(message.id)}
             onRetry={() => onRetry(message.id)}
+            onInspect={() => onInspectMessage(message.id)}
           />
         </Suspense>
       ) : (
@@ -77,8 +82,6 @@ export const ChatMessage = memo(function ChatMessage({
           content={message.content}
           attachments={message.attachments}
           timestamp={message.timestamp}
-          deliveryStatus={message.deliveryStatus}
-          deliveryDetail={message.deliveryDetail}
           selected={selected}
           onSelect={() => onSelect(message.id)}
           canRetry={canRetry}

@@ -1,5 +1,9 @@
 # identity/ — Workspace-Identity Files (upgrade step 01)
 
+> Note: some source paths cited below (`packages/core/src/identity/`, `packages/core/src/tools/executor/`,
+> `packages/core/src/agent.ts`) are not present in this tree; identity loading now lives in
+> `packages/gateway/src/identity-prompt.ts`. Treat those references as historical.
+
 This is Miki's version of OpenClaw's SOUL/AGENTS/IDENTITY/USER/TOOLS
 convention: plain, human-editable files that give every agent run the same
 starting context, loaded once per turn and assembled into a prompt prefix.
@@ -114,3 +118,13 @@ This is independent of the older SQLite/TKG memory (`packages/memory/`),
 which keeps running unchanged — its writes just move to a background queue
 (`AgentOrchestrator.fileMemory.background(...)`) so they can never delay a
 turn. Config: `agent.memory.files.*` in `config/agent.yaml`.
+
+## Autonomy files (idle loop)
+
+| File | Used by | Notes |
+|---|---|---|
+| `INTERESTS.md` | idle decision (curiosity cycle) | Topics Miki researches in free time. Editable by you and by Miki. Results go to `identity/memory/discoveries/<date>-<slug>.md`. |
+| `DRIVES.md` | idle decision | Miki's own motivations (YAML front-matter: `name`, `description`, `urge_per_hour`, `max_urge`). The highest urge decides what an idle cycle works on. |
+| `USER.md` | idle decision, chat | What Miki knows about you. A template ships with the install. |
+| `memory/environment.md` | idle decision | Written once by the first-run "Explore my environment" goal (empty memory and no drive history); not shipped. |
+

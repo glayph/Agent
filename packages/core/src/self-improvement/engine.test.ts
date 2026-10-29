@@ -159,6 +159,9 @@ describe("SelfImprovementEngine durable learning", () => {
       {},
       async () => ({ choices: [] }),
       { enabled: true, behavior_learning: { mode: "observe", min_samples: 3 } },
+      // The engine keeps the random source it was built with, so it has to be injected here
+      // (spying on Math.random later has no effect and made this test depend on luck).
+      { random: () => 0.99 },
     );
     const first = engine.recordExperience({
       actionKey: "model:local-lfm",
@@ -183,16 +186,11 @@ describe("SelfImprovementEngine durable learning", () => {
         "model:gemini": { count: 3, averageReward: 0.2 },
       },
     });
-    const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.99);
-    try {
-      const decision = engine.chooseAction({
-        context: "complex",
-        candidates: ["model:local-lfm", "model:gemini"],
-        baselineAction: "model:gemini",
-      });
-      expect(decision.actionKey).toBe("model:local-lfm");
-    } finally {
-      randomSpy.mockRestore();
-    }
+    const decision = engine.chooseAction({
+      context: "complex",
+      candidates: ["model:local-lfm", "model:gemini"],
+      baselineAction: "model:gemini",
+    });
+    expect(decision.actionKey).toBe("model:local-lfm");
   });
 });

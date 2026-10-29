@@ -1,31 +1,34 @@
 [Unit]
-StartLimitIntervalSec=120
-StartLimitBurst=10
-Description=Miki local llama.cpp Gemma server
+StartLimitIntervalSec=0
+Description=Miki local llama.cpp server
 PartOf=miki.target
 After=local-fs.target miki-memory.service
 Wants=miki-memory.service
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=@MIKI_USER@
+Group=@MIKI_GROUP@
 WorkingDirectory=@MIKI_ROOT@
 EnvironmentFile=-/etc/miki/miki.env
-ExecStart=@MIKI_ROOT@/packages/core/dist/llm/local/native/linux-x64/llama-server --host 127.0.0.1 --port 39200 --no-ui --model /home/ubuntu/.local/share/miki/models/google_gemma-4-E2B-it-Q4_0.gguf --alias local-model --ctx-size 16384 --threads 4
-ExecStartPre=/usr/bin/test -x @MIKI_ROOT@/packages/core/dist/llm/local/native/linux-x64/llama-server
-ExecStartPre=/usr/bin/test -f /home/ubuntu/.local/share/miki/models/google_gemma-4-E2B-it-Q4_0.gguf
+# Model, binary and sizing come from /etc/miki/miki.env (MIKI_LLAMA_*); nothing model-specific is hardcoded here.
+ExecStart=/bin/sh -c 'exec "${MIKI_LLAMA_SERVER_BIN:-@MIKI_ROOT@/packages/core/dist/llm/local/native/linux-x64/llama-server}" --host 127.0.0.1 --port "${MIKI_LLAMA_PORT:-39200}" --no-ui --model "$MIKI_LLAMA_MODEL_PATH" --alias local-model --ctx-size "${MIKI_LLAMA_CONTEXT_SIZE:-16384}" --threads "${MIKI_LLAMA_THREADS:-4}"'
+ExecStartPre=/bin/sh -c 'test -x "${MIKI_LLAMA_SERVER_BIN:-@MIKI_ROOT@/packages/core/dist/llm/local/native/linux-x64/llama-server}" && test -n "$MIKI_LLAMA_MODEL_PATH" && test -f "$MIKI_LLAMA_MODEL_PATH"'
 Restart=always
 RestartSec=5s
 TimeoutStartSec=90s
 TimeoutStopSec=20s
 KillSignal=SIGTERM
 SuccessExitStatus=0 143
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
+# Whole file system read-only except the paths below (the model and the binary are only read).
+# The leading "-" lets the unit start when ~/.cache does not exist yet.
+ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=@MIKI_ROOT@/data @MIKI_ROOT@/logs /home/ubuntu/.cache
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=@MIKI_ROOT@/data @MIKI_ROOT@/logs -@MIKI_HOME@/.cache
 MemoryMax=8G
 CPUQuota=400%
 TasksMax=256

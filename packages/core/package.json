@@ -46,6 +46,10 @@
       "import": "./dist/paths.js",
       "types": "./dist/paths.d.ts"
     },
+    "./permissions": {
+      "import": "./dist/permissions/permission-ledger.js",
+      "types": "./dist/permissions/permission-ledger.d.ts"
+    },
     "./skills": {
       "import": "./dist/skills-manager/index.js",
       "types": "./dist/skills-manager/index.d.ts"
@@ -69,6 +73,10 @@
     "./self-improvement": {
       "import": "./dist/self-improvement/index.js",
       "types": "./dist/self-improvement/index.d.ts"
+    },
+    "./token-budget-manager": {
+      "import": "./dist/token-budget-manager.js",
+      "types": "./dist/token-budget-manager.d.ts"
     },
     "./memory-files": {
       "import": "./dist/memory-files/index.js",

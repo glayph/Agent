@@ -88,6 +88,7 @@ describe("buildPluginMarketplaceReadinessReport", () => {
         "  plugin_contracts:",
         "    allow_execution: true",
         "    allow_network: true",
+        "    allow_unsafe_host_execution: true", // network plugins need an enforced sandbox or this explicit opt-in
       ].join("\n"),
     );
     await registerPlugin(workspaceDir, {

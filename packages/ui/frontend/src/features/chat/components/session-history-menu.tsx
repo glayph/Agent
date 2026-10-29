@@ -19,7 +19,7 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 
 import { type SessionSummary, updateSessionMetadata } from "@/api/sessions"
 import { copyText } from "@/lib/clipboard"
@@ -337,17 +337,17 @@ export function SessionHistoryMenu({
     try {
       await updateSessionMetadata(sessionId, { pinned: !wasPinned })
       writePinnedSessionIds(next)
-      toast.success(
+      notify.success(
         wasPinned
           ? t("chat.historyActions.unpinned", { defaultValue: "Unpinned" })
-          : t("chat.historyActions.pinned", { defaultValue: "Pinned" }),
+          : t("chat.historyActions.pinned", { defaultValue: "Pinned" }), { id: "session-history-menu:success:togglePinSession" }
       )
     } catch {
       setPinnedSessionIds(pinnedSessionIds)
-      toast.error(
+      notify.error(
         t("chat.historyActions.updateFailed", {
           defaultValue: "Could not update session metadata",
-        }),
+        }), { id: "session-history-menu:error:chat.historyActions.updateFailed" }
       )
     }
   }
@@ -381,8 +381,8 @@ export function SessionHistoryMenu({
         return next
       })
       setRenameTarget(null)
-      toast.success(
-        t("chat.historyActions.renamed", { defaultValue: "Renamed" }),
+      notify.success(
+        t("chat.historyActions.renamed", { defaultValue: "Renamed" }), { id: "session-history-menu:success:chat.historyActions.renamed" }
       )
     } catch {
       setRenamedSessions((current) => {
@@ -391,10 +391,10 @@ export function SessionHistoryMenu({
         else next[target.id] = previousTitle
         return next
       })
-      toast.error(
+      notify.error(
         t("chat.historyActions.updateFailed", {
           defaultValue: "Could not update session metadata",
-        }),
+        }), { id: "session-history-menu:error:chat.historyActions.updateFailed" }
       )
     }
   }
@@ -407,16 +407,16 @@ export function SessionHistoryMenu({
         : `${title}\n${window.location.origin}${window.location.pathname}#session=${encodeURIComponent(session.id)}`
     const copied = await copyText(shareText)
     if (copied) {
-      toast.success(
+      notify.success(
         t("chat.historyActions.shareCopied", {
           defaultValue: "Share link copied",
-        }),
+        }), { id: "session-history-menu:success:chat.historyActions.shareCopied" }
       )
     } else {
-      toast.error(
+      notify.error(
         t("chat.historyActions.shareFailed", {
           defaultValue: "Failed to copy share link",
-        }),
+        }), { id: "session-history-menu:error:chat.historyActions.shareFailed" }
       )
     }
   }
@@ -436,7 +436,7 @@ export function SessionHistoryMenu({
         return next
       })
     } catch (error) {
-      toast.error("Failed to delete session")
+      notify.error("Failed to delete session", { id: "session-history-menu:error:failed-to-delete-session" })
       throw error
     }
   }

@@ -7,14 +7,12 @@ import {
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
-
 import {
   type ModelInfo,
   type ModelProviderOption,
   getModels,
   setDefaultModel,
- } from "@/api/models"
+} from "@/api/models"
 import { PageHeader } from "@/app/layout/page-header"
 import { AddModelSheet } from "@/features/models/components/add-model-sheet"
 import { CatalogDialog } from "@/features/models/components/catalog-dialog"
@@ -23,6 +21,7 @@ import { EditModelSheet } from "@/features/models/components/edit-model-sheet"
 import { buildProviderGroups } from "@/features/models/components/models-page-model"
 import { ProviderSection } from "@/features/models/components/provider-section"
 import { SpeechToTextModels } from "@/features/models/components/speech-to-text-models"
+import { notify } from "@/lib/notify"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { Button } from "@/shared/ui/button"
 import { refreshGatewayState } from "@/store/gateway"
@@ -83,7 +82,7 @@ export function ModelsPage() {
         gateway?.restartRequired === true,
       )
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("models.loadError"))
+      notify.error(e instanceof Error ? e.message : t("models.loadError"), { id: "models:default-change-failed" })
     } finally {
       setSettingDefaultIndex(null)
     }
@@ -97,11 +96,12 @@ export function ModelsPage() {
       new URLSearchParams(globalThis.location.search).get("setup") ===
       "required"
     ) {
-      toast.info(
+      notify.info(
         t(
           "models.setupRequiredToast",
           "Add a model credential to start chatting — the default model isn't configured yet.",
         ),
+        { id: "models:setup-required" },
       )
       const url = new URL(globalThis.location.href)
       url.searchParams.delete("setup")
@@ -113,7 +113,7 @@ export function ModelsPage() {
   const defaultModelUnavailable = defaultModel && !defaultModel.available
 
   return (
-    <div className="models-page flex h-full flex-col">
+    <div className="models-page flex h-full flex-col" data-miki-page="models">
       <PageHeader title={t("navigation.models")} titleLevel={1}>
         <div className="flex items-center gap-3">
           <Button
@@ -143,7 +143,7 @@ export function ModelsPage() {
         </div>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6" data-miki-page-body="true">
         <div className="pt-2">
           {!defaultModel && (
             <div className="text-muted-foreground flex items-center gap-1.5 text-sm">
@@ -244,6 +244,7 @@ export function ModelsPage() {
         onClose={() => setAddOpen(false)}
         onSaved={fetchModels}
         existingModelNames={models.map((model) => model.model_name)}
+        existingModels={models}
         providerOptions={providerOptions}
       />
 

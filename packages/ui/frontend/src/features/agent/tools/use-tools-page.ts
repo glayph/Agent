@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import {
   type WebSearchConfigResponse,
@@ -10,6 +9,7 @@ import {
   setToolEnabled,
   updateWebSearchConfig,
 } from "@/api/tools"
+import { notify } from "@/lib/notify"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
@@ -87,7 +87,7 @@ export function useToolsPage() {
           ? error.message
           : t("pages.agent.tools.toggle_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "use-tools-page:error:restartRequired" })
     },
   })
 
@@ -128,7 +128,7 @@ export function useToolsPage() {
           ? error.message
           : t("pages.agent.tools.web_search.save_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "use-tools-page:error:restartRequired-2" })
     },
   })
 

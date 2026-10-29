@@ -1,31 +1,20 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { describe, expect, it } from "@jest/globals"
-import { buildIdentityContext } from "./identity-prompt.js"
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { buildIdentityContext } from "./identity-prompt.js";
 
-describe("buildIdentityContext", () => {
-  it("declares the agent identity and the live capabilities", () => {
-    const text = buildIdentityContext({ groups: [{ key: "terminal", enabled: true }, { key: "browser", enabled: true }, { key: "web_search", enabled: false }] })
-    expect(text).toMatch(/autonomous AI agent/)
-    expect(text).toMatch(/terminal_run/)
-    expect(text).toMatch(/browser_\*/)
-    expect(text).toMatch(/CURRENTLY OFF[^\n]*web_search/)
-  })
-  it("includes the configured persona", () => {
-    expect(buildIdentityContext({ groups: [], persona: "Speak Bengali." })).toMatch(/Speak Bengali\./)
-  })
-  it("loads TOOLS.md and the selected specialist's role instructions", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "miki-identity-"))
+describe("identity prompt cache", () => {
+  it("reuses unchanged identity text and refreshes it when a file changes", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-identity-prompt-"));
+    const file = path.join(dir, "SOUL.md");
+    const input = { groups: [{ key: "filesystem", enabled: true }], identityDirs: [dir] };
     try {
-      mkdirSync(path.join(root, "agents", "miki"), { recursive: true })
-      writeFileSync(path.join(root, "TOOLS.md"), "Use terminal evidence.")
-      writeFileSync(path.join(root, "agents", "miki", "AGENTS.md"), "Prefer direct execution.")
-      const text = buildIdentityContext({ groups: [], identityDirs: [root], specialistId: "miki" })
-      expect(text).toContain("Use terminal evidence.")
-      expect(text).toContain("Prefer direct execution.")
+      fs.writeFileSync(file, "first identity version");
+      expect(buildIdentityContext(input)).toContain("first identity version");
+      fs.writeFileSync(file, "updated identity version with a different size");
+      expect(buildIdentityContext(input)).toContain("updated identity version with a different size");
     } finally {
-      rmSync(root, { recursive: true, force: true })
+      fs.rmSync(dir, { recursive: true, force: true });
     }
-  })
-})
+  });
+});

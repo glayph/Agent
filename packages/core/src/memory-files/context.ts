@@ -115,9 +115,9 @@ export class MemoryContextBuilder {
     cfg: MemoryFilesConfig,
     budget: number,
   ): Promise<string> {
-    const files = await this.store.listFiles();
     const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     cutoff.setDate(cutoff.getDate() - (cfg.recentDays - 1));
+    const files = await this.store.listRecentFiles(cutoff);
     const recent: Array<MemoryFileInfo & { date: number }> = [];
     for (const f of files) {
       if (f.rel === "MEMORY.md" || f.rel.includes("/compactions/") || f.rel.includes("/legacy-import/")) continue;

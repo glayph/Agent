@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   type MonitorNode,
+  type MonitorState,
   clearMonitorRun,
   getMonitorState,
   resetMonitorStore,
@@ -60,6 +61,27 @@ describe("updateMonitorStore", () => {
     const state = getMonitorState()
     expect(state.nodes["node-1"]).toBeDefined()
     expect(state.nodeOrder).toEqual(["node-1"])
+  })
+})
+
+describe("completed run retention", () => {
+  it("keeps the eight newest completed runs and every active run", () => {
+    const runs: MonitorState["runs"] = Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+      const id = `done-${index}`
+      return [id, { id, status: "completed" as const, startedAt: index, endedAt: index + 1 }]
+    }))
+    runs["active"] = { id: "active", status: "running", startedAt: 100 }
+    const nodes = Object.fromEntries(Object.keys(runs).map((runId) => [
+      `node-${runId}`,
+      baseNode({ id: `node-${runId}`, runId, status: runId === "active" ? "running" : "completed" }),
+    ]))
+    updateMonitorStore({ runs, nodes, nodeOrder: Object.keys(nodes) })
+    const state = getMonitorState()
+    expect(Object.keys(state.runs)).toHaveLength(9)
+    expect(state.runs.active).toBeDefined()
+    expect(state.runs["done-0"]).toBeUndefined()
+    expect(state.nodes["node-done-0"]).toBeUndefined()
+    expect(state.nodes["node-active"]).toBeDefined()
   })
 })
 

@@ -831,7 +831,6 @@ export class AgentControlService {
   ): boolean {
     // Autonomous mode: control operations never wait for user approval.
     return false;
-    // eslint-disable-next-line no-unreachable
     if (
       capability === "model_runtime" &&
       (action === "inspect" || action === "health")

@@ -123,18 +123,38 @@ describe("MemoryContextBuilder", () => {
     expect(compact).toContain("core fact");
   });
 
+  it("uses the targeted recent-file scan instead of recursively listing the full archive", async () => {
+    root = tmpRoot();
+    store = new MemoryFileStore(resolveMemoryPaths(root));
+    const now = new Date();
+    await executeOp(store.planDailyNote("visible recent note", "agent", now));
+    const listAll = jest.spyOn(store, "listFiles");
+    try {
+      const block = await new MemoryContextBuilder(store, () => DEFAULT_MEMORY_FILES_CONFIG).build({ now });
+      expect(block).toContain("visible recent note");
+      expect(listAll).not.toHaveBeenCalled();
+    } finally {
+      listAll.mockRestore();
+    }
+  });
+
   it("indexes only recent daily/session files, not MEMORY.md or compaction archives", async () => {
     root = tmpRoot();
     store = new MemoryFileStore(resolveMemoryPaths(root));
     await executeOp(store.planLongTermNote("core fact"));
     const now = new Date();
+    const old = new Date(now);
+    old.setDate(old.getDate() - DEFAULT_MEMORY_FILES_CONFIG.recentDays - 5);
     await executeOp(store.planDailyNote("recent thing happened", "agent", now));
+    await executeOp(store.planDailyNote("old thing must not appear", "agent", old));
     await executeOp(
       store.planCompactionArchive({ sessionId: "abc", summary: "archived stuff", archivedCount: 3, now }),
     );
     const builder = new MemoryContextBuilder(store, () => DEFAULT_MEMORY_FILES_CONFIG);
-    const block = await builder.build();
+    const block = await builder.build({ now });
     expect(block).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
+    expect(block).toContain("recent thing happened");
+    expect(block).not.toContain("old thing must not appear");
     expect(block).not.toContain("compactions/");
   });
 });

@@ -1,10 +1,10 @@
 /**
  * Automatic retries for a failed model call.
  *
- * Waits 1s, 2s, 4s, 8s, 16s between attempts. Retries are bounded by `maxRetries`
+ * Waits 2s, 4s, 8s, 12s between attempts (minimum 2s, maximum 12s). Retries are bounded by `maxRetries`
  * (five by default) so persistent provider failures cannot hold a turn indefinitely. Stop ends a wait at once.
  */
-export const MODEL_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const
+export const MODEL_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000] as const
 
 /** Delay before the retry with this zero-based index (0 = the first retry). */
 export function modelRetryDelayMs(retryIndex: number): number {

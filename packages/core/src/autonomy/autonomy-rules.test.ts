@@ -41,10 +41,18 @@ function harness(replies: ScriptedReply[], configOverride: Record<string, unknow
   const llm = scriptedLLM(replies);
   // Same engine options the gateway uses for autonomous runs (turbo mode: no interactive approval prompts).
   const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry(), turboMode: true });
+  const overrideAutonomy = (configOverride.autonomy && typeof configOverride.autonomy === "object" ? configOverride.autonomy : {}) as Record<string, unknown>;
+  const basePolicy = { max_retries: 10, retry_backoff_seconds: 5, require_acceptance_contract: false };
+  const overridePolicy = (overrideAutonomy.tool_policy && typeof overrideAutonomy.tool_policy === "object" ? overrideAutonomy.tool_policy : {}) as Record<string, unknown>;
   const config: Record<string, unknown> = {
-    autonomy: { enabled: true, unlimited_budgets: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5 } },
-    heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } },
     ...configOverride,
+    autonomy: {
+      enabled: true,
+      unlimited_budgets: true,
+      ...overrideAutonomy,
+      tool_policy: { ...basePolicy, ...overridePolicy },
+    },
+    heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } },
   };
   const supervisor = new AutonomousSupervisor({
     db,
@@ -155,20 +163,17 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
     h.close();
   });
 
-  it("removes the retry cap whatever unlimited_budgets says", async () => {
+  it("keeps autonomous goals retryable without tool/token/cycle budgets", async () => {
     const h = harness(
-      [{ text: "BLOCKED: waiting for input." }],
-      { autonomy: { enabled: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5 } } },
+      [{ text: "BLOCKED: waiting for input." }, { text: "Completed after recovery." }],
+      { autonomy: { enabled: true, unlimited_budgets: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5, require_acceptance_contract: false } } },
     );
-    const goal = h.goals.create({ title: "Uncapped goal", steps: ["Work"], replaceExisting: false });
-    expect((await h.supervisor.tick("retry")).status).toBe("idle");
-    expect(h.goals.get(goal.id)?.status).toBe("active");
-    h.close();
-  });
-
-  it("reports the unlimited retry setting in status", () => {
-    const h = harness([{ text: "unused" }]);
+    const goal = h.goals.create({ title: "Recoverable goal", steps: ["Work"], replaceExisting: false });
+    const first = await h.supervisor.tick("retry");
+    expect(first.status).not.toBe("blocked");
+    expect(h.goals.get(goal.id)?.status).not.toBe("blocked");
     expect(h.supervisor.status().retry).toMatchObject({ max_retries: null, unlimited: true });
+    expect(h.supervisor.status().resource_limits).toMatchObject({ max_tool_calls_per_goal_cycle: null, max_tokens_per_cycle: null, max_run_duration_seconds: null, unlimited_budgets_requested: true });
     h.close();
   });
 });

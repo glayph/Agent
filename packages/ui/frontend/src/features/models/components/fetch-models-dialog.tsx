@@ -1,5 +1,5 @@
 import { IconDownload, IconLoader2 } from "@tabler/icons-react"
-import { useCallback, useEffect, useState } from "react"
+import { memo, useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -23,6 +23,41 @@ import {
   getCanonicalProviderKey,
   getProviderCatalogMap,
 } from "./provider-registry"
+import { createEmptyModelSelection, toggleVisibleModelSelection } from "./model-selection"
+
+const FetchedModelRow = memo(function FetchedModelRow({
+  model,
+  selected,
+  alreadyAdded,
+  onToggle,
+}: {
+  model: UpstreamModel
+  selected: boolean
+  alreadyAdded: boolean
+  onToggle: (id: string) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <label className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm ${alreadyAdded ? "text-muted-foreground cursor-not-allowed opacity-60" : "hover:bg-accent cursor-pointer"}`}>
+      <input
+        type="checkbox"
+        checked={selected}
+        disabled={alreadyAdded}
+        onChange={() => onToggle(model.id)}
+        className="size-3.5"
+      />
+      <span className="font-mono text-xs">{model.id}</span>
+      {alreadyAdded && (
+        <span className="ml-auto text-[10px]">{t("models.fetch.alreadyAdded")}</span>
+      )}
+      {model.owned_by && (
+        <span className="text-muted-foreground ml-auto text-xs">
+          {model.owned_by}
+        </span>
+      )}
+    </label>
+  )
+})
 
 interface FetchModelsDialogProps {
   open: boolean
@@ -33,6 +68,7 @@ interface FetchModelsDialogProps {
   apiBase: string
   modelIndex?: number
   backendOptions?: ModelProviderOption[]
+  alreadyAddedModelIds?: string[]
 }
 
 export function FetchModelsDialog({
@@ -44,11 +80,12 @@ export function FetchModelsDialog({
   apiBase,
   modelIndex,
   backendOptions,
+  alreadyAddedModelIds = [],
 }: FetchModelsDialogProps) {
   const { t } = useTranslation()
   const [fetching, setFetching] = useState(false)
   const [models, setModels] = useState<UpstreamModel[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(createEmptyModelSelection)
   const [error, setError] = useState("")
   const [filter, setFilter] = useState("")
 
@@ -62,7 +99,7 @@ export function FetchModelsDialog({
     setFetching(true)
     setError("")
     setModels([])
-    setSelected(new Set())
+    setSelected(createEmptyModelSelection())
     try {
       const res = await fetchUpstreamModels({
         provider: canonicalProvider,
@@ -71,8 +108,8 @@ export function FetchModelsDialog({
         model_index: modelIndex,
       })
       setModels(res.models)
-      // Auto-select all by default
-      setSelected(new Set(res.models.map((m) => m.id)))
+      // Keep every fetched option unselected so the user explicitly chooses models.
+      setSelected(createEmptyModelSelection())
     } catch (e) {
       setError(e instanceof Error ? e.message : t("models.fetch.failed"))
     } finally {
@@ -94,37 +131,35 @@ export function FetchModelsDialog({
 
   const handleClose = () => {
     setModels([])
-    setSelected(new Set())
+    setSelected(createEmptyModelSelection())
     setError("")
     setFilter("")
     onClose()
   }
 
-  const toggleModel = (id: string) => {
+  const toggleModel = useCallback((id: string) => {
+    if (alreadyAddedModelIds.includes(id)) return
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-  }
+  }, [alreadyAddedModelIds])
 
   const toggleAll = () => {
-    const filtered = models
-      .map((m) => m.id)
-      .filter(
-        (id) => !filter || id.toLowerCase().includes(filter.toLowerCase()),
-      )
-    if (filtered.every((id) => selected.has(id))) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(filtered))
-    }
+    const visibleIds = filteredModels.map((model) => model.id)
+    setSelected((previous) =>
+      toggleVisibleModelSelection(previous, visibleIds, alreadyAddedModelIds),
+    )
   }
 
   const filteredModels = filter
     ? models.filter((m) => m.id.toLowerCase().includes(filter.toLowerCase()))
     : models
+  const selectableFilteredModels = filteredModels.filter(
+    (model) => !alreadyAddedModelIds.includes(model.id),
+  )
   const {
     hiddenCount,
     showMore,
@@ -202,6 +237,7 @@ export function FetchModelsDialog({
               <div className="text-muted-foreground flex items-center justify-between text-xs">
                 <span>
                   {t("models.fetch.found", { count: models.length })}
+                  {` · ${t("models.fetch.selectedCount", { count: selected.size })}`}
                   {filter &&
                     ` ${t("models.fetch.shown", { count: filteredModels.length })}`}
                 </span>
@@ -210,30 +246,21 @@ export function FetchModelsDialog({
                   onClick={toggleAll}
                   className="text-primary hover:underline"
                 >
-                  {filteredModels.every((m) => selected.has(m.id))
+                  {selectableFilteredModels.length > 0 &&
+                  selectableFilteredModels.every((model) => selected.has(model.id))
                     ? t("models.fetch.deselectAll")
                     : t("models.fetch.selectAll")}
                 </button>
               </div>
               <div className="max-h-[300px] space-y-1 overflow-y-auto rounded-md border p-2">
-                {visibleModels.map((m) => (
-                  <label
-                    key={m.id}
-                    className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected.has(m.id)}
-                      onChange={() => toggleModel(m.id)}
-                      className="size-3.5"
-                    />
-                    <span className="font-mono text-xs">{m.id}</span>
-                    {m.owned_by && (
-                      <span className="text-muted-foreground ml-auto text-xs">
-                        {m.owned_by}
-                      </span>
-                    )}
-                  </label>
+                {visibleModels.map((model) => (
+                  <FetchedModelRow
+                    key={model.id}
+                    model={model}
+                    selected={selected.has(model.id)}
+                    alreadyAdded={alreadyAddedModelIds.includes(model.id)}
+                    onToggle={toggleModel}
+                  />
                 ))}
                 {hiddenCount > 0 && (
                   <Button
@@ -257,7 +284,7 @@ export function FetchModelsDialog({
           </Button>
           {models.length > 0 && (
             <Button onClick={handleFill} disabled={selected.size === 0}>
-              {t("models.fetch.fill", { count: selected.size })}
+              {t("models.fetch.addSelected", { count: selected.size })}
             </Button>
           )}
         </DialogFooter>

@@ -1,12 +1,13 @@
 import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { getSessionHistory } from "@/api/sessions"
+import { deleteSessionMessage, getSessionHistory } from "@/api/sessions"
 import { getChatState, updateChatStore } from "@/store/chat"
 import { gatewayAtom } from "@/store/gateway"
 
 import {
   connectChat,
+  deleteChatMessage,
   disconnectChat,
   editChatMessage,
   hydrateActiveSession,
@@ -29,6 +30,7 @@ vi.mock("@/api/sessions", async () => {
   return {
     ...actual,
     getSessionHistory: vi.fn(),
+    deleteSessionMessage: vi.fn().mockResolvedValue(undefined),
     updateSessionMessage: vi.fn().mockResolvedValue(undefined),
   }
 })
@@ -66,6 +68,7 @@ class MockWebSocket {
 }
 
 const mockedGetSessionHistory = vi.mocked(getSessionHistory)
+const mockedDeleteSessionMessage = vi.mocked(deleteSessionMessage)
 
 function resetChatState() {
   updateChatStore({
@@ -194,6 +197,51 @@ describe("chat controller active-session hydration", () => {
       "Persisted answer",
     ])
     expect(getChatState().hasHydratedActiveSession).toBe(true)
+  })
+})
+
+describe("chat controller message deletion", () => {
+  beforeEach(() => {
+    resetChatState()
+    mockedDeleteSessionMessage.mockReset().mockResolvedValue(undefined)
+    updateChatStore({
+      messages: [
+        ...getChatState().messages,
+        {
+          id: "user-2",
+          role: "user",
+          content: "Another message must remain",
+          timestamp: 3,
+        },
+      ],
+    })
+  })
+
+  it("deletes only the selected message and preserves all other chat rows", async () => {
+    expect(await deleteChatMessage("user-1")).toBe(true)
+
+    expect(mockedDeleteSessionMessage).toHaveBeenCalledTimes(1)
+    expect(mockedDeleteSessionMessage).toHaveBeenCalledWith(
+      "session-1",
+      "user-1",
+    )
+    expect(getChatState().messages.map((message) => message.id)).toEqual([
+      "assistant-1",
+      "user-2",
+    ])
+  })
+
+  it("keeps chat state unchanged when the message delete request fails", async () => {
+    mockedDeleteSessionMessage.mockRejectedValueOnce(
+      new Error("delete failed"),
+    )
+
+    expect(await deleteChatMessage("user-1")).toBe(false)
+    expect(getChatState().messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "assistant-1",
+      "user-2",
+    ])
   })
 })
 
@@ -336,6 +384,27 @@ describe("chat controller WebSocket dependency injection", () => {
     expect(getChatState().messages.at(-1)?.id).toBe(messageFrame.id)
   })
 
+  it("rejects more than 16 attachments instead of silently truncating them", async () => {
+    updateChatStore({ hasHydratedActiveSession: true })
+    await connectChat()
+    createdSockets[0].simulateOpen()
+    const attachments = Array.from({ length: 17 }, (_, index) => ({
+      type: "file" as const,
+      url: `/file-${index}`,
+    }))
+    expect(await sendChatMessage({ content: "Files", attachments })).toBe(false)
+    expect(
+      createdSockets[0].sentData
+        .map((data) => JSON.parse(data))
+        .some(
+          (frame) =>
+            frame.type === "message.send" && frame.payload?.content === "Files",
+        ),
+    ).toBe(false)
+    expect(
+      getChatState().messages.some((message) => message.content === "Files"),
+    ).toBe(false)
+  })
   it("retries with the original prompt attachments", async () => {
     updateChatStore({
       hasHydratedActiveSession: true,
@@ -469,7 +538,7 @@ describe("chat controller WebSocket dependency injection", () => {
     })
   })
 
-  it("rolls back the optimistic message when socket.send throws", async () => {
+  it("keeps a message with uncertain status when socket.send throws", async () => {
     updateChatStore({ hasHydratedActiveSession: true })
     await connectChat()
     createdSockets[0].simulateOpen()
@@ -479,12 +548,12 @@ describe("chat controller WebSocket dependency injection", () => {
 
     const sent = await sendChatMessage({ content: "This should roll back" })
 
-    expect(sent).toBe(false)
-    expect(
-      getChatState().messages.some(
-        (message) => message.content === "This should roll back",
-      ),
-    ).toBe(false)
-    expect(getChatState().isTyping).toBe(false)
+    expect(sent).toBe(true)
+    expect(getChatState().messages).toContainEqual(
+      expect.objectContaining({
+        content: "This should roll back",
+        deliveryStatus: "uncertain",
+      }),
+    )
   })
 })

@@ -80,9 +80,36 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     throw "Run the installer from an elevated PowerShell session."
 }
 
-New-Item -ItemType Directory -Path (Join-Path $WorkspaceDir "data") -Force | Out-Null
+$workspaceData = Join-Path $WorkspaceDir "data"
+New-Item -ItemType Directory -Path $workspaceData -Force | Out-Null
 $envDir = Join-Path $WorkspaceDir "config"
 New-Item -ItemType Directory -Path $envDir -Force | Out-Null
+$workspaceIdentity = Join-Path $WorkspaceDir "identity"
+New-Item -ItemType Directory -Path $workspaceIdentity -Force | Out-Null
+
+# Seed persistent runtime files from the application only when the owner has not
+# already supplied them. The gateway reads MIKI_CONFIG_DIR and identity files
+# from MIKI_WORKSPACE_DIR; a separate workspace must not silently lose autonomy
+# settings or the heartbeat checklist.
+foreach ($name in @("agent.yaml", "tools.yaml")) {
+    $source = Join-Path (Join-Path $RepoRoot "config") $name
+    $destination = Join-Path $envDir $name
+    if ((Test-Path $source) -and -not (Test-Path $destination)) {
+        Copy-Item -LiteralPath $source -Destination $destination
+    }
+}
+$sourceIdentity = Join-Path $RepoRoot "identity"
+if (Test-Path $sourceIdentity) {
+    Get-ChildItem -LiteralPath $sourceIdentity -File -Recurse -Force | ForEach-Object {
+        $relative = $_.FullName.Substring($sourceIdentity.Length).TrimStart([char]92, [char]47)
+        $destination = Join-Path $workspaceIdentity $relative
+        if (-not (Test-Path $destination)) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $destination
+        }
+    }
+}
+
 $envFile = Join-Path $envDir "agent-miki.env"
 if (-not (Test-Path $envFile)) {
     @"
@@ -90,11 +117,20 @@ MIKI_SOURCE_ROOT=$RepoRoot
 MIKI_RUNTIME_ROOT=$RepoRoot
 MIKI_NODE=$NodeExecutable
 MIKI_WORKSPACE_DIR=$WorkspaceDir
+MIKI_CONFIG_DIR=$envDir
+MIKI_DATA_DIR=$workspaceData
 GATEWAY_PORT=18800
 SUPERVISOR_MAX_RESTARTS=$MaxRestarts
 SUPERVISOR_READY_TIMEOUT_SEC=$ReadyTimeoutSec
-SUPERVISOR_ALLOW_UNLIMITED_RESTARTS=false
+SUPERVISOR_ALLOW_UNLIMITED_RESTARTS=true
 "@ | Set-Content -Path $envFile -Encoding UTF8
+} else {
+    $existingEnvironment = Get-Content -Path $envFile
+    if (-not ($existingEnvironment -match '^MIKI_SOURCE_ROOT=')) { Add-Content -Path $envFile -Value "MIKI_SOURCE_ROOT=$RepoRoot" }
+    if (-not ($existingEnvironment -match '^MIKI_WORKSPACE_DIR=')) { Add-Content -Path $envFile -Value "MIKI_WORKSPACE_DIR=$WorkspaceDir" }
+    if (-not ($existingEnvironment -match '^MIKI_RUNTIME_ROOT=')) { Add-Content -Path $envFile -Value "MIKI_RUNTIME_ROOT=$RepoRoot" }
+    if (-not ($existingEnvironment -match '^MIKI_CONFIG_DIR=')) { Add-Content -Path $envFile -Value "MIKI_CONFIG_DIR=$envDir" }
+    if (-not ($existingEnvironment -match '^MIKI_DATA_DIR=')) { Add-Content -Path $envFile -Value "MIKI_DATA_DIR=$workspaceData" }
 }
 # Keep configuration readable only by administrators and the service account.
 $acl = Get-Acl $envFile
@@ -120,7 +156,9 @@ $arguments = @(
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId $RunAs -LogonType ServiceAccount -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -RestartCount $MaxRestarts -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 3650)
+# Windows accepts at most 999 scheduler restarts. Agent Miki is meant to keep running, so the scheduler retries the
+# supervisor for as long as the machine is up; the supervisor itself never stops restarting the gateway.
+$settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 3650)
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Agent Miki readiness-aware self-healing supervisor" -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 Write-Host "Installed and started scheduled task: $TaskName"

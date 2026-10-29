@@ -85,6 +85,7 @@ describe("loadRuntimePluginContracts", () => {
         "    allow_execution: true",
         "    allow_network: true",
         "    allow_secrets: true",
+        "    allow_unsafe_host_execution: true", // no enforced OS sandbox in tests, so trust is explicit
       ].join("\n"),
     );
     await registerPlugin(workspaceDir, {
@@ -135,7 +136,10 @@ describe("loadRuntimePluginContracts", () => {
 
     expect(contract.readiness.status).toBe("policy_blocked");
     expect(contract.readiness.executable).toBe(false);
-    expect(contract.readiness.risk.requiresPolicy).toEqual(["network.http"]);
+    expect(contract.readiness.risk.requiresPolicy).toEqual([
+      "network.http",
+      "enforced.host_sandbox",
+    ]);
     expect(contract.readiness.reasons).toContain(
       "Plugin contract execution is disabled by policy.",
     );

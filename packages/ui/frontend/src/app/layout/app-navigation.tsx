@@ -5,6 +5,8 @@ import {
   IconChartDots3,
   IconFolder,
   IconMessageCircle,
+  IconEye,
+  IconPuzzle,
   IconSettings,
   IconSparkles,
   IconTool,
@@ -62,6 +64,20 @@ export const utilityNavigation: AppNavigationItem[] = []
 export const secondaryNavigation: AppNavigationItem[] = [
   ...primaryNavigation,
   {
+    id: "plugins",
+    titleKey: "navigation.plugins",
+    url: "/plugins",
+    description: "Browse and manage installed plugins.",
+    icon: IconPuzzle,
+  },
+  {
+    id: "monitor",
+    titleKey: "navigation.monitor",
+    url: "/agent/monitor",
+    description: "View the agent monitor and live computer state.",
+    icon: IconEye,
+  },
+  {
     id: "channels",
     titleKey: "navigation.channels",
     url: "/channels",
@@ -74,6 +90,13 @@ export const secondaryNavigation: AppNavigationItem[] = [
     url: "/memory",
     description: "Inspect selective memory and retrieval state.",
     icon: IconBrain,
+  },
+  {
+    id: "activity",
+    titleKey: "navigation.activity",
+    url: "/agent/activity",
+    description: "See running goals, live tool calls, the screen, and learned rules.",
+    icon: IconActivity,
   },
   {
     id: "skills",
@@ -90,4 +113,34 @@ export const secondaryNavigation: AppNavigationItem[] = [
     icon: IconTool,
   },
   ...utilityNavigation,
+]
+
+
+export interface AppNavigationGroup {
+  id: string
+  titleKey: string
+  itemIds: string[]
+}
+
+export const sidebarNavigationGroups: AppNavigationGroup[] = [
+  {
+    id: "workspace",
+    titleKey: "navigation.workspace_group",
+    itemIds: ["chat", "drive", "memory"],
+  },
+  {
+    id: "agent",
+    titleKey: "navigation.agent_group",
+    itemIds: ["monitor", "activity", "skills", "tools"],
+  },
+  {
+    id: "manage",
+    titleKey: "navigation.manage_group",
+    itemIds: ["models", "channels", "plugins", "config"],
+  },
+  {
+    id: "system",
+    titleKey: "navigation.system_group",
+    itemIds: ["health"],
+  },
 ]

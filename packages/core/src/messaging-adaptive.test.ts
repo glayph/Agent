@@ -1,6 +1,5 @@
 import {
   AdaptiveMessageCoordinator,
-  DEFAULT_ADAPTIVE_MESSAGING_CONFIG,
   chooseMessagingStrategy,
   getChannelMessagingCapabilities,
   planAdaptiveOutput,

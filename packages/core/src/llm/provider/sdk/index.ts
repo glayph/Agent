@@ -113,6 +113,8 @@ export interface MikiProviderCompletionRequest {
   credentials: Readonly<Record<string, string>>;
   extra?: Record<string, unknown>;
   timeoutMs?: number;
+  /** Stream text fragments where the provider advertises streaming support. */
+  onTextDelta?: (delta: string) => void;
   signal?: AbortSignal;
   context: MikiProviderContext;
 }

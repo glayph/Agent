@@ -71,10 +71,27 @@ const LOCAL_RUNTIME_EXECUTABLE =
   process.platform === "win32" ? "llama-server.exe" : "llama-server";
 const configuredModels = new Map<string, LocalModelEntry>();
 let managedProcess: ChildProcess | undefined;
+// pid of a llama-server this module started and then adopted again (for example after the gateway was killed and restarted).
+let managedPid = 0;
 let managedKey = "";
 let managedBaseUrl = "";
 let managedError = "";
-let ensureInFlight: Promise<{ baseUrl: string; model: string }> | undefined;
+// Model switches and starts run one after another, in the order they arrive: a later request never starts while an
+// earlier one is still stopping or loading a model, and the last request is the one that stays running. A request
+// joins the pending start only when it is for the same model as the most recent request (nothing else was queued after it).
+let ensureTail: Promise<unknown> = Promise.resolve();
+let lastEnsure: { key: string; run: Promise<{ baseUrl: string; model: string }> } | undefined;
+
+/** What is recorded about the llama-server this module started, so the next gateway can find and reuse or stop it. */
+interface RuntimeRecord {
+  pid: number;
+  port: number;
+  base_url: string;
+  model_path: string;
+  key: string;
+  executable: string;
+  started_at: string;
+}
 // A server started by the model manager is external to this core process. Keep
 // the last successful health probe so synchronous provider readiness checks do
 // not incorrectly report that healthy loopback runtime as unavailable.
@@ -361,10 +378,20 @@ function allowedModelPath(
   });
 }
 
-async function waitForReady(baseUrl: string, timeoutMs = Number.parseInt(process.env.MIKI_LLAMA_START_TIMEOUT_MS || "120000", 10)): Promise<void> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForReady(
+  baseUrl: string,
+  timeoutMs = Number.parseInt(process.env.MIKI_LLAMA_START_TIMEOUT_MS || "120000", 10),
+  stillStarting?: () => boolean,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError = "runtime did not become ready";
   while (Date.now() < deadline) {
+    if (stillStarting && !stillStarting())
+      throw new Error("llama-server exited before it was ready");
     try {
       const response = await fetch(`${baseUrl}/models`, {
         signal: AbortSignal.timeout(1200),
@@ -374,22 +401,210 @@ async function waitForReady(baseUrl: string, timeoutMs = Number.parseInt(process
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await sleep(250);
   }
   throw new Error(lastError);
 }
 
+/** "ready" when the server answers OK, "loading" when it answers but is not ready yet, "down" when nothing answers. */
+async function probeServer(baseUrl: string): Promise<"ready" | "loading" | "down"> {
+  try {
+    const response = await fetch(`${baseUrl}/models`, {
+      signal: AbortSignal.timeout(1200),
+    });
+    return response.ok ? "ready" : "loading";
+  } catch {
+    return "down";
+  }
+}
+
+/** The GGUF path a llama-server reports for itself (GET /props), or undefined when it does not say. */
+async function servedModelPath(baseUrl: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(new URL("/props", baseUrl), {
+      signal: AbortSignal.timeout(1200),
+    });
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { model_path?: unknown };
+    return typeof body.model_path === "string" && body.model_path.trim()
+      ? body.model_path
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function samePath(a: string, b: string): boolean {
+  return path.resolve(a) === path.resolve(b);
+}
+
+function runtimeRecordPath(): string {
+  const dataDir = process.env.MIKI_DATA_DIR || path.join(process.cwd(), "data");
+  return path.join(dataDir, "llama-runtime.json");
+}
+
+function readRuntimeRecord(): RuntimeRecord | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(runtimeRecordPath(), "utf8")) as Partial<RuntimeRecord>;
+    if (
+      Number.isInteger(parsed.pid) &&
+      typeof parsed.base_url === "string" &&
+      typeof parsed.key === "string" &&
+      typeof parsed.model_path === "string" &&
+      typeof parsed.executable === "string"
+    )
+      return parsed as RuntimeRecord;
+  } catch {
+    // No record yet, or it is unreadable: nothing is adopted.
+  }
+  return undefined;
+}
+
+function writeRuntimeRecord(record: RuntimeRecord): void {
+  try {
+    fs.mkdirSync(path.dirname(runtimeRecordPath()), { recursive: true });
+    fs.writeFileSync(runtimeRecordPath(), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  } catch {
+    // Best effort: without the record the next gateway simply starts its own server.
+  }
+}
+
+function clearRuntimeRecord(pid?: number): void {
+  const record = readRuntimeRecord();
+  if (pid !== undefined && record && record.pid !== pid) return;
+  try {
+    fs.rmSync(runtimeRecordPath(), { force: true });
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** A pid from an old record may have been reused by another program. On Linux the command line tells them apart. */
+function recordedServerIsOurs(record: RuntimeRecord): boolean {
+  if (!processAlive(record.pid)) return false;
+  const cmdline = `/proc/${record.pid}/cmdline`;
+  if (!fs.existsSync(cmdline)) return true;
+  try {
+    return fs.readFileSync(cmdline, "utf8").includes(path.basename(record.executable));
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processAlive(pid)) return true;
+    await sleep(200);
+  }
+  return !processAlive(pid);
+}
+
+async function terminatePid(pid: number): Promise<void> {
+  if (!processAlive(pid)) return;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Already exited.
+  }
+  if (await waitForPidExit(pid, 10_000)) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Already exited.
+  }
+  await waitForPidExit(pid, 5_000);
+}
+
+function hasManagedServer(): boolean {
+  return Boolean(managedProcess) || managedPid > 0;
+}
+
+/** Synchronous stop, for process exit and places that cannot wait. */
 function stopManagedProcess(): void {
   const processToStop = managedProcess;
+  const pid = managedPid;
   managedProcess = undefined;
+  managedPid = 0;
   managedKey = "";
   managedBaseUrl = "";
-  if (!processToStop) return;
-  try {
-    processToStop.kill("SIGTERM");
-  } catch {
-    // The child may have exited between the state check and termination.
+  if (processToStop) {
+    try {
+      processToStop.kill("SIGTERM");
+    } catch {
+      // The child may have exited between the state check and termination.
+    }
+    clearRuntimeRecord(processToStop.pid);
+  } else if (pid > 0) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Already exited.
+    }
+    clearRuntimeRecord(pid);
   }
+}
+
+/** Stops the managed server and returns only once it has exited, so a replacement can bind the same port. */
+async function stopManagedAndWait(): Promise<void> {
+  const processToStop = managedProcess;
+  const pid = managedPid;
+  managedProcess = undefined;
+  managedPid = 0;
+  managedKey = "";
+  managedBaseUrl = "";
+  if (processToStop) {
+    if (processToStop.exitCode === null && processToStop.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        const killTimer = setTimeout(() => {
+          try {
+            processToStop.kill("SIGKILL");
+          } catch {
+            // Already exited.
+          }
+        }, 10_000);
+        const giveUp = setTimeout(resolve, 15_000);
+        killTimer.unref?.();
+        giveUp.unref?.();
+        processToStop.once("exit", () => {
+          clearTimeout(killTimer);
+          clearTimeout(giveUp);
+          resolve();
+        });
+        try {
+          processToStop.kill("SIGTERM");
+        } catch {
+          clearTimeout(killTimer);
+          clearTimeout(giveUp);
+          resolve();
+        }
+      });
+    }
+    clearRuntimeRecord(processToStop.pid);
+    return;
+  }
+  if (pid > 0) {
+    await terminatePid(pid);
+    clearRuntimeRecord(pid);
+  }
+}
+
+async function waitForPortClosed(baseUrl: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await probeServer(baseUrl)) === "down") return;
+    await sleep(200);
+  }
+  throw new Error(`${baseUrl} is still answered by another process; stop it or change this model's port.`);
 }
 
 function runtimeArgs(
@@ -451,44 +666,70 @@ async function ensureLocalRuntimeImpl(
   const baseUrl = localBaseUrl(entry);
   const configuredPort =
     config.port || Number.parseInt(process.env.MIKI_LLAMA_PORT || "39200", 10);
-  const configuredPath = config.model_path;
-  const configuredExecutable = localExecutable(config);
-  const desiredKey =
-    configuredPath && configuredExecutable
-      ? runtimeKey(config, configuredExecutable, configuredPath, configuredPort)
-      : "";
-  try {
-    await waitForReady(baseUrl, 1000);
-    externalReadyBaseUrl = baseUrl;
-    const managedConfigChanged = Boolean(
-      managedProcess && managedBaseUrl === baseUrl && managedKey !== desiredKey,
-    );
-    if (managedProcess && managedBaseUrl && managedBaseUrl !== baseUrl) {
-      stopManagedProcess();
-    }
-    if (managedConfigChanged) {
-      stopManagedProcess();
-    } else {
-      managedError = "";
-      return {
-        baseUrl,
-        model: model.replace(
-          /^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i,
-          "",
-        ),
-      };
-    }
-  } catch {
-    // The previous health result must not survive a failed live probe. Otherwise
-    // the dashboard can report ready while the loopback server is gone.
-    externalReadyBaseUrl = "";
-    // A configured external loopback server is allowed, but managed startup is
-    // attempted only when a model path and executable are explicitly supplied.
-  }
-  if (config.auto_start === false)
-    throw new Error(`llama.cpp runtime is not reachable at ${baseUrl}.`);
   const modelPath = config.model_path;
   const executable = localExecutable(config);
+  const desiredKey =
+    modelPath && executable
+      ? runtimeKey(config, executable, modelPath, configuredPort)
+      : "";
+  const ready = () => ({
+    baseUrl,
+    model: model.replace(/^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i, ""),
+  });
+
+  // Fast path: the server this module runs already serves exactly this model and settings.
+  if (hasManagedServer() && desiredKey && managedKey === desiredKey && managedBaseUrl === baseUrl) {
+    if ((await probeServer(baseUrl)) === "ready") {
+      managedError = "";
+      externalReadyBaseUrl = baseUrl;
+      return ready();
+    }
+  }
+  // A server this module runs for another model or other settings is stopped first, so the next one starts on a free port.
+  if (hasManagedServer() && managedKey !== desiredKey) await stopManagedAndWait();
+
+  let state = await probeServer(baseUrl);
+  if (state === "loading") {
+    try {
+      await waitForReady(baseUrl);
+    } catch (error) {
+      throw new Error(`llama.cpp runtime failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    state = "ready";
+  }
+  if (state === "ready") {
+    const record = readRuntimeRecord();
+    const recordOwned = Boolean(
+      record && record.base_url === baseUrl && recordedServerIsOurs(record),
+    );
+    if (recordOwned && record && desiredKey && record.key === desiredKey) {
+      // Our server from before (the gateway was killed or restarted) with the same model and settings: reuse it.
+      managedPid = record.pid;
+      managedKey = desiredKey;
+      managedBaseUrl = baseUrl;
+      managedError = "";
+      externalReadyBaseUrl = baseUrl;
+      return ready();
+    }
+    if (recordOwned && record) {
+      // Our server, but for another model or other settings: stop it and start the selected model below.
+      await terminatePid(record.pid);
+      clearRuntimeRecord(record.pid);
+    } else {
+      // A server this module did not start. It is accepted only when it reports the selected model.
+      const served = await servedModelPath(baseUrl);
+      if (served && modelPath && !samePath(served, modelPath))
+        throw new Error(
+          `Another llama.cpp server on ${baseUrl} is serving ${served}, not the selected model. Stop it, or give this model its own port.`,
+        );
+      managedError = "";
+      externalReadyBaseUrl = baseUrl;
+      return ready();
+    }
+  }
+
+  if (config.auto_start === false)
+    throw new Error(`llama.cpp runtime is not reachable at ${baseUrl}.`);
   if (!modelPath)
     throw new Error(
       "No GGUF model_path is configured for the selected llama.cpp model.",
@@ -498,59 +739,78 @@ async function ensureLocalRuntimeImpl(
   if (!modelPath.toLowerCase().endsWith(".gguf"))
     throw new Error("local.model_path must point to a .gguf file.");
   if (!allowedModelPath(modelPath, config))
-    throw new Error(
-      "GGUF model path is outside the configured local allowlist.",
-    );
+    throw new Error("GGUF model path is outside the configured local allowlist.");
   if (!executable)
     throw new Error(
       "Miki's bundled llama.cpp runtime is unavailable. Run npm run build:all to build the vendored headless runtime, or provide local.executable_path explicitly.",
     );
   if (!fs.existsSync(executable))
     throw new Error(`llama-server executable not found: ${executable}`);
-  const port = configuredPort;
-  const key = runtimeKey(config, executable, modelPath, port);
-  if (!managedProcess || managedKey !== key) {
-    stopManagedProcess();
-    managedKey = key;
-    managedError = "";
-    const logDir = process.env.MIKI_DATA_DIR || path.join(process.cwd(), "data");
-    fs.mkdirSync(logDir, { recursive: true });
-    const log = fs.openSync(path.join(logDir, "llama-server.log"), "a");
-    managedProcess = spawn(executable, runtimeArgs(config, modelPath, port), {
-      stdio: ["ignore", log, log],
-      shell: false,
+
+  // A managed server that is still loading (or stuck) is stopped before a new one may bind the same port.
+  if (hasManagedServer()) await stopManagedAndWait();
+  await waitForPortClosed(baseUrl, 10_000);
+  const key = runtimeKey(config, executable, modelPath, configuredPort);
+  managedError = "";
+  const logDir = process.env.MIKI_DATA_DIR || path.join(process.cwd(), "data");
+  fs.mkdirSync(logDir, { recursive: true });
+  const log = fs.openSync(path.join(logDir, "llama-server.log"), "a");
+  const child = spawn(executable, runtimeArgs(config, modelPath, configuredPort), {
+    stdio: ["ignore", log, log],
+    shell: false,
+  });
+  managedProcess = child;
+  managedPid = 0;
+  managedKey = key;
+  managedBaseUrl = baseUrl;
+  if (child.pid)
+    writeRuntimeRecord({
+      pid: child.pid,
+      port: configuredPort,
+      base_url: baseUrl,
+      model_path: modelPath,
+      key,
+      executable,
+      started_at: new Date().toISOString(),
     });
-    managedBaseUrl = baseUrl;
-    managedProcess.once("error", (error) => {
-      managedError = error.message;
-    });
-    managedProcess.once("exit", (code, signal) => {
-      if (managedProcess)
-        managedError = `llama-server exited (${code ?? signal ?? "unknown"})`;
+  child.once("error", (error) => {
+    if (managedProcess === child) managedError = error.message;
+  });
+  // Only the process that is still the current one may clear the state; an old exit must not erase a newer start.
+  child.once("exit", (code, signal) => {
+    if (managedProcess === child) {
+      managedError = `llama-server exited (${code ?? signal ?? "unknown"})`;
       managedProcess = undefined;
       managedKey = "";
       managedBaseUrl = "";
-    });
-  }
+    }
+    clearRuntimeRecord(child.pid);
+  });
   try {
-    await waitForReady(baseUrl);
+    await waitForReady(baseUrl, undefined, () => child.exitCode === null && child.signalCode === null);
     externalReadyBaseUrl = baseUrl;
   } catch (error) {
     managedError = error instanceof Error ? error.message : String(error);
-    stopManagedProcess();
+    await stopManagedAndWait();
     throw new Error(`llama.cpp runtime failed to start: ${managedError}`);
   }
-  return {
-    baseUrl,
-    model: model.replace(/^(llama\.cpp|llama-cpp|llamacpp|local-llama)\//i, ""),
-  };
+  return ready();
 }
 
+/** Makes sure the llama-server for `model` is running. Calls are queued in arrival order (see above). */
 export function ensureLocalRuntime(model: string): Promise<{ baseUrl: string; model: string }> {
-  if (!ensureInFlight) {
-    ensureInFlight = ensureLocalRuntimeImpl(model).finally(() => { ensureInFlight = undefined; });
-  }
-  return ensureInFlight;
+  const key = model.toLowerCase();
+  if (lastEnsure && lastEnsure.key === key) return lastEnsure.run;
+  const run = ensureTail.catch(() => undefined).then(() => ensureLocalRuntimeImpl(model));
+  ensureTail = run.catch(() => undefined);
+  const entry = { key, run };
+  lastEnsure = entry;
+  run
+    .finally(() => {
+      if (lastEnsure === entry) lastEnsure = undefined;
+    })
+    .catch(() => undefined);
+  return run;
 }
 
 export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
@@ -560,14 +820,14 @@ export function getLocalRuntimeHealth(model?: string): LocalRuntimeHealth {
   const baseUrl = localBaseUrl(entry);
   return {
     provider: "llama.cpp",
-    ready: Boolean(managedProcess) || externalReadyBaseUrl === baseUrl,
+    ready: hasManagedServer() || externalReadyBaseUrl === baseUrl,
     configured: Boolean(
       entry ||
       process.env.MIKI_LLAMA_BASE_URL ||
       process.env.MIKI_LLAMA_SERVER_BIN,
     ),
     executable_available: Boolean(executable && fs.existsSync(executable)),
-    pid: managedProcess?.pid,
+    pid: managedProcess?.pid ?? (managedPid || undefined),
     port:
       config.port ||
       Number.parseInt(process.env.MIKI_LLAMA_PORT || "39200", 10),
@@ -593,8 +853,8 @@ export async function synchronizeLocalRuntimeForModel(
 ): Promise<LocalRuntimeTransition> {
   const local = isLocalModel(model);
   if (!local) {
-    const wasRunning = Boolean(managedProcess);
-    stopManagedProcess();
+    const wasRunning = hasManagedServer();
+    await stopManagedAndWait();
     return {
       selected_model: model,
       local: false,
@@ -604,7 +864,7 @@ export async function synchronizeLocalRuntimeForModel(
   }
 
   try {
-    const wasRunning = Boolean(managedProcess);
+    const wasRunning = hasManagedServer();
     await ensureLocalRuntime(model);
     return {
       selected_model: model,

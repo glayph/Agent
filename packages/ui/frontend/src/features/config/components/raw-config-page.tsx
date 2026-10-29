@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
+import { notify } from "@/lib/notify"
 import { launcherFetch } from "@/api/http"
 import { ConfigChangeNotice } from "@/app/layout/config-change-notice"
 import { PageHeader } from "@/app/layout/page-header"
@@ -120,7 +120,7 @@ export function RawConfigPage() {
       const message =
         error instanceof Error ? error.message : t("pages.config.save_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "raw-config-page:error:restartRequired" })
     },
   })
 
@@ -163,7 +163,7 @@ export function RawConfigPage() {
     onError: (error) => {
       const message = error instanceof Error ? error.message : "Configuration rollback failed."
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "raw-config-page:error:rollbackMutation" })
     },
   })
 
@@ -186,7 +186,7 @@ export function RawConfigPage() {
       const message =
         error instanceof Error ? error.message : t("pages.config.invalid_json")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "raw-config-page:error:handleSave" })
     }
   }
 
@@ -200,12 +200,12 @@ export function RawConfigPage() {
       setEditorValue(formatted)
       const message = t("pages.config.format_success")
       setStatusMessage({ kind: "success", text: message })
-      toast.success(message)
+      notify.success(message, { id: "raw-config-page:success:handleFormat" })
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t("pages.config.format_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "raw-config-page:error:handleFormat-2" })
     }
   }
 
@@ -220,12 +220,12 @@ export function RawConfigPage() {
     setIsDirty(false)
     const message = t("pages.config.reset_success")
     setStatusMessage({ kind: "info", text: message })
-    toast.info(message)
+    notify.info(message, { id: "raw-config-page:info:confirmReset" })
     setShowResetDialog(false)
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-miki-page="config-raw">
       <PageHeader title={t("pages.config.raw_json_title")}>
         <Button
           variant="outline"
@@ -244,7 +244,7 @@ export function RawConfigPage() {
         </Button>
       </PageHeader>
 
-      <div className="flex min-h-0 flex-1 flex-col p-1 lg:p-3 lg:p-6">
+      <div className="flex min-h-0 flex-1 flex-col p-2 sm:p-3 lg:p-5" data-miki-page-body="true">
         <div className="mx-auto flex h-full min-h-0 w-full max-w-[1000px] flex-col">
           {isLoading ? (
             <div className="flex flex-1 items-center justify-center">

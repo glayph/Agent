@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import bn from "./locales/bn.json"
 import en from "./locales/en.json"
 import ptBr from "./locales/pt-br.json"
 import zh from "./locales/zh.json"
@@ -31,6 +32,7 @@ function placeholders(text: string): string[] {
 describe("locale resources", () => {
   const locales = {
     en: flattenLocale(en),
+    bn: flattenLocale(bn),
     "pt-BR": flattenLocale(ptBr),
     zh: flattenLocale(zh),
   }
@@ -38,7 +40,30 @@ describe("locale resources", () => {
 
   it("keeps every locale key in parity with English", () => {
     for (const [localeName, locale] of Object.entries(locales)) {
+      if (localeName === "bn") {
+        expect(Object.keys(locale).every((key) => englishKeys.includes(key)), localeName).toBe(true)
+        continue
+      }
       expect(Object.keys(locale).sort(), localeName).toEqual(englishKeys)
+    }
+  })
+
+  it("requires Bengali key parity with English for channels, models and chat", () => {
+    const bengaliScoped = ["channels.", "models.", "chat."]
+    const scoped = (key: string) => bengaliScoped.some((prefix) => key.startsWith(prefix))
+    const required = englishKeys.filter(scoped)
+    const missing = required.filter((key) => locales.bn[key] === undefined)
+    expect(missing, "bn is missing keys that exist in en").toEqual([])
+    const unexpected = Object.keys(locales.bn).filter((key) => !englishKeys.includes(key))
+    expect(unexpected, "bn has keys that en does not").toEqual([])
+  })
+
+  it("uses _one/_other plural keys only (legacy _plural is ignored by i18next 26)", () => {
+    for (const [localeName, locale] of Object.entries(locales)) {
+      const keys = Object.keys(locale)
+      expect(keys.filter((key) => key.endsWith("_plural")), localeName).toEqual([])
+      const missingOther = keys.filter((key) => key.endsWith("_one") && locale[key.replace(/_one$/, "_other")] === undefined)
+      expect(missingOther, `${localeName} has _one without _other`).toEqual([])
     }
   })
 
@@ -46,10 +71,26 @@ describe("locale resources", () => {
     for (const key of englishKeys) {
       const expected = placeholders(locales.en[key])
       for (const [localeName, locale] of Object.entries(locales)) {
-        expect(placeholders(locale[key]), `${localeName}:${key}`).toEqual(
-          expected,
-        )
+        if (locale[key] === undefined) continue
+        expect(placeholders(locale[key]), `${localeName}:${key}`).toEqual(expected)
       }
+    }
+  })
+
+  it("translates the new redesign keys into Bengali", () => {
+    const requiredBengaliKeys = [
+      "models.add.batchSaveSuccess",
+      "models.fetch.alreadyAdded",
+      "models.fetch.addSelected",
+      "chat.actions.more",
+      "chat.tools.used",
+      "channels.catalog.groups.live",
+      "channels.catalog.truthNotice",
+      "channels.page.messagesNotDelivered",
+      "channels.page.allowFromWarning",
+    ]
+    for (const key of requiredBengaliKeys) {
+      expect(locales.bn[key], key).toBeTruthy()
     }
   })
 

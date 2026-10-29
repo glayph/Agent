@@ -64,3 +64,139 @@ describe("OpenAI-compatible provider client cache", () => {
     }
   });
 });
+
+describe("OpenAI-compatible provider streaming", () => {
+  it("forwards text deltas as they arrive and returns the assembled response", async () => {
+    let streamedRequests = 0;
+    const server = http.createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk.toString();
+      const body = JSON.parse(raw) as { stream?: boolean };
+      if (!body.stream) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "non-stream" }, finish_reason: "stop" }] }));
+        return;
+      }
+      streamedRequests += 1;
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+      const chunk = (delta: unknown, extra: Record<string, unknown> = {}) => JSON.stringify({
+        id: "chatcmpl-test",
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "gpt-test",
+        choices: [{ index: 0, delta, ...extra }],
+      });
+      res.write(`data: ${chunk({ role: "assistant", content: "Hel" })}\n\n`);
+      res.write(`data: ${chunk({ content: "lo" })}\n\n`);
+      res.write(`data: ${chunk({}, { finish_reason: "stop" })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+    const port = await listen(server);
+    const adapter = new OpenAICompatibleAdapter();
+    const seen: string[] = [];
+    try {
+      const response = await adapter.complete({
+        provider: {
+          id: "miki-streaming-regression",
+          displayName: "Test endpoint",
+          baseUrl: `http://127.0.0.1:${port}/v1`,
+          emptyApiKeyAllowed: false,
+        },
+        model: "gpt-test",
+        apiKey: "sk-test-stream-key-123456789",
+        messages: [{ role: "user", content: "hello" }],
+        timeoutMs: 5_000,
+        onTextDelta: (delta) => seen.push(delta),
+      });
+      expect(streamedRequests).toBe(1);
+      expect(seen).toEqual(["Hel", "lo"]);
+      expect(response.choices?.[0]?.message?.content).toBe("Hello");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps streaming when only stream_options is rejected", async () => {
+    const requests: Array<{ stream?: boolean; stream_options?: unknown }> = [];
+    const server = http.createServer(async (req, res) => {
+      let raw = "";
+      for await (const part of req) raw += part.toString();
+      const body = JSON.parse(raw) as { stream?: boolean; stream_options?: unknown };
+      requests.push(body);
+      if (body.stream_options) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "stream_options is not supported" } }));
+        return;
+      }
+      if (body.stream) {
+        res.writeHead(200, { "content-type": "text/event-stream", connection: "keep-alive" });
+        res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "ok" } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+        res.end("data: [DONE]\n\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "non-stream" }, finish_reason: "stop" }] }));
+    });
+    const port = await listen(server);
+    const adapter = new OpenAICompatibleAdapter();
+    const deltas: string[] = [];
+    try {
+      const response = await adapter.complete({
+        provider: { id: "miki-stream-options-fallback", displayName: "Test endpoint", baseUrl: `http://127.0.0.1:${port}/v1`, emptyApiKeyAllowed: false },
+        model: "gpt-test",
+        apiKey: "sk-test-stream-options-key-123456789",
+        messages: [{ role: "user", content: "hello" }],
+        timeoutMs: 5_000,
+        onTextDelta: (delta) => deltas.push(delta),
+      });
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.stream_options).toBeDefined();
+      expect(requests[1]).toMatchObject({ stream: true });
+      expect(requests[1]?.stream_options).toBeUndefined();
+      expect(deltas).toEqual(["ok"]);
+      expect(response.choices?.[0]?.message?.content).toBe("ok");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("retries without an unsupported optional thinking_level field", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const server = http.createServer(async (req, res) => {
+      let raw = "";
+      for await (const part of req) raw += part.toString();
+      const body = JSON.parse(raw) as Record<string, unknown>;
+      bodies.push(body);
+      if (Object.hasOwn(body, "thinking_level")) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "unknown parameter thinking_level" } }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }));
+    });
+    const port = await listen(server);
+    const adapter = new OpenAICompatibleAdapter();
+    try {
+      const response = await adapter.complete({
+        provider: { id: "miki-thinking-fallback", displayName: "Test endpoint", baseUrl: `http://127.0.0.1:${port}/v1`, emptyApiKeyAllowed: false },
+        model: "gpt-test",
+        apiKey: "sk-test-thinking-key-123456789",
+        messages: [{ role: "user", content: "hello" }],
+        extra: { temperature: 0.2, thinking_level: "low" },
+        timeoutMs: 5_000,
+      });
+      expect(bodies).toHaveLength(2);
+      expect(bodies[0]).toHaveProperty("thinking_level", "low");
+      expect(bodies[1]).not.toHaveProperty("thinking_level");
+      expect(bodies[1]).toHaveProperty("temperature", 0.2);
+      expect(response.choices?.[0]?.message?.content).toBe("ok");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+});
+

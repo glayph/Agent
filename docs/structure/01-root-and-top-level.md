@@ -11,9 +11,9 @@
 ├── README.md                    # Project overview, architecture, quick start
 ├── SETUP.md                     # Detailed setup and operational documentation
 ├── package.json                 # Monorepo root: workspaces, scripts (build, start, model:*, verify)
-├── package-lock.json            # npm lockfile
-├── pnpm-lock.yaml               # pnpm lockfile (used by some packages/frontend)
-├── pnpm-workspace.yaml          # Declares packages/* workspaces
+├── package-lock.json            # npm lockfile: canonical for the monorepo (CI runs `npm ci`)
+├── pnpm-lock.yaml               # pnpm lockfile: only the frontend build uses pnpm (scripts/frontend-pnpm.mjs); not read by `npm ci`
+├── pnpm-workspace.yaml          # pnpm settings picked up by the frontend's pnpm install
 ├── tsconfig.json                # Root TypeScript config
 ├── tsconfig.base.json           # Shared base TS compiler options
 ├── turbo.json                   # Turborepo pipeline configuration
@@ -26,7 +26,7 @@
 
 **Comments**
 - `package.json` defines the high-level scripts: `build:all`, `start` (→ bin/miki.js), `model:list|install|status`, `verify`, `dev`, `runtime:24-7`.
-- Locks and workspace files support both npm and pnpm usage.
+- npm workspaces (`package-lock.json`) are canonical; pnpm is used only inside `packages/ui/frontend`. When dependencies change, update `package-lock.json` first. The root `pnpm-lock.yaml`/`pnpm-workspace.yaml` are kept only until someone confirms `corepack pnpm install` in the frontend works without them.
 - Test configs are split so core, release and general tests can run independently.
 
 ## bin/

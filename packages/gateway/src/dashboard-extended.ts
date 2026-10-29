@@ -10,7 +10,7 @@ import Database from "better-sqlite3"
 import { createGoalsRouter, GoalStore } from "@miki/core/api/goals"
 import { createLinkPreviewRouter } from "@miki/core/api/link-preview"
 import { WhisperCppService, SpeechToTextError, loadSpeechToTextSettings } from "@miki/core/speech-to-text"
-import { listBuiltinPluginManifests, listBuiltinPluginHealth } from "@miki/core/plugins"
+import { listBuiltinPluginHealth } from "@miki/core/plugins"
 import QRCode from "qrcode"
 import { ExternalMcpConnectorManager } from "@miki/core/mcp/connectors"
 import { SelfImprovementEngine, type SelfImprovementConfig } from "@miki/core/self-improvement"
@@ -19,8 +19,10 @@ import type { McpRuntimeConfig, McpServerConfig } from "@miki/core/mcp/types"
 import type { SpeechToTextSettings } from "@miki/config"
 import { createWorkspaceSecretVault } from "@miki/config"
 import { CHANNEL_CONFIG_METADATA, CHANNEL_SECRET_FIELD_KEYS } from "@miki/config/channel-meta"
+import { authCredentialKey, runChannelAuthCheck, supportsAuthCheck, type ChannelAuthCheckResult } from "./channel-auth-check.js"
 import { publicChannelConfig, splitChannelConfig } from "./channel-config-helpers.js"
 import { getLifecycleBus } from "@miki/core/hooks"
+import { evolutionConfigFrom } from "./learned-behavior.js"
 import { wrapAsyncRoutes } from "./async-route.js"
 import { sessionCookie } from "./session-cookie.js"
 import { IGNORED_DIRS as SECRET_IGNORED_DIRS, isFixturePath, isIgnoredPath, isScannableFile, parseIgnoreFile, scanLine } from "./secret-scan-rules.js"
@@ -38,6 +40,8 @@ export interface DashboardExtendedDeps {
   rebindServer?: (port: number, publicAccess: boolean) => Promise<void>
   requireAuth: import("express").RequestHandler
   now: () => string
+  /** Injectable fetch for outbound provider checks (tests); defaults to the global fetch. */
+  fetchImpl?: typeof fetch
   registerShutdownHandler?: (handler: () => void | Promise<void>) => void
   agent: {
     registry: { size: number; names(): string[] }
@@ -112,13 +116,6 @@ function appMcpConfig(config: Record<string, unknown>): McpRuntimeConfig {
   }
 }
 
-function jsonMask(value: unknown): string {
-  const text = stringValue(value)
-  if (!text) return ""
-  if (text.length <= 8) return "••••"
-  return `${text.slice(0, 4)}…${text.slice(-4)}`
-}
-
 function deepMergeLocal(base: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
   const output = { ...base }
   for (const [key, value] of Object.entries(incoming)) {
@@ -133,7 +130,11 @@ const CHANNEL_FIELDS: Record<string, string[]> = Object.fromEntries(
   Object.entries(CHANNEL_CONFIG_METADATA).map(([name, meta]) => [name, [...meta.requiredFields]]),
 )
 const CHANNEL_META = Object.entries(CHANNEL_CONFIG_METADATA).map(([name, meta]) => ({
-  name, display_name: meta.displayName, runtime_status: meta.runtimeStatus, note: meta.note,
+  name,
+  display_name: meta.displayName,
+  runtime_status: meta.runtimeStatus,
+  sender_gated: meta.senderGated === true,
+  note: meta.note,
 }))
 const CHANNEL_SECRET_KEYS = new Set<string>(CHANNEL_SECRET_FIELD_KEYS)
 
@@ -412,45 +413,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   let evolutionTask: Promise<Record<string, unknown>> | null = null
 
   function evolutionConfig(): SelfImprovementConfig {
-    const rawEvolution = asRecord(deps.getAppConfig().evolution)
-    const raw = {
-      ...asRecord(deps.getAppConfig().self_improvement),
-      ...rawEvolution,
-      behavior_learning: {
-        ...asRecord(asRecord(deps.getAppConfig().self_improvement).behavior_learning),
-        ...asRecord(rawEvolution.behavior_learning),
-      },
-    } as Record<string, unknown>
-    const behavior = asRecord(raw.behavior_learning)
-    const configuredMode = stringValue(rawEvolution.mode) || stringValue(behavior.mode)
-    const mode = configuredMode === "apply" || configuredMode === "draft" || configuredMode === "observe"
-      ? configuredMode
-      : "observe"
-    const coldPathTimes = Array.isArray(raw.cold_path_times)
-      ? raw.cold_path_times.filter((v): v is string => typeof v === "string")
-      : []
-    const trigger = stringValue(raw.cold_path_trigger) || "after_turn"
-    const interval = 60
-    return {
-      enabled: raw.enabled === true,
-      reflection_interval_minutes: Math.max(1, Number(raw.reflection_interval_minutes ?? interval) || interval),
-      optimization_interval_minutes: Math.max(1, Number(raw.optimization_interval_minutes ?? Math.max(interval * 3, 180)) || Math.max(interval * 3, 180)),
-      prompt_tuning_interval_minutes: Math.max(1, Number(raw.prompt_tuning_interval_minutes ?? Math.max(interval * 2, 120)) || Math.max(interval * 2, 120)),
-      max_daily_reflections: Math.max(1, Number(raw.max_daily_reflections ?? 12) || 12),
-      max_reflections_per_day: Math.max(1, Number(raw.max_reflections_per_day ?? 12) || 12),
-      auto_apply_optimizations: raw.auto_apply_optimizations === true,
-      behavior_learning: {
-        enabled: behavior.enabled !== false,
-        mode,
-        exploration_rate: Math.max(0, Math.min(1, Number(behavior.exploration_rate ?? 0.1) || 0.1)),
-        exploration_floor: Math.max(0, Math.min(1, Number(behavior.exploration_floor ?? 0.02) || 0.02)),
-        exploration_decay: Math.max(0, Math.min(1, Number(behavior.exploration_decay ?? 0.995) || 0.995)),
-        min_samples: Math.max(1, Number(behavior.min_samples ?? 3) || 3),
-        max_draft_notes: Math.max(1, Number(behavior.max_draft_notes ?? 3) || 3),
-        retention_days: Math.max(1, Number(behavior.retention_days ?? 90) || 90),
-        edge_credit_eta: Math.max(0, Math.min(0.2, Number(behavior.edge_credit_eta ?? 0.05) || 0.05)),
-      },
-    }
+    return evolutionConfigFrom(deps.getAppConfig())
   }
 
   function getEvolutionEngine(): SelfImprovementEngine {
@@ -463,7 +426,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
         { tkg: { learningStore } },
         { dataDir: String((asRecord(deps.getAppConfig().evolution).state_dir || deps.dataRoot)) },
         async (messages) => {
-          const client = (llm ?? deps.agent.llmFor()) as any
+          const client = (llm ?? deps.agent.llmFor()) as unknown as { complete(messages: Array<{ role: string; content: string }>, options: Record<string, unknown>): Promise<never> } | undefined
           if (!client) throw new Error("No configured LLM is available for self-improvement analysis.")
           return client.complete(messages.map((message) => ({ role: message.role, content: message.content })), { json: true, maxCompletionTokens: 600 })
         },
@@ -541,16 +504,6 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   evolutionTimer.unref?.()
 
   let mcpManager = new ExternalMcpConnectorManager(deps.workspaceRoot, appMcpConfig(deps.getAppConfig()))
-  let mcpSignature = JSON.stringify(appMcpConfig(deps.getAppConfig()))
-  function getMcpManager(): ExternalMcpConnectorManager {
-    const config = appMcpConfig(deps.getAppConfig())
-    const nextSignature = JSON.stringify(config)
-    if (nextSignature !== mcpSignature) {
-      mcpManager.updateConfig(config)
-      mcpSignature = nextSignature
-    }
-    return mcpManager
-  }
 
   router.use("/link-preview", deps.requireAuth, createLinkPreviewRouter())
 
@@ -584,7 +537,6 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
 
   router.get("/channels/catalog", (_req, res) => {
     const config = deps.getAppConfig()
-    const list = channelRoot(config)
     res.json({ channels: CHANNEL_META.map((meta) => {
       const raw = getChannelRecord(config, meta.name)
       const { settings } = splitChannelConfig(raw)
@@ -596,7 +548,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
           ? Boolean(stringValue(settings.token))
           : true
       const configured = raw.enabled !== false && required.every((key) => stringValue(settings[key]) || stringValue(raw[key])) && hasRuntimeSecrets
-      const senderGated = meta.name === "telegram" || meta.name === "discord" || meta.name === "slack"
+      const senderGated = meta.sender_gated
       const allowFromNote = configured && senderGated && allowFrom.length === 0 ? "Connected, but allow_from is empty so every sender is ignored. Add trusted sender IDs (or * to allow everyone)." : undefined
       const runtime = deps.channelRuntimeStatus?.(meta.name)
       return { ...meta, runtime_note: allowFromNote ?? meta.note, runtime_live: meta.name === "miki" ? true : Boolean(runtime?.runtime_live), runtime_connected: meta.name === "miki" ? true : Boolean(runtime?.connected), runtime_error: runtime?.lastError, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined, configured }
@@ -623,35 +575,181 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     res.json({ secrets })
   })
 
+  function buildChannelProbeResponse(
+    name: string,
+    raw: Record<string, unknown>,
+    runtime: ReturnType<NonNullable<DashboardExtendedDeps["channelRuntimeStatus"]>> | undefined,
+    checkedAt: string,
+    mode?: unknown,
+    auth?: ChannelAuthCheckResult,
+  ) {
+    const meta = CHANNEL_META.find((item) => item.name === name)
+    if (!meta) return null
+    const { settings } = splitChannelConfig(raw)
+    const required = CHANNEL_FIELDS[name] ?? []
+    const configuredSecrets = new Set(
+      Object.keys(settings).filter((key) => CHANNEL_SECRET_KEYS.has(key) && stringValue(settings[key])),
+    )
+    const missing = required.filter(
+      (key) => !stringValue(settings[key]) && !configuredSecrets.has(key) && !stringValue(raw[key]),
+    )
+    const enabled = raw.enabled !== false
+    const implementedAdapter = meta.runtime_status === "functional"
+    const allowFrom = parseAllowedPeers(raw.allow_from ?? settings.allow_from)
+    const configured = missing.length === 0
+    const liveAdapterAvailable = meta.runtime_status === "functional"
+    const connected = name === "miki" ? true : Boolean(runtime?.connected)
+    const checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message: string }> = [
+      {
+        id: "config",
+        status: !enabled ? "warn" : configured ? "pass" : "warn",
+        message: !enabled ? "Channel is disabled." : configured ? "Required configuration is present." : `Missing: ${missing.join(", ")}`,
+      },
+      {
+        id: "runtime",
+        status: !liveAdapterAvailable
+          ? meta.runtime_status === "config_only" ? "fail" : "warn"
+          : connected ? "pass" : "warn",
+        message: !liveAdapterAvailable
+          ? meta.note
+          : connected
+            ? "Live adapter is connected."
+            : runtime?.lastError
+              ? `Adapter is reconnecting: ${runtime.lastError}`
+              : name === "miki"
+                ? "Built-in Miki WebSocket channel is available."
+                : "Adapter is implemented but not yet connected.",
+      },
+    ]
+    if (enabled && configured && meta.sender_gated && allowFrom.length === 0) {
+      checks.push({
+        id: "allow_from",
+        status: "warn",
+        message: "allow_from is empty, so every sender is ignored. Add trusted sender IDs (or * to allow everyone).",
+      })
+    }
+    let probeStatus: "ready" | "disabled" | "needs_config" | "auth_failed" | "runtime_error" | "partial" | "not_implemented" =
+      !enabled
+        ? "disabled"
+        : missing.length
+          ? "needs_config"
+          : connected
+            ? "ready"
+            : !liveAdapterAvailable
+              ? meta.runtime_status === "config_only" ? "not_implemented" : "partial"
+              : "partial"
+    if (name === "dingtalk" && configured) {
+      try {
+        const u = new URL(stringValue(settings.webhook_url))
+        checks.push({
+          id: "url",
+          status: u.protocol === "https:" ? "pass" : "warn",
+          message: "DingTalk webhook URL parsed successfully.",
+        })
+      } catch {
+        checks.push({ id: "url", status: "fail", message: "Invalid webhook URL." })
+        probeStatus = "needs_config"
+      }
+    }
+    if (auth) {
+      checks.push({ id: "auth", status: auth.ok ? "pass" : "fail", message: auth.message })
+      // A rejected credential is an auth failure; a timeout/unreachable provider is a runtime error, not a bad credential.
+      if (!auth.ok) probeStatus = auth.failureCode === "auth_rejected" ? "auth_failed" : "runtime_error"
+    }
+    const modeValue = String(mode || "sandbox")
+    // "live" is only reported when a real provider call was made; otherwise the check stays a sandbox check.
+    const checkMode = (modeValue === "live" ? (auth ? "live" : "sandbox") : modeValue) as "mock" | "sandbox" | "live"
+    return {
+      channel: name,
+      display_name: meta.display_name,
+      runtime_status: meta.runtime_status,
+      probe_status: probeStatus,
+      agent_connected: connected,
+      enabled,
+      configured,
+      missing_fields: missing,
+      checks,
+      check_mode: checkMode,
+      latency_ms: auth ? auth.latencyMs : connected ? 1 : 0,
+      ...(auth && !auth.ok && auth.failureCode ? { failure_code: auth.failureCode } : {}),
+      send_check: {
+        status: "skipped" as const,
+        mode: "sandbox" as const,
+        message: auth
+          ? "Credentials were verified with a read-only provider call; no message was sent."
+          : connected
+            ? "Adapter connection was checked; no external message was sent."
+            : "No external message was sent by the dashboard probe.",
+        latency_ms: 0,
+      },
+      next_steps: missing.length
+        ? missing.map((key) => key === "allow_from"
+          ? "Add trusted sender IDs to allow_from; use * only if you intentionally want to allow every sender."
+          : `Configure ${key}.`)
+        : !liveAdapterAvailable
+          ? ["This channel does not currently provide full live message transport."]
+          : !connected
+            ? ["The adapter is starting or reconnecting. Check the runtime error and network access."]
+            : ["The live adapter is connected and only accepts sender IDs listed in allow_from."],
+      setup_checklist: [
+        ...required,
+        ...(implementedAdapter && meta.sender_gated ? ["allow_from (trusted sender IDs)"] : []),
+      ].map((key) => `Configure ${key}.`),
+      checked_at: checkedAt,
+    }
+  }
+
   router.get("/channels/:name/probe", deps.requireAuth, async (req, res) => {
     const name = req.params.name
     const meta = CHANNEL_META.find((item) => item.name === name)
     if (!meta) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
-    const config = deps.getAppConfig()
-    const raw = getChannelRecord(config, name)
-    const { settings } = splitChannelConfig(raw)
-    const required = CHANNEL_FIELDS[name] ?? []
-    const configuredSecrets = new Set(Object.keys(settings).filter((key) => CHANNEL_SECRET_KEYS.has(key) && stringValue(settings[key])))
-    const missing = required.filter((key) => !stringValue(settings[key]) && !configuredSecrets.has(key) && !stringValue(raw[key]))
-    const enabled = raw.enabled !== false
-    const implementedAdapter = ["miki", "telegram", "discord", "slack"].includes(name)
-    const allowFrom = parseAllowedPeers(raw.allow_from ?? settings.allow_from)
-    const configured = missing.length === 0
-    const runtime = deps.channelRuntimeStatus?.(name)
-    const liveAdapterAvailable = name === "miki" || ["telegram", "discord", "slack"].includes(name)
-    const connected = name === "miki" ? true : Boolean(runtime?.connected)
-    const checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message: string }> = [
-      { id: "config", status: !enabled ? "warn" : configured ? "pass" : "warn", message: !enabled ? "Channel is disabled." : configured ? "Required configuration is present." : `Missing: ${missing.join(", ")}` },
-      { id: "runtime", status: !liveAdapterAvailable ? meta.runtime_status === "config_only" ? "fail" : "warn" : connected ? "pass" : "warn", message: !liveAdapterAvailable ? meta.note : connected ? "Live adapter is connected." : runtime?.lastError ? `Adapter is reconnecting: ${runtime.lastError}` : meta.name === "Miki" ? "Built-in Miki WebSocket channel is available." : "Adapter is implemented but not yet connected." },
-    ]
-    if (enabled && configured && ["telegram", "discord", "slack"].includes(name) && allowFrom.length === 0) {
-      checks.push({ id: "allow_from", status: "warn", message: "allow_from is empty, so every sender is ignored. Add trusted sender IDs (or * to allow everyone)." })
+    const raw = getChannelRecord(deps.getAppConfig(), name)
+    const result = buildChannelProbeResponse(
+      name,
+      raw,
+      deps.channelRuntimeStatus?.(name),
+      deps.now(),
+      req.query.mode,
+    )
+    if (!result) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
+    return res.json(result)
+  })
+
+  // Tests draft settings only in memory. The body is never persisted or logged;
+  // the response deliberately contains status/checks only, never credential values.
+  router.post("/channels/:name/probe", deps.requireAuth, async (req, res) => {
+    const name = req.params.name
+    const meta = CHANNEL_META.find((item) => item.name === name)
+    if (!meta) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
+    const requestBody = asRecord(req.body)
+    const draftInput = asRecord(requestBody.config ?? requestBody)
+    const saved = getChannelRecord(deps.getAppConfig(), name)
+    const savedParts = splitChannelConfig(saved)
+    const draftParts = splitChannelConfig(draftInput)
+    const draft: Record<string, unknown> = {
+      ...saved,
+      ...draftInput,
+      settings: { ...savedParts.settings, ...draftParts.settings },
+      enabled: typeof draftInput.enabled === "boolean" ? draftInput.enabled : saved.enabled,
     }
-    let probeStatus: "ready" | "disabled" | "needs_config" | "partial" | "not_implemented" = !enabled ? "disabled" : missing.length ? "needs_config" : connected ? "ready" : !liveAdapterAvailable ? meta.runtime_status === "config_only" ? "not_implemented" : "partial" : "partial"
-    if (name === "dingtalk" && configured) {
-      try { const u = new URL(stringValue(settings.webhook_url)); checks.push({ id: "url", status: u.protocol === "https:" ? "pass" : "warn", message: "DingTalk webhook URL parsed successfully." }) } catch { checks.push({ id: "url", status: "fail", message: "Invalid webhook URL." }); probeStatus = "needs_config" }
+    // The provider authentication check runs only for an explicit live probe, and only from POST:
+    // GET never reaches out to a provider. The credential stays in this scope (never logged, stored or returned).
+    let auth: ChannelAuthCheckResult | undefined
+    if (req.query.mode === "live" && supportsAuthCheck(name) && draft.enabled !== false) {
+      const credential = stringValue(splitChannelConfig(draft).settings[authCredentialKey(name)])
+      if (credential) auth = await runChannelAuthCheck(name, credential, { fetchImpl: deps.fetchImpl })
     }
-    return res.json({ channel: name, display_name: meta.display_name, runtime_status: meta.runtime_status, probe_status: probeStatus, agent_connected: connected, enabled, configured, missing_fields: missing, checks, check_mode: String(req.query.mode || "sandbox") === "live" ? "sandbox" : String(req.query.mode || "sandbox"), latency_ms: connected ? 1 : 0, send_check: { status: "skipped", mode: "sandbox", message: connected ? "Adapter connection was checked; no external message was sent." : "No external message was sent by the dashboard probe.", latency_ms: 0 }, next_steps: missing.length ? missing.map((key) => key === "allow_from" ? "Add trusted sender IDs to allow_from; use * only if you intentionally want to allow every sender." : `Configure ${key}.`) : !liveAdapterAvailable ? ["This channel is configuration-only; a live adapter is not implemented."] : !connected ? ["The adapter is starting or reconnecting. Check the runtime error and network access."] : ["The live adapter is connected and only accepts sender IDs listed in allow_from."], setup_checklist: [...required, ...(implementedAdapter && name !== "miki" ? ["allow_from (trusted sender IDs)"] : [])].map((key) => `Configure ${key}.`), checked_at: deps.now() })
+    const result = buildChannelProbeResponse(
+      name,
+      draft,
+      deps.channelRuntimeStatus?.(name),
+      deps.now(),
+      req.query.mode,
+      auth,
+    )
+    if (!result) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
+    res.setHeader("Cache-Control", "no-store")
+    return res.json(result)
   })
 
   async function qrDataUri(content: string) {
@@ -1107,7 +1205,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const id = stringValue(req.body?.backupId)
     if (!id || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) return res.status(400).json({ error: "A valid backupId is required" })
     const file = path.join(backupsDir, `${id}.json`)
-    let backup: any
+    let backup: { snapshot?: Record<string, unknown> }
     try { backup = JSON.parse(await fsp.readFile(file, "utf8")) } catch { return res.status(404).json({ error: "Backup not found" }) }
     const tables = ["settings", "model_configs", "memory_chunks", "memory_vectors", "chat_sessions", "chat_messages", "runtime_jobs"]
     await fsp.mkdir(backupsDir, { recursive: true, mode: 0o700 })

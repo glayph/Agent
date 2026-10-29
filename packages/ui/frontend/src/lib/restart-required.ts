@@ -1,8 +1,9 @@
 import type { TFunction } from "i18next"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 
 export function showRestartRequiredToast(t: TFunction, name: string) {
-  toast.warning(t("common.restartRequiredTitle"), {
+  notify.warning(t("common.restartRequiredTitle"), {
+    id: "restart-required",
     description: t("common.restartRequiredDesc", { name }),
   })
 }
@@ -18,7 +19,8 @@ export function showRuntimeApplyStatusToast(
   gatewayRestartRequired?: boolean,
 ) {
   if (status === "failed") {
-    toast.error(t("common.saveFailedTitle"), {
+    notify.error(t("common.saveFailedTitle"), {
+      id: `save-failed:${name}`,
       description: error || t("common.saveFailedDesc", { name }),
     })
     return
@@ -31,7 +33,7 @@ export function showRuntimeApplyStatusToast(
     showRestartRequiredToast(t, name)
     return
   }
-  toast.success(savedMessage)
+  notify.success(savedMessage, { id: `save-success:${name}` })
 }
 
 export function showSaveSuccessOrRestartToast(

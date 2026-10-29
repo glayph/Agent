@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 
 import { isLauncherAuthPathname } from "@/lib/launcher-login-path"
 
@@ -100,15 +100,15 @@ export async function launcherFetch(
         globalThis.location.assign("/launcher-login")
       }
     } else if (showErrorToast && !res.ok) {
-      toast.error(await responseErrorMessage(res))
+      notify.error(await responseErrorMessage(res), { id: `http:${res.status}:${String(input)}` })
     }
 
     return res
   } catch (error) {
     if (showErrorToast) {
-      toast.error(error instanceof GatewayBackendError
+      notify.error(error instanceof GatewayBackendError
         ? error.message
-        : "Network error: Please check your connection.")
+        : "Network error: Please check your connection.", { id: `http:network:${String(input)}` })
     }
     throw error
   }

@@ -153,20 +153,19 @@
   },
   "heartbeat": {
     "enabled": true,
-    "interval_seconds": 30,
+    "interval_seconds": 20,
     "checklist_path": "identity/HEARTBEAT.md",
     "proactive": {
       "enabled": true,
       "startup_decision": true,
+      "llm_when_idle": true,
       "min_poll_seconds": 5,
-      "max_poll_seconds": 60,
+      "max_poll_seconds": 20,
       "idle_backoff_multiplier": 2,
       "decision_interval_seconds": 30,
-      "max_decision_interval_seconds": 300,
-      "decision_backoff_multiplier": 1.5,
       "failure_threshold": 3,
-      "failure_backoff_base_seconds": 30,
-      "failure_backoff_max_seconds": 300
+      "failure_backoff_base_seconds": 2,
+      "failure_backoff_max_seconds": 12
     },
     "auto_actions": {
       "enabled": true,
@@ -181,10 +180,12 @@
     "enabled": true,
     "mode": "safe",
     "unlimited_budgets": false,
+    "max_run_duration_seconds": 300,
+    "history_retention_days": 30,
     "tool_policy": {
       "mode": "safe",
       "max_retries": 3,
-      "retry_backoff_seconds": 15,
+      "retry_backoff_seconds": 2,
       "require_acceptance_contract": false,
       "allow_browser": false,
       "browser_allowed_domains": [],

@@ -76,6 +76,8 @@ type LearningStore = {
     scope: Scope | undefined,
     options?: Record<string, unknown>,
   ): Array<Record<string, unknown> | null>;
+  approveProposal?(scope: Scope | undefined, proposalId: string, approvalId?: string): Record<string, unknown> | null;
+  applyProposal?(scope: Scope | undefined, proposalId: string): Record<string, unknown> | null;
   recordDecision?(input: Record<string, unknown>): Record<string, unknown>;
   createPolicySnapshot?(scope: Scope | undefined, input?: Record<string, unknown>): Record<string, unknown> | null;
   getActivePolicySnapshot?(scope: Scope | undefined): Record<string, unknown> | null;
@@ -124,6 +126,30 @@ interface CircuitBreaker {
 }
 
 type CycleType = "reflection" | "optimization" | "prompt_tuning";
+
+// Findings the engine writes when the analysis model did not answer. They carry no lesson, so they are never fed back.
+const PLACEHOLDER_FINDINGS = new Set([
+  "Deterministic reward and outcome summary generated.",
+  "Prompt tuning requires a draft review before any application.",
+]);
+
+// The analysis model returns JSON ({finding, confidence, recommendation}); plain text is kept as it is.
+function findingText(raw: unknown): string {
+  const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      const finding = String(record.finding ?? "").trim();
+      const recommendation = String(record.recommendation ?? "").trim();
+      return [finding, recommendation && `Suggested: ${recommendation}`].filter(Boolean).join(" ").slice(0, 300);
+    }
+  } catch {
+    /* plain-text finding */
+  }
+  return text.slice(0, 300);
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min;
@@ -645,6 +671,7 @@ export class SelfImprovementEngine {
         type === "reflection" ? await this.callForAnalysis(experiences) : null;
       let outputCount = 0;
       let proposal: Record<string, unknown> | null = null;
+      let autoApplied = false;
 
       if (type === "optimization") {
         const policy = store.readPolicyState(this.scope);
@@ -667,6 +694,7 @@ export class SelfImprovementEngine {
           status: "pending_approval",
           metadata: { cycleId: cycle.id },
         });
+        autoApplied = this.autoApplyProposal(store, proposal, snapshot ? String(snapshot.id) : undefined);
         outputCount = 1;
       } else if (type === "reflection" || type === "prompt_tuning") {
         proposal = store.createProposal({
@@ -686,9 +714,12 @@ export class SelfImprovementEngine {
             evidenceSummary: stats,
           },
           evidenceIds: experiences.slice(0, 20).map((item) => item.id),
-          status: "draft",
+          // Auto-applied notes skip "draft": a draft cannot be approved, and drafts that never leave
+          // "draft" would block every later reflection (draft_limit).
+          status: this.autoApplyEnabled() ? "pending_approval" : "draft",
           metadata: { cycleId: cycle.id },
         });
+        autoApplied = this.autoApplyProposal(store, proposal);
         outputCount = proposal ? 1 : 0;
       }
 
@@ -699,6 +730,7 @@ export class SelfImprovementEngine {
         outputCount,
         metadata: {
           proposalId: proposal?.id || null,
+          autoApplied,
           policyVersion: store.readPolicyState(this.scope).policyVersion,
         },
       });
@@ -721,6 +753,44 @@ export class SelfImprovementEngine {
     } finally {
       this.cycleRunning = false;
     }
+  }
+
+  /** Proposals are approved and applied by config (not by a person) only in apply mode with auto_apply_optimizations on. */
+  private autoApplyEnabled(): boolean {
+    return this.config.auto_apply_optimizations === true && modeOf(this.config) === "apply";
+  }
+
+  /** Approves and applies a proposal under the config switch. A store that refuses leaves it pending; the cycle still completes. */
+  private autoApplyProposal(store: LearningStore, proposal: Record<string, unknown> | null, snapshotId?: string): boolean {
+    if (!proposal || !this.autoApplyEnabled()) return false;
+    try {
+      const proposalId = String(proposal.id);
+      store.approveProposal?.(this.scope, proposalId, "auto-approved-by-config");
+      store.applyProposal?.(this.scope, proposalId);
+      if (snapshotId) store.promotePolicySnapshot?.(this.scope, snapshotId, "auto-approved-by-config");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Applied reflection findings as short advisory lines for the next turn's prompt.
+   * Empty when learning is off or nothing has been applied yet.
+   */
+  getLearnedGuidance(): string {
+    const store = this.store();
+    if (!store || !this.enabled || this.config.behavior_learning?.enabled === false) return "";
+    const limit = positiveInt(this.config.behavior_learning?.max_draft_notes, 3);
+    const notes: string[] = [];
+    for (const proposal of store.listProposals(this.scope, { status: "applied", limit: 50 })) {
+      if (!proposal || proposal.kind !== "reflection") continue;
+      const note = findingText((proposal.payload as Record<string, unknown> | undefined)?.finding);
+      if (!note || PLACEHOLDER_FINDINGS.has(note) || notes.includes(note)) continue;
+      notes.push(note);
+      if (notes.length >= limit) break;
+    }
+    return notes.map((note) => `- ${note}`).join("\n");
   }
 
   getAccumulatedTunings(): string[] {
@@ -819,12 +889,16 @@ export class SelfImprovementEngine {
           reason: "apply_mode_required",
         };
       }
-      return {
-        status: "rejected",
-        cycleType: "optimization",
-        cycleId: null,
-        reason: "owner_approval_required",
-      };
+      if (this.config.auto_apply_optimizations !== true) {
+        return {
+          status: "rejected",
+          cycleType: "optimization",
+          cycleId: null,
+          reason: "auto_apply_disabled",
+        };
+      }
+      // The cycle approves and applies its own proposal under the config switch.
+      return this.runCycle("optimization", options.force === true);
     }
     return this.runCycle("optimization", options.force === true);
   }

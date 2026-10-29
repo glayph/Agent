@@ -23,6 +23,7 @@ let child = null;
 let memoryChild = null;
 let ownsMemoryChild = false;
 let shuttingDown = false;
+let launchWatchdog = null;
 
 function exists(filePath) {
   try {
@@ -198,9 +199,12 @@ async function start(argv) {
     stdio: "inherit",
     shell: false,
   });
+  const launchedChild = child;
+  startLaunchWatchdog(launchedChild);
 
   child.on("error", (err) => fail(`Failed to start Miki: ${err.message}`));
   child.on("exit", (code, signal) => {
+    stopLaunchWatchdog();
     child = null;
     if (memoryChild && ownsMemoryChild) {
       memoryChild.kill("SIGTERM");
@@ -218,6 +222,71 @@ async function start(argv) {
   void waitForReadySignal();
 }
 
+// Hang watchdog for the process the service manager runs. A gateway whose event loop is stuck does not answer
+// /gateway/live; after a few such probes in a row the whole Miki process tree is killed, so the launcher exits and
+// systemd (or launchd) starts it again. Probing begins only after the gateway has answered once, so a slow start
+// is never mistaken for a hang. MIKI_WATCHDOG=0 turns it off; the interval, timeout and failure count can be changed.
+const WATCHDOG_INTERVAL_MS = Math.max(1_000, Number(process.env.MIKI_WATCHDOG_INTERVAL_MS) || 10_000);
+const WATCHDOG_TIMEOUT_MS = Math.max(500, Number(process.env.MIKI_WATCHDOG_TIMEOUT_MS) || 4_000);
+const WATCHDOG_FAILURE_LIMIT = Math.max(1, Math.floor(Number(process.env.MIKI_WATCHDOG_FAILURES)) || 3);
+
+function stopLaunchWatchdog() {
+  if (launchWatchdog) clearInterval(launchWatchdog);
+  launchWatchdog = null;
+}
+
+async function gatewayLive() {
+  const port = Number(process.env.GATEWAY_PORT || 18800);
+  const probe = async (path) => {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      signal: AbortSignal.timeout(WATCHDOG_TIMEOUT_MS),
+    });
+    return response;
+  };
+  try {
+    const response = await probe("/gateway/live");
+    // An older gateway build has no /gateway/live; its health URL is the next best proof of a running event loop.
+    if (response.status === 404) return (await probe("/gateway/health")).ok;
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function startLaunchWatchdog(launched) {
+  stopLaunchWatchdog();
+  if (process.env.MIKI_WATCHDOG === "0") return;
+  let armed = false;
+  let failures = 0;
+  let probing = false;
+  launchWatchdog = setInterval(async () => {
+    if (probing || shuttingDown || child !== launched) return;
+    probing = true;
+    try {
+      if (await gatewayLive()) {
+        armed = true;
+        failures = 0;
+        return;
+      }
+      if (!armed) return;
+      failures += 1;
+      console.warn(
+        `Miki watchdog: the gateway did not answer /gateway/live (${failures}/${WATCHDOG_FAILURE_LIMIT}).`,
+      );
+      if (failures >= WATCHDOG_FAILURE_LIMIT && child === launched) {
+        console.error(
+          "Miki watchdog: the gateway is unresponsive; stopping Miki so the service manager starts it again.",
+        );
+        stopLaunchWatchdog();
+        terminateChildTree(true);
+      }
+    } finally {
+      probing = false;
+    }
+  }, WATCHDOG_INTERVAL_MS);
+  launchWatchdog.unref?.();
+}
+
 async function gatewayHealthy() {
   const port = Number(process.env.GATEWAY_PORT || 18800);
   try {
@@ -226,7 +295,8 @@ async function gatewayHealthy() {
     });
     if (!response.ok) return false;
     const body = await response.json().catch(() => null);
-    return Boolean(body && body.status === "ok" && body.coreHealthy === true);
+    // "degraded" (model or channel trouble) is still a running gateway; only a failed database ("unhealthy") is not ready.
+    return Boolean(body && (body.status === "ok" || body.status === "degraded") && body.coreHealthy === true);
   } catch {
     return false;
   }

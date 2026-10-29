@@ -7,10 +7,25 @@ describe("runtime settings defaults", () => {
     expect(resolveMaxToolIterations({}, {})).toBe(DEFAULT_MAX_TOOL_ITERATIONS);
   });
 
-  it("uses an explicit context window and otherwise applies the 4x max-token rule", () => {
-    expect(resolveContextWindowTokens({ context_window: 131072, max_tokens: 100 })).toBe(131072);
+  it("uses an explicit context window, then the model's real window, and only then the 4x max-token estimate", () => {
+    const lookup = (model: string) => (model === "big-model" ? 1_000_000 : undefined);
+    expect(resolveContextWindowTokens({ context_window: 131072, max_tokens: 100 }, "big-model", lookup)).toBe(131072);
+    // context_window: 0 means "not set": use the model's real window, not 4 x max_completion_tokens.
+    expect(resolveContextWindowTokens({ context_window: 0, max_completion_tokens: 16384 }, "big-model", lookup)).toBe(1_000_000);
+    // Unknown model or no model: legacy estimate.
+    expect(resolveContextWindowTokens({ context_window: 0, max_tokens: 8192 }, "other", lookup)).toBe(32768);
     expect(resolveContextWindowTokens({ context_window: 0, max_tokens: 8192 })).toBe(32768);
+    // Optional cap bounds unusually large provider windows without overriding an explicit window.
+    expect(resolveContextWindowTokens({ context_window: 0, context_window_cap: 65536 }, "big-model", lookup)).toBe(65536);
+    expect(resolveContextWindowTokens({ context_window: 0, context_window_cap: 65536 }, "small-model", () => 32000)).toBe(32000);
+    expect(resolveContextWindowTokens({ context_window: 131072, context_window_cap: 65536 }, "big-model", lookup)).toBe(131072);
     expect(resolveContextWindowTokens({})).toBe(DEFAULT_MAX_COMPLETION_TOKENS * 4);
+  });
+
+  it("uses the built-in model limits by default", () => {
+    expect(resolveContextWindowTokens({ context_window: 0, max_completion_tokens: 16384 }, "gemini-3.5-flash-lite")).toBe(1_000_000);
+    expect(resolveContextWindowTokens({ context_window: 0, context_window_cap: 65536 }, "gemini-3.5-flash-lite")).toBe(65536);
+    expect(resolveContextWindowTokens({ context_window: 0, max_completion_tokens: 16384 }, "some-unknown-model")).toBe(128_000);
   });
 
   it("resolves an optional non-negative wall-time budget from settings or environment", () => {

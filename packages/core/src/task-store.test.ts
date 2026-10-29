@@ -23,6 +23,8 @@ describe("DurableTaskStore", () => {
       status: "queued",
       version: 0,
       createdAt: "2026-10-15T00:00:00.000Z",
+      attemptCount: 0,
+      maxAttempts: 5,
     });
     expect(store.listEvents("task-1")).toEqual([
       expect.objectContaining({ fromStatus: null, toStatus: "queued", version: 0, reason: "task created" }),

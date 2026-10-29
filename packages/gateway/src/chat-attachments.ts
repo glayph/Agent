@@ -43,24 +43,73 @@ const KNOWN_TYPES: Record<string, [ChatAttachmentType, string]> = {
   ".jpeg": ["image", "image/jpeg"],
   ".gif": ["image", "image/gif"],
   ".webp": ["image", "image/webp"],
+  ".bmp": ["image", "image/bmp"],
+  ".ico": ["image", "image/x-icon"],
+  ".avif": ["image", "image/avif"],
+  ".tif": ["image", "image/tiff"],
+  ".tiff": ["image", "image/tiff"],
   ".svg": ["image", "image/svg+xml"],
+  ".heic": ["image", "image/heic"],
+  ".heif": ["image", "image/heif"],
   ".mp3": ["audio", "audio/mpeg"],
   ".wav": ["audio", "audio/wav"],
   ".ogg": ["audio", "audio/ogg"],
+  ".flac": ["audio", "audio/flac"],
+  ".m4a": ["audio", "audio/mp4"],
+  ".aac": ["audio", "audio/aac"],
+  ".aif": ["audio", "audio/aiff"],
+  ".aiff": ["audio", "audio/aiff"],
+  ".oga": ["audio", "audio/ogg"],
+  ".opus": ["audio", "audio/opus"],
+  ".wma": ["audio", "audio/x-ms-wma"],
   ".mp4": ["video", "video/mp4"],
+  ".m4v": ["video", "video/mp4"],
+  ".3gp": ["video", "video/3gpp"],
   ".webm": ["video", "video/webm"],
+  ".ogv": ["video", "video/ogg"],
+  ".mov": ["video", "video/quicktime"],
+  ".wmv": ["video", "video/x-ms-wmv"],
+  ".mkv": ["video", "video/x-matroska"],
+  ".avi": ["video", "video/x-msvideo"],
+  ".mpeg": ["video", "video/mpeg"],
+  ".mpg": ["video", "video/mpeg"],
   ".pdf": ["file", "application/pdf"],
+  ".doc": ["file", "application/msword"],
+  ".docx": ["file", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ".xls": ["file", "application/vnd.ms-excel"],
+  ".xlsx": ["file", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  ".ppt": ["file", "application/vnd.ms-powerpoint"],
+  ".pptx": ["file", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  ".rtf": ["file", "application/rtf"],
+  ".odt": ["file", "application/vnd.oasis.opendocument.text"],
+  ".ods": ["file", "application/vnd.oasis.opendocument.spreadsheet"],
+  ".odp": ["file", "application/vnd.oasis.opendocument.presentation"],
+  ".7z": ["file", "application/x-7z-compressed"],
+  ".zip": ["file", "application/zip"],
   ".md": ["file", "text/markdown"],
   ".txt": ["file", "text/plain"],
   ".csv": ["file", "text/csv"],
   ".json": ["file", "application/json"],
+  ".xml": ["file", "application/xml"],
+  ".yaml": ["file", "application/yaml"],
+  ".yml": ["file", "application/yaml"],
+  ".toml": ["file", "application/toml"],
+  ".ini": ["file", "text/plain"],
+  ".log": ["file", "text/plain"],
   ".html": ["file", "text/html"],
   ".css": ["file", "text/css"],
   ".js": ["file", "text/javascript"],
+  ".jsx": ["file", "text/plain"],
   ".ts": ["file", "text/plain"],
+  ".tsx": ["file", "text/plain"],
   ".py": ["file", "text/plain"],
   ".sh": ["file", "text/plain"],
-  ".zip": ["file", "application/zip"],
+  ".go": ["file", "text/plain"],
+  ".rs": ["file", "text/plain"],
+  ".java": ["file", "text/plain"],
+  ".c": ["file", "text/plain"],
+  ".cpp": ["file", "text/plain"],
+  ".h": ["file", "text/plain"],
 }
 
 /** Never exposed through the media route, whatever the root. */
@@ -124,6 +173,52 @@ export function toAttachment(file: string): ChatAttachmentPayload | null {
     url: `${MEDIA_ROUTE}?path=${encodeURIComponent(file)}`,
     filename: path.basename(file),
     content_type: info.contentType,
+  }
+}
+
+function requestedPathFromMediaUrl(rawUrl: string): string | null {
+  if (!rawUrl || rawUrl.startsWith("data:")) return null
+  try {
+    const url = new URL(rawUrl, "http://miki.local")
+    if (url.pathname !== MEDIA_ROUTE) return null
+    return url.searchParams.get("path")
+  } catch {
+    return null
+  }
+}
+
+/** Resolves an existing chat-media URL to an allowed file in the workspace. */
+export function workspaceRelativePathFromMediaUrl(
+  rawUrl: string,
+  ctx: AttachmentContext,
+): string | null {
+  const requested = requestedPathFromMediaUrl(rawUrl)
+  if (!requested) return null
+  const file = resolveMediaPath(requested, ctx)
+  if (!file) return null
+  const relative = path.relative(ctx.workspaceRoot, file)
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
+  return relative.split(path.sep).join("/")
+}
+
+/** Makes a supported uploaded image available to image-capable model providers. */
+export function imageDataUrlFromMediaUrl(
+  rawUrl: string,
+  ctx: AttachmentContext,
+): string | null {
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(rawUrl)) return rawUrl
+  const requested = requestedPathFromMediaUrl(rawUrl)
+  if (!requested) return null
+  const file = resolveMediaPath(requested, ctx)
+  if (!file) return null
+  const info = describeFile(file)
+  // Use broadly supported vision formats for direct model input. Other image types
+  // remain attached by workspace path so one unsupported MIME cannot fail the turn.
+  if (!info || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(info.contentType)) return null
+  try {
+    return `data:${info.contentType};base64,${fs.readFileSync(file).toString("base64")}`
+  } catch {
+    return null
   }
 }
 

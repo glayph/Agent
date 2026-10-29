@@ -98,3 +98,4 @@ skills-lock.json
 # Runtime memory / journals (personal, regenerated at runtime)
 identity/.wal/
 identity/memory/20*.md
+.chaos-build/

@@ -11,6 +11,37 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
+// The always-on Linux installer keeps mutable config/data in a separate
+// workspace. When doctor is run interactively, it should inspect the same paths
+// as the systemd service rather than accidentally checking the source checkout.
+function applyMatchingServicePaths() {
+  const candidates = [
+    process.env.MIKI_ENV_FILE,
+    ...(process.platform === "linux" ? ["/etc/agent-miki/agent-miki.env"] : []),
+    ...(process.platform === "win32" ? [path.join(PROJECT_ROOT, "config", "agent-miki.env")] : []),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    let contents;
+    try { contents = fs.readFileSync(candidate, "utf8"); } catch { continue; }
+    const values = {};
+    for (const line of contents.split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!match || line.trimStart().startsWith("#")) continue;
+      values[match[1]] = match[2].replace(/^(["'])(.*)\1$/, "$2");
+    }
+    // Do not accidentally inspect another Miki installation on a multi-agent host.
+    if (!values.MIKI_SOURCE_ROOT || path.resolve(values.MIKI_SOURCE_ROOT) !== PROJECT_ROOT) continue;
+    for (const name of ["MIKI_WORKSPACE_DIR", "MIKI_RUNTIME_ROOT", "MIKI_CONFIG_DIR", "MIKI_DATA_DIR", "MIKI_LLAMA_MODEL_PATH"]) {
+      if (!process.env[name] && values[name]) process.env[name] = values[name];
+    }
+    break;
+  }
+}
+applyMatchingServicePaths();
+const EFFECTIVE_WORKSPACE_DIR = path.resolve(process.env.MIKI_WORKSPACE_DIR || PROJECT_ROOT);
+const EFFECTIVE_CONFIG_DIR = path.resolve(process.env.MIKI_CONFIG_DIR || path.join(EFFECTIVE_WORKSPACE_DIR, "config"));
+const EFFECTIVE_DATA_DIR = path.resolve(process.env.MIKI_DATA_DIR || path.join(EFFECTIVE_WORKSPACE_DIR, "data"));
+
 // Register runtime loader for @miki/* package resolution
 const loaderPath = path.join(
   PROJECT_ROOT,
@@ -103,7 +134,7 @@ function writableDir(dir) {
 }
 
 function sqliteWritable() {
-  const dataDir = path.join(PROJECT_ROOT, "data");
+  const dataDir = EFFECTIVE_DATA_DIR;
   fs.mkdirSync(dataDir, { recursive: true });
   const target = path.join(dataDir, `.doctor-${process.pid}.sqlite`);
   const db = new Database(target);
@@ -112,6 +143,95 @@ function sqliteWritable() {
   } finally {
     db.close();
     fs.rmSync(target, { force: true });
+  }
+}
+
+function alwaysOnSupervisorCheck() {
+  const stateFile = path.join(EFFECTIVE_DATA_DIR, "24-7-supervisor.json");
+  let state;
+  try {
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  } catch {
+    return check(
+      "always_on_supervisor",
+      "24/7 supervisor",
+      "warn",
+      "No supervisor state was found. Miki may be running in foreground mode only; install and enable the OS startup service for reboot persistence.",
+    );
+  }
+  const pid = Number(state.pid);
+  let parentAlive = Number.isInteger(pid) && pid > 0;
+  if (parentAlive) {
+    try { process.kill(pid, 0); } catch (error) { parentAlive = error?.code === "EPERM"; }
+  }
+  const gatewayPid = Number(state.gatewayPid);
+  let gatewayAlive = Number.isInteger(gatewayPid) && gatewayPid > 0;
+  if (gatewayAlive) {
+    try { process.kill(gatewayPid, 0); } catch (error) { gatewayAlive = error?.code === "EPERM"; }
+  }
+  const heartbeatAt = Date.parse(String(state.heartbeatAt || state.updatedAt || ""));
+  const heartbeatFresh = Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt < 90_000 && Date.now() >= heartbeatAt;
+  const running = state.status === "running" && parentAlive && gatewayAlive && heartbeatFresh;
+  return check(
+    "always_on_supervisor",
+    "24/7 supervisor",
+    running ? "pass" : "warn",
+    running
+      ? `Supervisor PID ${pid} and gateway PID ${gatewayPid} are alive; heartbeat is recent.`
+      : `Supervisor is not confirmed healthy (state=${String(state.status || "unknown")}, parent=${parentAlive ? "alive" : "missing"}, gateway=${gatewayAlive ? "alive" : "missing"}, heartbeat=${heartbeatFresh ? "fresh" : "stale"}). Check the OS service logs and restart the service if needed.`,
+    { state: String(state.status || "unknown"), parentAlive, gatewayAlive, heartbeatFresh },
+  );
+}
+
+async function savedDefaultModelStatus() {
+  const databaseFile = path.join(EFFECTIVE_DATA_DIR, "miki-runtime.sqlite");
+  if (!fs.existsSync(databaseFile)) return null;
+  let db;
+  try {
+    db = new Database(databaseFile, { readonly: true, fileMustExist: true });
+    const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_configs'").get();
+    if (!table) return null;
+    const row = db.prepare("SELECT id, payload FROM model_configs WHERE is_default=1 ORDER BY id LIMIT 1").get();
+    if (!row) return null;
+    const payload = JSON.parse(row.payload);
+    const model = String(payload.model || payload.model_name || "").trim();
+    const provider = String(payload.provider || "openai-compatible").trim().toLowerCase();
+    if (!model || payload.enabled === false) return { model, provider, credentialConfigured: false };
+    const local = payload.local && typeof payload.local === "object" ? payload.local : {};
+    const localModelPath = String(local.model_path || process.env.MIKI_LLAMA_MODEL_PATH || "").trim();
+    let credentialConfigured = Boolean(payload.api_key_ref || payload.api_key);
+    if (payload.api_key_ref) {
+      try {
+        const { createWorkspaceSecretVault } = await import("@miki/config");
+        credentialConfigured = Boolean(createWorkspaceSecretVault(EFFECTIVE_CONFIG_DIR).get(String(payload.api_key_ref)));
+      } catch {
+        // Do not fail diagnosis if the encrypted-vault package is unavailable.
+      }
+    }
+    const envKeys = {
+      openai: process.env.OPENAI_API_KEY,
+      gpt: process.env.OPENAI_API_KEY,
+      chatgpt: process.env.OPENAI_API_KEY,
+      gemini: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+      google: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+      openrouter: process.env.OPENROUTER_API_KEY,
+      "openai-compatible": process.env.OPENAI_COMPATIBLE_API_KEY || process.env.OPENAI_API_KEY,
+      compatible: process.env.OPENAI_COMPATIBLE_API_KEY || process.env.OPENAI_API_KEY,
+    };
+    credentialConfigured = credentialConfigured || Boolean(String(envKeys[provider] || "").trim());
+    const keyOptional = ["openai-compatible", "compatible", "openai_compatible"].includes(provider);
+    const localModelPresent = ["llama.cpp", "llama-cpp", "llamacpp", "local"].includes(provider) && Boolean(localModelPath && fs.existsSync(localModelPath));
+    return {
+      model,
+      provider,
+      credentialConfigured: credentialConfigured || keyOptional || localModelPresent,
+      localModelPresent,
+      id: row.id,
+    };
+  } catch {
+    return null;
+  } finally {
+    db?.close();
   }
 }
 
@@ -156,7 +276,7 @@ function isPlaceholderSecret(value) {
 function secretScan() {
   const candidates = [
     path.join(PROJECT_ROOT, ".env"),
-    ...walkFiles(path.join(PROJECT_ROOT, "config")),
+    ...walkFiles(EFFECTIVE_CONFIG_DIR),
     ...walkFiles(path.join(PROJECT_ROOT, "docs")),
   ].filter((file) => /\.(env|json|ya?ml|md|txt|log)$/i.test(file));
   const findings = [];
@@ -187,7 +307,7 @@ function secretScan() {
 }
 
 function parseConfig() {
-  const configPath = path.join(PROJECT_ROOT, "config", "agent.yaml");
+  const configPath = path.join(EFFECTIVE_CONFIG_DIR, "agent.yaml");
   if (!fs.existsSync(configPath)) return {};
   return yaml.load(fs.readFileSync(configPath, "utf-8")) || {};
 }
@@ -227,7 +347,7 @@ async function configValidationCheck() {
 async function secretVaultCheck() {
   try {
     const { inspectEnvSecretStatus } = await import("@miki/config");
-    const secretStatus = inspectEnvSecretStatus({ workspaceDir: PROJECT_ROOT });
+    const secretStatus = inspectEnvSecretStatus({ workspaceDir: EFFECTIVE_WORKSPACE_DIR });
     const envOnly = secretStatus
       .filter((item) => item.envOnly)
       .map((item) => item.key);
@@ -337,20 +457,22 @@ async function runDoctor() {
     ),
   );
 
-  for (const dir of ["config", "data"]) {
+  checks.push(alwaysOnSupervisorCheck());
+
+  for (const [dir, target] of [["config", EFFECTIVE_CONFIG_DIR], ["data", EFFECTIVE_DATA_DIR]]) {
     try {
-      writableDir(path.join(PROJECT_ROOT, dir));
+      writableDir(target);
       checks.push(
         check(
           `writable_${dir}`,
           `${dir}/ writable`,
           "pass",
-          `${dir}/ is writable.`,
+          `${target} is writable.`,
         ),
       );
     } catch (err) {
       checks.push(
-        check(`writable_${dir}`, `${dir}/ writable`, "fail", err.message),
+        check(`writable_${dir}`, `${dir}/ writable`, "fail", `${target}: ${err.message}`),
       );
     }
   }
@@ -374,6 +496,33 @@ async function runDoctor() {
   checks.push(await secretVaultCheck());
   checks.push(await playwrightChromiumCheck());
 
+  if (process.platform === "linux") {
+    const xdotool = commandVersion("xdotool", ["version"]);
+    checks.push(
+      check(
+        "computer_use_xdotool",
+        "xdotool (computer use)",
+        xdotool ? "pass" : "warn",
+        xdotool
+          ? `xdotool ${xdotool.split(/\s+/).pop()}`
+          : "xdotool is not installed; computer_* UI actions will fail. Install it (e.g. sudo apt-get install xdotool).",
+      ),
+    );
+    const display = String(process.env.DISPLAY || "").trim();
+    checks.push(
+      check(
+        "computer_use_display",
+        "X11 display (computer use)",
+        display ? "pass" : "warn",
+        display
+          ? `DISPLAY=${display}`
+          : process.env.WAYLAND_DISPLAY
+            ? "Wayland-only session: computer_* needs X11/XWayland with DISPLAY set."
+            : "DISPLAY is not set; computer_* UI actions need an X11 session (set DISPLAY/XAUTHORITY for the service).",
+      ),
+    );
+  }
+
   // The direct-provider policy is intentionally limited to Gemini and
   // llama.cpp. llama.cpp is local and does not require an API key.
   //
@@ -386,7 +535,7 @@ async function runDoctor() {
   let geminiConfigured = false;
   try {
     const { resolveConfiguredSecret } = await import("@miki/config");
-    const resolved = resolveConfiguredSecret("GEMINI_API_KEY", PROJECT_ROOT);
+    const resolved = resolveConfiguredSecret("GEMINI_API_KEY", EFFECTIVE_WORKSPACE_DIR);
     geminiConfigured = typeof resolved === "string" && resolved.trim() !== "";
   } catch {
     // Fall back to a raw environment check if @miki/config can't be loaded
@@ -396,14 +545,69 @@ async function runDoctor() {
       typeof process.env.GEMINI_API_KEY === "string" &&
       process.env.GEMINI_API_KEY.trim() !== "";
   }
+  const storedModel = await savedDefaultModelStatus();
+  const envProviderKeys = [
+    ["OpenAI", process.env.OPENAI_API_KEY],
+    ["Gemini", process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY],
+    ["OpenRouter", process.env.OPENROUTER_API_KEY],
+    ["OpenAI-compatible", process.env.OPENAI_COMPATIBLE_API_KEY],
+  ].filter(([, value]) => typeof value === "string" && value.trim() !== "").map(([name]) => name);
+  const knownCredential = envProviderKeys.length > 0 || geminiConfigured || Boolean(storedModel?.credentialConfigured);
   checks.push(
     check(
       "provider_keys",
-      "LLM provider keys",
-      geminiConfigured ? "pass" : "warn",
-      geminiConfigured
-        ? "Gemini credential is configured; llama.cpp remains the local no-key provider."
-        : "Gemini credential is not configured; local llama.cpp remains available without an API key.",
+      "LLM provider credentials",
+      knownCredential ? "pass" : "warn",
+      knownCredential
+        ? `Credential/configuration detected for ${[...new Set([...envProviderKeys, ...(storedModel?.credentialConfigured ? [storedModel.provider] : [])])].join(", ")}. The Models page can test the active provider.`
+        : "No provider credential was detected in the environment or the saved default model. Configure a model and credential in Dashboard > Models.",
+    ),
+  );
+
+  // Autonomous notices only reach the user through a channel that has a token AND a trusted sender list.
+  try {
+    const cfg = parseConfig();
+    const channels = Object.entries(cfg.channel_list || {}).filter(
+      ([name, c]) => name !== "miki" && c && c.enabled && Array.isArray(c.allow_from),
+    );
+    const usable = channels.filter(([, c]) => c.allow_from.length > 0).map(([n]) => n);
+    checks.push(
+      check(
+        "notification_channel",
+        "Notification channel",
+        usable.length ? "pass" : "warn",
+        usable.length
+          ? `Trusted senders configured for: ${usable.join(", ")}.`
+          : "No external channel has allow_from set; proactive messages appear only in the web chat. Add your platform user ID to allow_from and a bot token.",
+      ),
+    );
+  } catch {
+    /* config problems are reported by the config check */
+  }
+
+  // Model configuration is stored in the same SQLite database the running gateway
+  // uses. Checking only process environment keys incorrectly reported a missing
+  // model when the owner had configured it in Dashboard > Models.
+  const localModel = String(process.env.MIKI_LLAMA_MODEL_PATH || "").trim();
+  const envModelConfigured = Boolean(
+    String(process.env.MIKI_MODEL || process.env.OPENAI_MODEL || process.env.DEFAULT_MODEL || "").trim() ||
+    (String(process.env.MIKI_PROVIDER || "").trim() && knownCredential),
+  );
+  const savedModelConfigured = Boolean(storedModel?.model && storedModel.credentialConfigured);
+  const localModelConfigured = Boolean(localModel && fs.existsSync(localModel));
+  const autonomyModelReady = savedModelConfigured || envModelConfigured || localModelConfigured;
+  checks.push(
+    check(
+      "autonomy_model",
+      "Autonomy model",
+      autonomyModelReady ? "pass" : "warn",
+      savedModelConfigured
+        ? `Default model saved in the runtime database: ${storedModel.provider}/${storedModel.model}. Run its connection and tool-calling tests in Dashboard > Models.`
+        : storedModel?.model
+          ? `Default model ${storedModel.provider}/${storedModel.model} is saved, but its credential could not be confirmed. Check the key/vault status in Dashboard > Models.`
+          : envModelConfigured || localModelConfigured
+            ? "A model appears to be configured through environment settings. Confirm the default model and tool-calling test in Dashboard > Models."
+            : "No usable default model was detected in the active runtime database or environment. Configure a provider, select a default model, and test it in Dashboard > Models.",
     ),
   );
 
@@ -440,7 +644,7 @@ async function runDoctor() {
       check(
         "migrations",
         "Migrations",
-        fs.existsSync(path.join(PROJECT_ROOT, "config", "agent.yaml"))
+        fs.existsSync(path.join(EFFECTIVE_CONFIG_DIR, "agent.yaml"))
           ? "pass"
           : "warn",
         "Migration dry-run preconditions checked.",
@@ -489,7 +693,9 @@ async function runDoctor() {
   return {
     status,
     checkedAt: new Date().toISOString(),
-    workspaceDir: PROJECT_ROOT,
+    workspaceDir: EFFECTIVE_WORKSPACE_DIR,
+    configDir: EFFECTIVE_CONFIG_DIR,
+    dataDir: EFFECTIVE_DATA_DIR,
     checks,
   };
 }

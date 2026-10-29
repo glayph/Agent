@@ -3,18 +3,26 @@ import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ChatEmptyState } from "@/features/chat/components/chat-empty-state"
-import { RunActivityLine } from "@/features/chat/components/run-activity-line"
-import { WorkStartStatus } from "@/features/chat/components/work-start-status"
+import { getRenderableChatMessages } from "@/features/chat/components/renderable-chat-messages"
+import { useMessageActionLabels } from "@/features/chat/components/use-message-action-labels"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { Button } from "@/shared/ui/button"
-import type { AssistantDetailVisibility, ChatMessage } from "@/store/chat"
-import { shouldShowAssistantMessage } from "@/store/chat"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/ui/alert-dialog"
+import type { ChatMessage } from "@/store/chat"
 
 import { ChatMessage as WorkspaceChatMessage } from "./chat-message"
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
-  assistantDetailVisibility: AssistantDetailVisibility
   isTyping: boolean
   hasHydratedActiveSession: boolean
   isGatewayRunning: boolean
@@ -28,11 +36,11 @@ interface ChatMessageListProps {
   onDeleteMessage: (messageId: string) => void
   onForkMessage: (messageId: string) => void
   onRetryMessage: (messageId: string) => void
+  onInspectMessage: (messageId: string) => void
 }
 
 export function ChatMessageList({
   messages,
-  assistantDetailVisibility,
   isTyping,
   hasHydratedActiveSession,
   isGatewayRunning,
@@ -46,65 +54,57 @@ export function ChatMessageList({
   onDeleteMessage,
   onForkMessage,
   onRetryMessage,
+  onInspectMessage,
 }: ChatMessageListProps) {
   const { t } = useTranslation()
-  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
-  const renderableMessages = useMemo(() => {
-    const filtered = messages.filter((message) =>
-      shouldShowAssistantMessage(
-        assistantDetailVisibility,
-        message.kind,
-        message.inspectorOnly,
-      ),
-    )
-    const correlated = filtered.filter(
-      (message) => message.role === "assistant" && message.replyToMessageId,
-    )
-    if (correlated.length === 0) return filtered
-
-    const repliesByUser = new Map<string, ChatMessage[]>()
-    for (const message of correlated) {
-      const parentId = message.replyToMessageId
-      if (!parentId) continue
-      const replies = repliesByUser.get(parentId) ?? []
-      replies.push(message)
-      repliesByUser.set(parentId, replies)
-    }
-    const parentIds = new Set(repliesByUser.keys())
-    const ordered: ChatMessage[] = []
-    for (const message of filtered) {
-      if (message.role === "assistant" && message.replyToMessageId && parentIds.has(message.replyToMessageId)) {
-        continue
-      }
-      ordered.push(message)
-      if (message.role === "user") {
-        ordered.push(...(repliesByUser.get(message.id) ?? []))
-      }
-    }
-    return ordered
-  }, [assistantDetailVisibility, messages])
+  const actionLabels = useMessageActionLabels()
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(
+    null,
+  )
+  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<
+    string | null
+  >(null)
+  const renderableMessages = useMemo(
+    () => getRenderableChatMessages(messages),
+    [messages],
+  )
+  const latestAssistantMessageId = useMemo(
+    () =>
+      [...renderableMessages].reverse().find((message) => message.role === "assistant")
+        ?.id,
+    [renderableMessages],
+  )
   const {
     hiddenCount,
     showMore,
     visibleItems: visibleMessages,
   } = useIncrementalList({
     items: renderableMessages,
-    initialCount: 80,
-    step: 80,
+    initialCount: 40,
+    step: 40,
     fromEnd: true,
     resetKey: messages[0]?.id ?? "empty",
   })
-  const streamingMessageId = isTyping
-    ? [...messages].reverse().find((message) => message.role === "assistant" && message.kind === "normal")?.id
-    : undefined
-
+  let streamingMessageId: string | undefined
+  if (isTyping) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]
+      if (message.role === "assistant" && message.kind === "normal") {
+        streamingMessageId = message.id
+        break
+      }
+    }
+  }
   return (
     <div
       ref={scrollRef}
       onScroll={onScroll}
       onClick={(event) => {
         const target = event.target
-        if (!(target instanceof Element) || !target.closest("[data-chat-bubble]")) {
+        if (
+          !(target instanceof Element) ||
+          !target.closest("[data-chat-bubble]")
+        ) {
           setSelectedMessageId(null)
         }
       }}
@@ -142,6 +142,7 @@ export function ChatMessageList({
             message={message}
             isStreaming={message.id === streamingMessageId}
             selected={selectedMessageId === message.id}
+            subtleActions={message.role === "assistant" && message.id === latestAssistantMessageId}
             onSelect={setSelectedMessageId}
             canRetry={
               connectionState === "connected" &&
@@ -149,15 +150,41 @@ export function ChatMessageList({
               retryableMessageIds.has(message.id)
             }
             onEdit={onEditMessage}
-            onDelete={onDeleteMessage}
+            onDelete={setPendingDeleteMessageId}
             onFork={onForkMessage}
             onRetry={onRetryMessage}
+            onInspectMessage={onInspectMessage}
           />
         ))}
-
-        <WorkStartStatus />
-        <RunActivityLine />
       </div>
+      <AlertDialog
+        open={pendingDeleteMessageId !== null}
+        onOpenChange={(open) => !open && setPendingDeleteMessageId(null)}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {actionLabels.deleteConfirmTitle}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {actionLabels.deleteConfirmDescription}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{actionLabels.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const messageId = pendingDeleteMessageId
+                setPendingDeleteMessageId(null)
+                if (messageId) onDeleteMessage(messageId)
+              }}
+            >
+              {actionLabels.deleteConfirmAction}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

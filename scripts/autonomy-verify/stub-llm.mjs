@@ -9,7 +9,7 @@ export async function startStub(brain) {
       if (req.method === 'GET' && /\/models$/.test(req.url)) { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'stub-model' }] })) }
       let parsed = {}; try { parsed = JSON.parse(body || '{}') } catch {}
       requests.push({ auth: req.headers.authorization ?? null, tools: (parsed.tools || []).map((t) => t.function?.name), json: Boolean(parsed.response_format), model: parsed.model, n: parsed.messages?.length })
-      const out = brain(parsed, requests.length) || { content: 'NO_ACTION' }
+      const out = brain(parsed, requests.length) || { content: 'Acknowledged.' }
       if (out.status) { res.statusCode = out.status; res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ error: { message: out.error || 'error' } })) }
       const message = { role: 'assistant', content: out.content ?? null, ...(out.tool_calls ? { tool_calls: out.tool_calls.map((c, i) => ({ id: `call_${requests.length}_${i}`, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args || {}) } })) } : {}) }
       res.setHeader('content-type', 'application/json')

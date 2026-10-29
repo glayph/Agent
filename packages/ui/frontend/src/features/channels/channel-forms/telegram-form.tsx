@@ -10,6 +10,7 @@ import {
   parseAllowFromInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import { ChannelSection } from "@/features/channels/components/channel-section"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
 import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
@@ -58,114 +59,134 @@ export function TelegramForm({
 
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field
-            label={t("channels.field.token")}
-            required
-            hint={t("channels.form.desc.token")}
-            error={fieldErrors.token}
-          >
-            <KeyInput
-              value={asString(config._token)}
-              onChange={(v) => onChange("_token", v)}
-              placeholder={getSecretInputPlaceholder(
-                configuredSecrets,
-                "token",
-                t("channels.field.secretHintSet"),
-                t("channels.field.tokenPlaceholder"),
-              )}
-            />
-          </Field>
-
-          <Field
-            label={t("channels.field.baseUrl")}
-            hint={t("channels.form.desc.baseUrl")}
-          >
-            <Input
-              value={asString(config.base_url)}
-              onChange={(e) => onChange("base_url", e.target.value)}
-              placeholder="https://api.telegram.org"
-            />
-          </Field>
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field
-            label={t("channels.field.proxy")}
-            hint={t("channels.form.desc.proxy")}
-          >
-            <Input
-              value={asString(config.proxy)}
-              onChange={(e) => onChange("proxy", e.target.value)}
-              placeholder="http://127.0.0.1:7890"
-            />
-          </Field>
-          <ChannelArrayListField
-            label={t("channels.field.allowFrom")}
-            hint={t("channels.form.desc.allowFrom")}
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder={t("channels.field.allowFromPlaceholder")}
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
-
-          <div>
-            <SwitchCardField
-              label={t("channels.field.typingEnabled")}
-              hint={t("channels.form.desc.typingEnabled")}
-              checked={asBool(typingConfig.enabled)}
-              onCheckedChange={(checked) =>
-                onChange("typing", { ...typingConfig, enabled: checked })
-              }
-              ariaLabel={t("channels.field.typingEnabled")}
-            />
-          </div>
-
-          <div>
-            <StreamingConfigField
-              value={config.streaming}
-              onChange={(value) => onChange("streaming", value)}
-            />
-          </div>
-
-          <div>
-            <SwitchCardField
-              label={t("channels.field.placeholderEnabled")}
-              hint={t("channels.form.desc.placeholderEnabled")}
-              checked={placeholderEnabled}
-              onCheckedChange={(checked) =>
-                onChange("placeholder", {
-                  ...placeholderConfig,
-                  enabled: checked,
-                })
-              }
-              ariaLabel={t("channels.field.placeholderEnabled")}
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <Field
+              label={t("channels.field.token")}
+              required
+              hint={t("channels.form.desc.token")}
+              error={fieldErrors.token}
             >
-              {placeholderEnabled && (
-                <div className="space-y-1">
-                  <Input
-                    value={asString(placeholderConfig.text)}
-                    onChange={(e) =>
-                      onChange("placeholder", {
-                        ...placeholderConfig,
-                        text: e.target.value,
-                      })
-                    }
-                    placeholder={t("channels.field.placeholderText")}
-                    aria-label={t("channels.field.placeholderText")}
-                  />
-                </div>
-              )}
-            </SwitchCardField>
-          </div>
-        </CardContent>
-      </Card>
+              <KeyInput
+                value={asString(config._token)}
+                onChange={(v) => onChange("_token", v)}
+                placeholder={getSecretInputPlaceholder(
+                  configuredSecrets,
+                  "token",
+                  t("channels.field.secretHintSet"),
+                  t("channels.field.tokenPlaceholder"),
+                )}
+              />
+            </Field>
+          </CardContent>
+        </Card>
+      </ChannelSection>
+
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <ChannelArrayListField
+              label={t("channels.field.allowFrom")}
+              hint={t("channels.form.desc.allowFrom")}
+              value={asStringArray(config.allow_from)}
+              onChange={(value) => onChange("allow_from", value)}
+              placeholder={t("channels.field.allowFromPlaceholder")}
+              parser={parseAllowFromInput}
+              fieldPath="allow_from"
+              registerFlusher={registerArrayFieldFlusher}
+              resetVersion={arrayFieldResetVersion}
+            />
+          </CardContent>
+        </Card>
+      </ChannelSection>
+
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <Field
+              label={t("channels.field.baseUrl")}
+              hint={t("channels.form.desc.baseUrl")}
+            >
+              <Input
+                value={asString(config.base_url)}
+                onChange={(e) => onChange("base_url", e.target.value)}
+                placeholder="https://api.telegram.org"
+              />
+            </Field>
+            <Field
+              label={t("channels.field.proxy")}
+              hint={t("channels.form.desc.proxy")}
+            >
+              <Input
+                value={asString(config.proxy)}
+                onChange={(e) => onChange("proxy", e.target.value)}
+                placeholder="http://127.0.0.1:7890"
+              />
+            </Field>
+
+            <div>
+              <SwitchCardField
+                label={t("channels.field.typingEnabled")}
+                hint={t("channels.form.desc.typingEnabled")}
+                checked={asBool(typingConfig.enabled)}
+                onCheckedChange={(checked) =>
+                  onChange("typing", { ...typingConfig, enabled: checked })
+                }
+                ariaLabel={t("channels.field.typingEnabled")}
+              />
+            </div>
+
+            <div>
+              <StreamingConfigField
+                value={config.streaming}
+                onChange={(value) => onChange("streaming", value)}
+              />
+            </div>
+
+            <div>
+              <SwitchCardField
+                label={t("channels.field.placeholderEnabled")}
+                hint={t("channels.form.desc.placeholderEnabled")}
+                checked={placeholderEnabled}
+                onCheckedChange={(checked) =>
+                  onChange("placeholder", {
+                    ...placeholderConfig,
+                    enabled: checked,
+                  })
+                }
+                ariaLabel={t("channels.field.placeholderEnabled")}
+              >
+                {placeholderEnabled && (
+                  <div className="space-y-1">
+                    <Input
+                      value={asString(placeholderConfig.text)}
+                      onChange={(e) =>
+                        onChange("placeholder", {
+                          ...placeholderConfig,
+                          text: e.target.value,
+                        })
+                      }
+                      placeholder={t("channels.field.placeholderText")}
+                      aria-label={t("channels.field.placeholderText")}
+                    />
+                  </div>
+                )}
+              </SwitchCardField>
+            </div>
+          </CardContent>
+        </Card>
+      </ChannelSection>
     </div>
   )
 }

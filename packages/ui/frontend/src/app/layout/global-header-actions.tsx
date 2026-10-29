@@ -16,8 +16,9 @@ import * as React from "react"
 import { useTranslation } from "react-i18next"
 
 import { postLauncherDashboardLogout } from "@/api/launcher-auth"
+import { notify } from "@/lib/notify"
 import { useGateway } from "@/hooks/use-gateway.ts"
-import { type ThemePreference, useTheme } from "@/hooks/use-theme.ts"
+import { type ThemePreference, useTheme } from "@/hooks/use-theme"
 import {
   formatSessionRemaining,
   useSessionRemainingMs,
@@ -91,8 +92,16 @@ export function GlobalHeaderActions() {
   const [showLogoutDialog, setShowLogoutDialog] = React.useState(false)
 
   const handleLogout = async () => {
-    await postLauncherDashboardLogout()
-    globalThis.location.assign("/launcher-login")
+    try {
+      const loggedOut = await postLauncherDashboardLogout()
+      if (!loggedOut) {
+        notify.error(t("header.logout.failed", { defaultValue: "Could not sign out. Please try again." }))
+        return
+      }
+      globalThis.location.assign("/launcher-login")
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : t("header.logout.failed", { defaultValue: "Could not sign out. Please try again." }))
+    }
   }
 
   const handleShutdownBackend = () => {

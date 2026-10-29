@@ -183,6 +183,70 @@ export function classifyError(
   );
 }
 
+interface StreamChunk {
+  choices?: Array<{
+    index?: number;
+    finish_reason?: string | null;
+    delta?: {
+      content?: unknown;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        function?: { name?: string; arguments?: unknown };
+      }>;
+    };
+  }>;
+  usage?: LLMResponse["usage"];
+}
+
+async function readStreamingCompletion(
+  streamValue: unknown,
+  request: ProviderCompletionRequest,
+  model: string,
+): Promise<LLMResponse> {
+  const stream = streamValue as AsyncIterable<StreamChunk>;
+  let content = "";
+  let finishReason: string | undefined;
+  let usage: LLMResponse["usage"];
+  const calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = [];
+
+  for await (const chunk of stream) {
+    if (chunk.usage) usage = chunk.usage;
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+    if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string" && delta.content) {
+      content += delta.content;
+      try { request.onTextDelta?.(delta.content); } catch { /* UI listeners must not break generation */ }
+    }
+    for (const part of delta.tool_calls ?? []) {
+      const index = typeof part.index === "number" ? part.index : calls.length;
+      const target = (calls[index] ??= { id: "", type: "function", function: { name: "", arguments: "" } });
+      if (part.id) target.id = part.id;
+      if (part.function?.name) target.function.name += part.function.name;
+      if (typeof part.function?.arguments === "string") target.function.arguments += part.function.arguments;
+    }
+  }
+
+  const completeCalls = calls.filter((call) => call && call.function.name).map((call, index) => ({
+    ...call,
+    id: call.id || `call_${index}_${randomUUID().slice(0, 8)}`,
+  }));
+  return {
+    choices: [{
+      message: {
+        role: "assistant",
+        content: content || "",
+        ...(completeCalls.length ? { tool_calls: completeCalls } : {}),
+      },
+      finish_reason: finishReason ?? (completeCalls.length ? "tool_calls" : "stop"),
+    }],
+    ...(usage ? { usage } : {}),
+    model,
+  } as LLMResponse;
+}
+
 function serializeMultimodalMessages(
   messages: ProviderCompletionRequest["messages"],
 ): ProviderCompletionRequest["messages"] {
@@ -266,6 +330,11 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
       messages,
       ...providerExtra,
     };
+    let streaming = typeof request.onTextDelta === "function";
+    if (streaming) {
+      requestBody.stream = true;
+      requestBody.stream_options = { include_usage: true };
+    }
     for (const key of Object.keys(requestBody)) {
       if (requestBody[key] === undefined) delete requestBody[key];
     }
@@ -273,17 +342,53 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        return await getClient(
+        const result = await getClient(
           provider,
           apiKey,
           request.timeoutMs,
         ).chat.completions.create(requestBody as never, {
           signal: request.signal,
         });
+        return streaming
+          ? await readStreamingCompletion(result, request, model)
+          : result as LLMResponse;
       } catch (error) {
         lastError = error;
         const message = errorMessage(error).toLowerCase();
         const status = statusCode(error);
+        // Optional provider-specific thinking controls are not recognized by
+        // every OpenAI-compatible server. Retry immediately without that field,
+        // matching the direct-fetch client while preserving all other settings.
+        if (
+          status === 400 &&
+          Object.hasOwn(requestBody, "thinking_level") &&
+          /thinking[_ -]?level|reasoning[_ -]?effort|unknown (field|parameter)|unrecognized.*thinking/.test(message)
+        ) {
+          delete requestBody.thinking_level;
+          attempt -= 1;
+          continue;
+        }
+        // Some otherwise-compatible servers stream correctly but reject usage
+        // metadata in the SSE request. Keep streaming and retry without that option.
+        if (
+          streaming &&
+          status === 400 &&
+          Object.hasOwn(requestBody, "stream_options") &&
+          /stream[_ -]?options/.test(message)
+        ) {
+          // Some OpenAI-compatible endpoints stream correctly but reject usage
+          // metadata in the SSE request. Keep streaming and retry without that option.
+          delete requestBody.stream_options;
+          attempt -= 1;
+          continue;
+        }
+        if (streaming && status === 400 && /stream/.test(message)) {
+          streaming = false;
+          delete requestBody.stream;
+          delete requestBody.stream_options;
+          attempt -= 1;
+          continue;
+        }
         const retryable =
           status === 408 ||
           status === 429 ||

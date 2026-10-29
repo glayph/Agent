@@ -713,6 +713,7 @@ export function EditModelSheet({
                       value={form.apiKey}
                       onChange={(v) => setForm((f) => ({ ...f, apiKey: v }))}
                       placeholder={apiKeyPlaceholder}
+                      initiallyVisible
                     />
                   </Field>
                 )

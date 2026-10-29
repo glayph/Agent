@@ -6,7 +6,7 @@ import {
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 
 import {
   type CatalogEntry,
@@ -91,7 +91,7 @@ export function CatalogDialog({
       const message =
         e instanceof Error ? e.message : t("models.catalog.loadFailed")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "catalog-dialog:error:loadCatalogs" })
     } finally {
       setLoading(false)
     }
@@ -160,7 +160,7 @@ export function CatalogDialog({
       const message =
         e instanceof Error ? e.message : t("models.catalog.deleteFailed")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "catalog-dialog:error:handleDelete" })
     }
   }
 
@@ -184,13 +184,13 @@ export function CatalogDialog({
         count: modelsToAdd.length,
       })
       setStatusMessage({ kind: "success", text: message })
-      toast.success(message)
+      notify.success(message, { id: "catalog-dialog:success:handleAddSelected" })
       onModelAdded()
     } catch (e) {
       const message =
         e instanceof Error ? e.message : t("models.catalog.addFailed")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "catalog-dialog:error:handleAddSelected-2" })
     } finally {
       setAdding(false)
     }

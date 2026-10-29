@@ -49,6 +49,7 @@ tool_state:
 disabled_tools: []
 runtime:
   cron:
+    # Compatibility mirror of tools.cron. v1 schedules never execute arbitrary shell commands.
     allow_command: false
     exec_timeout_minutes: 5
   exec:

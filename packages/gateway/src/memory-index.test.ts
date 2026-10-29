@@ -65,6 +65,23 @@ describe("SqliteMemoryIndex", () => {
     expect(await index.bootstrapTrust()).toEqual({ user: true, memory: true });
   });
 
+  it("avoids rescanning daily memory files when trust-bearing files are unchanged", async () => {
+    memory.setWriteObserver((relPath, provenance) => index.markProvenance(relPath, provenance));
+    await memory.note("Owner-confirmed fast response preference", "user");
+    expect(await index.bootstrapTrust()).toEqual({ user: true, memory: false });
+
+    const fullListing = jest.spyOn(memory.store, "listFiles");
+    expect(await index.bootstrapTrust()).toEqual({ user: true, memory: false });
+    expect(fullListing).not.toHaveBeenCalled();
+
+    await memory.note("Durable context speed preference", "long_term");
+    expect(await index.bootstrapTrust()).toEqual({ user: true, memory: true });
+    expect(fullListing).toHaveBeenCalledTimes(1);
+
+    await fs.rm(memory.memoryPaths().memoryMd, { force: true });
+    expect(await index.bootstrapTrust()).toEqual({ user: true, memory: false });
+  });
+
   it("marks the exact previous stable preference superseded instead of retaining it as active", async () => {
     await memory.note("Prefers concise replies", "user");
     await memory.note("Prefers detailed, step-by-step replies", "user", "Prefers concise replies");

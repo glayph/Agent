@@ -3,14 +3,10 @@ import {
   IconArchive,
   IconBrain,
   IconChevronDown,
-  IconChevronLeft,
   IconChevronRight,
-  IconClock,
   IconFile,
   IconListDetails,
-  IconLockCheck,
   IconMaximize,
-  IconMicrophone,
   IconMinimize,
   IconPlayerPlay,
   IconShieldCheck,
@@ -18,7 +14,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
   type ChatInspectorPage,
@@ -30,7 +26,15 @@ import type { MonitorNode } from "@/features/monitor/store"
 import { monitorAtom } from "@/features/monitor/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
+import { ToolCallSummaryMeta } from "@/features/chat/components/tool-status-mark"
 import type { ChatMessage } from "@/store/chat"
+import {
+  formatInspectorTime,
+  getLatestAssistantResponse,
+  getMessageRunIds,
+  parseInspectorTimestamp,
+  scopeActivityNodes,
+} from "@/features/chat/inspector-utils"
 
 interface ChatInspectorProps {
   chatId: string
@@ -45,14 +49,20 @@ const pages: Array<{
   icon: typeof IconActivity
 }> = [
   { id: "overview", label: "Overview", icon: IconActivity },
-  { id: "response", label: "Response", icon: IconArchive },
-  { id: "thoughts", label: "Thoughts", icon: IconBrain },
-  { id: "work", label: "Work", icon: IconPlayerPlay },
-  { id: "artifacts", label: "Artifacts", icon: IconFile },
-  { id: "evidence", label: "Evidence", icon: IconLockCheck },
-  { id: "events", label: "Events", icon: IconListDetails },
-  { id: "voice", label: "Voice", icon: IconMicrophone },
+  { id: "execution", label: "Execution", icon: IconPlayerPlay },
+  { id: "outputs", label: "Outputs", icon: IconArchive },
+  { id: "timeline", label: "Timeline", icon: IconListDetails },
 ]
+
+type ExecutionSection = "all" | "plan" | "tools" | "checks"
+type OutputSection = "response" | "files" | "voice"
+type TimelineFilter =
+  | "all"
+  | "plan"
+  | "tools"
+  | "files"
+  | "errors"
+  | "checks"
 
 function preview(value: string | undefined, limit = 180): string {
   const normalized = value?.trim().replace(/\s+/g, " ") ?? ""
@@ -70,12 +80,8 @@ function formatValue(value: unknown): string {
   }
 }
 
-function formatTime(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(timestamp))
+function formatTime(timestamp: number | string): string {
+  return formatInspectorTime(timestamp)
 }
 
 function thoughtCategory(content: string): string {
@@ -125,9 +131,17 @@ export function ChatInspector({
   const [currentSelection, setSelection] = useAtom(chatInspectorAtom)
   const monitorState = useAtomValue(monitorAtom)
   const [isExpanded, setIsExpanded] = useState(false)
+  const [executionSection, setExecutionSection] = useState<ExecutionSection>("all")
+  const [outputSection, setOutputSection] = useState<OutputSection>("response")
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all")
   const [expandedThoughtIds, setExpandedThoughtIds] = useState<Set<string>>(
     new Set(),
   )
+  const previousSelectionRef = useRef<{
+    chatId?: string
+    messageId?: string
+    page?: ChatInspectorPage
+  }>({})
 
   const isOpen = selection?.chatId === chatId
   const page = isOpen ? selection.page : "overview"
@@ -141,20 +155,46 @@ export function ChatInspector({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [close, isOpen])
 
-  const selectedMessage = useMemo(
-    () =>
-      selection?.messageId
-        ? messages.find((message) => message.id === selection.messageId)
-        : messages.find((message) => message.role === "assistant"),
-    [messages, selection],
-  )
-  const nodes = useMemo(
-    () =>
-      liveActivityNodes.length > 0
-        ? liveActivityNodes
-        : Object.values(monitorState.nodes).slice(-24),
-    [liveActivityNodes, monitorState.nodes],
-  )
+  useEffect(() => {
+    const previous = previousSelectionRef.current
+    const routeChanged =
+      previous.chatId !== selection?.chatId ||
+      previous.messageId !== selection?.messageId ||
+      previous.page !== selection?.page
+
+    if (routeChanged && isOpen && selection?.page === "outputs") {
+      const selected = messages.find(
+        (message) => message.id === selection.messageId,
+      )
+      setOutputSection(selected?.voice ? "voice" : "response")
+    }
+
+    previousSelectionRef.current = {
+      chatId: selection?.chatId,
+      messageId: selection?.messageId,
+      page: selection?.page,
+    }
+  }, [chatId, isOpen, messages, selection?.chatId, selection?.messageId, selection?.page])
+
+  const selectedMessage = useMemo(() => {
+    const explicit = selection?.messageId
+      ? messages.find((message) => message.id === selection.messageId)
+      : undefined
+    return explicit ?? getLatestAssistantResponse(messages)
+  }, [messages, selection?.messageId])
+  const messageRunIds = useMemo(() => getMessageRunIds(messages), [messages])
+  const nodes = useMemo(() => {
+    const scopedNodes = scopeActivityNodes(
+      Object.values(monitorState.nodes),
+      messageRunIds,
+    )
+    const sourceNodes = scopeActivityNodes(liveActivityNodes, messageRunIds)
+    const selectedNodes = sourceNodes.length > 0 ? sourceNodes : scopedNodes
+    return selectedNodes
+      .slice()
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-24)
+  }, [liveActivityNodes, messageRunIds, monitorState.nodes])
   const thoughtMessages = useMemo(
     () => messages.filter((message) => message.kind === "thought"),
     [messages],
@@ -164,8 +204,10 @@ export function ChatInspector({
       messages.filter(
         (message) =>
           message.role === "assistant" &&
+          !message.inspectorOnly &&
           message.kind !== "thought" &&
-          message.kind !== "tool_calls",
+          message.kind !== "tool_calls" &&
+          message.kind !== "action_update",
       ),
     [messages],
   )
@@ -189,22 +231,63 @@ export function ChatInspector({
       ),
     [messages],
   )
+  const timelineEvents = useMemo(() => {
+    const thoughts = thoughtMessages.map((message) => ({
+      id: `thought-${message.id}`,
+      timestamp: parseInspectorTimestamp(message.timestamp) ?? 0,
+      type: "thought" as const,
+      message,
+    }))
+    const activity = nodes.map((node) => ({
+      id: `node-${node.id}`,
+      timestamp: node.updatedAt,
+      type: "node" as const,
+      node,
+    }))
+    return [...thoughts, ...activity].sort((a, b) => a.timestamp - b.timestamp)
+  }, [nodes, thoughtMessages])
+  const filteredTimelineEvents = useMemo(
+    () =>
+      timelineEvents.filter((event) => {
+        if (timelineFilter === "all") return true
+        if (timelineFilter === "plan") return event.type === "thought"
+        if (event.type !== "node") return false
+        const node = event.node
+        if (timelineFilter === "files") return node.type === "file"
+        if (timelineFilter === "errors") {
+          return node.status === "failed" || Boolean(node.error)
+        }
+        if (timelineFilter === "checks") {
+          return Boolean(
+            node.resultMessage || node.outputPreview || node.error,
+          )
+        }
+        return node.type !== "file" && node.type !== "pattern"
+      }),
+    [timelineEvents, timelineFilter],
+  )
 
   if (!isOpen) return null
 
-  const currentPageIndex = pages.findIndex((item) => item.id === page)
-  const activePage = pages[currentPageIndex] ?? pages[0]
-  const ActiveIcon = activePage.icon
-
-  const changePage = (direction: -1 | 1) => {
-    const nextIndex =
-      (currentPageIndex + direction + pages.length) % pages.length
-    setPage(pages[nextIndex].id)
+  const selectMessage = (
+    messageId: string,
+    targetPage: ChatInspectorPage = "overview",
+  ) => {
+    if (!currentSelection) return
+    setSelection({ ...currentSelection, messageId, page: targetPage })
   }
 
-  const selectMessage = (messageId: string) => {
-    if (!currentSelection) return
-    setSelection({ ...currentSelection, messageId, page: "overview" })
+  const openMessageDetail = (message: ChatMessage) => {
+    if (message.kind === "thought") {
+      setExecutionSection("plan")
+      selectMessage(message.id, "execution")
+    } else if (message.kind === "tool_calls") {
+      setExecutionSection("tools")
+      selectMessage(message.id, "execution")
+    } else {
+      setOutputSection(message.voice ? "voice" : "response")
+      selectMessage(message.id, "outputs")
+    }
   }
 
   return (
@@ -283,7 +366,7 @@ export function ChatInspector({
               key={item.id}
               type="button"
               className={cn(
-                "flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-medium transition-colors",
+                "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-[11px] font-medium transition-colors",
                 selected
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -291,49 +374,75 @@ export function ChatInspector({
               onClick={() => setPage(item.id)}
               aria-current={selected ? "page" : undefined}
             >
-              <PageIcon className="size-3" />
+              <PageIcon className="size-3.5" />
               {item.label}
             </button>
           )
         })}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mb-4 flex items-center justify-between">
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px] font-medium"
-            onClick={() => changePage(-1)}
-            aria-label="Previous Inspector page"
-          >
-            <IconChevronLeft className="size-3.5" /> Previous
-          </button>
-          <div className="text-muted-foreground flex items-center gap-1.5 text-[11px] font-semibold">
-            <ActiveIcon className="text-primary size-3.5" />
-            {activePage.label}
-          </div>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px] font-medium"
-            onClick={() => changePage(1)}
-            aria-label="Next Inspector page"
-          >
-            Next <IconChevronRight className="size-3.5" />
-          </button>
-        </div>
+      {page === "execution" && (
+        <nav
+          className="border-border/50 flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1"
+          aria-label="Execution sections"
+        >
+          {(["all", "plan", "tools", "checks"] as const).map((section) => (
+            <button
+              key={section}
+              type="button"
+              onClick={() => setExecutionSection(section)}
+              aria-current={executionSection === section ? "page" : undefined}
+              className={cn(
+                "shrink-0 rounded-md px-2.5 py-1.5 text-[10px] font-medium capitalize transition-colors",
+                executionSection === section
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              )}
+            >
+              {section === "all"
+                ? "All"
+                : section === "plan"
+                  ? "Plan"
+                  : section === "tools"
+                    ? "Tools"
+                    : "Checks"}
+            </button>
+          ))}
+        </nav>
+      )}
 
-        {page === "response" && (
+      {page === "outputs" && (
+        <nav
+          className="border-border/50 flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1"
+          aria-label="Output sections"
+        >
+          {(["response", "files", "voice"] as const).map((section) => (
+            <button
+              key={section}
+              type="button"
+              onClick={() => setOutputSection(section)}
+              aria-current={outputSection === section ? "page" : undefined}
+              className={cn(
+                "shrink-0 rounded-md px-2.5 py-1.5 text-[10px] font-medium capitalize transition-colors",
+                outputSection === section
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              )}
+            >
+              {section === "response"
+                ? "Response"
+                : section === "files"
+                  ? "Files"
+                  : "Voice"}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {page === "outputs" && outputSection === "response" && (
           <div className="flex flex-col gap-3">
-            <div className="border-primary/15 bg-primary/5 rounded-xl border p-3 text-xs leading-5">
-              <div className="text-primary mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase">
-                <IconArchive className="size-3.5" /> Response
-              </div>
-              <div className="text-foreground/80">
-                This is the complete assistant response. The normal chat bubble
-                shows only a short preview; detailed execution stays in Thoughts
-                and Work.
-              </div>
-            </div>
+            <SectionLabel>RESPONSES</SectionLabel>
             {responseMessages.length > 0 ? (
               responseMessages
                 .slice()
@@ -343,14 +452,12 @@ export function ChatInspector({
                     type="button"
                     key={message.id}
                     className="border-border/60 bg-muted/20 hover:bg-muted/45 rounded-xl border p-3 text-left transition-colors"
-                    onClick={() => selectMessage(message.id)}
+                    onClick={() => selectMessage(message.id, "outputs")}
                   >
                     <div className="text-muted-foreground mb-1 flex items-center justify-between text-[10px]">
                       <span>Agent Miki</span>
                       <span>
-                        {Number.isFinite(Number(message.timestamp))
-                          ? formatTime(Number(message.timestamp))
-                          : "—"}
+                        {formatTime(message.timestamp)}
                       </span>
                     </div>
                     <div className="text-foreground/90 text-sm leading-6 whitespace-pre-wrap">
@@ -390,7 +497,7 @@ export function ChatInspector({
                 <button
                   type="button"
                   className="border-border/60 bg-muted/20 hover:bg-muted/45 w-full rounded-xl border p-3 text-left transition-colors"
-                  onClick={() => setPage("thoughts")}
+                  onClick={() => openMessageDetail(selectedMessage)}
                 >
                   <div className="text-muted-foreground mb-1 flex items-center justify-between text-[10px]">
                     <span>
@@ -420,7 +527,10 @@ export function ChatInspector({
                         type="button"
                         key={node.id}
                         className="hover:bg-muted/35 flex items-center gap-2 rounded-lg px-2 py-1.5 text-left"
-                        onClick={() => setPage("work")}
+                        onClick={() => {
+                          setExecutionSection("tools")
+                          setPage("execution")
+                        }}
                       >
                         <IconTool
                           className={cn("size-3.5", statusTone(node.status))}
@@ -441,17 +551,9 @@ export function ChatInspector({
           </div>
         )}
 
-        {page === "thoughts" && (
+        {page === "execution" && (executionSection === "all" || executionSection === "plan") && (
           <div className="flex flex-col gap-3">
-            <div className="border-primary/15 bg-primary/5 rounded-xl border p-3 text-xs leading-5">
-              <div className="text-primary mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase">
-                <IconBrain className="size-3.5" /> Thought summary
-              </div>
-              <div className="text-foreground/80">
-                Inspector shows concise execution summaries, not private hidden
-                chain-of-thought.
-              </div>
-            </div>
+            <SectionLabel>PLAN SUMMARIES</SectionLabel>
             {thoughtMessages.length > 0 ? (
               thoughtMessages.map((message) => {
                 const category = thoughtCategory(message.content)
@@ -479,9 +581,7 @@ export function ChatInspector({
                         Thought · {category}
                       </span>
                       <span className="text-muted-foreground text-[10px]">
-                        {Number.isFinite(Number(message.timestamp))
-                          ? formatTime(Number(message.timestamp))
-                          : "—"}
+                        {formatTime(message.timestamp)}
                       </span>
                       <IconChevronDown
                         className={cn(
@@ -501,7 +601,7 @@ export function ChatInspector({
                         <button
                           type="button"
                           className="text-primary mt-2 text-[11px] font-medium"
-                          onClick={() => selectMessage(message.id)}
+                          onClick={() => openMessageDetail(message)}
                         >
                           Open full detail
                         </button>
@@ -518,7 +618,7 @@ export function ChatInspector({
           </div>
         )}
 
-        {page === "work" && (
+        {page === "execution" && (executionSection === "all" || executionSection === "tools") && (
           <div className="flex flex-col gap-2">
             <SectionLabel>EXECUTION NODES</SectionLabel>
             {toolMessages.length > 0 && (
@@ -531,6 +631,7 @@ export function ChatInspector({
                     <div className="text-foreground mb-1 flex items-center gap-2 text-xs font-medium">
                       <IconTool className="text-primary size-3.5" /> Tool call
                       summary
+                      <ToolCallSummaryMeta toolCalls={message.toolCalls} />
                     </div>
                     <div className="text-muted-foreground text-[11px] leading-5">
                       {preview(message.content, 260)}
@@ -561,10 +662,18 @@ export function ChatInspector({
                       {node.status}
                     </span>
                   </div>
-                  {(node.action || node.outputPreview || node.error) && (
+                  {node.input !== undefined && (
+                    <pre className="bg-background/50 text-muted-foreground mt-2 max-h-20 overflow-auto rounded-md p-2 text-[10px] leading-4 whitespace-pre-wrap">
+                      {preview(formatValue(node.input), 240)}
+                    </pre>
+                  )}
+                  {(node.error || node.outputPreview || node.resultMessage || node.action) && (
                     <div className="text-muted-foreground mt-2 text-[11px] leading-5">
                       {preview(
-                        node.error || node.outputPreview || node.action,
+                        node.error ||
+                          node.outputPreview ||
+                          node.resultMessage ||
+                          node.action,
                         280,
                       )}
                     </div>
@@ -586,32 +695,33 @@ export function ChatInspector({
           </div>
         )}
 
-        {page === "artifacts" && (
+        {page === "outputs" && outputSection === "files" && (
           <div className="flex flex-col gap-3">
             <SectionLabel>ARTIFACTS AND OUTPUTS</SectionLabel>
             {artifacts.length > 0 ? (
-              artifacts.map((artifact) => (
-                <a
-                  key={artifact.id}
-                  href={artifact.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="border-border/60 bg-muted/20 hover:bg-muted/45 flex items-center gap-3 rounded-xl border p-3"
-                >
-                  <div className="bg-primary/10 text-primary flex size-8 shrink-0 items-center justify-center rounded-lg">
-                    <IconFile className="size-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-foreground truncate text-xs font-medium">
-                      {artifact.name}
+              artifacts.map((artifact) => {
+                const content = (
+                  <>
+                    <div className="bg-primary/10 text-primary flex size-8 shrink-0 items-center justify-center rounded-lg">
+                      <IconFile className="size-4" />
                     </div>
-                    <div className="text-muted-foreground mt-1 text-[10px]">
-                      {artifact.type}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-foreground truncate text-xs font-medium">{artifact.name}</div>
+                      <div className="text-muted-foreground mt-1 text-[10px]">{artifact.type}</div>
                     </div>
+                    {artifact.url && <IconChevronRight className="text-muted-foreground size-3.5" />}
+                  </>
+                )
+                return artifact.url ? (
+                  <a key={artifact.id} href={artifact.url} target="_blank" rel="noreferrer" className="border-border/60 bg-muted/20 hover:bg-muted/45 flex items-center gap-3 rounded-xl border p-3">
+                    {content}
+                  </a>
+                ) : (
+                  <div key={artifact.id} className="border-border/60 bg-muted/20 flex items-center gap-3 rounded-xl border p-3">
+                    {content}
                   </div>
-                  <IconChevronRight className="text-muted-foreground size-3.5" />
-                </a>
-              ))
+                )
+              })
             ) : (
               <EmptyState>No artifacts or generated files yet.</EmptyState>
             )}
@@ -636,7 +746,7 @@ export function ChatInspector({
           </div>
         )}
 
-        {page === "evidence" && (
+        {page === "execution" && executionSection === "checks" && (
           <div className="flex flex-col gap-3">
             <SectionLabel>CHECKPOINTS AND EVIDENCE</SectionLabel>
             {nodes.length > 0 ? (
@@ -677,18 +787,9 @@ export function ChatInspector({
           </div>
         )}
 
-        {page === "voice" && (
+        {page === "outputs" && outputSection === "voice" && (
           <div className="flex flex-col gap-3">
-            <div className="border-primary/15 bg-primary/5 rounded-xl border p-3 text-xs leading-5">
-              <div className="text-primary mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase">
-                <IconMicrophone className="size-3.5" /> Voice transcription
-              </div>
-              <div className="text-foreground/80">
-                Voice is transcribed locally through the configured whisper.cpp
-                runtime, then the transcript follows the same Local or Cloud LLM
-                chat route. Raw audio is not retained by Agent Miki.
-              </div>
-            </div>
+            <SectionLabel>VOICE</SectionLabel>
             {voiceMessages.length > 0 ? (
               voiceMessages
                 .slice()
@@ -703,13 +804,13 @@ export function ChatInspector({
                       <div className="text-muted-foreground mb-2 flex items-center justify-between text-[10px]">
                         <span>
                           {voice.source === "microphone"
-                            ? "Microphone recording"
-                            : "Uploaded audio"}
+                            ? "Microphone"
+                            : voice.source === "channel"
+                              ? "Channel voice"
+                              : "Uploaded audio"}
                         </span>
                         <span>
-                          {Number.isFinite(Number(message.timestamp))
-                            ? formatTime(Number(message.timestamp))
-                            : "—"}
+                          {formatTime(message.timestamp)}
                         </span>
                       </div>
                       <div className="text-foreground mb-3 text-sm leading-6 whitespace-pre-wrap">
@@ -742,59 +843,118 @@ export function ChatInspector({
           </div>
         )}
 
-        {page === "events" && (
-          <div className="flex flex-col gap-3">
-            <SectionLabel>REALTIME EVENT STREAM</SectionLabel>
-            {thoughtMessages
-              .slice()
-              .reverse()
-              .map((message) => (
-                <div key={`thought-event-${message.id}`} className="flex gap-2">
-                  <div className="flex flex-col items-center">
-                    <IconBrain className="text-primary mt-0.5 size-3.5" />
-                    <div className="bg-border/70 mt-1 h-full w-px" />
-                  </div>
-                  <div className="min-w-0 pb-3">
-                    <div className="text-foreground text-xs font-medium">
-                      Inspector summary · {thoughtCategory(message.content)}
+        {page === "timeline" && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <SectionLabel>ACTIVITY</SectionLabel>
+              <span className="text-muted-foreground text-[10px]">
+                {filteredTimelineEvents.length} items
+              </span>
+            </div>
+            <div
+              className="flex flex-wrap gap-1"
+              aria-label="Timeline filters"
+            >
+              {(["all", "plan", "tools", "files", "errors", "checks"] as const).map(
+                (filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setTimelineFilter(filter)}
+                    aria-pressed={timelineFilter === filter}
+                    className={cn(
+                      "rounded-md px-2 py-1 text-[10px] font-medium capitalize transition-colors",
+                      timelineFilter === filter
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                    )}
+                  >
+                    {filter === "all"
+                      ? "All"
+                      : filter === "plan"
+                        ? "Plan"
+                        : filter === "tools"
+                          ? "Tools"
+                          : filter === "files"
+                            ? "Files"
+                            : filter === "errors"
+                              ? "Errors"
+                              : "Checks"}
+                  </button>
+                ),
+              )}
+            </div>
+            {filteredTimelineEvents.length > 0 ? (
+              <div className="divide-border/50 divide-y">
+                {filteredTimelineEvents.map((event) =>
+                  event.type === "thought" ? (
+                    <div key={event.id} className="flex gap-2 py-2.5">
+                      <IconBrain className="text-primary mt-0.5 size-3.5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-foreground text-xs font-medium">
+                          Plan · {thoughtCategory(event.message.content)}
+                        </div>
+                        <div className="text-muted-foreground mt-0.5 text-[10px]">
+                          {formatTime(event.message.timestamp)}
+                        </div>
+                        <div className="text-muted-foreground mt-1 text-[11px] leading-5">
+                          {preview(event.message.content, 220)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-primary shrink-0 text-[10px] font-medium"
+                        onClick={() => openMessageDetail(event.message)}
+                      >
+                        Open
+                      </button>
                     </div>
-                    <div className="text-muted-foreground mt-0.5 text-[10px]">
-                      {Number.isFinite(Number(message.timestamp))
-                        ? formatTime(Number(message.timestamp))
-                        : "—"}
+                  ) : (
+                    <div key={event.id} className="flex gap-2 py-2.5">
+                      <IconTool
+                        className={cn(
+                          "mt-0.5 size-3.5 shrink-0",
+                          statusTone(event.node.status),
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-foreground text-xs font-medium">
+                            {event.node.label}
+                          </span>
+                          <span
+                            className={cn(
+                              "text-[10px]",
+                              statusTone(event.node.status),
+                            )}
+                          >
+                            {event.node.status}
+                          </span>
+                        </div>
+                        <div className="text-muted-foreground mt-0.5 text-[10px]">
+                          {formatTime(event.node.updatedAt)}
+                        </div>
+                        {(event.node.error ||
+                          event.node.resultMessage ||
+                          event.node.outputPreview ||
+                          event.node.action) && (
+                          <div className="text-muted-foreground mt-1 text-[11px] leading-5">
+                            {preview(
+                              event.node.error ||
+                                event.node.resultMessage ||
+                                event.node.outputPreview ||
+                                event.node.action,
+                              220,
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-muted-foreground mt-1 text-[11px] leading-5">
-                      {preview(message.content, 220)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            {[...nodes].reverse().map((node) => (
-              <div key={`event-${node.id}`} className="flex gap-2">
-                <div className="flex flex-col items-center">
-                  <IconClock className="text-muted-foreground mt-0.5 size-3.5" />
-                  <div className="bg-border/70 mt-1 h-full w-px" />
-                </div>
-                <div className="min-w-0 pb-3">
-                  <div className="text-foreground text-xs font-medium">
-                    {node.label}
-                  </div>
-                  <div className="text-muted-foreground mt-0.5 text-[10px]">
-                    {formatTime(node.updatedAt)} · {node.status}
-                  </div>
-                  {(node.action || node.resultMessage || node.error) && (
-                    <div className="text-muted-foreground mt-1 text-[11px] leading-5">
-                      {preview(
-                        node.error || node.resultMessage || node.action,
-                        220,
-                      )}
-                    </div>
-                  )}
-                </div>
+                  ),
+                )}
               </div>
-            ))}
-            {nodes.length === 0 && thoughtMessages.length === 0 && (
-              <EmptyState>No realtime events yet.</EmptyState>
+            ) : (
+              <EmptyState>No activity yet.</EmptyState>
             )}
           </div>
         )}
@@ -802,7 +962,7 @@ export function ChatInspector({
 
       <div className="border-border/70 text-muted-foreground flex shrink-0 items-center gap-2 border-t px-3 py-2 text-[10px]">
         <IconShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-        Sensitive internal reasoning is summarized and redacted.
+        Private reasoning is not shown.
       </div>
     </aside>
   )

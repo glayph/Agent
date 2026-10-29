@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
+import Database from "better-sqlite3";
 import { ChannelRuntimeManager, channelSettings, isChannelSenderAllowed, parseAllowFrom } from "./channel-runtime.js";
+import { ChannelDeliveryStore } from "./outbox.js";
 
 
 class FakeWebSocket extends EventEmitter {
@@ -25,18 +27,32 @@ function runtimeEntry() {
   };
 }
 
-function runtimeDb() {
-  return {
-    prepare(sql: string) {
-      return {
-        get() {
-          if (sql.includes("SELECT id FROM chat_messages")) return undefined;
-          if (sql.includes("SELECT id,content FROM chat_messages")) return { id: "assistant-1", content: "Hello from Miki" };
-          return undefined;
-        },
-      };
-    },
-  } as never;
+/** Real in-memory SQLite with the chat_messages table; `reply` is the assistant answer the fake run "produces". */
+function runtimeDb(reply = "Hello from Miki") {
+  const db = new Database(":memory:");
+  db.exec("CREATE TABLE chat_messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at TEXT, kind TEXT DEFAULT 'normal', context_id TEXT, status TEXT DEFAULT 'completed', status_detail TEXT)");
+  (db as any).__reply = reply;
+  return db;
+}
+
+/** What the real runner leaves behind after a successful turn: the answer saved as an assistant message. */
+function completeTurn(db: Database.Database, input: { contextId: string; sessionId: string }, runId: string, reply = "Hello from Miki") {
+  db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,kind) VALUES(?,?,?,?,?,?,'normal')").run(`assistant-${runId}`, input.sessionId, "assistant", reply, new Date(Date.now() + 2).toISOString(), input.contextId);
+  return { status: "completed", runId };
+}
+
+/** A chat-turn runner double that stores the user message and the assistant answer like the real runner does. */
+function fakeTurns(db: Database.Database, options: { status?: string; detail?: string; reply?: string } = {}) {
+  let n = 0;
+  return { run: jest.fn(async (input: { contextId: string; sessionId: string; trigger: { clientMessageId?: string; content: string } }) => {
+    const id = input.trigger.clientMessageId as string;
+    const exists = db.prepare("SELECT id FROM chat_messages WHERE id=?").get(id);
+    if (exists) return { status: "duplicate" };
+    const stamp = new Date(Date.now() + 1).toISOString();
+    db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,status,status_detail) VALUES(?,?,?,?,?,?,?,?)").run(id, input.sessionId, "user", input.trigger.content, stamp, input.contextId, options.status === "failed" ? "failed" : "completed", options.detail ?? null);
+    if (options.status !== "failed") db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,kind) VALUES(?,?,?,?,?,?,'normal')").run(`assistant-${++n}`, input.sessionId, "assistant", options.reply ?? "Hello from Miki", new Date(Date.now() + 2).toISOString(), input.contextId);
+    return { status: options.status ?? "completed", runId: `run-${n}` };
+  }), waitForRun: jest.fn(async () => "completed") };
 }
 
 describe("external channel runtime", () => {
@@ -124,12 +140,27 @@ describe("external channel runtime", () => {
     await manager.close();
   });
 
+  it("sends proactive Slack notices to allow-listed user IDs through chat.postMessage", async () => {
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      requests.push({ url: String(input), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    const config = { channel_list: { slack: { enabled: true, allow_from: ["U123", "*"], settings: { bot_token: "slack-token", app_token: "slack-app" } } } };
+    const manager = new ChannelRuntimeManager({ db: {} as never, chatTurns: {} as never, getAppConfig: () => config, log: () => undefined, fetchImpl });
+    await manager.sendProactiveNotice("Slack notice.");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("https://slack.com/api/chat.postMessage");
+    expect(requests[0].body).toMatchObject({ channel: "U123", text: "Slack notice." });
+    await manager.close();
+  });
+
   it("skips disabled channels, channels without credentials, and channels without recipients", async () => {
     const fetchImpl = jest.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
     const config = { channel_list: {
       telegram: { enabled: false, allow_from: ["123"], settings: { token: "disabled-token" } },
       discord: { enabled: true, allow_from: ["456"] },
-      slack: { enabled: true, allow_from: ["789"], settings: { bot_token: "slack-token", app_token: "slack-app" } },
+      slack: { enabled: true, allow_from: ["789"], settings: { app_token: "slack-app" } },
     } };
     const manager = new ChannelRuntimeManager({ db: {} as never, chatTurns: {} as never, getAppConfig: () => config, log: () => undefined, fetchImpl });
     await manager.sendProactiveNotice("Notice.");
@@ -166,12 +197,13 @@ describe("external channel runtime", () => {
       resolveReply();
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
     };
-    const chatTurns = { run: jest.fn(async (input: { trigger: { content: string }; peerId: string }) => {
+    const db = runtimeDb();
+    const chatTurns = { run: jest.fn(async (input: { contextId: string; sessionId: string; trigger: { content: string }; peerId: string }) => {
       expect(input.peerId).toBe("U123");
       expect(input.trigger.content).toBe("hello from Slack");
-      return { status: "completed", runId: "slack-run" };
+      return completeTurn(db, input, "slack-run");
     }) } as never;
-    const manager = new ChannelRuntimeManager({ db: runtimeDb(), chatTurns, getAppConfig: () => ({}), log: () => undefined, fetchImpl, WebSocketImpl: FakeWebSocket as never });
+    const manager = new ChannelRuntimeManager({ db, chatTurns, getAppConfig: () => ({ channel_list: { slack: { enabled: true, allow_from: ["U123"], settings: { bot_token: "xoxb-test", app_token: "xapp-test" } } } }), log: () => undefined, fetchImpl, WebSocketImpl: FakeWebSocket as never });
     const entry = runtimeEntry() as never;
     const connected = (manager as any).connectSlack({ name: "slack", enabled: true, token: "xoxb-test", appToken: "xapp-test", allowFrom: ["U123"] }, entry, "wss://slack.example/socket");
     const socket = FakeWebSocket.instances[0];
@@ -199,12 +231,13 @@ describe("external channel runtime", () => {
       resolveReply();
       return new Response("{}", { status: 200 });
     };
-    const chatTurns = { run: jest.fn(async (input: { trigger: { content: string }; peerId: string }) => {
+    const db = runtimeDb();
+    const chatTurns = { run: jest.fn(async (input: { contextId: string; sessionId: string; trigger: { content: string }; peerId: string }) => {
       expect(input.peerId).toBe("D123");
       expect(input.trigger.content).toBe("hello from Discord");
-      return { status: "completed", runId: "discord-run" };
+      return completeTurn(db, input, "discord-run");
     }) } as never;
-    const manager = new ChannelRuntimeManager({ db: runtimeDb(), chatTurns, getAppConfig: () => ({}), log: () => undefined, fetchImpl, WebSocketImpl: FakeWebSocket as never });
+    const manager = new ChannelRuntimeManager({ db, chatTurns, getAppConfig: () => ({ channel_list: { discord: { enabled: true, allow_from: ["D123"], settings: { token: "discord-test" } } } }), log: () => undefined, fetchImpl, WebSocketImpl: FakeWebSocket as never });
     const entry = runtimeEntry() as never;
     const connected = (manager as any).connectDiscord({ name: "discord", enabled: true, token: "discord-test", allowFrom: ["D123"] }, entry, "wss://discord.example/?v=10&encoding=json");
     const socket = FakeWebSocket.instances[0];
@@ -249,22 +282,12 @@ describe("external channel runtime", () => {
       }
       throw new Error(`Unexpected mock URL: ${url}`);
     };
-    const db = {
-      prepare(sql: string) {
-        return {
-          get() {
-            if (sql.includes("SELECT id FROM chat_messages")) return undefined;
-            if (sql.includes("SELECT id,content FROM chat_messages")) return { id: "assistant-1", content: "Hello from Miki" };
-            return undefined;
-          },
-        };
-      },
-    } as never;
-    const chatTurns = { run: jest.fn(async (input: { trigger: { content: string; clientMessageId?: string }; peerId: string }) => {
+    const db = runtimeDb();
+    const chatTurns = { run: jest.fn(async (input: { contextId: string; sessionId: string; trigger: { content: string; clientMessageId?: string }; peerId: string }) => {
       expect(input.peerId).toBe("123");
       expect(input.trigger.content).toBe("hello");
       expect(input.trigger.clientMessageId).toBe("telegram_102");
-      return { status: "completed", runId: "run-1" };
+      return completeTurn(db, input, "run-1");
     }) } as never;
     const config = { channel_list: { telegram: { enabled: true, allow_from: ["123"], settings: { token: "test-token" } } } };
     const manager = new ChannelRuntimeManager({ db, chatTurns, getAppConfig: () => config, log: () => undefined, fetchImpl, now: () => new Date().toISOString() });
@@ -277,4 +300,210 @@ describe("external channel runtime", () => {
       await manager.close();
     }
   });
+});
+
+describe("durable channel delivery (outbox)", () => {
+  const config = { channel_list: { telegram: { enabled: true, allow_from: ["123"], settings: { token: "tg-token" } } } };
+  const entry = () => runtimeEntry() as never;
+  const sendInput = (eventId: string, text = "hello") => ({ channel: "telegram" as const, address: "123", senderId: "123", eventId, text, allowFrom: ["123"], entry: entry() });
+  const waitFor = async (check: () => boolean, ms = 1500) => {
+    const end = Date.now() + ms;
+    while (!check()) { if (Date.now() > end) throw new Error("condition not reached"); await new Promise((r) => setTimeout(r, 5)); }
+  };
+
+  function build(options: { status?: string; detail?: string; online?: { value: boolean } } = {}) {
+    const db = runtimeDb();
+    const sent: Array<{ chat_id: string; text: string }> = [];
+    const online = options.online ?? { value: true };
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      if (!online.value) throw new Error("network down");
+      sent.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    const chatTurns = fakeTurns(db, { status: options.status, detail: options.detail });
+    const delivery = new ChannelDeliveryStore(db, { baseDelayMs: 5, maxDelayMs: 20 });
+    const manager = new ChannelRuntimeManager({ db, chatTurns: chatTurns as never, getAppConfig: () => config, log: () => undefined, fetchImpl, delivery });
+    return { db, sent, online, chatTurns, delivery, manager };
+  }
+
+  it("keeps a reply whose send failed and delivers it once when the network returns", async () => {
+    const { manager, sent, online, delivery } = build({ online: { value: false } });
+    try {
+      await (manager as any).dispatchMessage(sendInput("1"));
+      await new Promise((r) => setTimeout(r, 30));
+      expect(sent).toHaveLength(0);
+      expect(delivery.stats().pending).toBe(1); // the answer is still waiting, not lost
+      online.value = true;
+      manager.flushOutbox();
+      await waitFor(() => sent.length === 1);
+      expect(sent[0]).toMatchObject({ chat_id: "123", text: "Hello from Miki" });
+      manager.flushOutbox();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(sent).toHaveLength(1); // no duplicate
+      expect(delivery.stats().pending).toBe(0);
+    } finally { await manager.close(); }
+  });
+
+  it("tells the user on the channel when the turn failed, instead of staying silent", async () => {
+    const { manager, sent } = build({ status: "failed", detail: "model server unreachable" });
+    try {
+      await (manager as any).dispatchMessage(sendInput("2"));
+      await waitFor(() => sent.length === 1);
+      expect(sent[0].text).toContain("request_failed");
+      expect(sent[0].text).toContain("model server unreachable");
+    } finally { await manager.close(); }
+  });
+
+  it("answers a platform re-delivery whose reply was never queued, but not one already answered", async () => {
+    const { manager, sent, db, delivery } = build();
+    try {
+      // The first delivery completed, but the process stopped before the reply was queued.
+      delivery.recordInbound({ eventId: "telegram_3", channel: "telegram", address: "123", senderId: "123" });
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,status) VALUES('telegram_3','channel-telegram-123','user','hello','2026-10-27T10:00:00.000Z','channel:telegram:address:123:peer:123','completed')").run();
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,kind) VALUES('assistant-old','channel-telegram-123','assistant','Saved answer','2026-10-27T10:00:05.000Z','channel:telegram:address:123:peer:123','normal')").run();
+      await (manager as any).dispatchMessage(sendInput("3"));
+      await waitFor(() => sent.length === 1);
+      expect(sent[0].text).toBe("Saved answer");
+      await (manager as any).dispatchMessage(sendInput("3")); // delivered a third time by the platform
+      await new Promise((r) => setTimeout(r, 30));
+      expect(sent).toHaveLength(1);
+    } finally { await manager.close(); }
+  });
+
+  it("sends the answer of a message resumed after a restart to the channel it came from", async () => {
+    const { manager, sent, db, delivery } = build();
+    try {
+      delivery.recordInbound({ eventId: "telegram_4", channel: "telegram", address: "123", senderId: "123" });
+      db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,status) VALUES('telegram_4','channel-telegram-123','user','hello','2026-10-27T10:00:00.000Z','channel:telegram:address:123:peer:123','queued')").run();
+      const outcome = await manager.resumeInbound("telegram_4", async () => completeTurn(db, { contextId: "channel:telegram:address:123:peer:123", sessionId: "channel-telegram-123" }, "resume-1", "Resumed answer"));
+      expect(outcome.status).toBe("completed");
+      await waitFor(() => sent.length === 1);
+      expect(sent[0]).toMatchObject({ chat_id: "123", text: "Resumed answer" });
+    } finally { await manager.close(); }
+  });
+
+  it("runs a message that did not come from a channel without touching the outbox", async () => {
+    const { manager, sent } = build();
+    try {
+      const run = jest.fn(async () => ({ status: "completed", runId: "web-run" }));
+      await manager.resumeInbound("web-message-1", run as never);
+      expect(run).toHaveBeenCalledTimes(1);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sent).toHaveLength(0);
+    } finally { await manager.close(); }
+  });
+
+  it("splits a long reply into ordered parts", async () => {
+    const { manager, sent } = build();
+    const long = `${"a".repeat(3900)}\n${"b".repeat(3900)}`;
+    try {
+      (manager as any).queueOutbound({ channel: "telegram", address: "123", chatMessageId: "long-1", text: long });
+      await waitFor(() => sent.length === 2);
+      expect(sent[0].text.startsWith("a")).toBe(true);
+      expect(sent[1].text.startsWith("b")).toBe(true);
+    } finally { await manager.close(); }
+  });
+});
+
+describe("channel connection hardening", () => {
+  const waitFor = async (check: () => boolean, ms = 4000) => {
+    const end = Date.now() + ms;
+    while (!check()) { if (Date.now() > end) throw new Error("condition not reached"); await new Promise((r) => setTimeout(r, 10)); }
+  };
+  const discordSettings = { name: "discord", enabled: true, token: "discord-test", allowFrom: ["D1"] };
+  const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  const quietTurns = (db: Database.Database) => ({ run: jest.fn(async (input: { contextId: string; sessionId: string }) => completeTurn(db, input, `r${Math.random()}`)), waitForRun: jest.fn(async () => "completed") }) as never;
+
+  it("Discord: a dropped connection RESUMEs the saved session instead of identifying again", async () => {
+    FakeWebSocket.instances = [];
+    const db = runtimeDb();
+    const manager = new ChannelRuntimeManager({ db, chatTurns: quietTurns(db), getAppConfig: () => ({}), log: () => undefined, fetchImpl: (async () => jsonResponse([])) as never, WebSocketImpl: FakeWebSocket as never });
+    const entry = runtimeEntry() as never;
+    try {
+      const first = (manager as any).connectDiscord(discordSettings, entry, "wss://d/?v=10");
+      const s1 = FakeWebSocket.instances[0];
+      s1.emit("message", Buffer.from(JSON.stringify({ op: 10, d: { heartbeat_interval: 60_000 } })));
+      expect(s1.sent[0]).toMatchObject({ op: 2 }); // first connection identifies
+      s1.emit("message", Buffer.from(JSON.stringify({ op: 0, s: 5, t: "READY", d: { session_id: "sess-1", resume_gateway_url: "wss://resume.example" } })));
+      s1.close();
+      await first;
+      expect((entry as any).discord).toMatchObject({ sessionId: "sess-1", resumeUrl: "wss://resume.example", seq: 5 });
+      const second = (manager as any).connectDiscord(discordSettings, entry, "wss://resume.example/?v=10");
+      const s2 = FakeWebSocket.instances[1];
+      s2.emit("message", Buffer.from(JSON.stringify({ op: 10, d: { heartbeat_interval: 60_000 } })));
+      expect(s2.sent[0]).toEqual({ op: 6, d: { token: "discord-test", session_id: "sess-1", seq: 5 } });
+      // Discord says the session is gone: it is forgotten so the next connection identifies again.
+      s2.emit("message", Buffer.from(JSON.stringify({ op: 9, d: false })));
+      await second;
+      expect((entry as any).discord.sessionId).toBeUndefined();
+    } finally { (entry as any).controller.abort(); await manager.close(); }
+  });
+
+  it("Discord: a heartbeat that is never acknowledged ends the half-open connection", async () => {
+    FakeWebSocket.instances = [];
+    const db = runtimeDb();
+    const logs: string[] = [];
+    const manager = new ChannelRuntimeManager({ db, chatTurns: quietTurns(db), getAppConfig: () => ({}), log: (m) => logs.push(m), fetchImpl: (async () => jsonResponse([])) as never, WebSocketImpl: FakeWebSocket as never });
+    const entry = runtimeEntry() as never;
+    try {
+      const done = (manager as any).connectDiscord(discordSettings, entry, "wss://d/?v=10");
+      FakeWebSocket.instances[0].emit("message", Buffer.from(JSON.stringify({ op: 10, d: { heartbeat_interval: 1000 } })));
+      await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error("half-open connection was not detected")), 4000))]);
+      expect(logs.join(" ")).toContain("heartbeat was not acknowledged");
+    } finally { (entry as any).controller.abort(); await manager.close(); }
+  });
+
+  it("Discord: after a fresh session it asks for the messages missed since the last one seen and answers them oldest first", async () => {
+    FakeWebSocket.instances = [];
+    const db = runtimeDb();
+    const delivery = new ChannelDeliveryStore(db, { baseDelayMs: 5 });
+    delivery.setCursor("discord", "C9", "100", (a, b) => BigInt(a) > BigInt(b));
+    const handled: string[] = [];
+    const chatTurns = { run: jest.fn(async (input: { contextId: string; sessionId: string; trigger: { clientMessageId?: string } }) => { handled.push(String(input.trigger.clientMessageId)); return completeTurn(db, input, `c-${handled.length}`); }), waitForRun: jest.fn(async () => "completed") } as never;
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes("/channels/C9/messages?after=100")) return jsonResponse([
+        { id: "103", content: "third", author: { id: "D1", bot: false } },
+        { id: "101", content: "first", author: { id: "D1", bot: false } },
+        { id: "102", content: "from a bot", author: { id: "bot", bot: true } },
+      ]);
+      return jsonResponse({ ok: true });
+    };
+    const manager = new ChannelRuntimeManager({ db, chatTurns, getAppConfig: () => ({ channel_list: { discord: { enabled: true, allow_from: ["D1"], settings: { token: "discord-test" } } } }), log: () => undefined, fetchImpl, WebSocketImpl: FakeWebSocket as never, delivery });
+    const entry = runtimeEntry() as never;
+    try {
+      const done = (manager as any).connectDiscord(discordSettings, entry, "wss://d/?v=10");
+      const socket = FakeWebSocket.instances[0];
+      socket.emit("message", Buffer.from(JSON.stringify({ op: 10, d: { heartbeat_interval: 60_000 } })));
+      socket.emit("message", Buffer.from(JSON.stringify({ op: 0, s: 1, t: "READY", d: { session_id: "s", resume_gateway_url: "wss://r" } })));
+      await waitFor(() => handled.length === 2);
+      expect(handled).toEqual(["discord_101", "discord_103"]);
+      expect(delivery.getCursor("discord", "C9")).toBe("103");
+      socket.close(); await done;
+    } finally { (entry as any).controller.abort(); await manager.close(); }
+  });
+
+  it("Slack: a silent connection is replaced, and missed messages are fetched on reconnect", async () => {
+    FakeWebSocket.instances = [];
+    const db = runtimeDb();
+    const delivery = new ChannelDeliveryStore(db, { baseDelayMs: 5 });
+    delivery.setCursor("slack", "C5", "1700000000.000100", (a, b) => Number(a) > Number(b));
+    const handled: string[] = [];
+    const chatTurns = { run: jest.fn(async (input: { contextId: string; sessionId: string; trigger: { clientMessageId?: string } }) => { handled.push(String(input.trigger.clientMessageId)); return completeTurn(db, input, `s-${handled.length}`); }), waitForRun: jest.fn(async () => "completed") } as never;
+    const fetchImpl: typeof fetch = async (input) => String(input).includes("conversations.history")
+      ? jsonResponse({ ok: true, messages: [{ ts: "1700000005.000200", user: "U1", text: "missed while offline" }, { ts: "1700000006.000300", bot_id: "B1", text: "bot" }] })
+      : jsonResponse({ ok: true });
+    const manager = new ChannelRuntimeManager({ db, chatTurns, getAppConfig: () => ({}), log: () => undefined, fetchImpl, WebSocketImpl: FakeWebSocket as never, delivery, staleMs: 3000 });
+    const entry = runtimeEntry() as never;
+    try {
+      const done = (manager as any).connectSlack({ name: "slack", enabled: true, token: "xoxb-1", appToken: "xapp-1", allowFrom: ["U1"] }, entry, "wss://slack.example/socket");
+      FakeWebSocket.instances[0].emit("open");
+      await waitFor(() => handled.length === 1);
+      expect(handled[0]).toBe("slack_C5_1700000005_000200");
+      // No event, ping or pong arrives: the connection is half-open and must be dropped.
+      await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error("silent connection was not replaced")), 6000))]);
+    } finally { (entry as any).controller.abort(); await manager.close(); }
+  }, 12000);
 });

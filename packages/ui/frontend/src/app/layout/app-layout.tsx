@@ -51,6 +51,15 @@ function DeferredCommandPalette() {
 }
 
 export function AppLayout({ children }: { children: ReactNode }) {
+  const [isMobileViewport, setIsMobileViewport] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)")
+    const update = () => setIsMobileViewport(media.matches)
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
+
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
@@ -59,8 +68,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
     "/plugins",
     "/models",
     "/channels",
+    "/agent/monitor",
     "/agent/skills",
     "/agent/tools",
+    "/agent/activity",
     "/memory",
     "/config",
     "/health",
@@ -99,7 +110,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </main>
         </div>
         <DeferredCommandPalette />
-        <Toaster position="bottom-center" />
+        <Toaster
+          position={isMobileViewport ? "top-center" : "bottom-right"}
+          visibleToasts={3}
+          duration={3500}
+          closeButton
+          offset={isMobileViewport ? "max(12px, env(safe-area-inset-top))" : 24}
+          toastOptions={{
+            style: { fontFamily: "inherit" },
+          }}
+        />
       </SidebarProvider>
     </TooltipProvider>
   )

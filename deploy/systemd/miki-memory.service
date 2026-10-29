@@ -5,8 +5,8 @@ After=local-fs.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=@MIKI_USER@
+Group=@MIKI_GROUP@
 WorkingDirectory=@MIKI_ROOT@
 EnvironmentFile=-/etc/miki/miki.env
 ExecStart=@MIKI_NODE@ @MIKI_ROOT@/packages/memory/src/api/server.js
@@ -15,10 +15,13 @@ RestartSec=3s
 TimeoutStopSec=10s
 KillSignal=SIGTERM
 SuccessExitStatus=0 143
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
+# Whole file system read-only except the paths below.
+ProtectSystem=strict
 ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
 ReadWritePaths=@MIKI_ROOT@/data @MIKI_ROOT@/logs
 MemoryMax=256M
 CPUQuota=50%

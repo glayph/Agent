@@ -1,5 +1,5 @@
 import { getDefaultStore } from "jotai"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 
 import {
   deleteSessionMessage,
@@ -12,10 +12,14 @@ import {
   mergeHistoryMessages,
 } from "@/features/chat/history"
 import {
-  handlemikiMessage,
   type MikiWsClientMessage,
   type MikiWsServerMessage,
+  handlemikiMessage,
 } from "@/features/chat/protocol"
+import {
+  findFailedUserTurn,
+  isUnansweredUserMessage,
+} from "@/features/chat/retryable"
 import {
   SINGLE_CHAT_SESSION_ID,
   clearStoredSessionId,
@@ -25,7 +29,6 @@ import {
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import { handleMonitorMessage } from "@/features/monitor/protocol"
 import i18n from "@/i18n"
-import { findFailedUserTurn } from "@/features/chat/retryable"
 import {
   type ChatAttachment,
   type ChatMessage,
@@ -77,7 +80,8 @@ function hideResolvedErrors(messages: ChatMessage[]): ChatMessage[] {
   if (latestSuccessfulReply < 0) return messages
   return messages
     .filter(
-      (message, index) => message.kind !== "error" || index > latestSuccessfulReply,
+      (message, index) =>
+        message.kind !== "error" || index > latestSuccessfulReply,
     )
     .map((message, index) =>
       message.role === "user" &&
@@ -102,6 +106,9 @@ let activeCheckpointId: string | null = null
 let activeSequence = -1
 
 let customWsFactory: ((url: string) => WebSocket) | null = null
+// Keep unacknowledged frames in memory and replay them with the same id after reconnect.
+// The gateway deduplicates by client message id, so this closes the send/ack race safely.
+const pendingOutgoing = new Map<string, { sessionId: string; frame: string }>()
 
 export function setWebSocketFactory(
   factory: ((url: string) => WebSocket) | null,
@@ -227,6 +234,47 @@ export async function connectChat() {
     const wsUrl = `${wsScheme}//${host}/miki/ws`
     const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}`
     const socket = customWsFactory ? customWsFactory(url) : new WebSocket(url)
+    const pendingDeltas: MikiWsServerMessage[] = []
+    let pendingDeltaTimer: number | null = null
+    const flushPendingDeltas = () => {
+      if (pendingDeltaTimer !== null) {
+        window.clearTimeout(pendingDeltaTimer)
+        pendingDeltaTimer = null
+      }
+      const queued = pendingDeltas.splice(0)
+      if (
+        activeSessionIdRef !== sessionId ||
+        generation !== connectionGeneration
+      )
+        return
+      for (const delta of queued) handlemikiMessage(delta, sessionId)
+    }
+    const queueDelta = (delta: MikiWsServerMessage) => {
+      const payload = delta.payload ?? {}
+      const id =
+        typeof payload.message_id === "string" ? payload.message_id : ""
+      const text = typeof payload.delta === "string" ? payload.delta : ""
+      if (!id || !text) {
+        handlemikiMessage(delta, sessionId)
+        return
+      }
+      const previous = pendingDeltas[pendingDeltas.length - 1]
+      const previousId = previous?.payload?.message_id
+      if (previous && previousId === id) {
+        const priorText =
+          typeof previous.payload?.delta === "string"
+            ? previous.payload.delta
+            : ""
+        pendingDeltas[pendingDeltas.length - 1] = {
+          ...delta,
+          payload: { ...previous.payload, ...payload, delta: priorText + text },
+        }
+      } else {
+        pendingDeltas.push(delta)
+      }
+      if (pendingDeltaTimer === null)
+        pendingDeltaTimer = window.setTimeout(flushPendingDeltas, 16)
+    }
 
     if (generation !== connectionGeneration) {
       isConnecting = false
@@ -250,7 +298,39 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected", runError: undefined })
       isConnecting = false
       reconnectAttempts = 0
-      socket.send(JSON.stringify({ type: "authenticate", session_id: sessionId }))
+      socket.send(
+        JSON.stringify({ type: "authenticate", session_id: sessionId }),
+      )
+      for (const [messageId, pending] of pendingOutgoing) {
+        if (pending.sessionId !== sessionId) continue
+        try {
+          socket.send(pending.frame)
+          updateChatStore((prev) => ({
+            messages: prev.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    deliveryStatus: "sending",
+                    deliveryDetail: undefined,
+                  }
+                : message,
+            ),
+          }))
+        } catch {
+          updateChatStore((prev) => ({
+            messages: prev.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    deliveryStatus: "uncertain",
+                    deliveryDetail:
+                      "Waiting for a chat connection to confirm delivery.",
+                  }
+                : message,
+            ),
+          }))
+        }
+      }
       const currentState = getChatState()
       if (activeCheckpointId && currentState.isTyping) {
         const resumeMessage: MikiWsClientMessage = {
@@ -288,15 +368,41 @@ export async function connectChat() {
           checkpoint_id?: unknown
           sequence?: unknown
         }
+        if (message.type !== "message.delta") flushPendingDeltas()
         if (message.type === "proactive.message") {
           const payload = message.payload || {}
-          const content = typeof payload.content === "string" ? payload.content.trim() : ""
-          const messageId = typeof payload.message_id === "string" ? payload.message_id : `proactive-${Date.now()}`
-          if (content) {
+          const content =
+            typeof payload.content === "string" ? payload.content.trim() : ""
+          const messageId =
+            typeof payload.message_id === "string"
+              ? payload.message_id
+              : `proactive-${Date.now()}`
+          // A background notice belongs to one session; do not show it in another one.
+          const belongsHere =
+            typeof payload.session_id !== "string" ||
+            payload.session_id === activeSessionIdRef
+          if (content && belongsHere) {
             updateChatStore((prev) => ({
-              messages: prev.messages.some((candidate) => candidate.id === messageId)
+              messages: prev.messages.some(
+                (candidate) => candidate.id === messageId,
+              )
                 ? prev.messages
-                : [...prev.messages, { id: messageId, role: "assistant" as const, content, kind: "normal" as const, ...(typeof payload.run_id === "string" ? { runId: payload.run_id } : {}), timestamp: message.timestamp ?? Date.now() }],
+                : [
+                    ...prev.messages,
+                    {
+                      id: messageId,
+                      role: "assistant" as const,
+                      content,
+                      kind: "normal" as const,
+                      ...(typeof payload.run_id === "string"
+                        ? { runId: payload.run_id }
+                        : {}),
+                      ...(typeof payload.notification_kind === "string"
+                        ? { notificationKind: payload.notification_kind }
+                        : {}),
+                      timestamp: message.timestamp ?? Date.now(),
+                    },
+                  ],
             }))
           }
           return
@@ -319,6 +425,35 @@ export async function connectChat() {
             globalThis.location.assign("/launcher-login")
           }
           return
+        }
+        if (
+          ["message.accepted", "message.duplicate", "message.status"].includes(
+            message.type,
+          )
+        ) {
+          const payload = message.payload ?? {}
+          const messageId =
+            typeof payload.message_id === "string" ? payload.message_id : ""
+          const clientId =
+            typeof payload.client_message_id === "string"
+              ? payload.client_message_id
+              : ""
+          const status =
+            message.type === "message.accepted" ? "queued" : payload.status
+          if (
+            messageId &&
+            [
+              "queued",
+              "processing",
+              "retrying",
+              "failed",
+              "cancelled",
+              "completed",
+            ].includes(String(status))
+          ) {
+            pendingOutgoing.delete(clientId)
+            pendingOutgoing.delete(messageId)
+          }
         }
         if (message.type === "stream_checkpoint") {
           activeCheckpointId =
@@ -351,7 +486,8 @@ export async function connectChat() {
             "failed",
             "cancelled",
           ].includes(String(payload.status))
-            ? (String(payload.status) as "completed" | "completed_with_warning" | "failed" | "cancelled")
+            ? (String(payload.status) as
+                "completed" | "completed_with_warning" | "failed" | "cancelled")
             : undefined
           updateChatStore((prev) => {
             if (!runId) return { isTyping: false }
@@ -361,12 +497,16 @@ export async function connectChat() {
             const isLastRun = runningRunIds.length === 0
             return {
               ...(isLastRun && terminalStatus === "completed"
-                ? { messages: prev.messages.filter((message) => message.kind !== "error") }
+                ? {
+                    messages: prev.messages.filter(
+                      (message) => message.kind !== "error",
+                    ),
+                  }
                 : {}),
               runningRunIds,
               isTyping: !isLastRun,
               runStatus: isLastRun
-                ? terminalStatus ?? prev.runStatus
+                ? (terminalStatus ?? prev.runStatus)
                 : "running",
               ...(isLastRun
                 ? {
@@ -386,7 +526,9 @@ export async function connectChat() {
         if (message.type === "connection.ready" || message.type === "auth.ok") {
           return
         }
-        if (message.type?.startsWith("node.")) {
+        if (message.type === "message.delta") {
+          queueDelta(message)
+        } else if (message.type?.startsWith("node.")) {
           handleMonitorMessage(message)
         } else {
           handlemikiMessage(message, sessionId)
@@ -409,6 +551,7 @@ export async function connectChat() {
       ) {
         return
       }
+      flushPendingDeltas()
       wsRef = null
       isConnecting = false
       void isGatewaySessionAuthenticated().then((authenticated) => {
@@ -421,7 +564,20 @@ export async function connectChat() {
           }
           return
         }
-        updateChatStore({ connectionState: "disconnected", isTyping: Boolean(activeCheckpointId) })
+        updateChatStore((prev) => ({
+          connectionState: "disconnected",
+          isTyping: Boolean(activeCheckpointId),
+          messages: prev.messages.map((message) =>
+            pendingOutgoing.has(message.id)
+              ? {
+                  ...message,
+                  deliveryStatus: "uncertain",
+                  deliveryDetail:
+                    "Connection lost before the server confirmed delivery; it will be retried safely.",
+                }
+              : message,
+          ),
+        }))
         scheduleReconnect(generation, sessionId)
       })
     }
@@ -450,7 +606,10 @@ export async function connectChat() {
           }
           return
         }
-        updateChatStore({ connectionState: "error", isTyping: Boolean(activeCheckpointId) })
+        updateChatStore({
+          connectionState: "error",
+          isTyping: Boolean(activeCheckpointId),
+        })
         scheduleReconnect(generation, sessionId)
       })
     }
@@ -497,11 +656,9 @@ export async function hydrateActiveSession() {
       }
 
       const hydratedMessages = hideResolvedErrors(
-        (
         currentState.messages.length > 0
           ? mergeHistoryMessages(historyMessages, currentState.messages)
-          : historyMessages
-        ),
+          : historyMessages,
       )
       const identity = latestRunIdentity(hydratedMessages)
       updateChatStore({
@@ -580,12 +737,10 @@ function normalizeOutgoingAttachments(
 ): ChatAttachment[] {
   return attachments
     .filter((attachment) => Boolean(attachment.url))
-    .slice(0, 16)
     .map((attachment) => ({ ...attachment }))
 }
 
 function sendmikiMessage(
-  socket: WebSocket,
   requestId: string,
   content: string,
   attachments: ChatAttachment[],
@@ -593,37 +748,34 @@ function sendmikiMessage(
   voice?: ChatVoiceMetadata,
   audio?: EphemeralAudioPayload,
   thinkingMode?: "auto" | "off" | "low" | "medium" | "high",
-) {
-  socket.send(
-    JSON.stringify({
-      type: "message.send",
-      id: requestId,
-      payload: {
-        content,
-        media: attachments.map((attachment) => attachment.url),
-        ...(attachments.length > 0
-          ? {
-              attachments: attachments.map((attachment) => ({
-                type: attachment.type,
-                url: attachment.url,
-                ...(attachment.filename ? { filename: attachment.filename } : {}),
-                ...(attachment.contentType
-                  ? { content_type: attachment.contentType }
-                  : {}),
-              })),
-            }
-          : {}),
-        ...(requestedModel?.trim()
-          ? { requested_model: requestedModel.trim() }
-          : {}),
-        ...(voice ? { voice } : {}),
-        ...(audio ? { audio } : {}),
-        ...(thinkingMode ? { thinking_mode: thinkingMode } : {}),
-      },
-    }),
-  )
+): string {
+  return JSON.stringify({
+    type: "message.send",
+    id: requestId,
+    payload: {
+      content,
+      media: attachments.map((attachment) => attachment.url),
+      ...(attachments.length > 0
+        ? {
+            attachments: attachments.map((attachment) => ({
+              type: attachment.type,
+              url: attachment.url,
+              ...(attachment.filename ? { filename: attachment.filename } : {}),
+              ...(attachment.contentType
+                ? { content_type: attachment.contentType }
+                : {}),
+            })),
+          }
+        : {}),
+      ...(requestedModel?.trim()
+        ? { requested_model: requestedModel.trim() }
+        : {}),
+      ...(voice ? { voice } : {}),
+      ...(audio ? { audio } : {}),
+      ...(thinkingMode ? { thinking_mode: thinkingMode } : {}),
+    },
+  })
 }
-
 export async function sendChatMessage({
   content,
   attachments = [],
@@ -639,6 +791,16 @@ export async function sendChatMessage({
 
   const normalizedContent = content.trim()
   const normalizedAttachments = normalizeOutgoingAttachments(attachments)
+  if (normalizedAttachments.length > 16) {
+    notify.error(
+      i18n.t("chat.attachmentLimit", {
+        defaultValue:
+          "You can send up to 16 attachments at a time. Remove some files and try again.",
+      }),
+      { id: "chat:attachment-limit" },
+    )
+    return false
+  }
 
   if (!normalizedContent && normalizedAttachments.length === 0 && !audio) {
     return false
@@ -664,14 +826,14 @@ export async function sendChatMessage({
           normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
         voice: voice ? { ...voice, transcript: normalizedContent } : undefined,
         timestamp: Date.now(),
+        deliveryStatus: "sending",
       },
     ],
     isTyping: true,
   }))
 
   try {
-    sendmikiMessage(
-      socket,
+    const frame = sendmikiMessage(
       id,
       normalizedContent,
       normalizedAttachments,
@@ -680,14 +842,24 @@ export async function sendChatMessage({
       audio,
       thinkingMode,
     )
+    pendingOutgoing.set(id, { sessionId: activeSessionIdRef, frame })
+    socket.send(frame)
     return true
   } catch (error) {
-    console.error("Failed to send miki message:", error)
+    console.error("Could not confirm message send:", error)
     updateChatStore((prev) => ({
-      messages: prev.messages.filter((message) => message.id !== id),
-      isTyping: false,
+      messages: prev.messages.map((message) =>
+        message.id === id
+          ? {
+              ...message,
+              deliveryStatus: "uncertain",
+              deliveryDetail:
+                "Could not confirm delivery. It will be retried when chat reconnects.",
+            }
+          : message,
+      ),
     }))
-    return false
+    return true
   }
 }
 
@@ -766,11 +938,20 @@ export async function forkChatSessionFromMessage(
 export async function retryChatMessage(messageId: string): Promise<boolean> {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) return false
   const state = getChatState()
-  const targetIndex = state.messages.findIndex((message) => message.id === messageId)
+  const targetIndex = state.messages.findIndex(
+    (message) => message.id === messageId,
+  )
   if (targetIndex < 0) return false
-  const isFailedTurn = findFailedUserTurn(state.messages)?.id === messageId
-  if (targetIndex !== state.messages.length - 1 && !isFailedTurn) return false
   const target = state.messages[targetIndex]
+  const isFailedTurn = findFailedUserTurn(state.messages)?.id === messageId
+  // An older message the user sent that never got an answer can be run again too; later messages stay as they are.
+  const isUnanswered = isUnansweredUserMessage(target)
+  if (
+    targetIndex !== state.messages.length - 1 &&
+    !isFailedTurn &&
+    !isUnanswered
+  )
+    return false
   const promptMessage =
     target.role === "user"
       ? target
@@ -794,7 +975,9 @@ export async function retryChatMessage(messageId: string): Promise<boolean> {
                 attachments: attachments.map((attachment) => ({
                   type: attachment.type,
                   url: attachment.url,
-                  ...(attachment.filename ? { filename: attachment.filename } : {}),
+                  ...(attachment.filename
+                    ? { filename: attachment.filename }
+                    : {}),
                   ...(attachment.contentType
                     ? { content_type: attachment.contentType }
                     : {}),
@@ -810,13 +993,15 @@ export async function retryChatMessage(messageId: string): Promise<boolean> {
           ? prev.messages.filter((message) => message.id !== messageId)
           : isFailedTurn
             ? // The gateway drops what the failed attempt left behind (error message etc.); mirror that.
-              prev.messages
-                .slice(0, targetIndex + 1)
-                .map((message) =>
-                  message.id === messageId
-                    ? { ...message, deliveryStatus: "processing" as const, deliveryDetail: undefined }
-                    : message,
-                )
+              prev.messages.slice(0, targetIndex + 1).map((message) =>
+                message.id === messageId
+                  ? {
+                      ...message,
+                      deliveryStatus: "processing" as const,
+                      deliveryDetail: undefined,
+                    }
+                  : message,
+              )
             : prev.messages,
       isTyping: true,
     }))
@@ -861,7 +1046,7 @@ export async function switchChatSession(sessionId: string) {
     }
   } catch (error) {
     console.error("Failed to load session history:", error)
-    toast.error(i18n.t("chat.historyOpenFailed"))
+    notify.error(i18n.t("chat.historyOpenFailed"), { id: "chat:history-open-failed" })
   }
 }
 
@@ -873,7 +1058,6 @@ export async function newChatSession() {
     await switchChatSession(SINGLE_CHAT_SESSION_ID)
   }
 }
-
 
 export async function stopChatGeneration(): Promise<boolean> {
   const state = getChatState()
@@ -926,11 +1110,12 @@ export async function stopChatGeneration(): Promise<boolean> {
     isTyping: taskId
       ? prev.runningRunIds.some((candidate) => candidate !== taskId)
       : false,
-    runStatus: taskId && prev.runningRunIds.some((candidate) => candidate !== taskId)
-      ? "running"
-      : prev.runStatus === "running" || prev.runStatus === "starting"
-        ? "cancelled"
-        : prev.runStatus,
+    runStatus:
+      taskId && prev.runningRunIds.some((candidate) => candidate !== taskId)
+        ? "running"
+        : prev.runStatus === "running" || prev.runStatus === "starting"
+          ? "cancelled"
+          : prev.runStatus,
     ...(taskId && prev.activeRunId === taskId
       ? {
           activeRunId:

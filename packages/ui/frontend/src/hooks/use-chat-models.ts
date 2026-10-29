@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
+import { notify } from "@/lib/notify"
 import { type ModelInfo, type ModelResolution, getModels, setDefaultModel } from "@/api/models"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
@@ -123,7 +123,7 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
         )
       } catch (err) {
         console.error("Failed to set default model:", err)
-        toast.error(err instanceof Error ? err.message : t("models.loadError"))
+        notify.error(err instanceof Error ? err.message : t("models.loadError"), { id: "use-chat-models:error:handleSetDefault" })
       }
     },
     [defaultModelName, syncDefaultModelName, t],

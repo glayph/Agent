@@ -13,6 +13,7 @@ import {
   getSecretInputPlaceholder,
   isSecretField,
 } from "@/features/channels/components/channel-config-fields"
+import { ChannelSection } from "@/features/channels/components/channel-section"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
 import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
@@ -262,9 +263,10 @@ export function GenericForm({
   const basicFields = rawFields.filter(isBasicField)
   const advancedFields = rawFields.filter((key) => !isBasicField(key))
 
+  const hasAccessContent =
+    config.allow_from !== undefined && !hiddenFieldSet.has("allow_from")
   const hasAdvancedContent =
     advancedFields.length > 0 ||
-    (config.allow_from !== undefined && !hiddenFieldSet.has("allow_from")) ||
     (config.allow_origins !== undefined &&
       !hiddenFieldSet.has("allow_origins")) ||
     (config.allow_token_query !== undefined &&
@@ -278,156 +280,178 @@ export function GenericForm({
   return (
     <div className="space-y-6">
       {basicFields.length > 0 && (
-        <Card className="shadow-sm">
-          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-            {basicFields.map(renderField)}
-          </CardContent>
-        </Card>
+        <ChannelSection
+          title={t("channels.section.credentials")}
+          description={t("channels.section.credentialsDesc")}
+        >
+          <Card className="shadow-sm">
+            <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+              {basicFields.map(renderField)}
+            </CardContent>
+          </Card>
+        </ChannelSection>
       )}
 
-      {hasAdvancedContent && (
-        <Card className="shadow-sm">
-          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-            {advancedFields.map(renderField)}
-
-            {config.allow_from !== undefined &&
-              !hiddenFieldSet.has("allow_from") && (
-                <ChannelArrayListField
-                  label={t("channels.field.allowFrom")}
-                  hint={t("channels.form.desc.allowFrom")}
-                  value={asStringArray(config.allow_from)}
-                  onChange={(value) => onChange("allow_from", value)}
-                  placeholder={t("channels.field.allowFromPlaceholder")}
-                  parser={parseAllowFromInput}
-                  fieldPath="allow_from"
-                  registerFlusher={registerArrayFieldFlusher}
-                  resetVersion={arrayFieldResetVersion}
-                />
-              )}
-
-            {config.allow_origins !== undefined &&
-              !hiddenFieldSet.has("allow_origins") && (
-                <ChannelArrayListField
-                  label={t("channels.field.allowOrigins")}
-                  hint={t("channels.form.desc.allowOrigins")}
-                  value={asStringArray(config.allow_origins)}
-                  onChange={(value) => onChange("allow_origins", value)}
-                  placeholder={t("channels.field.allowOriginsPlaceholder")}
-                  fieldPath="allow_origins"
-                  registerFlusher={registerArrayFieldFlusher}
-                  resetVersion={arrayFieldResetVersion}
-                />
-              )}
-
-            {config.allow_token_query !== undefined &&
-              !hiddenFieldSet.has("allow_token_query") && (
-                <div>
-                  <SwitchCardField
-                    label={formatLabel("allow_token_query")}
-                    hint={buildHint("allow_token_query")}
-                    checked={asBool(config.allow_token_query)}
-                    onCheckedChange={(checked) =>
-                      onChange("allow_token_query", checked)
-                    }
-                    ariaLabel={formatLabel("allow_token_query")}
-                  />
-                </div>
-              )}
-
-            {config.group_trigger !== undefined &&
-              !hiddenFieldSet.has("group_trigger") && (
-                <>
-                  <div>
-                    <SwitchCardField
-                      label={t("channels.field.groupTriggerMentionOnly")}
-                      hint={t("channels.form.desc.groupTriggerMentionOnly")}
-                      checked={asBool(groupTriggerConfig.mention_only)}
-                      onCheckedChange={(checked) =>
-                        onChange("group_trigger", {
-                          ...groupTriggerConfig,
-                          mention_only: checked,
-                        })
-                      }
-                      ariaLabel={t("channels.field.groupTriggerMentionOnly")}
-                    />
-                  </div>
-
+      {hasAccessContent && (
+        <ChannelSection
+          title={t("channels.section.access")}
+          description={t("channels.section.accessDesc")}
+        >
+          <Card className="shadow-sm">
+            <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+              {config.allow_from !== undefined &&
+                !hiddenFieldSet.has("allow_from") && (
                   <ChannelArrayListField
-                    label={t("channels.field.groupTriggerPrefixes")}
-                    hint={t("channels.form.desc.groupTriggerPrefixes")}
-                    value={asStringArray(groupTriggerConfig.prefixes)}
-                    onChange={(value) =>
-                      onChange("group_trigger", {
-                        ...groupTriggerConfig,
-                        prefixes: value,
-                      })
-                    }
-                    placeholder={t("channels.field.groupTriggerPrefixes")}
-                    fieldPath="group_trigger.prefixes"
+                    label={t("channels.field.allowFrom")}
+                    hint={t("channels.form.desc.allowFrom")}
+                    value={asStringArray(config.allow_from)}
+                    onChange={(value) => onChange("allow_from", value)}
+                    placeholder={t("channels.field.allowFromPlaceholder")}
+                    parser={parseAllowFromInput}
+                    fieldPath="allow_from"
                     registerFlusher={registerArrayFieldFlusher}
                     resetVersion={arrayFieldResetVersion}
                   />
-                </>
-              )}
+                )}
+            </CardContent>
+          </Card>
+        </ChannelSection>
+      )}
 
-            {config.typing !== undefined && !hiddenFieldSet.has("typing") && (
-              <div>
-                <SwitchCardField
-                  label={t("channels.field.typingEnabled")}
-                  hint={t("channels.form.desc.typingEnabled")}
-                  checked={asBool(typingConfig.enabled)}
-                  onCheckedChange={(checked) =>
-                    onChange("typing", { ...typingConfig, enabled: checked })
-                  }
-                  ariaLabel={t("channels.field.typingEnabled")}
-                />
-              </div>
-            )}
+      {hasAdvancedContent && (
+        <ChannelSection
+          collapsible
+          title={t("channels.section.advanced")}
+          description={t("channels.section.advancedDesc")}
+        >
+          <Card className="shadow-sm">
+            <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+              {advancedFields.map(renderField)}
 
-            {showStreamingConfig && (
-              <div>
-                <StreamingConfigField
-                  value={config.streaming}
-                  onChange={(value) => onChange("streaming", value)}
-                />
-              </div>
-            )}
+              {config.allow_origins !== undefined &&
+                !hiddenFieldSet.has("allow_origins") && (
+                  <ChannelArrayListField
+                    label={t("channels.field.allowOrigins")}
+                    hint={t("channels.form.desc.allowOrigins")}
+                    value={asStringArray(config.allow_origins)}
+                    onChange={(value) => onChange("allow_origins", value)}
+                    placeholder={t("channels.field.allowOriginsPlaceholder")}
+                    fieldPath="allow_origins"
+                    registerFlusher={registerArrayFieldFlusher}
+                    resetVersion={arrayFieldResetVersion}
+                  />
+                )}
 
-            {config.placeholder !== undefined &&
-              !hiddenFieldSet.has("placeholder") && (
+              {config.allow_token_query !== undefined &&
+                !hiddenFieldSet.has("allow_token_query") && (
+                  <div>
+                    <SwitchCardField
+                      label={formatLabel("allow_token_query")}
+                      hint={buildHint("allow_token_query")}
+                      checked={asBool(config.allow_token_query)}
+                      onCheckedChange={(checked) =>
+                        onChange("allow_token_query", checked)
+                      }
+                      ariaLabel={formatLabel("allow_token_query")}
+                    />
+                  </div>
+                )}
+
+              {config.group_trigger !== undefined &&
+                !hiddenFieldSet.has("group_trigger") && (
+                  <>
+                    <div>
+                      <SwitchCardField
+                        label={t("channels.field.groupTriggerMentionOnly")}
+                        hint={t("channels.form.desc.groupTriggerMentionOnly")}
+                        checked={asBool(groupTriggerConfig.mention_only)}
+                        onCheckedChange={(checked) =>
+                          onChange("group_trigger", {
+                            ...groupTriggerConfig,
+                            mention_only: checked,
+                          })
+                        }
+                        ariaLabel={t("channels.field.groupTriggerMentionOnly")}
+                      />
+                    </div>
+
+                    <ChannelArrayListField
+                      label={t("channels.field.groupTriggerPrefixes")}
+                      hint={t("channels.form.desc.groupTriggerPrefixes")}
+                      value={asStringArray(groupTriggerConfig.prefixes)}
+                      onChange={(value) =>
+                        onChange("group_trigger", {
+                          ...groupTriggerConfig,
+                          prefixes: value,
+                        })
+                      }
+                      placeholder={t("channels.field.groupTriggerPrefixes")}
+                      fieldPath="group_trigger.prefixes"
+                      registerFlusher={registerArrayFieldFlusher}
+                      resetVersion={arrayFieldResetVersion}
+                    />
+                  </>
+                )}
+
+              {config.typing !== undefined && !hiddenFieldSet.has("typing") && (
                 <div>
                   <SwitchCardField
-                    label={t("channels.field.placeholderEnabled")}
-                    hint={t("channels.form.desc.placeholderEnabled")}
-                    checked={placeholderEnabled}
+                    label={t("channels.field.typingEnabled")}
+                    hint={t("channels.form.desc.typingEnabled")}
+                    checked={asBool(typingConfig.enabled)}
                     onCheckedChange={(checked) =>
-                      onChange("placeholder", {
-                        ...placeholderConfig,
-                        enabled: checked,
-                      })
+                      onChange("typing", { ...typingConfig, enabled: checked })
                     }
-                    ariaLabel={t("channels.field.placeholderEnabled")}
-                  >
-                    {placeholderEnabled && (
-                      <div className="space-y-1">
-                        <Input
-                          value={asString(placeholderConfig.text)}
-                          onChange={(e) =>
-                            onChange("placeholder", {
-                              ...placeholderConfig,
-                              text: e.target.value,
-                            })
-                          }
-                          placeholder={t("channels.field.placeholderText")}
-                          aria-label={t("channels.field.placeholderText")}
-                        />
-                      </div>
-                    )}
-                  </SwitchCardField>
+                    ariaLabel={t("channels.field.typingEnabled")}
+                  />
                 </div>
               )}
-          </CardContent>
-        </Card>
+
+              {showStreamingConfig && (
+                <div>
+                  <StreamingConfigField
+                    value={config.streaming}
+                    onChange={(value) => onChange("streaming", value)}
+                  />
+                </div>
+              )}
+
+              {config.placeholder !== undefined &&
+                !hiddenFieldSet.has("placeholder") && (
+                  <div>
+                    <SwitchCardField
+                      label={t("channels.field.placeholderEnabled")}
+                      hint={t("channels.form.desc.placeholderEnabled")}
+                      checked={placeholderEnabled}
+                      onCheckedChange={(checked) =>
+                        onChange("placeholder", {
+                          ...placeholderConfig,
+                          enabled: checked,
+                        })
+                      }
+                      ariaLabel={t("channels.field.placeholderEnabled")}
+                    >
+                      {placeholderEnabled && (
+                        <div className="space-y-1">
+                          <Input
+                            value={asString(placeholderConfig.text)}
+                            onChange={(e) =>
+                              onChange("placeholder", {
+                                ...placeholderConfig,
+                                text: e.target.value,
+                              })
+                            }
+                            placeholder={t("channels.field.placeholderText")}
+                            aria-label={t("channels.field.placeholderText")}
+                          />
+                        </div>
+                      )}
+                    </SwitchCardField>
+                  </div>
+                )}
+            </CardContent>
+          </Card>
+        </ChannelSection>
       )}
     </div>
   )

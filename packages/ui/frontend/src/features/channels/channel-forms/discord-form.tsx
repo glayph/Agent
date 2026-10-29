@@ -11,6 +11,7 @@ import {
   parseConservativeStringListInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import { ChannelSection } from "@/features/channels/components/channel-section"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
 import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
@@ -51,84 +52,105 @@ export function DiscordForm({
 
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field
-            label={t("channels.field.token")}
-            required
-            hint={t("channels.form.desc.token")}
-            error={fieldErrors.token}
-          >
-            <KeyInput
-              value={asString(config._token)}
-              onChange={(v) => onChange("_token", v)}
-              placeholder={getSecretInputPlaceholder(
-                configuredSecrets,
-                "token",
-                t("channels.field.secretHintSet"),
-                t("channels.field.tokenPlaceholder"),
-              )}
-            />
-          </Field>
-        </CardContent>
-      </Card>
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <Field
+              label={t("channels.field.token")}
+              required
+              hint={t("channels.form.desc.token")}
+              error={fieldErrors.token}
+            >
+              <KeyInput
+                value={asString(config._token)}
+                onChange={(v) => onChange("_token", v)}
+                placeholder={getSecretInputPlaceholder(
+                  configuredSecrets,
+                  "token",
+                  t("channels.field.secretHintSet"),
+                  t("channels.field.tokenPlaceholder"),
+                )}
+              />
+            </Field>
+          </CardContent>
+        </Card>
+      </ChannelSection>
 
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field
-            label={t("channels.field.proxy")}
-            hint={t("channels.form.desc.proxy")}
-          >
-            <Input
-              value={asString(config.proxy)}
-              onChange={(e) => onChange("proxy", e.target.value)}
-              placeholder="http://127.0.0.1:7890"
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <ChannelArrayListField
+              label={t("channels.field.allowFrom")}
+              hint={t("channels.form.desc.allowFrom")}
+              value={asStringArray(config.allow_from)}
+              onChange={(value) => onChange("allow_from", value)}
+              placeholder={t("channels.field.allowFromPlaceholder")}
+              parser={parseAllowFromInput}
+              fieldPath="allow_from"
+              registerFlusher={registerArrayFieldFlusher}
+              resetVersion={arrayFieldResetVersion}
             />
-          </Field>
-          <ChannelArrayListField
-            label={t("channels.field.allowFrom")}
-            hint={t("channels.form.desc.allowFrom")}
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder={t("channels.field.allowFromPlaceholder")}
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
+          </CardContent>
+        </Card>
+      </ChannelSection>
 
-          <div>
-            <SwitchCardField
-              label={t("channels.field.mentionOnly")}
-              hint={t("channels.form.desc.mentionOnly")}
-              checked={groupTriggerConfig.mention_only !== false}
-              onCheckedChange={(checked) => {
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <Card className="shadow-sm">
+          <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+            <Field
+              label={t("channels.field.proxy")}
+              hint={t("channels.form.desc.proxy")}
+            >
+              <Input
+                value={asString(config.proxy)}
+                onChange={(e) => onChange("proxy", e.target.value)}
+                placeholder="http://127.0.0.1:7890"
+              />
+            </Field>
+
+            <div>
+              <SwitchCardField
+                label={t("channels.field.mentionOnly")}
+                hint={t("channels.form.desc.mentionOnly")}
+                checked={groupTriggerConfig.mention_only !== false}
+                onCheckedChange={(checked) => {
+                  onChange("group_trigger", {
+                    ...groupTriggerConfig,
+                    mention_only: checked,
+                  })
+                }}
+                ariaLabel={t("channels.field.mentionOnly")}
+              />
+            </div>
+            <ChannelArrayListField
+              label={t("channels.field.groupTriggerPrefixes")}
+              hint={t("channels.form.desc.groupTriggerPrefixes")}
+              value={asStringArray(groupTriggerConfig.prefixes)}
+              onChange={(value) =>
                 onChange("group_trigger", {
                   ...groupTriggerConfig,
-                  mention_only: checked,
+                  prefixes: value,
                 })
-              }}
-              ariaLabel={t("channels.field.mentionOnly")}
+              }
+              placeholder={t("channels.field.groupTriggerPrefixes")}
+              parser={parseConservativeStringListInput}
+              fieldPath="group_trigger.prefixes"
+              registerFlusher={registerArrayFieldFlusher}
+              resetVersion={arrayFieldResetVersion}
             />
-          </div>
-          <ChannelArrayListField
-            label={t("channels.field.groupTriggerPrefixes")}
-            hint={t("channels.form.desc.groupTriggerPrefixes")}
-            value={asStringArray(groupTriggerConfig.prefixes)}
-            onChange={(value) =>
-              onChange("group_trigger", {
-                ...groupTriggerConfig,
-                prefixes: value,
-              })
-            }
-            placeholder={t("channels.field.groupTriggerPrefixes")}
-            parser={parseConservativeStringListInput}
-            fieldPath="group_trigger.prefixes"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </ChannelSection>
     </div>
   )
 }

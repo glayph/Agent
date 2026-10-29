@@ -1,31 +1,23 @@
 import {
   IconActivityHeartbeat,
-  IconAtom,
-  IconBroadcast,
   IconChevronRight,
   IconCircleX,
   IconClock,
   IconDatabase,
   IconLoader2,
-  IconPuzzle,
   IconRefresh,
   IconSearch,
   IconSettings,
   IconInfoCircle,
-  IconTool,
+  IconPuzzle,
 } from "@tabler/icons-react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
-import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
-import { type SupportedChannel, getChannelsCatalog } from "@/api/channels"
+import { notify } from "@/lib/notify"
 import { getGatewayLogs, restartGateway } from "@/api/gateway"
-import {
-  type ModelInfo,
-  type ModelProviderOption,
-  getModels,
-} from "@/api/models"
 import {
   type PluginHealth,
   type PluginManifest,
@@ -33,92 +25,40 @@ import {
   getPluginManifests,
 } from "@/api/plugins"
 import { type FullHealthReport, getFullHealthReport } from "@/api/safety"
-import { type SkillSupportItem, getSkills } from "@/api/skills"
-import { type ToolSupportItem, getTools, setToolEnabled } from "@/api/tools"
 import { PageHeader } from "@/app/layout/page-header"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Input } from "@/shared/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
-import { Switch } from "@/shared/ui/switch"
 
-export type PluginPageSection =
-  "catalog" | "provider" | "core" | "channel" | "capability" | "health"
+export type PluginPageSection = "catalog" | "core" | "health"
 
 const NAVIGATION = [
   {
-    label: "Catalog",
-    description: "Browse available plugins",
+    labelKey: "pages.plugins.catalog",
     to: "/plugins?section=catalog",
     section: "catalog" as const,
     icon: IconDatabase,
   },
   {
-    label: "Providers & Models",
-    description: "AI providers and models",
-    to: "/plugins?section=provider",
-    section: "provider" as const,
-    icon: IconAtom,
-  },
-  {
-    label: "Core Services",
-    description: "System runtime services",
+    labelKey: "pages.plugins.coreServices",
     to: "/plugins?section=core",
     section: "core" as const,
     icon: IconSettings,
   },
   {
-    label: "Channels",
-    description: "Messaging connections",
-    to: "/plugins?section=channel",
-    section: "channel" as const,
-    icon: IconBroadcast,
-  },
-  {
-    label: "Skills & Tools",
-    description: "Agent skills and tools",
-    to: "/plugins?section=capability",
-    section: "capability" as const,
-    icon: IconTool,
-  },
-  {
-    label: "Health & Logs",
-    description: "Runtime health and logs",
+    labelKey: "pages.plugins.healthLogs",
     to: "/plugins?section=health",
     section: "health" as const,
     icon: IconActivityHeartbeat,
   },
 ]
 
-const PAGE_META: Record<
-  PluginPageSection,
-  { title: string; description: string }
-> = {
-  catalog: {
-    title: "Catalog",
-    description: "Available runtime plugins and their current status.",
-  },
-  provider: {
-    title: "Providers & Models",
-    description: "Connected providers and configured models.",
-  },
-  core: {
-    title: "Core Services",
-    description: "System services that keep the runtime operational.",
-  },
-  channel: {
-    title: "Channels",
-    description: "Messaging connections and their configuration state.",
-  },
-  capability: {
-    title: "Skills & Tools",
-    description: "Installed skills and tools available to the agent.",
-  },
-  health: {
-    title: "Health & Logs",
-    description: "Plugin health, service health, and recent runtime logs.",
-  },
+const PAGE_META: Record<PluginPageSection, { titleKey: string }> = {
+  catalog: { titleKey: "pages.plugins.catalog" },
+  core: { titleKey: "pages.plugins.coreServices" },
+  health: { titleKey: "pages.plugins.healthLogs" },
 }
 
 function familyForManifest(manifest: PluginManifest) {
@@ -155,7 +95,12 @@ function statusTone(status?: string) {
 }
 
 function StatusBadge({ status }: { status?: string }) {
+  const { t } = useTranslation()
   const tone = statusTone(status)
+  const statusKey = (status ?? "unknown").toLowerCase().replaceAll("-", "_")
+  const label = t(`pages.plugins.status.${statusKey}`, {
+    defaultValue: statusLabel(status),
+  })
   return (
     <Badge
       variant={
@@ -173,7 +118,7 @@ function StatusBadge({ status }: { status?: string }) {
           "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
       )}
     >
-      {statusLabel(status)}
+      {label}
     </Badge>
   )
 }
@@ -187,6 +132,7 @@ function StateMessage({
   message: string
   onRetry?: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <div
       className={cn(
@@ -202,7 +148,7 @@ function StateMessage({
       {kind === "error" && onRetry && (
         <Button size="sm" variant="outline" onClick={onRetry}>
           <IconRefresh className="size-3.5" aria-hidden="true" />
-          <span>Retry</span>
+          <span>{t("pages.plugins.retry", { defaultValue: "Retry" })}</span>
         </Button>
       )}
     </div>
@@ -218,6 +164,7 @@ function SectionHeading({
   description: string
   action?: React.ReactNode
 }) {
+  const { t } = useTranslation()
   return (
     <div
       data-page-section="true"
@@ -229,7 +176,9 @@ function SectionHeading({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="More information"
+              aria-label={t("pages.plugins.moreInformation", {
+                defaultValue: "More information",
+              })}
               className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <IconInfoCircle className="size-3.5" />
@@ -270,7 +219,7 @@ function Row({
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{title}</div>
           {description && (
-            <div className="text-muted-foreground mt-1 line-clamp-1 text-xs">
+            <div className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5 sm:line-clamp-1">
               {description}
             </div>
           )}
@@ -286,6 +235,7 @@ function Row({
 
 
 function CatalogPage() {
+  const { t } = useTranslation()
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState("all")
   const manifestsQuery = useQuery({
@@ -318,37 +268,38 @@ function CatalogPage() {
   return (
     <div className="space-y-4">
       <SectionHeading
-        title="Available plugins"
-        description="Browse the runtime catalog. Configuration actions open the existing management surface."
+        title={t("pages.plugins.availablePlugins", { defaultValue: "Available plugins" })}
+        description={t("pages.plugins.availablePluginsDescription", { defaultValue: "Browse the runtime catalog. Configuration actions open the existing management surface." })}
       />
       <div className="flex flex-col gap-2 sm:flex-row">
         <label className="relative min-w-0 flex-1">
-          <span className="sr-only">Search plugins</span>
+          <span className="sr-only">{t("pages.plugins.searchPlugins", { defaultValue: "Search plugins" })}</span>
           <IconSearch className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search plugins"
+            placeholder={t("pages.plugins.searchPlugins", { defaultValue: "Search plugins" })}
             className="pl-9"
           />
         </label>
         <select
           value={category}
           onChange={(event) => setCategory(event.target.value)}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          aria-label={t("pages.plugins.allCategories", { defaultValue: "Filter plugins by category" })}
+          className="border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
-          <option value="all">All categories</option>
-          <option value="provider">Providers</option>
-          <option value="channel">Channels</option>
-          <option value="capability">Skills & tools</option>
+          <option value="all">{t("pages.plugins.allCategories", { defaultValue: "All categories" })}</option>
+          <option value="provider">{t("pages.plugins.providers", { defaultValue: "Providers" })}</option>
+          <option value="channel">{t("pages.plugins.channels", { defaultValue: "Channels" })}</option>
+          <option value="capability">{t("pages.plugins.skillsTools", { defaultValue: "Skills & tools" })}</option>
         </select>
       </div>
       {manifestsQuery.isLoading || healthQuery.isLoading ? (
-        <StateMessage kind="loading" message="Loading plugin catalog…" />
+        <StateMessage kind="loading" message={t("pages.plugins.loadingCatalog", { defaultValue: "Loading plugin catalog…" })} />
       ) : manifestsQuery.isError || healthQuery.isError ? (
         <StateMessage
           kind="error"
-          message="The plugin catalog is unavailable."
+          message={t("pages.plugins.catalogUnavailable", { defaultValue: "The plugin catalog is unavailable." })}
           onRetry={() => {
             void manifestsQuery.refetch()
             void healthQuery.refetch()
@@ -357,7 +308,7 @@ function CatalogPage() {
       ) : visible.length === 0 ? (
         <StateMessage
           kind="empty"
-          message="No plugins match the current filter."
+          message={t("pages.plugins.noPluginsMatch", { defaultValue: "No plugins match the current filter." })}
         />
       ) : (
         <div className="divide-border divide-y border-t">
@@ -366,10 +317,12 @@ function CatalogPage() {
             const family = familyForManifest(manifest)
             const target =
               family === "provider"
-                ? "/plugins?section=provider"
+                ? "/models"
                 : family === "channel"
-                  ? "/plugins?section=channel"
-                  : "/plugins?section=capability"
+                  ? "/channels"
+                  : manifest.id.toLowerCase().includes("skill")
+                    ? "/agent/skills"
+                    : "/agent/tools"
             return (
               <Row
                 key={manifest.id}
@@ -380,7 +333,7 @@ function CatalogPage() {
                 action={
                   <Button asChild size="sm" variant="outline">
                     <a href={target}>
-                      Open <IconChevronRight className="size-3.5" />
+                      {t("pages.plugins.open", { defaultValue: "Open" })} <IconChevronRight className="size-3.5" />
                     </a>
                   </Button>
                 }
@@ -393,93 +346,19 @@ function CatalogPage() {
   )
 }
 
-function ProvidersPage() {
-  const modelsQuery = useQuery({
-    queryKey: ["plugins", "models"],
-    queryFn: getModels,
-  })
-  const models = useMemo(
-    () => modelsQuery.data?.models ?? [],
-    [modelsQuery.data?.models],
-  )
-  const providers = modelsQuery.data?.provider_options ?? []
-  const byProvider = useMemo(() => {
-    const groups = new Map<string, ModelInfo[]>()
-    for (const model of models)
-      groups.set(model.provider || "unknown", [
-        ...(groups.get(model.provider || "unknown") ?? []),
-        model,
-      ])
-    return groups
-  }, [models])
-  return (
-    <div className="space-y-4">
-      <SectionHeading
-        title="Providers & Models"
-        description="Connected providers and configured models from the existing model configuration API."
-        action={
-          <Button asChild size="sm" variant="outline">
-            <Link to="/models">Manage models</Link>
-          </Button>
-        }
-      />
-      {modelsQuery.isLoading ? (
-        <StateMessage kind="loading" message="Loading providers and models…" />
-      ) : modelsQuery.isError ? (
-        <StateMessage
-          kind="error"
-          message="Provider data is unavailable."
-          onRetry={() => {
-            void modelsQuery.refetch()
-          }}
-        />
-      ) : providers.length === 0 && models.length === 0 ? (
-        <StateMessage kind="empty" message="No providers are configured yet." />
-      ) : (
-        <div className="divide-border divide-y border-t">
-          {providers.map((provider: ModelProviderOption) => {
-            const providerModels = byProvider.get(provider.id) ?? []
-            return (
-              <Row
-                key={provider.id}
-                title={provider.display_name || provider.id}
-                description={
-                  providerModels.length
-                    ? `${providerModels.length} configured model${providerModels.length === 1 ? "" : "s"}`
-                    : "Available provider · no model configured"
-                }
-                status={
-                  providerModels.some((model) => model.available)
-                    ? "connected"
-                    : "available"
-                }
-                icon={<IconAtom className="size-4" />}
-                action={
-                  <Button asChild size="sm" variant="outline">
-                    <Link to="/models">Configure</Link>
-                  </Button>
-                }
-              />
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 const CORE_SERVICE_LABELS: Record<string, string> = {
-  "authentication.core": "Authentication",
-  "memory.temporal-knowledge-graph": "Memory",
-  "scheduler.core": "Automation",
-  "observability.core": "Observability",
-  "storage.core": "Storage",
-  "security.policy-kernel": "Security",
-  "workflow.project": "Workflow",
-  "notifications.core": "Notifications",
+  "authentication.core": "pages.plugins.authentication",
+  "memory.temporal-knowledge-graph": "navigation.memory",
+  "scheduler.core": "pages.plugins.automation",
+  "observability.core": "pages.plugins.observability",
+  "storage.core": "pages.plugins.storage",
+  "security.policy-kernel": "pages.plugins.security",
+  "workflow.project": "pages.plugins.workflow",
+  "notifications.core": "pages.plugins.notifications",
 }
 
 function CorePage() {
+  const { t } = useTranslation()
   const manifestsQuery = useQuery({
     queryKey: ["plugins", "manifests"],
     queryFn: getPluginManifests,
@@ -495,15 +374,15 @@ function CorePage() {
   return (
     <div className="space-y-4">
       <SectionHeading
-        title="Core Services"
-        description="Core-owned services are reported by the runtime; configuration opens the relevant existing page."
+        title={t("pages.plugins.coreServices", { defaultValue: "Core Services" })}
+        description={t("pages.plugins.coreServicesDescription", { defaultValue: "Core service status is reported by the runtime." })}
       />
       {manifestsQuery.isLoading || healthQuery.isLoading ? (
-        <StateMessage kind="loading" message="Loading core services…" />
+        <StateMessage kind="loading" message={t("pages.plugins.loadingCore", { defaultValue: "Loading core services…" })} />
       ) : manifestsQuery.isError || healthQuery.isError ? (
         <StateMessage
           kind="error"
-          message="Core service data is unavailable."
+          message={t("pages.plugins.coreUnavailable", { defaultValue: "Core service data is unavailable." })}
           onRetry={() => {
             void manifestsQuery.refetch()
             void healthQuery.refetch()
@@ -512,14 +391,14 @@ function CorePage() {
       ) : core.length === 0 ? (
         <StateMessage
           kind="empty"
-          message="No core service metadata is available."
+          message={t("pages.plugins.noCoreMetadata", { defaultValue: "No core service metadata is available." })}
         />
       ) : (
         <div className="divide-border divide-y border-t">
           {core.map((manifest) => (
             <Row
               key={manifest.id}
-              title={CORE_SERVICE_LABELS[manifest.id]}
+              title={t(CORE_SERVICE_LABELS[manifest.id], { defaultValue: manifest.id })}
               description={manifest.description || manifest.id}
               status={health[manifest.id]?.status ?? manifest.runtimeStatus}
               icon={<IconSettings className="size-4" />}
@@ -531,175 +410,8 @@ function CorePage() {
   )
 }
 
-function ChannelsPage() {
-  const channelsQuery = useQuery({
-    queryKey: ["plugins", "channels"],
-    queryFn: getChannelsCatalog,
-  })
-  const channels = channelsQuery.data?.channels ?? []
-  return (
-    <div className="space-y-4">
-      <SectionHeading
-        title="Channels"
-        description="Connection status and configuration are handled by the existing channel editor."
-      />
-      {channelsQuery.isLoading ? (
-        <StateMessage kind="loading" message="Loading channels…" />
-      ) : channelsQuery.isError ? (
-        <StateMessage
-          kind="error"
-          message="Channel catalog is unavailable."
-          onRetry={() => {
-            void channelsQuery.refetch()
-          }}
-        />
-      ) : channels.length === 0 ? (
-        <StateMessage
-          kind="empty"
-          message="No channel integrations are available."
-        />
-      ) : (
-        <div className="divide-border divide-y border-t">
-          {channels.map((channel: SupportedChannel) => (
-            <Row
-              key={channel.name}
-              title={channel.display_name || channel.name}
-              description={
-                channel.runtime_note ||
-                "Connection and credentials can be configured."
-              }
-              status={channel.runtime_status}
-              icon={<IconBroadcast className="size-4" />}
-              action={
-                <Button asChild size="sm" variant="outline">
-                  <Link to="/channels/$name" params={{ name: channel.name }}>
-                    Configure
-                  </Link>
-                </Button>
-              }
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function CapabilitiesPage() {
-  const queryClient = useQueryClient()
-  const skillsQuery = useQuery({
-    queryKey: ["plugins", "skills"],
-    queryFn: getSkills,
-  })
-  const toolsQuery = useQuery({
-    queryKey: ["plugins", "tools"],
-    queryFn: getTools,
-  })
-  const toolMutation = useMutation({
-    mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
-      setToolEnabled(name, enabled),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["plugins", "tools"] })
-      toast.success("Tool state updated")
-    },
-    onError: (error) =>
-      toast.error(
-        error instanceof Error ? error.message : "Could not update tool",
-      ),
-  })
-  const skills = skillsQuery.data?.skills ?? []
-  const tools = toolsQuery.data?.tools ?? []
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        title="Skills & Tools"
-        description="Installed skills are read-only here; tool enable/disable uses the existing runtime configuration API."
-        action={
-          <Button asChild size="sm" variant="outline">
-            <Link to="/agent/skills">Manage skills</Link>
-          </Button>
-        }
-      />
-      {skillsQuery.isLoading || toolsQuery.isLoading ? (
-        <StateMessage kind="loading" message="Loading skills and tools…" />
-      ) : skillsQuery.isError || toolsQuery.isError ? (
-        <StateMessage
-          kind="error"
-          message="Skills or tools data is unavailable."
-          onRetry={() => {
-            void skillsQuery.refetch()
-            void toolsQuery.refetch()
-          }}
-        />
-      ) : (
-        <>
-          <section>
-            <div className="mb-2 flex items-center gap-2">
-              <IconPuzzle className="text-muted-foreground size-4" />
-              <h3 className="text-sm font-semibold">Installed skills</h3>
-            </div>
-            {skills.length === 0 ? (
-              <div className="text-muted-foreground border border-dashed px-4 py-6 text-sm">
-                No installed skills.
-              </div>
-            ) : (
-              <div className="divide-border divide-y border-t">
-                {skills.map((skill: SkillSupportItem) => (
-                  <Row
-                    key={`${skill.source}:${skill.name}`}
-                    title={skill.name}
-                    description={skill.description || skill.path}
-                    status="installed"
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-          <section>
-            <div className="mb-2 flex items-center gap-2">
-              <IconTool className="text-muted-foreground size-4" />
-              <h3 className="text-sm font-semibold">Tools</h3>
-            </div>
-            {tools.length === 0 ? (
-              <div className="text-muted-foreground border border-dashed px-4 py-6 text-sm">
-                No tools reported.
-              </div>
-            ) : (
-              <div className="divide-border divide-y border-t">
-                {tools.map((tool: ToolSupportItem) => (
-                  <Row
-                    key={tool.name}
-                    title={tool.name}
-                    description={tool.description}
-                    status={tool.status}
-                    action={
-                      tool.status !== "blocked" ? (
-                        <Switch
-                          checked={tool.status === "enabled"}
-                          disabled={toolMutation.isPending}
-                          onCheckedChange={(enabled) =>
-                            toolMutation.mutate({ name: tool.config_key, enabled })
-                          }
-                          aria-label={`Enable ${tool.name}`}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground text-xs">
-                          Blocked
-                        </span>
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </div>
-  )
-}
-
 function HealthPage() {
+  const { t } = useTranslation()
   const healthQuery = useQuery({
     queryKey: ["plugins", "health"],
     queryFn: getPluginHealth,
@@ -714,9 +426,9 @@ function HealthPage() {
   })
   const restartMutation = useMutation({
     mutationFn: restartGateway,
-    onSuccess: () => toast.success("Restart requested"),
+    onSuccess: () => notify.success(t("pages.plugins.restartRequested", { defaultValue: "Restart requested" }), { id: "plugins-page:success:restart-requested" }),
     onError: (error) =>
-      toast.error(error instanceof Error ? error.message : "Restart failed"),
+      notify.error(error instanceof Error ? error.message : t("pages.plugins.restartFailed", { defaultValue: "Restart failed" }), { id: "plugins-page:error:restartMutation" }),
   })
   const health = healthQuery.data?.health ?? {}
   const report = reportQuery.data
@@ -726,8 +438,8 @@ function HealthPage() {
   return (
     <div className="space-y-6">
       <SectionHeading
-        title="Health & Logs"
-        description="Live plugin health, core service health, and recent gateway logs."
+        title={t("pages.plugins.healthLogs", { defaultValue: "Health & Logs" })}
+        description={t("pages.plugins.healthLogsDescription", { defaultValue: "Live plugin health, core service health, and recent gateway logs." })}
         action={
           <div className="flex gap-2">
             <Button
@@ -741,7 +453,7 @@ function HealthPage() {
               disabled={loading}
             >
               <IconRefresh className="size-3.5" />
-              Refresh
+              {t("common.refresh", { defaultValue: "Refresh" })}
             </Button>
             <Button
               size="sm"
@@ -750,17 +462,17 @@ function HealthPage() {
               disabled={restartMutation.isPending}
             >
               <IconRefresh className="size-3.5" />
-              Restart
+              {t("pages.plugins.restart", { defaultValue: "Restart" })}
             </Button>
           </div>
         }
       />
       {loading ? (
-        <StateMessage kind="loading" message="Loading health and logs…" />
+        <StateMessage kind="loading" message={t("pages.plugins.loadingHealth", { defaultValue: "Loading health and logs…" })} />
       ) : error ? (
         <StateMessage
           kind="error"
-          message="Health data is unavailable."
+          message={t("pages.plugins.healthUnavailable", { defaultValue: "Health data is unavailable." })}
           onRetry={() => {
             void healthQuery.refetch()
             void reportQuery.refetch()
@@ -772,12 +484,12 @@ function HealthPage() {
           <section>
             <div className="mb-2 flex items-center gap-2">
               <IconActivityHeartbeat className="text-muted-foreground size-4" />
-              <h3 className="text-sm font-semibold">Plugins</h3>
+              <h3 className="text-sm font-semibold">{t("navigation.plugins", { defaultValue: "Plugins" })}</h3>
             </div>
             <div className="divide-border divide-y border-t">
               {Object.entries(health).length === 0 ? (
                 <div className="text-muted-foreground border border-dashed px-4 py-6 text-sm">
-                  No plugin health checks reported.
+                  {t("pages.plugins.noPluginHealth", { defaultValue: "No plugin health checks reported." })}
                 </div>
               ) : (
                 Object.entries(health).map(
@@ -796,7 +508,7 @@ function HealthPage() {
           <section>
             <div className="mb-2 flex items-center gap-2">
               <IconDatabase className="text-muted-foreground size-4" />
-              <h3 className="text-sm font-semibold">Services</h3>
+              <h3 className="text-sm font-semibold">{t("pages.plugins.services", { defaultValue: "Services" })}</h3>
             </div>
             <div className="divide-border divide-y border-t">
               {report?.components?.map(
@@ -810,7 +522,7 @@ function HealthPage() {
                 ),
               ) ?? (
                 <div className="text-muted-foreground px-4 py-6 text-sm">
-                  No service health reported.
+                  {t("pages.plugins.noServiceHealth", { defaultValue: "No service health reported." })}
                 </div>
               )}
             </div>
@@ -818,12 +530,12 @@ function HealthPage() {
           <section>
             <div className="mb-2 flex items-center gap-2">
               <IconClock className="text-muted-foreground size-4" />
-              <h3 className="text-sm font-semibold">Recent logs</h3>
+              <h3 className="text-sm font-semibold">{t("pages.plugins.recentLogs", { defaultValue: "Recent logs" })}</h3>
             </div>
             <pre className="bg-muted/30 max-h-72 overflow-auto border p-3 font-mono text-xs leading-5">
               {logsQuery.data?.logs?.length
                 ? logsQuery.data.logs.slice(-80).join("\n")
-                : "No recent logs."}
+                : t("pages.plugins.noRecentLogs", { defaultValue: "No recent logs." })}
             </pre>
           </section>
         </>
@@ -833,26 +545,29 @@ function HealthPage() {
 }
 
 export function PluginsPage() {
+  const { t } = useTranslation()
   const requested = new URLSearchParams(globalThis.location.search).get("section")
   const section: PluginPageSection =
-    requested === "provider" ||
-    requested === "core" ||
-    requested === "channel" ||
-    requested === "capability" ||
-    requested === "health"
-      ? requested
-      : "catalog"
+    requested === "core" || requested === "health" ? requested : "catalog"
   const meta = PAGE_META[section]
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title={`Plugins · ${meta.title}`} titleLevel={1} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
+    <div className="flex h-full min-h-0 flex-col" data-miki-page="plugins">
+      <PageHeader title={`${t("navigation.plugins", { defaultValue: "Plugins" })} · ${t(meta.titleKey, { defaultValue: meta.titleKey })}`} titleLevel={1} />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6" data-miki-page-body="true">
         <div className="mx-auto w-full max-w-5xl space-y-6 pt-2">
-          <div className="border-border flex flex-wrap gap-2 border-b pb-3">
+          <nav
+            aria-label={t("pages.plugins.sectionNavigation", {
+              defaultValue: "Plugin sections",
+            })}
+            className="border-border flex flex-wrap gap-2 border-b pb-3"
+          >
             {NAVIGATION.map((item) => (
-              <a
+              <Link
                 key={item.section}
-                href={item.to}
+                to="/plugins"
+                search={{ section: item.section }}
+                aria-current={section === item.section ? "page" : undefined}
+                data-active={section === item.section ? "true" : "false"}
                 className={cn(
                   "rounded-md px-3 py-1.5 text-sm transition-colors",
                   section === item.section
@@ -860,16 +575,13 @@ export function PluginsPage() {
                     : "text-muted-foreground hover:text-foreground hover:bg-muted",
                 )}
               >
-                {item.label}
-              </a>
+                {t(item.labelKey, { defaultValue: item.labelKey })}
+              </Link>
             ))}
-          </div>
+          </nav>
           <div className="pt-1">
             {section === "catalog" && <CatalogPage />}
-            {section === "provider" && <ProvidersPage />}
             {section === "core" && <CorePage />}
-            {section === "channel" && <ChannelsPage />}
-            {section === "capability" && <CapabilitiesPage />}
             {section === "health" && <HealthPage />}
           </div>
         </div>

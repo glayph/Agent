@@ -1,6 +1,5 @@
 import {
   IconAdjustmentsHorizontal,
-  IconAlertCircle,
   IconArrowUp,
   IconFileMusic,
   IconLoader2,
@@ -9,7 +8,11 @@ import {
   IconPlayerStop,
   IconPlus,
 } from "@tabler/icons-react"
-import { type KeyboardEvent as ReactKeyboardEvent, useId, useRef } from "react"
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useId,
+  useRef,
+} from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
 
@@ -64,7 +67,6 @@ export interface ChatComposerProps {
   onModeClick?: () => void
   onRemoveAttachment: (index: number) => void
   onSend: () => void
-  onStopGeneration?: () => void
   isWorking?: boolean
   isEditing?: boolean
   onCancelEdit?: () => void
@@ -133,7 +135,6 @@ export function ChatComposer({
   onModeClick,
   onRemoveAttachment,
   onSend,
-  onStopGeneration,
   isWorking = false,
   isEditing = false,
   onCancelEdit,
@@ -166,20 +167,17 @@ export function ChatComposer({
       : t(`chat.disabledShort.${inputDisabledReason}`, {
           defaultValue: disabledShortFallback[inputDisabledReason],
         })
-  const placeholder =
-    disabledMessage ??
-    (isWorking
-      ? t("chat.placeholderWorking", {
-          defaultValue: "Message Miki while it works",
-        })
-      : t("chat.placeholderCompact", { defaultValue: "Ask anything" }))
+  const placeholder = isWorking
+    ? t("chat.placeholderWorking", {
+        defaultValue: "Message Miki while it works",
+      })
+    : t("chat.placeholderCompact", { defaultValue: "Ask anything" })
   const resolvedModeLabel =
     modeLabel ?? t("chat.modeAction", { defaultValue: "Mode" })
   const actionsMenuLabel = t("chat.actionsMenu", {
     defaultValue: "Composer actions",
   })
   const textareaDescription = canInput ? sendHintId : disabledMessageId
-
   const voiceLabel = isTranscribing
     ? t("chat.transcribingVoice", { defaultValue: "Transcribing…" })
     : isRecording
@@ -215,7 +213,7 @@ export function ChatComposer({
 
   return (
     <div className="pointer-events-none relative z-10 shrink-0 bg-transparent px-[var(--chat-inline-padding)] pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-      <div className="pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col overflow-hidden rounded-2xl border [background:var(--chat-composer-bg)] [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)]">
+      <div className="pointer-events-auto relative mx-auto flex max-w-[var(--chat-content-width)] flex-col overflow-hidden rounded-2xl border [border-color:var(--chat-composer-border)] [box-shadow:var(--chat-composer-shadow)] [background:var(--chat-composer-bg)]">
         {isEditing && onCancelEdit ? (
           <div className="bg-muted/60 text-muted-foreground flex items-center justify-between gap-2 border-b px-3 py-1.5 text-[12.5px] leading-5">
             <span className="min-w-0 truncate">
@@ -232,41 +230,6 @@ export function ChatComposer({
             >
               {t("common.cancel")}
             </Button>
-          </div>
-        ) : null}
-
-        {isWorking ? (
-          <div
-            role="status"
-            className="bg-primary/5 border-primary/10 flex items-center gap-2.5 border-b px-3 py-1.5 text-[12.5px] leading-5"
-          >
-            <span aria-hidden className="relative flex size-2 shrink-0">
-              <span className="bg-primary absolute inline-flex size-full rounded-full opacity-60 motion-safe:animate-ping" />
-              <span className="bg-primary relative inline-flex size-2 rounded-full" />
-            </span>
-            <span className="text-foreground flex-1 font-medium sm:flex-none">
-              {t("chat.agentWorking", { defaultValue: "Miki is working" })}
-            </span>
-            <span className="text-muted-foreground hidden min-w-0 flex-1 truncate sm:block">
-              {t("chat.agentWorkingHint", {
-                defaultValue: "Anything you send now reaches it on its next step.",
-              })}
-            </span>
-            {onStopGeneration ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-foreground hover:bg-primary/10 h-7 shrink-0 gap-1.5 rounded-lg px-2 text-[12.5px]"
-                onClick={onStopGeneration}
-                aria-label={t("chat.stopGeneration", {
-                  defaultValue: "Stop generating",
-                })}
-              >
-                <IconPlayerStop className="size-3.5" />
-                {t("chat.stopAction", { defaultValue: "Stop" })}
-              </Button>
-            ) : null}
           </div>
         ) : null}
 
@@ -313,12 +276,10 @@ export function ChatComposer({
             aria-disabled="true"
             aria-label={t("chat.messageInput", { defaultValue: "Message" })}
             aria-describedby={disabledMessageId}
-            title={disabledMessage || undefined}
-            className="text-muted-foreground flex min-h-[3rem] min-w-0 items-center gap-2 px-4 pt-3.5 pb-1 text-[14px] leading-6"
+            className="text-muted-foreground flex min-h-[3rem] min-w-0 items-center px-4 pt-3.5 pb-1 text-[14px] leading-6"
           >
-            <IconAlertCircle className="text-warning/90 size-4 shrink-0" />
             <span className="truncate">
-              {disabledShortMessage || disabledMessage}
+              {t("chat.placeholderCompact", { defaultValue: "Ask anything" })}
             </span>
           </div>
         )}
@@ -383,7 +344,9 @@ export function ChatComposer({
                 <Button
                   type="button"
                   size="icon"
-                  variant={showVoiceAction && isRecording ? "destructive" : "ghost"}
+                  variant={
+                    showVoiceAction && isRecording ? "destructive" : "ghost"
+                  }
                   className={cn(
                     "size-9 rounded-xl transition-[transform,background-color,color] active:scale-95",
                     actionDisabled && !isTranscribing
@@ -422,9 +385,16 @@ export function ChatComposer({
           </Tooltip>
         </div>
 
-        {!canInput && disabledMessage && (
-          <p id={disabledMessageId} className="sr-only">
-            {disabledMessage}
+        {!canInput && (
+          <p
+            id={disabledMessageId}
+            role="status"
+            className="text-muted-foreground border-t px-4 py-2 text-xs leading-5"
+          >
+            {disabledShortMessage || disabledMessage ||
+              t("chat.inputUnavailable", {
+                defaultValue: "Chat input is currently unavailable.",
+              })}
           </p>
         )}
       </div>

@@ -8,7 +8,6 @@ import {
 import { useCallback, useEffect, useState } from "react"
 import type { FormEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import {
   type MemoryChunk,
@@ -22,6 +21,7 @@ import {
   reindexMemory,
   searchMemory,
 } from "@/api/memory"
+import { notify } from "@/lib/notify"
 import { PageHeader } from "@/app/layout/page-header"
 import { formatDateTime } from "@/lib/format"
 import { Badge } from "@/shared/ui/badge"
@@ -77,6 +77,7 @@ function MemoryItemRow({
   item: MemoryItem
   onInspect: (id: string) => void
 }) {
+  const { t } = useTranslation()
   return (
     <button
       type="button"
@@ -98,7 +99,7 @@ function MemoryItemRow({
           <div className="text-foreground font-semibold">
             {scoreLabel(item.score)}
           </div>
-          <div>score</div>
+          <div>{t("pages.memory.score", { defaultValue: "score" })}</div>
         </div>
       </div>
     </button>
@@ -121,18 +122,25 @@ export function MemoryPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const loadStats = useCallback(async () => {
+    try {
+      const response = await getMemoryStats()
+      setStats(response.stats)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("pages.memory.load_error", { defaultValue: "Unable to load memory diagnostics." })
+      setError(message)
+      notify.error(message, { id: "memory-page:error:stats" })
+    }
+  }, [t])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [statsResponse, chunksResponse] = await Promise.all([
-        getMemoryStats(),
-        listMemoryChunks({
-          region: region === "all" ? undefined : region,
-          limit: 80,
-        }),
-      ])
-      setStats(statsResponse.stats)
+      const chunksResponse = await listMemoryChunks({
+        region: region === "all" ? undefined : region,
+        limit: 80,
+      })
       setChunks(chunksResponse.chunks)
     } catch (err) {
       const message =
@@ -142,11 +150,15 @@ export function MemoryPage() {
               defaultValue: "Unable to load memory diagnostics.",
             })
       setError(message)
-      toast.error(message)
+      notify.error(message, { id: "memory-page:error:load" })
     } finally {
       setLoading(false)
     }
   }, [region, t])
+
+  useEffect(() => {
+    void loadStats()
+  }, [loadStats])
 
   useEffect(() => {
     void load()
@@ -156,8 +168,11 @@ export function MemoryPage() {
     try {
       setSelected((await inspectMemoryChunk(chunkId)).chunk)
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Unable to inspect memory chunk.",
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : t("pages.memory.inspect_failed", { defaultValue: "Unable to inspect this memory chunk." }),
+        { id: "memory-page:error:inspect" },
       )
     }
   }
@@ -166,6 +181,7 @@ export function MemoryPage() {
     event.preventDefault()
     if (!query.trim()) return
     setBusy("search")
+    setSearchResult(null)
     try {
       setSearchResult(
         await searchMemory(query.trim(), {
@@ -175,7 +191,12 @@ export function MemoryPage() {
         }),
       )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Memory search failed.")
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : t("pages.memory.search_failed", { defaultValue: "Memory search failed." }),
+        { id: "memory-page:error:submitSearch" },
+      )
     } finally {
       setBusy(null)
     }
@@ -185,10 +206,19 @@ export function MemoryPage() {
     setBusy("reindex")
     try {
       const result = await reindexMemory()
-      toast.success(`Reindexed ${result.result.reindexed} chunks.`)
-      await load()
+      notify.success(
+        t("pages.memory.reindexed_count", {
+          count: result.result.reindexed,
+          defaultValue: "Reindexed {{count}} chunks.",
+        }),
+        { id: "memory-page:success:runReindex" },
+      )
+      await Promise.all([load(), loadStats()])
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Reindex failed.")
+      notify.error(
+        err instanceof Error ? err.message : t("pages.memory.reindex_failed", { defaultValue: "Reindex failed." }),
+        { id: "memory-page:error:runReindex" },
+      )
     } finally {
       setBusy(null)
     }
@@ -208,16 +238,19 @@ export function MemoryPage() {
     setBusy("forget")
     try {
       await forgetMemoryChunk(selected.id)
-      toast.success(
+      notify.success(
         t("pages.memory.forgotten", {
           defaultValue: "Memory chunk forgotten.",
-        }),
+        }), { id: "memory-page:success:pages.memory.forgotten" }
       )
       setSelected(null)
-      await load()
+      await Promise.all([load(), loadStats()])
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Forget operation failed.",
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : t("pages.memory.forget_failed", { defaultValue: "Could not forget this memory chunk." }),
+        { id: "memory-page:error:forget" },
       )
     } finally {
       setBusy(null)
@@ -225,15 +258,12 @@ export function MemoryPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <PageHeader
-        title={t("pages.memory.title", { defaultValue: "Memory" })}
-
-      >
+    <div className="flex h-full flex-col" data-miki-page="memory">
+      <PageHeader title={t("pages.memory.title", { defaultValue: "Memory" })}>
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void load()}
+          onClick={() => void Promise.all([load(), loadStats()])}
           disabled={loading}
         >
           <IconRefresh data-icon="inline-start" />
@@ -250,11 +280,11 @@ export function MemoryPage() {
         </Button>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        {error && (
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" data-miki-page-body="true">
+        {error && stats && (
           <div
-            role="alert"
-            className="border-destructive/40 bg-destructive/10 text-destructive mb-4 rounded-lg border px-3 py-2 text-sm"
+            role="status"
+            className="border-amber-500/30 bg-amber-500/5 text-foreground mb-4 rounded-lg border px-3 py-2 text-sm"
           >
             {error}
           </div>
@@ -265,28 +295,39 @@ export function MemoryPage() {
               <Skeleton key={index} className="h-28 rounded-lg" />
             ))}
           </div>
+        ) : error && !stats ? (
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 flex flex-col items-start gap-3 rounded-xl border p-5 sm:p-6"
+          >
+            <p className="text-destructive text-sm">{error}</p>
+            <Button variant="outline" size="sm" onClick={() => void Promise.all([load(), loadStats()])} disabled={loading}>
+              <IconRefresh data-icon="inline-start" />
+              {t("pages.memory.retry", { defaultValue: "Try again" })}
+            </Button>
+          </div>
         ) : (
           <div className="flex flex-col gap-5">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <Metric
-                label="Chunks"
+                label={t("pages.memory.metrics.chunks", { defaultValue: "Chunks" })}
                 value={stats?.chunks ?? 0}
-                detail="active selective records"
+                detail={t("pages.memory.metrics.chunks_detail", { defaultValue: "Active selective records" })}
               />
               <Metric
-                label="Postings"
+                label={t("pages.memory.metrics.postings", { defaultValue: "Postings" })}
                 value={stats?.postings ?? 0}
-                detail="inverted index entries"
+                detail={t("pages.memory.metrics.postings_detail", { defaultValue: "Inverted index entries" })}
               />
               <Metric
-                label="Graph edges"
+                label={t("pages.memory.metrics.edges", { defaultValue: "Graph edges" })}
                 value={stats?.edges ?? 0}
-                detail="bounded traversal links"
+                detail={t("pages.memory.metrics.edges_detail", { defaultValue: "Bounded traversal links" })}
               />
               <Metric
-                label="Retrievals"
+                label={t("pages.memory.metrics.retrievals", { defaultValue: "Retrievals" })}
                 value={stats?.retrievals ?? 0}
-                detail="diagnostic traces"
+                detail={t("pages.memory.metrics.retrievals_detail", { defaultValue: "Diagnostic traces" })}
               />
             </div>
 
@@ -310,30 +351,40 @@ export function MemoryPage() {
                     defaultValue:
                       "Search remembered facts, tasks, rules, or skills…",
                   })}
-                  aria-label="Memory search"
+                  aria-label={t("pages.memory.search_title", {
+                    defaultValue: "Memory search",
+                  })}
                 />
                 <Button type="submit" disabled={busy !== null || !query.trim()}>
                   <IconSearch data-icon="inline-start" />
-                  Search
+                  {t("pages.memory.search_button", { defaultValue: "Search" })}
                 </Button>
               </form>
               {searchResult && (
                 <div className="mt-4 space-y-2">
                   <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
                     <span>
-                      {searchResult.result.stats.selectedCount} selected
+                      {searchResult.result.stats.selectedCount}{" "}
+                      {t("pages.memory.selected", { defaultValue: "selected" })}
                     </span>
                     <span>·</span>
                     <span>
-                      {searchResult.result.stats.candidateCount} candidates
+                      {searchResult.result.stats.candidateCount}{" "}
+                      {t("pages.memory.candidates", {
+                        defaultValue: "candidates",
+                      })}
                     </span>
                     <span>·</span>
                     <span>
                       {searchResult.result.stats.tokensUsed}/
-                      {searchResult.result.stats.maxTokens} tokens
+                      {searchResult.result.stats.maxTokens}{" "}
+                      {t("pages.memory.tokens", { defaultValue: "tokens" })}
                     </span>
                     <span>·</span>
-                    <span>{searchResult.result.stats.latencyMs} ms</span>
+                    <span>
+                      {searchResult.result.stats.latencyMs}{" "}
+                      {t("pages.memory.milliseconds", { defaultValue: "ms" })}
+                    </span>
                   </div>
                   {searchResult.result.items.length ? (
                     searchResult.result.items.map((item) => (
@@ -345,7 +396,7 @@ export function MemoryPage() {
                     ))
                   ) : (
                     <div className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
-                      No selective matches.
+                      {t("pages.memory.no_search_matches", { defaultValue: "No selective matches." })}
                     </div>
                   )}
                 </div>
@@ -362,15 +413,20 @@ export function MemoryPage() {
                     "Recent active chunks grouped by functional region.",
                 })}
               >
-                <div className="mb-4 flex flex-wrap gap-2">
+                <div
+                  className="mb-4 flex flex-wrap gap-2"
+                  role="group"
+                  aria-label={t("pages.memory.region_filter", { defaultValue: "Filter by memory region" })}
+                >
                   {REGIONS.map((item) => (
                     <Button
                       key={item}
                       size="sm"
                       variant={region === item ? "default" : "outline"}
                       onClick={() => setRegion(item)}
+                      aria-pressed={region === item}
                     >
-                      {item === "all" ? "All" : item}
+                      {t(`pages.memory.regions.${item}`, { defaultValue: item.replaceAll("_", " ") })}
                     </Button>
                   ))}
                 </div>
@@ -381,7 +437,8 @@ export function MemoryPage() {
                         type="button"
                         key={chunk.id}
                         onClick={() => void inspect(chunk.id)}
-                        className="border-border hover:bg-muted/50 w-full rounded-lg border p-3 text-left transition-colors"
+                        aria-pressed={selected?.id === chunk.id}
+                        className="border-border hover:bg-muted/50 focus-visible:ring-ring/60 w-full rounded-lg border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none aria-pressed:border-primary/60 aria-pressed:bg-primary/5"
                       >
                         <div className="mb-1 flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
@@ -395,16 +452,28 @@ export function MemoryPage() {
                         <p className="line-clamp-2 text-sm">
                           {chunk.summary || chunk.content}
                         </p>
-                        <div className="text-muted-foreground mt-2 text-xs">
-                          confidence {scoreLabel(Number(chunk.confidence))} ·
-                          importance {scoreLabel(Number(chunk.importance))} ·
-                          uses {chunk.access_count}
+                        <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                          <span>
+                            {t("pages.memory.confidence", {
+                              defaultValue: "Confidence",
+                            })}{" "}
+                            {scoreLabel(Number(chunk.confidence))}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span>
+                            {t("pages.memory.importance", {
+                              defaultValue: "Importance",
+                            })}{" "}
+                            {scoreLabel(Number(chunk.importance))}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span>{t("pages.memory.uses", { defaultValue: "Uses" })} {chunk.access_count}</span>
                         </div>
                       </button>
                     ))
                   ) : (
                     <div className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
-                      No chunks in this region.
+                      {t("pages.memory.no_chunks_region", { defaultValue: "No chunks in this region." })}
                     </div>
                   )}
                 </div>
@@ -430,32 +499,33 @@ export function MemoryPage() {
                     </div>
                     <div className="text-muted-foreground grid grid-cols-2 gap-2 text-xs">
                       <div>
-                        Confidence{" "}
+                        {t("pages.memory.confidence", { defaultValue: "Confidence" })}{" "}
                         <strong className="text-foreground">
                           {scoreLabel(Number(selected.confidence))}
                         </strong>
                       </div>
                       <div>
-                        Importance{" "}
+                        {t("pages.memory.importance", { defaultValue: "Importance" })}{" "}
                         <strong className="text-foreground">
                           {scoreLabel(Number(selected.importance))}
                         </strong>
                       </div>
                       <div>
-                        Uses{" "}
+                        {t("pages.memory.uses", { defaultValue: "Uses" })}{" "}
                         <strong className="text-foreground">
                           {selected.access_count}
                         </strong>
                       </div>
                       <div>
-                        Edges{" "}
+                        {t("pages.memory.edges", { defaultValue: "Edges" })}{" "}
                         <strong className="text-foreground">
                           {selected.edges.length}
                         </strong>
                       </div>
                     </div>
                     <div className="text-muted-foreground text-xs">
-                      Created {formatDateTime(selected.created_at)}
+                      {t("pages.memory.created", { defaultValue: "Created" })}{" "}
+                      {formatDateTime(selected.created_at)}
                     </div>
                     <Button
                       variant="destructive"
@@ -464,15 +534,19 @@ export function MemoryPage() {
                       disabled={busy !== null}
                     >
                       <IconTrash data-icon="inline-start" />
-                      Forget chunk
+                      {t("pages.memory.forget_chunk", {
+                        defaultValue: "Forget chunk",
+                      })}
                     </Button>
                   </div>
                 ) : (
                   <div className="text-muted-foreground flex min-h-32 flex-col items-center justify-center gap-2 text-center text-sm">
                     <IconShieldCheck className="size-6" />
                     <span>
-                      Memory is scope-fixed and credential values are never
-                      shown here.
+                      {t("pages.memory.scope_fixed_notice", {
+                        defaultValue:
+                          "Memory is limited to the active scope. Credential values are never shown here.",
+                      })}
                     </span>
                   </div>
                 )}

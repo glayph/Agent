@@ -5,11 +5,11 @@ import {
   ASSISTANT_DETAIL_VISIBILITY_STORAGE_KEY,
   type AssistantDetailVisibility,
   DEFAULT_ASSISTANT_DETAIL_VISIBILITY,
-  assistantDetailVisibilityStorage,
-  shouldShowAssistantMessage,
   DEFAULT_THINKING_MODE,
   THINKING_MODE_STORAGE_KEY,
   type ThinkingMode,
+  assistantDetailVisibilityStorage,
+  shouldShowAssistantMessage,
   thinkingModeStorage,
 } from "@/features/chat/detail-visibility"
 import {
@@ -23,6 +23,8 @@ export interface ChatAttachment {
   url: string
   filename?: string
   contentType?: string
+  /** Local UI metadata; the gateway does not need this value. */
+  sizeBytes?: number
 }
 
 export interface ChatVoiceMetadata {
@@ -45,11 +47,17 @@ export interface ChatToolCallExtraContent {
   toolFeedbackExplanation?: string
 }
 
+export type ChatToolCallStatus = "running" | "success" | "error"
+
 export interface ChatToolCall {
   id?: string
   type?: string
   function?: ChatToolCallFunction
   extraContent?: ChatToolCallExtraContent
+  /** Only set when the gateway reported it; never inferred. */
+  status?: ChatToolCallStatus
+  /** Only set when the gateway reported a real measured duration. */
+  durationMs?: number
 }
 
 export type AssistantMessageKind =
@@ -66,6 +74,8 @@ export interface ChatMessage {
   kind?: AssistantMessageKind
   modelName?: string
   runId?: string
+  /** Set for background notices: progress, result, warning or discovery. */
+  notificationKind?: string
   replyToMessageId?: string
   messageGroupId?: string
   messageSequence?: number
@@ -76,12 +86,20 @@ export interface ChatMessage {
   attachments?: ChatAttachment[]
   voice?: ChatVoiceMetadata
   toolCalls?: ChatToolCall[]
-  /** Delivery state of a user message: queued | processing | retrying | failed (completed is the default and omitted). */
+  /** Delivery state of a user message; completed is the default and omitted. */
   deliveryStatus?: ChatDeliveryStatus
   deliveryDetail?: string
 }
 
-export type ChatDeliveryStatus = "queued" | "processing" | "retrying" | "failed"
+export type ChatDeliveryStatus =
+  | "sending"
+  | "uncertain"
+  | "unknown"
+  | "queued"
+  | "processing"
+  | "retrying"
+  | "failed"
+  | "cancelled"
 
 export interface ContextUsage {
   used_tokens: number
@@ -167,6 +185,8 @@ export interface ChatStoreState {
   activeRunProvider?: string
   runStatus?: RunStatus
   runError?: string
+  /** Transient provider quota notice; cleared after the next successful response. */
+  quotaNotice?: string
   deliveryOutcome?: DeliveryOutcome
   runActivity?: RunActivity
   workStatus?: WorkStatus

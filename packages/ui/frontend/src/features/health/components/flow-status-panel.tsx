@@ -1,13 +1,13 @@
 import { IconRefresh } from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import {
   type FlowComponentStatus,
   type FlowStatusResponse,
   getFlowStatus,
 } from "@/api/system"
+import { notify } from "@/lib/notify"
 import { formatDateTime } from "@/lib/format"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
@@ -48,8 +48,8 @@ export function FlowStatusPanel() {
     try {
       setFlow(await getFlowStatus())
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("pages.health.flow.load_error"),
+      notify.error(
+        err instanceof Error ? err.message : t("pages.health.flow.load_error"), { id: "flow-status-panel:error:load" }
       )
     } finally {
       setLoading(false)

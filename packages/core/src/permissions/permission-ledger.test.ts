@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
 import { PermissionLedger, categoryForTool } from "./permission-ledger.js";
 
 function tempLedger(): { ledger: PermissionLedger; file: string; dir: string } {
@@ -86,4 +85,34 @@ test("tools map to stable categories", () => {
   assert.equal(categoryForTool("browser_click"), "browser");
   assert.equal(categoryForTool("computer_click"), "computer_use");
   assert.equal(categoryForTool("web_fetch_custom"), "tool:web_fetch_custom");
+});
+
+test("a block rule is final: it is not lifted by a one-time grant and is listed", () => {
+  const { ledger, dir } = tempLedger();
+  ledger.learn({ category: "file_delete", match: "", decision: "block", note: "never delete files" });
+  ledger.grantOnce("file_delete", "");
+  const verdict = ledger.evaluate("file_delete", { path: "a.txt" });
+  assert.equal(verdict.mode, "block");
+  assert.match(verdict.reason, /must not be done/);
+  assert.equal(ledger.grants().length, 1, "the grant is not consumed by a block");
+  assert.deepEqual(ledger.rules().map((rule) => rule.decision), ["block"]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a more specific act rule still beats a broad block rule", () => {
+  const { ledger, dir } = tempLedger();
+  ledger.learn({ category: "shell", match: "", decision: "block", note: "no shell" });
+  ledger.learn({ category: "shell", match: "npm test", decision: "act", note: "tests are fine" });
+  assert.equal(ledger.evaluate("shell_execute", { command: "npm test" }).mode, "auto");
+  assert.equal(ledger.evaluate("shell_execute", { command: "rm x" }).mode, "block");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("learned rules persist and are applied by a new ledger instance (next run)", () => {
+  const { ledger, file, dir } = tempLedger();
+  ledger.learn({ category: "shell", match: "deploy", decision: "ask", note: "ask first" });
+  const next = new PermissionLedger(file);
+  assert.equal(next.rules().length, 1);
+  assert.equal(next.evaluate("shell_execute", { command: "deploy prod" }).mode, "block");
+  fs.rmSync(dir, { recursive: true, force: true });
 });

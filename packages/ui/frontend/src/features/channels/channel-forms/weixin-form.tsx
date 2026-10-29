@@ -10,8 +10,11 @@ import {
   parseAllowFromInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import {
+  ChannelFieldCard,
+  ChannelSection,
+} from "@/features/channels/components/channel-section"
 import { Field, KeyInput } from "@/shared/forms/shared-form"
-import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
 
 import { QrBindingPanel } from "./qr-binding-panel"
@@ -48,29 +51,60 @@ export function WeixinForm({
 
   return (
     <div className="space-y-6">
-      <QrBindingPanel
-        channel="weixin"
-        isBound={isBound}
-        onBindingComplete={onBindingComplete}
-      />
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <div className="space-y-4">
+          <QrBindingPanel
+            channel="weixin"
+            isBound={isBound}
+            onBindingComplete={onBindingComplete}
+          />
+          <ChannelFieldCard>
+            <Field
+              label="Account ID"
+              required
+              hint={t("channels.form.desc.genericField", {
+                field: "WeChat account id",
+              })}
+              error={fieldErrors.account_id}
+            >
+              <Input
+                value={asString(config.account_id)}
+                onChange={(e) => onChange("account_id", e.target.value)}
+                placeholder="wxid_xxxxx"
+              />
+            </Field>
+          </ChannelFieldCard>
+        </div>
+      </ChannelSection>
 
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <Field
-            label="Account ID"
-            required
-            hint={t("channels.form.desc.genericField", {
-              field: "WeChat account id",
-            })}
-            error={fieldErrors.account_id}
-          >
-            <Input
-              value={asString(config.account_id)}
-              onChange={(e) => onChange("account_id", e.target.value)}
-              placeholder="wxid_xxxxx"
-            />
-          </Field>
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <ChannelFieldCard>
+          <ChannelArrayListField
+            label={t("channels.field.allowFrom")}
+            hint={t("channels.form.desc.allowFrom")}
+            value={asStringArray(config.allow_from)}
+            onChange={(value) => onChange("allow_from", value)}
+            placeholder={t("channels.field.allowFromPlaceholder")}
+            parser={parseAllowFromInput}
+            fieldPath="allow_from"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
+        </ChannelFieldCard>
+      </ChannelSection>
 
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Token"
             hint={t("channels.form.desc.genericField", {
@@ -90,18 +124,6 @@ export function WeixinForm({
             />
           </Field>
 
-          <ChannelArrayListField
-            label={t("channels.field.allowFrom")}
-            hint={t("channels.form.desc.allowFrom")}
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder={t("channels.field.allowFromPlaceholder")}
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
-
           <Field
             label={t("channels.field.proxy")}
             hint={t("channels.form.desc.proxy")}
@@ -112,8 +134,8 @@ export function WeixinForm({
               placeholder="http://localhost:7890"
             />
           </Field>
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }

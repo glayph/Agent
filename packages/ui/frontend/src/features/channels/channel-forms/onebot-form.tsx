@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next"
+
 import type { ChannelConfig } from "@/api/channels"
 import {
   type ArrayFieldFlusher,
@@ -9,8 +11,11 @@ import {
   parseConservativeStringListInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import {
+  ChannelFieldCard,
+  ChannelSection,
+} from "@/features/channels/components/channel-section"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
-import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
 
 interface OneBotFormProps {
@@ -44,12 +49,16 @@ export function OneBotForm({
   registerArrayFieldFlusher,
   arrayFieldResetVersion,
 }: OneBotFormProps) {
+  const { t } = useTranslation()
   const groupTriggerConfig = asRecord(config.group_trigger)
 
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Server URL"
             required
@@ -62,7 +71,34 @@ export function OneBotForm({
               placeholder="ws://127.0.0.1:5700"
             />
           </Field>
+        </ChannelFieldCard>
+      </ChannelSection>
 
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <ChannelFieldCard>
+          <ChannelArrayListField
+            label="Allow From"
+            hint="Allowed user or group IDs. Supports user:123 and group:456."
+            value={asStringArray(config.allow_from)}
+            onChange={(value) => onChange("allow_from", value)}
+            placeholder="user:123456, group:789012"
+            parser={parseAllowFromInput}
+            fieldPath="allow_from"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
+        </ChannelFieldCard>
+      </ChannelSection>
+
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Access Token"
             hint="OneBot access token if required"
@@ -90,22 +126,6 @@ export function OneBotForm({
               placeholder="123456789"
             />
           </Field>
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <ChannelArrayListField
-            label="Allow From"
-            hint="Allowed user or group IDs. Supports user:123 and group:456."
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder="user:123456, group:789012"
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
 
           <div>
             <SwitchCardField
@@ -137,8 +157,8 @@ export function OneBotForm({
             registerFlusher={registerArrayFieldFlusher}
             resetVersion={arrayFieldResetVersion}
           />
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }

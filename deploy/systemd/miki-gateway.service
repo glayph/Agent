@@ -1,6 +1,5 @@
 [Unit]
-StartLimitIntervalSec=120
-StartLimitBurst=10
+StartLimitIntervalSec=0
 Description=Miki gateway and dashboard
 PartOf=miki.target
 After=network-online.target miki-memory.service miki-llama.service miki-core.service
@@ -8,12 +7,14 @@ Wants=network-online.target miki-memory.service miki-llama.service miki-core.ser
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=@MIKI_USER@
+Group=@MIKI_GROUP@
 WorkingDirectory=@MIKI_ROOT@
 EnvironmentFile=-/etc/miki/miki.env
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=@MIKI_HOME@/.Xauthority
 Environment=MIKI_GATEWAY_MANAGE_CORE=false
-Environment=PATH=/home/ubuntu/.nvm/versions/node/v22.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=@MIKI_NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=@MIKI_NODE@ @MIKI_ROOT@/packages/gateway/dist/index.js
 Restart=always
 RestartSec=5s
@@ -21,12 +22,13 @@ TimeoutStartSec=90s
 TimeoutStopSec=25s
 KillSignal=SIGTERM
 SuccessExitStatus=0 143
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=@MIKI_ROOT@/config @MIKI_ROOT@/data @MIKI_ROOT@/logs
-MemoryMax=768M
+# The gateway runs the agent's terminal and computer_* tools as this user, with the user's own
+# permissions and the desktop session (DISPLAY/XAUTHORITY), so it is deliberately NOT confined with
+# ProtectSystem/ProtectHome/PrivateTmp/NoNewPrivileges: they would silently break those tools.
+# (A ReadWritePaths= line here would do nothing without ProtectSystem=/ProtectHome=, so there is none.)
+# Run Miki inside a VM/container, or as a dedicated unprivileged user, to limit what the agent can touch.
+RestrictSUIDSGID=true
+LockPersonality=true
 CPUQuota=150%
 TasksMax=512
 LimitNOFILE=65536

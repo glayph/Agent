@@ -9,7 +9,6 @@ import {
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import {
   type DeliveryReceipt,
@@ -27,6 +26,7 @@ import {
   runDoctor,
   runSecretScan,
 } from "@/api/safety"
+import { notify } from "@/lib/notify"
 import { PageHeader } from "@/app/layout/page-header"
 import { FlowStatusPanel } from "@/features/health/components/flow-status-panel"
 import { formatDateTime } from "@/lib/format"
@@ -158,7 +158,7 @@ export function HealthPage() {
       const message =
         err instanceof Error ? err.message : t("pages.health.load_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "health-page:error:load" })
     } finally {
       setLoading(false)
     }
@@ -192,13 +192,13 @@ export function HealthPage() {
       await action()
       const message = t("pages.health.completed")
       setStatusMessage({ kind: "success", text: message })
-      toast.success(message)
+      notify.success(message, { id: "health-page:success:runAction" })
       await load()
     } catch (err) {
       const message =
         err instanceof Error ? err.message : t("pages.health.action_failed")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "health-page:error:runAction-2" })
     } finally {
       setBusy(null)
     }
@@ -215,7 +215,7 @@ export function HealthPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-miki-page="health">
       <PageHeader
         title={t("pages.health.title")}
         titleExtra={
@@ -237,7 +237,7 @@ export function HealthPage() {
         </Button>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" data-miki-page-body="true">
         {statusMessage && (
           <div
             className={

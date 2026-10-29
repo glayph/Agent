@@ -4,6 +4,8 @@ export interface DurableTaskWorkerOptions {
   pollMs?: number;
   leaseMs?: number;
   heartbeatMs?: number;
+  retryBaseMs?: number;
+  retryMaxMs?: number;
   now?: () => string;
   onError?: (error: unknown) => void;
 }
@@ -21,6 +23,8 @@ export class DurableTaskWorker {
   private readonly pollMs: number;
   private readonly leaseMs: number;
   private readonly heartbeatMs: number;
+  private readonly retryBaseMs: number;
+  private readonly retryMaxMs: number;
   private readonly now: () => string;
   private running = false;
   private loopPromise: Promise<void> | null = null;
@@ -33,6 +37,8 @@ export class DurableTaskWorker {
     this.pollMs = Math.max(10, options.pollMs ?? 1_000);
     this.leaseMs = Math.max(100, options.leaseMs ?? 60_000);
     this.heartbeatMs = Math.max(10, Math.min(this.leaseMs - 1, options.heartbeatMs ?? Math.floor(this.leaseMs / 3)));
+    this.retryBaseMs = Math.max(0, options.retryBaseMs ?? 1_000);
+    this.retryMaxMs = Math.max(this.retryBaseMs, options.retryMaxMs ?? 60_000);
     this.now = options.now ?? (() => new Date().toISOString());
     this.onError = options.onError;
   }
@@ -64,10 +70,21 @@ export class DurableTaskWorker {
       });
     } catch (error) {
       this.onError?.(error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (task.attemptCount >= task.maxAttempts) {
+        return this.store.transition(task.taskId, "failed", {
+          now: this.now(),
+          reason: `worker handler failed after ${task.attemptCount}/${task.maxAttempts} attempts`,
+          error: message,
+        });
+      }
+      const delayMs = Math.min(this.retryMaxMs, this.retryBaseMs * (2 ** Math.max(0, task.attemptCount - 1)));
+      const nextRetryAt = new Date(Date.parse(this.now()) + delayMs).toISOString();
       return this.store.transition(task.taskId, "retrying", {
         now: this.now(),
-        reason: "worker handler failed; task requeued",
-        error: error instanceof Error ? error.message : String(error),
+        reason: `worker handler failed; retry ${task.attemptCount + 1}/${task.maxAttempts} scheduled after ${delayMs}ms`,
+        error: message,
+        nextRetryAt,
       });
     } finally {
       clearInterval(heartbeat);

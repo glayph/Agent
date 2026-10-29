@@ -14,7 +14,9 @@ module.exports = {
     "/dist/",
     "/packages/ui/frontend/",
     // This spec is run by the dedicated Vitest command, not Jest.
-    "/packages/gateway/src/restart-policy[.]test[.]ts$",
+    "/packages/gateway/src/model-retry[.]test[.]ts$",
+    "/packages/gateway/src/session-cookie[.]test[.]ts$",
+    "/packages/gateway/src/agent-runtime-stream-retry[.]test[.]ts$",
     "/*.d.ts",
   ],
   transformIgnorePatterns: [

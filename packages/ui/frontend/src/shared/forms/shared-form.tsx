@@ -130,6 +130,7 @@ interface KeyInputProps {
   ariaDescribedBy?: string
   className?: string
   disabled?: boolean
+  initiallyVisible?: boolean
 }
 
 export function KeyInput({
@@ -142,9 +143,10 @@ export function KeyInput({
   ariaDescribedBy,
   className,
   disabled = false,
+  initiallyVisible = false,
 }: KeyInputProps) {
   const { t } = useTranslation()
-  const [show, setShow] = useState(false)
+  const [show, setShow] = useState(initiallyVisible)
   const visibilityLabel = show
     ? t("common.hide_secret", "Hide secret")
     : t("common.show_secret", "Show secret")

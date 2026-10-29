@@ -1,6 +1,5 @@
 [Unit]
-StartLimitIntervalSec=120
-StartLimitBurst=10
+StartLimitIntervalSec=0
 Description=Miki core API
 PartOf=miki.target
 After=network-online.target miki-memory.service miki-llama.service
@@ -8,12 +7,14 @@ Wants=network-online.target miki-memory.service miki-llama.service
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=@MIKI_USER@
+Group=@MIKI_GROUP@
 WorkingDirectory=@MIKI_ROOT@
 EnvironmentFile=-/etc/miki/miki.env
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=@MIKI_HOME@/.Xauthority
 Environment=MIKI_GATEWAY_MANAGE_CORE=false
-Environment=PATH=/home/ubuntu/.nvm/versions/node/v22.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=@MIKI_NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=@MIKI_NODE@ @MIKI_ROOT@/packages/core/dist/api/index.js
 Restart=always
 RestartSec=5s
@@ -21,11 +22,12 @@ TimeoutStartSec=90s
 TimeoutStopSec=25s
 KillSignal=SIGTERM
 SuccessExitStatus=0 143
-NoNewPrivileges=true
-PrivateTmp=true
+# /usr, /boot and /etc become read-only for this service; the user's home stays writable. PrivateTmp is
+# not set because computer_* tools reach the X11 socket in /tmp.
 ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=@MIKI_ROOT@/config @MIKI_ROOT@/data @MIKI_ROOT@/logs /home/ubuntu/.local/share/miki
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
 MemoryMax=2G
 CPUQuota=200%
 TasksMax=512

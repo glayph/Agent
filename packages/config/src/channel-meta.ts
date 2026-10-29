@@ -6,13 +6,15 @@ export interface ChannelConfigMetadata {
   requiredFields: readonly string[];
   secretFields: readonly string[];
   runtimeStatus: ChannelRuntimeStatus;
+  /** Whether this adapter drops messages from senders not listed in allow_from. */
+  senderGated?: boolean;
   note: string;
 }
 
 export const CHANNEL_CONFIG_METADATA: Record<string, ChannelConfigMetadata> = {
-  telegram: { displayName: "Telegram", requiredFields: ["token"], secretFields: ["token"], runtimeStatus: "functional", note: "Live Bot API long-polling adapter is hosted by the gateway; set allow_from to trusted sender IDs before enabling it." },
-  discord: { displayName: "Discord", requiredFields: ["token"], secretFields: ["token"], runtimeStatus: "functional", note: "Live Discord Gateway adapter is hosted by the gateway; enable Message Content intent and set allow_from to trusted sender IDs." },
-  slack: { displayName: "Slack", requiredFields: ["bot_token", "app_token"], secretFields: ["bot_token", "app_token"], runtimeStatus: "functional", note: "Live Socket Mode adapter is hosted by the gateway; subscribe to message events and set allow_from to trusted sender IDs." },
+  telegram: { displayName: "Telegram", requiredFields: ["token"], secretFields: ["token"], runtimeStatus: "functional", senderGated: true, note: "Live Bot API long-polling adapter is hosted by the gateway; set allow_from to trusted sender IDs before enabling it." },
+  discord: { displayName: "Discord", requiredFields: ["token"], secretFields: ["token"], runtimeStatus: "functional", senderGated: true, note: "Live Discord Gateway adapter is hosted by the gateway; enable Message Content intent and set allow_from to trusted sender IDs." },
+  slack: { displayName: "Slack", requiredFields: ["bot_token", "app_token"], secretFields: ["bot_token", "app_token"], runtimeStatus: "functional", senderGated: true, note: "Live Socket Mode adapter is hosted by the gateway; subscribe to message events and set allow_from to trusted sender IDs." },
   feishu: { displayName: "Feishu", requiredFields: ["app_id", "app_secret"], secretFields: ["app_secret", "encrypt_key", "verification_token"], runtimeStatus: "partial", note: "Configuration and validation are managed by the dashboard." },
   dingtalk: { displayName: "DingTalk", requiredFields: ["webhook_url"], secretFields: ["webhook_url", "client_secret"], runtimeStatus: "partial", note: "Configuration and webhook validation are managed by the dashboard." },
   line: { displayName: "LINE", requiredFields: ["token", "channel_secret"], secretFields: ["token", "channel_secret", "channel_access_token"], runtimeStatus: "partial", note: "Configuration is managed by the dashboard." },

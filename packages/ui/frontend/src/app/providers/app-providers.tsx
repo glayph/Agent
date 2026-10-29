@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 
 import { useHighlightTheme } from "@/hooks/use-highlight-theme"
-import { useTheme } from "@/hooks/use-theme"
+import { ThemeProvider } from "@/hooks/use-theme"
 
 import { UnsavedChangesProvider } from "./unsaved-changes-provider"
 
@@ -11,7 +11,9 @@ interface AppProvidersProps {
 
 export function AppProviders({ children }: AppProvidersProps) {
   useHighlightTheme()
-  useTheme()
-
-  return <UnsavedChangesProvider>{children}</UnsavedChangesProvider>
+  return (
+    <ThemeProvider>
+      <UnsavedChangesProvider>{children}</UnsavedChangesProvider>
+    </ThemeProvider>
+  )
 }

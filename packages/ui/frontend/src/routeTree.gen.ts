@@ -19,6 +19,7 @@ import { Route as LauncherSetupRouteImport } from './routes/launcher-setup'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as PluginsRouteImport } from './routes/plugins'
+import { Route as AgentActivityRouteImport } from './routes/agent/activity'
 import { Route as AgentMonitorRouteImport } from './routes/agent/monitor'
 import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
 import { Route as AgentToolsRouteImport } from './routes/agent/tools'
@@ -74,6 +75,11 @@ const PluginsRoute = PluginsRouteImport.update({
   path: '/plugins',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentActivityRoute = AgentActivityRouteImport.update({
+  id: '/agent/activity',
+  path: '/agent/activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentMonitorRoute = AgentMonitorRouteImport.update({
   id: '/agent/monitor',
   path: '/agent/monitor',
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
   '/plugins': typeof PluginsRoute
+  '/agent/activity': typeof AgentActivityRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
@@ -122,6 +129,7 @@ export interface FileRoutesByTo {
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
   '/plugins': typeof PluginsRoute
+  '/agent/activity': typeof AgentActivityRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   '/memory': typeof MemoryRoute
   '/models': typeof ModelsRoute
   '/plugins': typeof PluginsRoute
+  '/agent/activity': typeof AgentActivityRoute
   '/agent/monitor': typeof AgentMonitorRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/memory'
     | '/models'
     | '/plugins'
+    | '/agent/activity'
     | '/agent/monitor'
     | '/agent/skills'
     | '/agent/tools'
@@ -173,6 +183,7 @@ export interface FileRouteTypes {
     | '/memory'
     | '/models'
     | '/plugins'
+    | '/agent/activity'
     | '/agent/monitor'
     | '/agent/skills'
     | '/agent/tools'
@@ -189,6 +200,7 @@ export interface FileRouteTypes {
     | '/memory'
     | '/models'
     | '/plugins'
+    | '/agent/activity'
     | '/agent/monitor'
     | '/agent/skills'
     | '/agent/tools'
@@ -206,6 +218,7 @@ export interface RootRouteChildren {
   MemoryRoute: typeof MemoryRoute
   ModelsRoute: typeof ModelsRoute
   PluginsRoute: typeof PluginsRoute
+  AgentActivityRoute: typeof AgentActivityRoute
   AgentMonitorRoute: typeof AgentMonitorRoute
   AgentSkillsRoute: typeof AgentSkillsRoute
   AgentToolsRoute: typeof AgentToolsRoute
@@ -283,6 +296,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PluginsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent/activity': {
+      id: '/agent/activity'
+      path: '/agent/activity'
+      fullPath: '/agent/activity'
+      preLoaderRoute: typeof AgentActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agent/monitor': {
       id: '/agent/monitor'
       path: '/agent/monitor'
@@ -337,6 +357,7 @@ const rootRouteChildren: RootRouteChildren = {
   MemoryRoute: MemoryRoute,
   ModelsRoute: ModelsRoute,
   PluginsRoute: PluginsRoute,
+  AgentActivityRoute: AgentActivityRoute,
   AgentMonitorRoute: AgentMonitorRoute,
   AgentSkillsRoute: AgentSkillsRoute,
   AgentToolsRoute: AgentToolsRoute,

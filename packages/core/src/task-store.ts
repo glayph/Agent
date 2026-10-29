@@ -11,6 +11,7 @@ export interface CreateTaskInput {
   goal: string;
   sessionId?: string;
   now?: string;
+  maxAttempts?: number;
 }
 
 export interface DurableTask extends TaskLifecycle {
@@ -20,6 +21,9 @@ export interface DurableTask extends TaskLifecycle {
   leaseExpiresAt?: string;
   lastError?: string;
   result?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  nextRetryAt?: string;
 }
 
 export interface TaskTransitionEvent {
@@ -43,6 +47,9 @@ interface TaskRow {
   result: string | null;
   created_at: string;
   updated_at: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_retry_at: string | null;
 }
 
 interface EventRow {
@@ -70,6 +77,9 @@ export class DurableTaskStore {
         lease_expires_at TEXT,
         last_error TEXT,
         result TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 5,
+        next_retry_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -88,11 +98,18 @@ export class DurableTaskStore {
       CREATE INDEX IF NOT EXISTS idx_miki_task_events_task
         ON miki_task_events(task_id, id);
     `);
+    const columns = new Set((this.db.prepare("PRAGMA table_info(miki_tasks)").all() as Array<{ name: string }>).map((row) => row.name));
+    if (!columns.has("attempt_count")) this.db.exec("ALTER TABLE miki_tasks ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
+    if (!columns.has("max_attempts")) this.db.exec("ALTER TABLE miki_tasks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 5");
+    if (!columns.has("next_retry_at")) this.db.exec("ALTER TABLE miki_tasks ADD COLUMN next_retry_at TEXT");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_miki_tasks_retry_due ON miki_tasks(status,next_retry_at,updated_at)");
   }
 
   create(input: CreateTaskInput): DurableTask {
     const taskId = input.taskId ?? randomUUID();
     const timestamp = input.now ?? this.now();
+    const requestedMaxAttempts = Number(input.maxAttempts ?? 5);
+    const maxAttempts = Number.isFinite(requestedMaxAttempts) ? Math.max(1, Math.min(20, Math.trunc(requestedMaxAttempts))) : 5;
     const task: DurableTask = {
       taskId,
       goal: input.goal,
@@ -101,13 +118,15 @@ export class DurableTaskStore {
       version: 0,
       createdAt: timestamp,
       updatedAt: timestamp,
+      attemptCount: 0,
+      maxAttempts,
     };
 
     const insert = this.db.transaction(() => {
       this.db.prepare(`
-        INSERT INTO miki_tasks(task_id,goal,session_id,status,version,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?)
-      `).run(task.taskId, task.goal, task.sessionId ?? null, task.status, task.version, timestamp, timestamp);
+        INSERT INTO miki_tasks(task_id,goal,session_id,status,version,attempt_count,max_attempts,next_retry_at,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+      `).run(task.taskId, task.goal, task.sessionId ?? null, task.status, task.version, 0, task.maxAttempts, null, timestamp, timestamp);
       this.db.prepare(`
         INSERT INTO miki_task_events(task_id,from_status,to_status,version,reason,created_at)
         VALUES(?,?,?,?,?,?)
@@ -138,7 +157,7 @@ export class DurableTaskStore {
   transition(
     taskId: string,
     nextStatus: TaskStatus,
-    options: { now?: string; reason?: string; leaseMs?: number; result?: string; error?: string } = {},
+    options: { now?: string; reason?: string; leaseMs?: number; result?: string; error?: string; nextRetryAt?: string | null } = {},
   ): DurableTask {
     const update = this.db.transaction(() => {
       const current = this.get(taskId);
@@ -151,9 +170,10 @@ export class DurableTaskStore {
       const leaseExpiresAt = next.status === "running" && options.leaseMs !== undefined
         ? new Date(Date.parse(timestamp) + Math.max(0, options.leaseMs)).toISOString()
         : null;
+      const nextRetryAt = next.status === "retrying" ? options.nextRetryAt ?? null : null;
       const result = this.db.prepare(`
         UPDATE miki_tasks
-        SET status=?,version=?,lease_expires_at=?,last_error=?,result=?,updated_at=?
+        SET status=?,version=?,lease_expires_at=?,last_error=?,result=?,next_retry_at=?,updated_at=?
         WHERE task_id=? AND version=?
       `).run(
         next.status,
@@ -161,6 +181,7 @@ export class DurableTaskStore {
         leaseExpiresAt,
         options.error ?? (next.status === "failed" ? (next.reason ?? null) : current.lastError ?? null),
         options.result ?? current.result ?? null,
+        nextRetryAt,
         timestamp,
         taskId,
         current.version,
@@ -179,16 +200,18 @@ export class DurableTaskStore {
     const claim = this.db.transaction(() => {
       const row = this.db.prepare(`
         SELECT * FROM miki_tasks
-        WHERE status IN ('queued','retrying')
-        ORDER BY updated_at ASC
+        WHERE status='queued' OR (status='retrying' AND (next_retry_at IS NULL OR next_retry_at<=?))
+        ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, updated_at ASC
         LIMIT 1
-      `).get() as TaskRow | undefined;
+      `).get(now) as TaskRow | undefined;
       if (!row) return null;
-      return this.transition(row.task_id, "running", {
+      this.transition(row.task_id, "running", {
         now,
         leaseMs,
         reason: "worker claimed task",
       });
+      this.db.prepare("UPDATE miki_tasks SET attempt_count=attempt_count+1,next_retry_at=NULL WHERE task_id=?").run(row.task_id);
+      return this.get(row.task_id);
     });
     return claim();
   }
@@ -204,14 +227,13 @@ export class DurableTaskStore {
 
   recoverExpired(now = this.now()): DurableTask[] {
     const rows = this.db.prepare(`
-      SELECT task_id FROM miki_tasks
+      SELECT task_id,attempt_count,max_attempts FROM miki_tasks
       WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?
       ORDER BY updated_at ASC
-    `).all(now) as Array<{ task_id: string }>;
-    return rows.map((row) => this.transition(row.task_id, "retrying", {
-      now,
-      reason: "worker lease expired; task requeued",
-    }));
+    `).all(now) as Array<{ task_id: string; attempt_count: number; max_attempts: number }>;
+    return rows.map((row) => row.attempt_count >= row.max_attempts
+      ? this.transition(row.task_id, "failed", { now, reason: "worker lease expired after the maximum number of attempts" })
+      : this.transition(row.task_id, "retrying", { now, reason: "worker lease expired; task requeued", nextRetryAt: now }));
   }
 
   private toTask(row: TaskRow): DurableTask {
@@ -225,6 +247,9 @@ export class DurableTaskStore {
       ...(row.lease_expires_at ? { leaseExpiresAt: row.lease_expires_at } : {}),
       ...(row.last_error ? { lastError: row.last_error } : {}),
       ...(row.result ? { result: row.result } : {}),
+      attemptCount: row.attempt_count,
+      maxAttempts: row.max_attempts,
+      ...(row.next_retry_at ? { nextRetryAt: row.next_retry_at } : {}),
       updatedAt: row.updated_at,
     };
   }

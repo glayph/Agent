@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import {
   secondaryNavigation,
+  sidebarNavigationGroups,
   utilityNavigation,
   type AppNavigationItem,
 } from "@/app/layout/app-navigation"
@@ -49,7 +50,9 @@ function NavList({
             to={item.url}
             onClick={(event) => onClick(item, event)}
             aria-label={label}
+            aria-current={isActive ? "page" : undefined}
             title={showLabels ? undefined : label}
+            data-labels={showLabels ? "true" : "false"}
             data-active={isActive}
             className={cn(
               "miki-sidebar__nav-item mx-auto flex items-center border border-transparent",
@@ -104,62 +107,74 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     closeMobileSidebar()
   }
 
-  const mainNavigation = secondaryNavigation.filter(
-    (item) => !utilityNavigation.some((utility) => utility.id === item.id),
-  )
-
   return (
     <Sidebar
       {...props}
       collapsible={isMobile ? "offcanvas" : "none"}
       style={
-        { "--sidebar-width": isMobile ? "17rem" : "var(--app-rail-width)" } as React.CSSProperties
+        { "--sidebar-width": isMobile ? "17rem" : "15rem" } as React.CSSProperties
       }
       className="miki-sidebar border-r"
     >
-      <SidebarHeader className="miki-sidebar__header flex h-[var(--app-topbar-height)] items-center justify-center border-b px-0">
+      <SidebarHeader className="miki-sidebar__header flex h-[var(--app-topbar-height)] items-center justify-start border-b px-4">
         <Link
           to="/"
           onClick={closeMobileSidebar}
-          className={cn(
-            "miki-sidebar__brand flex size-9 items-center justify-center overflow-hidden rounded-md border p-0 transition-colors",
-            isMobile ? "mx-0" : "mx-auto",
-          )}
+          className="miki-sidebar__brand-row flex min-w-0 items-center gap-2.5 rounded-md p-0 transition-colors"
           aria-label="Miki"
           title="Miki"
         >
-          <img
-            src="/icon.png"
-            alt=""
-            aria-hidden="true"
-            draggable={false}
-            loading="eager"
-            decoding="async"
-            className="size-full rounded-[inherit] object-cover"
-          />
+          <span className="miki-sidebar__brand" aria-hidden="true">
+            <img
+              src="/icon.png"
+              alt=""
+              draggable={false}
+              loading="eager"
+              decoding="async"
+              className="size-full rounded-[inherit] object-cover"
+            />
+          </span>
+          <span className="miki-sidebar__brand-label">Agent Miki</span>
         </Link>
-        {isMobile && <span className="miki-sidebar__brand-label">Agent Miki</span>}
       </SidebarHeader>
 
-      <SidebarContent className="px-0 py-3">
-        <NavList
-          items={mainNavigation}
-          currentPath={currentPath}
-          onClick={handleNavClick}
-          t={t}
-          showLabels={isMobile}
-        />
+      <SidebarContent className="miki-sidebar__content px-3 py-3">
+        {sidebarNavigationGroups.map((group) => {
+          const items = group.itemIds
+            .map((id) => secondaryNavigation.find((item) => item.id === id))
+            .filter((item): item is AppNavigationItem => Boolean(item))
+          if (items.length === 0) return null
+          const groupLabel = t(group.titleKey)
+          return (
+            <section
+              key={group.id}
+              className="miki-sidebar__group"
+              aria-label={groupLabel}
+            >
+              <div className="miki-sidebar__group-title">{groupLabel}</div>
+              <NavList
+                items={items}
+                currentPath={currentPath}
+                onClick={handleNavClick}
+                t={t}
+                showLabels
+              />
+            </section>
+          )
+        })}
       </SidebarContent>
 
-      <SidebarFooter className="miki-sidebar__footer border-t px-0 py-2">
-        <NavList
-          items={utilityNavigation}
-          currentPath={currentPath}
-          onClick={handleNavClick}
-          t={t}
-          showLabels={isMobile}
-        />
-      </SidebarFooter>
+      {utilityNavigation.length > 0 && (
+        <SidebarFooter className="miki-sidebar__footer border-t px-3 py-2">
+          <NavList
+            items={utilityNavigation}
+            currentPath={currentPath}
+            onClick={handleNavClick}
+            t={t}
+            showLabels
+          />
+        </SidebarFooter>
+      )}
     </Sidebar>
   )
 }

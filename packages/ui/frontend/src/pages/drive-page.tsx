@@ -71,7 +71,6 @@ import * as React from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { toast } from "sonner"
 
 import {
   type DirectoryListing,
@@ -93,6 +92,8 @@ import {
   uploadFile,
   writeFile,
 } from "@/api/files"
+import { GlobalHeaderActions } from "@/app/layout/global-header-actions"
+import { notify } from "@/lib/notify"
 import { launcherFetch } from "@/api/http"
 import { useIncrementalList } from "@/hooks/use-incremental-list"
 import { formatFileSize } from "@/lib/format"
@@ -1891,12 +1892,12 @@ export function DrivePage() {
 
   const announceSuccess = React.useCallback((message: string) => {
     setStatusMessage({ kind: "success", text: message })
-    toast.success(message)
+    notify.success(message, { id: `drive-page:success:${message}` })
   }, [])
 
   const announceError = React.useCallback((message: string) => {
     setStatusMessage({ kind: "error", text: message })
-    toast.error(message)
+    notify.error(message, { id: `drive-page:error:${message}` })
   }, [])
 
   const togglePin = React.useCallback(
@@ -2384,17 +2385,18 @@ export function DrivePage() {
         : page.path
 
   return (
-    <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden" data-miki-page="drive">
       <header
         data-miki-topbar="true"
-        className="miki-topbar border-border bg-background/96 flex h-14 shrink-0 items-center gap-2 border-b px-3"
+        data-drive-header="true"
+        className="miki-topbar border-border bg-background/96 flex h-[var(--app-topbar-height)] min-h-[var(--app-topbar-height)] shrink-0 items-center gap-2 border-b px-3"
       >
         <SidebarTrigger
           className="size-8 shrink-0 rounded-md md:hidden"
           aria-label={t("navigation.toggle_sidebar")}
           title={t("navigation.toggle_sidebar")}
         />
-        <h1 className="max-w-[min(42vw,24rem)] min-w-0 shrink truncate text-lg font-semibold">
+        <h1 className="max-w-[20vw] min-w-0 shrink truncate text-sm font-semibold sm:max-w-[min(42vw,24rem)] sm:text-base">
           {page.kind === "system" ? t("drive.system") : basename(title)}
         </h1>
         <form onSubmit={submitPath} className="min-w-[5.5rem] flex-1">
@@ -2408,6 +2410,7 @@ export function DrivePage() {
           />
         </form>
         <ToolButton
+          className="hidden sm:inline-flex"
           label={t("drive.system")}
           disabled={page.kind === "system"}
           onClick={openSystem}
@@ -2415,13 +2418,18 @@ export function DrivePage() {
           <IconArrowLeft className="size-4" />
         </ToolButton>
         <ToolButton
+          className="hidden sm:inline-flex"
           label={t("drive.actions.up")}
           disabled={page.kind === "system"}
           onClick={goUp}
         >
           <IconArrowUp className="size-4" />
         </ToolButton>
-        <ToolButton label={t("common.refresh")} onClick={refreshCurrentPage}>
+        <ToolButton
+          className="hidden sm:inline-flex"
+          label={t("common.refresh")}
+          onClick={refreshCurrentPage}
+        >
           <IconRefresh className="size-4" />
         </ToolButton>
         <DropdownMenu>
@@ -2434,7 +2442,31 @@ export function DrivePage() {
                   })
                 : t("drive.actions.label")}
             </DropdownMenuLabel>
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator className="sm:hidden" />
+            <DropdownMenuItem
+              className="sm:hidden"
+              disabled={page.kind === "system"}
+              onSelect={openSystem}
+            >
+              <IconHome className="size-4" />
+              {t("drive.system")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="sm:hidden"
+              disabled={page.kind === "system"}
+              onSelect={goUp}
+            >
+              <IconArrowUp className="size-4" />
+              {t("drive.actions.up")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="sm:hidden"
+              onSelect={refreshCurrentPage}
+            >
+              <IconRefresh className="size-4" />
+              {t("common.refresh")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="sm:hidden" />
             <DropdownMenuItem
               disabled={undoStack.length === 0}
               onSelect={() => void undoLastOperation()}
@@ -2575,6 +2607,7 @@ export function DrivePage() {
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        <GlobalHeaderActions />
         <input
           ref={fileInputRef}
           type="file"

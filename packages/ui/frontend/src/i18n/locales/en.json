@@ -13,6 +13,7 @@
     "skills": "Skills",
     "tools": "Tools",
     "monitor": "Monitor",
+    "activity": "Activity",
     "services": "Services",
     "channels_group": "Channels",
     "show_more_channels": "More",
@@ -26,7 +27,10 @@
     "toggle_sidebar": "Toggle sidebar",
     "channels": "Channels",
     "plugins": "Plugins",
-    "about": "About"
+    "about": "About",
+    "workspace_group": "Workspace",
+    "manage_group": "Manage",
+    "system_group": "System"
   },
   "launcherLogin": {
     "title": "Sign in",
@@ -35,10 +39,12 @@
     "passwordPlaceholder": "Enter password",
     "submit": "Sign in",
     "errorInvalid": "Incorrect password. Please try again.",
-    "errorNetwork": "Network error. Please try again."
+    "errorNetwork": "Network error. Please try again.",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
   },
   "launcherSetup": {
-    "title": "Set dashboard password",
+    "title": "Create password",
     "description": "Choose a password to protect access to this dashboard. You will use it every time you sign in.",
     "passwordLabel": "Password",
     "passwordPlaceholder": "At least 8 characters",
@@ -113,11 +119,15 @@
       "edit": "Edit message",
       "delete": "Delete message",
       "deleteConfirmTitle": "Delete message?",
-      "deleteConfirmDescription": "This message will be removed from the conversation.",
+      "deleteConfirmDescription": "Only this message is removed from the chat. Other messages and saved memory are left unchanged.",
       "fork": "Fork from here",
       "retry": "Retry",
       "retryUnavailable": "Connect chat before retrying",
-      "modelInfo": "Model {{model}}"
+      "rateUp": "Good answer",
+      "rateDown": "Bad answer",
+      "modelInfo": "Model {{model}}",
+      "more": "More message actions",
+      "modelLabel": "Model"
     },
     "enableCodeWrap": "Wrap lines",
     "disableCodeWrap": "Disable wrap",
@@ -211,8 +221,8 @@
       "noMemory": "Context usage will appear after the gateway reports token budget.",
       "metadata": "Agent metadata"
     },
-    "attachImage": "Add images",
-    "removeImage": "Remove image",
+    "attachImage": "Attach files",
+    "removeImage": "Remove attachment",
     "uploadedImage": "Uploaded image",
     "attachedImage": "Attached image",
     "downloadFile": "Download file",
@@ -220,6 +230,10 @@
     "invalidImage": "\"{{name}}\" is not a supported image file.",
     "imageTooLarge": "\"{{name}}\" exceeds the {{size}} limit.",
     "imageReadFailed": "Failed to read \"{{name}}\".",
+    "attachmentLimit": "You can attach up to 16 files to one message.",
+    "attachmentSlots": "Only {{count}} more file(s) can be attached.",
+    "attachmentTotalTooLarge": "Attachments must total 100 MB or less per message.",
+    "attachmentUploadFailed": "Could not upload \"{{name}}\".",
     "empty": {
       "noConfiguredModel": "No Model Configured",
       "noConfiguredModelDescription": "You need to configure at least one AI model with an API key before you can start chatting.",
@@ -234,7 +248,20 @@
       "oauth": "OAuth",
       "local": "Local"
     },
-    "assistantDetailMenuTitle": "Response details"
+    "assistantDetailMenuTitle": "Response details",
+    "delivery": {
+      "processing": "Miki is processing this request.",
+      "processingActivity": "Miki is working; this message will be read after the current step ({{activity}})."
+    },
+    "tools": {
+      "used": "Used {{count}} tools",
+      "statusRunning": "Running",
+      "statusSuccess": "All tools succeeded",
+      "failedCount": "{{count}} failed",
+      "durationMs": "{{value}} ms",
+      "durationSeconds": "{{value}} s",
+      "durationMinutes": "{{minutes}} min {{seconds}} s"
+    }
   },
   "header": {
     "logout": {
@@ -293,9 +320,11 @@
     "restartRequiredTitle": "Gateway restart required",
     "restartRequiredDesc": "The latest {{name}} configuration has been saved. Restart the gateway for it to take effect.",
     "showMore": "Show {{count}} more",
-    "showMore_plural": "Show {{count}} more",
+    "showMore_one": "Show {{count}} more",
+    "showMore_other": "Show {{count}} more",
     "showOlder": "Show {{count}} older",
-    "showOlder_plural": "Show {{count}} older"
+    "showOlder_one": "Show {{count}} older",
+    "showOlder_other": "Show {{count}} older"
   },
   "command": {
     "open": "Open command palette",
@@ -422,7 +451,8 @@
       "errorDuplicateModelName": "Model alias already exists. Please use a different name.",
       "saveError": "Failed to add model",
       "saveSuccess": "Model added.",
-      "confirm": "Add Model"
+      "confirm": "Add Model",
+      "batchSaveSuccess": "Added {{count}} models."
     },
     "delete": {
       "title": "Delete Model?",
@@ -486,13 +516,21 @@
       "retry": "Retry",
       "filterPlaceholder": "Filter models…",
       "found": "Found {{count}} model",
-      "found_plural": "Found {{count}} models",
+      "found_one": "Found {{count}} model",
+      "found_other": "Found {{count}} models",
       "shown": "({{count}} shown)",
       "selectAll": "Select All",
       "deselectAll": "Deselect All",
       "fill": "Fill {{count}} Selected Model",
-      "fill_plural": "Fill {{count}} Selected Models",
-      "failed": "Failed to fetch models"
+      "fill_one": "Fill {{count}} Selected Model",
+      "fill_other": "Fill {{count}} Selected Models",
+      "failed": "Failed to fetch models",
+      "alreadyAdded": "Already added",
+      "selectedCount": "{{count}} selected",
+      "addSelected": "Add {{count}} models",
+      "selectedModels": "Selected models",
+      "failedBadge": "Failed",
+      "removeSelected": "Remove {{model}}"
     },
     "catalog": {
       "button": "Saved Catalogs",
@@ -511,7 +549,8 @@
       "deleteSuccess": "Catalog deleted.",
       "refresh": "Refresh from upstream",
       "found": "Found {{count}} model",
-      "found_plural": "Found {{count}} models",
+      "found_one": "Found {{count}} model",
+      "found_other": "Found {{count}} models",
       "selectAll": "Select All",
       "deselectAll": "Deselect All",
       "addSelected": "Add {{count}} Selected",
@@ -559,6 +598,16 @@
       "noProvider": "No provider found.",
       "noCatalog": "Provider catalog unavailable.",
       "local": "local"
+    },
+    "local": {
+      "ggufModel": "GGUF model",
+      "llamaServer": "llama-server",
+      "browseModels": "Browse models",
+      "browseExecutable": "Browse executable",
+      "port": "Port",
+      "context": "Context",
+      "gpuLayers": "GPU layers",
+      "autoStart": "Auto-start"
     }
   },
   "channels": {
@@ -654,6 +703,7 @@
       "enableLabel": "Enable channel",
       "probeTitle": "Runtime probe",
       "probeRun": "Run probe",
+      "quickCheck": "Quick check",
       "probing": "Probing",
       "probeError": "Failed to run runtime probe",
       "probeSaveFirst": "Save changes before running the runtime probe.",
@@ -665,7 +715,37 @@
       "runtimeLive": "Live adapter is available.",
       "runtimeUnavailable": "Configuration can be saved, but no live message adapter is available for this channel.",
       "runtimeNotConfigured": "Enter the required credentials to activate this adapter.",
-      "runtimeDisconnected": "Configured, but the adapter is not connected. Check its runtime probe and gateway logs."
+      "runtimeDisconnected": "Configured, but the adapter is not connected. Check its runtime probe and gateway logs.",
+      "messagesNotDelivered": "Settings can be saved, but this channel does not yet deliver messages at runtime.",
+      "allowFromWarning": "allow_from is empty. The channel may appear connected but will ignore every sender until trusted sender IDs are added.",
+      "probeDetails": "Details",
+      "statusBlock": "Connection status",
+      "connectionConnected": "Connected",
+      "connectionConnecting": "Connecting",
+      "connectionDisabled": "Disabled",
+      "connectionError": "Connection error",
+      "connectionSavedOnly": "Settings saved; live delivery unavailable",
+      "connectionNeedsSetup": "Needs setup",
+      "credentialsTitle": "Credentials and settings",
+      "credentialsDescription": "Configure the required credentials and optional channel behavior.",
+      "probeStatus": {
+        "ready": "Ready",
+        "disabled": "Disabled",
+        "needs_config": "Needs config",
+        "auth_failed": "Auth failed",
+        "webhook_failed": "Webhook failed",
+        "rate_limited": "Rate limited",
+        "runtime_error": "Runtime error",
+        "partial": "Partial",
+        "not_implemented": "Config surface only"
+      },
+      "liveAdapterCheck": "Live adapter check",
+      "testConnection": "Test connection",
+      "lastTest": "Last test",
+      "neverTested": "Not tested yet",
+      "probeMode": "Mode: {{mode}}",
+      "probeLatency": "{{latency}}ms",
+      "sendCheck": "Send: {{status}}"
     },
     "form": {
       "desc": {
@@ -753,6 +833,31 @@
       "clientIdPlaceholder": "Auto-generated if blank",
       "secretSet": "Already configured. Leave blank to keep unchanged.",
       "secretEmpty": "Not configured"
+    },
+    "catalog": {
+      "description": "Configure a channel and check its runtime status. Credentials alone do not guarantee message delivery.",
+      "searchPlaceholder": "Search channels…",
+      "configuredCount": "{{count}}/{{total}} configured",
+      "noResults": "No channels match your search.",
+      "groups": {
+        "live": "Live",
+        "needsSetup": "Needs setup",
+        "partial": "Saved only / Partial",
+        "notConfigured": "Not configured"
+      },
+      "capabilityLiveAdapter": "Live adapter",
+      "capabilityPartial": "Partial",
+      "capabilityConfigOnly": "Config only",
+      "configure": "Configure",
+      "truthNotice": "Only channels with an implemented adapter can exchange live messages. Partial and config-only channels can save settings but do not yet provide complete message delivery."
+    },
+    "section": {
+      "credentials": "Credentials",
+      "credentialsDesc": "Required keys and tokens for this channel.",
+      "access": "Access",
+      "accessDesc": "Only the sender IDs listed here can talk to the agent.",
+      "advanced": "Advanced",
+      "advancedDesc": "Optional behavior. The defaults work for most setups."
     }
   },
   "drive": {
@@ -875,7 +980,8 @@
     "trace": {
       "title": "Trace Timeline",
       "events": "{{count}} event",
-      "events_plural": "{{count}} events"
+      "events_one": "{{count}} event",
+      "events_other": "{{count}} events"
     },
     "status": {
       "pending": "Pending",
@@ -1006,10 +1112,12 @@
       "placeholder": "Search indexed files",
       "submit": "Search",
       "resultsFound": "{{count}} result found",
-      "resultsFound_plural": "{{count}} results found",
+      "resultsFound_one": "{{count}} result found",
+      "resultsFound_other": "{{count}} results found",
       "scanning": "Scanning {{path}}",
       "roots": "{{count}} root",
-      "roots_plural": "{{count}} roots"
+      "roots_one": "{{count}} root",
+      "roots_other": "{{count}} roots"
     },
     "status": {
       "scanned": "Scanned",
@@ -1037,15 +1145,56 @@
       "title": "Memory",
       "reindex": "Reindex",
       "load_error": "Unable to load memory diagnostics.",
-      "search_title": "Selective memory search",
-      "search_description": "Search is scoped to the active runtime and returns only bounded, scored chunks.",
+      "search_title": "Memory search",
+      "search_description": "Search is scoped to the active runtime and returns bounded, scored chunks.",
       "search_placeholder": "Search remembered facts, tasks, rules, or skills…",
       "chunks_title": "Memory chunks",
       "chunks_description": "Recent active chunks grouped by functional region.",
       "inspect_title": "Chunk inspector",
-      "inspect_empty": "Select a chunk to inspect provenance and graph links.",
+      "inspect_empty": "Select a chunk to inspect its source and graph links.",
       "forget_confirm": "Forget this memory chunk? It will be excluded from future retrieval.",
-      "forgotten": "Memory chunk forgotten."
+      "forgotten": "Memory chunk forgotten.",
+      "score": "score",
+      "depth": "Depth",
+      "retry": "Try again",
+      "search_button": "Search",
+      "selected": "selected",
+      "candidates": "candidates",
+      "tokens": "tokens",
+      "milliseconds": "ms",
+      "no_search_matches": "No selective matches.",
+      "no_chunks_region": "No chunks in this region.",
+      "confidence": "Confidence",
+      "importance": "Importance",
+      "uses": "Uses",
+      "edges": "Edges",
+      "created": "Created",
+      "forget_chunk": "Forget chunk",
+      "scope_fixed_notice": "Memory is limited to the active scope. Credential values are never shown here.",
+      "search_failed": "Memory search failed.",
+      "inspect_failed": "Unable to inspect this memory chunk.",
+      "reindex_failed": "Reindex failed.",
+      "forget_failed": "Could not forget this memory chunk.",
+      "reindexed_count": "Reindexed {{count}} chunks.",
+      "metrics": {
+        "chunks": "Chunks",
+        "chunks_detail": "Active selective records",
+        "postings": "Postings",
+        "postings_detail": "Inverted index entries",
+        "edges": "Graph edges",
+        "edges_detail": "Bounded traversal links",
+        "retrievals": "Retrievals",
+        "retrievals_detail": "Diagnostic traces"
+      },
+      "regions": {
+        "all": "All",
+        "long_term": "Long-term",
+        "day_to_day": "Day-to-day",
+        "static": "Static",
+        "skill": "Skills",
+        "rule_emotion": "Rules & emotion"
+      },
+      "region_filter": "Filter by memory region"
     },
     "health": {
       "title": "Health",
@@ -1462,6 +1611,150 @@
       "waiting_gateway": "Waiting for gateway to start…",
       "no_logs": "No logs recorded yet.",
       "line_count": "{{count}} lines"
+    },
+    "activity": {
+      "title": "Activity",
+      "runningSummary": "{{count}} / {{max}} running",
+      "paused": "Paused",
+      "runningGoals": "Running goals",
+      "noRunningGoals": "No goals are running.",
+      "liveToolCalls": "Live tool calls",
+      "noToolCalls": "No tool calls yet.",
+      "screen": "Screen",
+      "capture": "Capture",
+      "autoRefresh": "Auto refresh",
+      "cronSchedules": "Scheduled tasks",
+      "cronHelp": "Use minute, hour, day, month, and weekday fields. Schedules create Miki tasks; they do not run arbitrary shell commands.",
+      "taskTitle": "Task title",
+      "cronExpression": "Cron expression",
+      "timezone": "Time zone",
+      "missedRunPolicy": "Missed-run policy",
+      "skipMissed": "Skip missed runs",
+      "runOnce": "Run once after recovery",
+      "descriptionOptional": "Description (optional)",
+      "taskPlaceholder": "Weekday morning review",
+      "descriptionPlaceholder": "What should Miki inspect or accomplish?",
+      "createSchedule": "Create schedule",
+      "noSchedules": "No scheduled tasks yet.",
+      "next": "Next",
+      "status": "Status",
+      "missed": "Missed",
+      "lastRun": "Last run",
+      "resume": "Resume",
+      "pause": "Pause",
+      "discard": "Discard",
+      "learnedRules": "Learned rules",
+      "noRules": "No rules yet. Everything is allowed until you teach Miki otherwise.",
+      "removeRule": "Remove rule {{category}}",
+      "currentScreen": "Current desktop screen",
+      "goalLabel": "Goal",
+      "statuses": {
+        "unknown": "Unknown",
+        "running": "Running",
+        "retrying": "Retrying",
+        "failed": "Failed",
+        "paused": "Paused",
+        "scheduled": "Scheduled",
+        "completed": "Completed",
+        "succeeded": "Succeeded",
+        "success": "Success",
+        "pending": "Pending",
+        "cancelled": "Cancelled",
+        "canceled": "Cancelled",
+        "blocked": "Blocked",
+        "error": "Error",
+        "waiting": "Waiting",
+        "queued": "Queued",
+        "done": "Done",
+        "active": "Active"
+      },
+      "decisions": {
+        "act": "Act",
+        "ask": "Ask first",
+        "block": "Block"
+      }
+    },
+    "monitor": {
+      "inspector": "Live activity inspector",
+      "liveInspector": "Live inspector",
+      "closeInspector": "Close activity inspector",
+      "status": "Status",
+      "duration": "Duration",
+      "started": "Started",
+      "plannerLevel": "Planner level",
+      "parallel": "Running in parallel with sibling activities",
+      "action": "Action",
+      "input": "Input",
+      "result": "Result",
+      "outputPreview": "Output preview",
+      "error": "Error",
+      "detailPending": "Activity details will appear here as Miki receives execution events.",
+      "run": "Run",
+      "node": "Node",
+      "attempt": "Attempt",
+      "openConversation": "Open conversation",
+      "noActivity": "No activity yet",
+      "noActivityDescription": "Start a task in chat to see its steps here.",
+      "openChat": "Open chat"
+    },
+    "plugins": {
+      "catalog": "Catalog",
+      "coreServices": "Core Services",
+      "healthLogs": "Health & Logs",
+      "availablePlugins": "Available plugins",
+      "availablePluginsDescription": "Browse the runtime catalog. Configuration actions open the relevant management page.",
+      "searchPlugins": "Search plugins",
+      "allCategories": "All categories",
+      "providers": "Providers",
+      "channels": "Channels",
+      "skillsTools": "Skills & tools",
+      "loadingCatalog": "Loading plugin catalog…",
+      "catalogUnavailable": "The plugin catalog is unavailable.",
+      "noPluginsMatch": "No plugins match the current filter.",
+      "retry": "Retry",
+      "moreInformation": "More information",
+      "coreServicesDescription": "Core service status reported by the runtime.",
+      "loadingCore": "Loading core services…",
+      "coreUnavailable": "Core service data is unavailable.",
+      "noCoreMetadata": "No core service metadata is available.",
+      "restartRequested": "Restart requested",
+      "restartFailed": "Restart failed",
+      "healthLogsDescription": "Live plugin health, core service health, and recent gateway logs.",
+      "restart": "Restart",
+      "loadingHealth": "Loading health and logs…",
+      "healthUnavailable": "Health data is unavailable.",
+      "noPluginHealth": "No plugin health checks reported.",
+      "services": "Services",
+      "noServiceHealth": "No service health reported.",
+      "recentLogs": "Recent logs",
+      "noRecentLogs": "No recent logs.",
+      "open": "Open",
+      "authentication": "Authentication",
+      "automation": "Automation",
+      "observability": "Observability",
+      "storage": "Storage",
+      "security": "Security",
+      "workflow": "Workflow",
+      "notifications": "Notifications",
+      "sectionNavigation": "Plugin sections",
+      "status": {
+        "functional": "Functional",
+        "enabled": "Enabled",
+        "ready": "Ready",
+        "healthy": "Healthy",
+        "pass": "Passed",
+        "partial": "Partial",
+        "config_only": "Configuration only",
+        "degraded": "Degraded",
+        "warn": "Warning",
+        "needs_config": "Needs configuration",
+        "failed": "Failed",
+        "error": "Error",
+        "blocked": "Blocked",
+        "auth_failed": "Authentication failed",
+        "runtime_error": "Runtime error",
+        "unknown": "Unknown"
+      }
     }
   }
 }

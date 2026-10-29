@@ -1,3 +1,4 @@
+import { notify } from "@/lib/notify"
 import {
   useInfiniteQuery,
   useMutation,
@@ -7,7 +8,6 @@ import {
 import { useNavigate } from "@tanstack/react-router"
 import { type UIEvent, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import {
   type SkillRegistrySearchResult,
@@ -108,19 +108,19 @@ export function useHubMarketplace() {
   const installMutation = useMutation({
     mutationFn: installSkill,
     onSuccess: (response) => {
-      toast.success(
+      notify.success(
         t("pages.agent.skills.install_success", {
           name: response.skill?.name ?? response.slug,
-        }),
+        }), { id: "use-hub-marketplace:success:pages.agent.skills.install_success" }
       )
       void queryClient.invalidateQueries({ queryKey: ["skills"] })
       void queryClient.invalidateQueries({ queryKey: ["skills-marketplace"] })
     },
     onError: (err) => {
-      toast.error(
+      notify.error(
         err instanceof Error
           ? err.message
-          : t("pages.agent.skills.install_error"),
+          : t("pages.agent.skills.install_error"), { id: "use-hub-marketplace:error:installMutation" }
       )
     },
   })

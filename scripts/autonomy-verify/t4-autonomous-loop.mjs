@@ -17,11 +17,11 @@ console.log('### T4a live loop (supervisor.start()): no user message, no goal, n
   const stub = await startStub((req) => {
     const k = kind(req)
     if (k === 'ambient') {
-      if (toolCount(req) === 0) { if (proposed) return { content: 'NO_ACTION' }; proposed = true; return { tool_calls: [{ name: 'autonomy_propose_goal', args: PROPOSAL }] } }
+      if (toolCount(req) === 0) { if (proposed) return { content: 'The report goal is already queued; nothing else to start.' }; proposed = true; return { tool_calls: [{ name: 'autonomy_propose_goal', args: PROPOSAL }] } }
       return { content: 'Queued a verified report goal.' }
     }
     if (k === 'goal') return brain(req)
-    return { content: 'NO_ACTION' }
+    return { content: 'Acknowledged.' }
   })
   const w = buildWorld({ models: model(stub.url) })
   const before = { goals: row(w.db, 'SELECT COUNT(*) c FROM pursue_goals')[0].c, tasks: row(w.db, 'SELECT COUNT(*) c FROM autonomy_task_queue')[0].c, userMsgs: row(w.db, "SELECT COUNT(*) c FROM chat_messages WHERE role='user'")[0].c }
@@ -37,7 +37,7 @@ console.log('### T4a live loop (supervisor.start()): no user message, no goal, n
   const kinds = stub.requests.reduce((a, r) => (a[r.tools.includes('autonomy_propose_goal') ? 'ambient' : r.tools.length ? 'goal' : 'other'] = (a[r.tools.includes('autonomy_propose_goal') ? 'ambient' : r.tools.length ? 'goal' : 'other'] || 0) + 1, a), {})
   console.log('model calls by phase:', j(kinds), '| total', stub.requests.length)
   console.log('heartbeat cycle:', j(row(w.db, 'SELECT probe_ok,probe_detail FROM autonomy_heartbeat_cycles ORDER BY rowid DESC LIMIT 1')))
-  console.log('notifications:', w.notes.map((n) => `[${n.kind}] ${n.text.slice(0, 90)}`))
+  console.log('notifications:', w.notes.map((n) => `[${n.kind}] ${(n.text ?? JSON.stringify(n.event ?? {})).slice(0, 90)}`))
   const report = path.join(w.workspace, 'autonomy/out/report.txt')
   console.log('artifact on disk:', fs.existsSync(report) ? JSON.stringify(fs.readFileSync(report, 'utf8')) : 'MISSING')
   console.log('runtime log:', w.logs.filter((l) => /Autonomy cycle|Proactive|provider failure|Ambient/.test(l)))
@@ -52,7 +52,7 @@ console.log('### T4a live loop (supervisor.start()): no user message, no goal, n
 // ======================= T4b: proposal tool guard rails + policy =======================
 console.log('\n### T4b proposal tool: validation, de-dup, caps; policy not weakened')
 {
-  const stub = await startStub(() => ({ content: 'NO_ACTION' }))
+  const stub = await startStub(() => ({ content: 'Acknowledged.' }))
   const w = buildWorld({ models: model(stub.url) })
   const cfg = w.supervisor.config()
   const mk = () => { const proposals = []; return { proposals, tool: w.supervisor.buildProposeGoalTool(cfg, proposals) } }

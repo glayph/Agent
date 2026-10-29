@@ -1,6 +1,11 @@
+import { useTranslation } from "react-i18next"
+
 import type { ChannelConfig } from "@/api/channels"
+import {
+  ChannelFieldCard,
+  ChannelSection,
+} from "@/features/channels/components/channel-section"
 import { Field } from "@/shared/forms/shared-form"
-import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
 import { Switch } from "@/shared/ui/switch"
 
@@ -19,10 +24,15 @@ function asBoolean(value: unknown): boolean {
 }
 
 export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
+  const { t } = useTranslation()
+
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Server"
             required
@@ -36,15 +46,6 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
             />
           </Field>
 
-          <Field label="Port" hint="IRC server port" error={fieldErrors.port}>
-            <Input
-              value={asString(config.port)}
-              onChange={(e) => onChange("port", e.target.value)}
-              placeholder="6667"
-              type="number"
-            />
-          </Field>
-
           <Field
             label="Nickname"
             required
@@ -55,6 +56,23 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
               value={asString(config.nick)}
               onChange={(e) => onChange("nick", e.target.value)}
               placeholder="Miki"
+            />
+          </Field>
+        </ChannelFieldCard>
+      </ChannelSection>
+
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <ChannelFieldCard>
+          <Field label="Port" hint="IRC server port" error={fieldErrors.port}>
+            <Input
+              value={asString(config.port)}
+              onChange={(e) => onChange("port", e.target.value)}
+              placeholder="6667"
+              type="number"
             />
           </Field>
 
@@ -107,8 +125,8 @@ export function IRCForm({ config, onChange, fieldErrors = {} }: IRCFormProps) {
               type="password"
             />
           </Field>
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }

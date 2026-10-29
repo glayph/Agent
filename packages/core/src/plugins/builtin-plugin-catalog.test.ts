@@ -57,6 +57,13 @@ describe("unified built-in plugin catalog", () => {
     ]);
   });
 
+  it("marks the Cron scheduler functional only when its persistent runtime is wired", () => {
+    expect(getBuiltinPluginManifest("scheduler.cron")).toMatchObject({
+      runtimeStatus: "functional",
+      capabilities: ["scheduler"],
+    });
+  });
+
   it("registers capability descriptors without allowing duplicate ids", () => {
     expect(builtinCapabilityRegistry.list().length).toBeGreaterThanOrEqual(15);
     expect(

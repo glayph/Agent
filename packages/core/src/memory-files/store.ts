@@ -134,6 +134,8 @@ export interface MemoryFileInfo {
 }
 
 export class MemoryFileStore {
+  private listing?: Promise<MemoryFileInfo[]>;
+
   constructor(readonly paths: MemoryPaths) {}
 
   // ---- planning (pure) ---------------------------------------------------
@@ -272,8 +274,94 @@ export class MemoryFileStore {
     }
   }
 
-  /** USER.md, MEMORY.md plus every markdown file under memory/ (recursive). */
+  /**
+   * USER.md, MEMORY.md plus every markdown file under memory/ (recursive).
+   * Concurrent callers share one filesystem walk; results are fresh per walk,
+   * so this coalesces duplicate work without introducing a stale-file cache.
+   */
   async listFiles(): Promise<MemoryFileInfo[]> {
+    if (this.listing) return (await this.listing).map((file) => ({ ...file }));
+    const pending = this.collectFiles();
+    this.listing = pending;
+    try {
+      return (await pending).map((file) => ({ ...file }));
+    } finally {
+      if (this.listing === pending) this.listing = undefined;
+    }
+  }
+
+  /**
+   * List only date-prefixed notes inside the active retention window.
+   * Prompt context needs recent note digests, not a full walk/stat of the whole
+   * archive on every turn. Full indexing/search continues to use listFiles().
+   */
+  async listRecentFiles(cutoff: Date): Promise<MemoryFileInfo[]> {
+    const out: MemoryFileInfo[] = [];
+    const cutoffMs = new Date(cutoff.getFullYear(), cutoff.getMonth(), cutoff.getDate()).getTime();
+    const datePrefix = /^(\d{4})-(\d{2})-(\d{2})/;
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const abs = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          const name = entry.name.toLowerCase();
+          if (depth < 3 && name !== "compactions" && name !== "legacy-import")
+            await walk(abs, depth + 1);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue;
+        const match = datePrefix.exec(entry.name);
+        if (!match) continue;
+        const dateMs = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime();
+        if (!Number.isFinite(dateMs) || dateMs < cutoffMs) continue;
+        try {
+          const safeAbs = await resolveMemoryFile(this.paths, abs);
+          if (!safeAbs) continue;
+          const st = await fs.promises.stat(safeAbs);
+          if (!st.isFile()) continue;
+          out.push({
+            abs: safeAbs,
+            rel: path.relative(this.paths.root, abs).split(path.sep).join("/"),
+            mtimeMs: st.mtimeMs,
+            size: st.size,
+          });
+        } catch {
+          /* A note can disappear while the index is being assembled. */
+        }
+      }
+    };
+    await walk(this.paths.dailyDir, 0);
+    return out;
+  }
+
+  /** Fast metadata check for the two trust-bearing root files; does not walk daily notes. */
+  async listTrustFiles(): Promise<MemoryFileInfo[]> {
+    const out: MemoryFileInfo[] = [];
+    for (const abs of [this.paths.userMd, this.paths.memoryMd]) {
+      try {
+        const safeAbs = await resolveMemoryFile(this.paths, abs);
+        if (!safeAbs) continue;
+        const st = await fs.promises.stat(safeAbs);
+        if (!st.isFile()) continue;
+        out.push({
+          abs: safeAbs,
+          rel: path.relative(this.paths.root, abs).split(path.sep).join("/"),
+          mtimeMs: st.mtimeMs,
+          size: st.size,
+        });
+      } catch {
+        /* missing is fine */
+      }
+    }
+    return out;
+  }
+
+  private async collectFiles(): Promise<MemoryFileInfo[]> {
     const out: MemoryFileInfo[] = [];
     const push = async (abs: string) => {
       try {

@@ -1,4 +1,5 @@
 import { IconLoader2, IconPlus } from "@tabler/icons-react"
+import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 
 import { PageHeader } from "@/app/layout/page-header"
@@ -15,11 +16,16 @@ import { SkillsList } from "./skills-list"
 import { Stats } from "./stats"
 import { useSkillsPage } from "./use-skills-page"
 
+/** Picks the view first; each view owns its hooks so none run after a conditional return. */
 export function SkillsPage() {
-  const { t } = useTranslation()
   if (new URLSearchParams(globalThis.location.search).get("view") === "discover") {
     return <HubPage />
   }
+  return <SkillsListView />
+}
+
+function SkillsListView() {
+  const { t } = useTranslation()
   const {
     searchQuery,
     sourceFilter,
@@ -67,13 +73,13 @@ export function SkillsPage() {
   } = useSkillsPage()
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-miki-page="skills">
       <PageHeader
         title={t("navigation.skills")}
         children={
           <>
             <Button asChild variant="outline" size="sm">
-              <a href="/agent/skills?view=discover">Discover skills</a>
+              <Link to="/agent/skills" search={{ view: "discover" }}>Discover skills</Link>
             </Button>
             <input
               ref={importInputRef}
@@ -105,7 +111,7 @@ export function SkillsPage() {
         }
       />
 
-      <div className="flex-1 overflow-auto px-6 py-6">
+      <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6" data-miki-page-body="true">
         <div className="w-full max-w-6xl space-y-8">
           {statusMessage && (
             <div

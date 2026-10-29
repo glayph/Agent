@@ -58,11 +58,30 @@ describe("createFetchLLMClient", () => {
 });
 
 describe("createRegistryLLMClient", () => {
-  it("passes tools through the provider registry's extra options", async () => {
+  it("passes tools, generation settings, and streaming through the provider registry", async () => {
     const complete = jest.fn(async () => okBody);
     const client = createRegistryLLMClient({ complete } as never, "gemini-flash");
-    await client.complete([{ role: "user", content: "a" }], { tools: [{ type: "function", function: { name: "t", description: "d", parameters: {} } }], json: true });
-    expect(complete).toHaveBeenCalledWith("gemini-flash", expect.any(Array), expect.objectContaining({ extra: expect.objectContaining({ tool_choice: "auto", response_format: { type: "json_object" } }) }));
+    const onTextDelta = jest.fn();
+    await client.complete([{ role: "user", content: "a" }], {
+      tools: [{ type: "function", function: { name: "t", description: "d", parameters: {} } }],
+      json: true,
+      temperature: 0.15,
+      maxCompletionTokens: 512,
+      thinkingLevel: "low",
+      onTextDelta,
+    });
+    expect(complete).toHaveBeenCalledWith("gemini-flash", expect.any(Array), expect.objectContaining({
+      extra: expect.objectContaining({
+        tool_choice: "auto",
+        response_format: { type: "json_object" },
+        temperature: 0.15,
+        max_completion_tokens: 512,
+        thinking_level: "low",
+      }),
+      onTextDelta: undefined,
+    }));
+    await client.complete([{ role: "user", content: "stream me" }], { onTextDelta });
+    expect(complete).toHaveBeenLastCalledWith("gemini-flash", expect.any(Array), expect.objectContaining({ onTextDelta }));
   });
 });
 

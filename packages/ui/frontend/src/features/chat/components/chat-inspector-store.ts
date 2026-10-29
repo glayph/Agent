@@ -1,14 +1,6 @@
 import { atom } from "jotai"
 
-export type ChatInspectorPage =
-  | "overview"
-  | "response"
-  | "thoughts"
-  | "work"
-  | "artifacts"
-  | "evidence"
-  | "events"
-  | "voice"
+export type ChatInspectorPage = "overview" | "execution" | "outputs" | "timeline"
 
 export interface ChatInspectorSelection {
   chatId: string

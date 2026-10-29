@@ -3,6 +3,9 @@ import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 import { ConfigPage } from "@/pages/config-page"
 
 export const Route = createFileRoute("/config")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: search.view === "raw" ? "raw" as const : undefined,
+  }),
   component: ConfigLayout,
 })
 

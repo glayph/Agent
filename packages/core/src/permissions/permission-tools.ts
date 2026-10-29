@@ -26,7 +26,7 @@ export function createPermissionTools(ledger: PermissionLedger = getPermissionLe
     {
       name: "permission_learn",
       description:
-        "Record what the user has taught about acting on its own. Use decision=ask when the user wants to be asked before a kind of action, including after a mistake. Use decision=act when the user says to just do it. The most specific rule wins. Keep the user's words in note.",
+        "Record what the user has taught about acting on its own. Use decision=ask when the user wants to be asked before a kind of action, including after a mistake. Use decision=act when the user says to just do it. Use decision=block only when the user says a kind of action must never be done. The most specific rule wins. Keep the user's words in note.",
       risk: "config_write",
       approval: "auto",
       parameters: {
@@ -36,13 +36,13 @@ export function createPermissionTools(ledger: PermissionLedger = getPermissionLe
         properties: {
           category: CATEGORY_SCHEMA,
           match: MATCH_SCHEMA,
-          decision: { type: "string", enum: ["ask", "act"] },
+          decision: { type: "string", enum: ["ask", "act", "block"] },
           note: { type: "string" },
         },
       },
       async execute(input) {
         const decision = input.decision;
-        if (decision !== "ask" && decision !== "act") throw new Error('"decision" must be "ask" or "act".');
+        if (decision !== "ask" && decision !== "act" && decision !== "block") throw new Error('"decision" must be "ask", "act" or "block".');
         const rule = ledger.learn({
           category: requiredText(input.category, "category"),
           match: optionalText(input.match),

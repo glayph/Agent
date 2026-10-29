@@ -148,3 +148,10 @@ packages/core/
 - `task-store.ts` persists that lifecycle in SQLite (`miki_tasks` and `miki_task_events`) with transactional transition history, optimistic version checks, worker leases, claim, and expired-lease recovery; the gateway initializes the schema at startup.
 - `task-worker.ts` provides the reusable lease-aware worker loop: claim polling, expired-lease recovery, heartbeat renewal, handler result verification, retry-on-error, and clean shutdown. The autonomous supervisor still has a legacy queue adapter to migrate next.
 - `autonomous-supervisor.ts` now mirrors its scheduled queue into the unified durable task tables, preserving legacy scheduling while exposing versioned lifecycle events and durable lease recovery.
+
+## Chat steering and conversation serialization
+
+- `AgentEngine.steer()` timestamps and queues user messages. With `agents.defaults.steer_interrupt` enabled (the default), a message aborts only the active LLM completion; the run's own cancellation signal remains independent. The discarded streamed draft is retracted, then steering messages are added to the next model request with numbered timestamps.
+- A tool already running is allowed to finish. Before each not-yet-started tool call, the engine checks the steering inbox and records skipped calls with an instruction to repeat the operation if still needed.
+- `ChatTurnRunner` acquires a shared `KeyedLane` by conversation before registering a new active run. Messages that can be steered into the active run are delivered there; otherwise they stay queued until the lane is available.
+- If a run fails or reaches its execution limit, unread steered messages are queued for one carryover run each. Explicit user cancellation excludes them from carryover. The chat UI shows a processing label and the current activity for a steered message that is waiting to be read.

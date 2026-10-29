@@ -33,6 +33,47 @@ export interface GoalAcceptanceResult {
 }
 
 const DEFAULT_ACCEPTANCE_BUDGET_MS = 15_000;
+const ACCEPTANCE_CHECK_TYPES = new Set([
+  "final_text_contains", "final_text_regex", "file_exists", "file_contains", "http_status", "tool_called",
+]);
+
+/** Validate persisted/user-provided contracts before an autonomous run can have side effects. */
+export function isGoalAcceptanceContract(value: unknown): value is GoalAcceptanceContract {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as { mode?: unknown; checks?: unknown };
+  if (candidate.mode !== undefined && candidate.mode !== "all" && candidate.mode !== "any") return false;
+  if (!Array.isArray(candidate.checks) || candidate.checks.length === 0 || candidate.checks.length > 25) return false;
+  // Final model text is not independent proof that the requested work occurred.
+  // Require at least one artifact, HTTP response, or successfully observed tool call.
+  const hasIndependentEvidence = candidate.checks.some((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const type = (raw as Record<string, unknown>).type;
+    return type === "file_exists" || type === "file_contains" || type === "http_status" || type === "tool_called";
+  });
+  if (!hasIndependentEvidence) return false;
+  return candidate.checks.every((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const check = raw as Record<string, unknown>;
+    if (typeof check.type !== "string" || !ACCEPTANCE_CHECK_TYPES.has(check.type)) return false;
+    switch (check.type) {
+      case "final_text_contains":
+        return typeof check.text === "string" && check.text.trim().length > 0;
+      case "final_text_regex":
+        if (typeof check.pattern !== "string" || !check.pattern) return false;
+        try { new RegExp(check.pattern, typeof check.flags === "string" ? check.flags : undefined); return true; } catch { return false; }
+      case "file_exists":
+        return typeof check.path === "string" && check.path.trim().length > 0;
+      case "file_contains":
+        return typeof check.path === "string" && check.path.trim().length > 0 && typeof check.text === "string" && check.text.length > 0;
+      case "http_status":
+        return typeof check.url === "string" && /^https?:\/\//i.test(check.url) && (check.expectedStatus === undefined || (Number.isInteger(check.expectedStatus) && Number(check.expectedStatus) >= 100 && Number(check.expectedStatus) <= 599));
+      case "tool_called":
+        return typeof check.name === "string" && check.name.trim().length > 0 && check.status === "succeeded";
+      default:
+        return false;
+    }
+  });
+}
 
 function safeRelative(root: string, requested: string): string {
   const normalizedRoot = path.resolve(root);
@@ -51,8 +92,8 @@ export async function verifyGoalAcceptance(
   context: GoalAcceptanceContext,
   maxDurationMs = DEFAULT_ACCEPTANCE_BUDGET_MS,
 ): Promise<GoalAcceptanceResult> {
-  if (!contract || !Array.isArray(contract.checks) || contract.checks.length === 0) {
-    return { passed: false, reason: "No deterministic Goal Acceptance Contract is configured.", checks: [] };
+  if (!contract || !isGoalAcceptanceContract(contract)) {
+    return { passed: false, reason: "No deterministic Goal Acceptance Contract with valid independent evidence is configured.", checks: [] };
   }
   const checks: GoalAcceptanceResult["checks"] = [];
   const deadline = Date.now() + Math.max(0, Math.min(120_000, Math.floor(maxDurationMs)));
@@ -105,7 +146,11 @@ export async function verifyGoalAcceptance(
     }
   }
   const mode = contract.mode ?? "all";
-  const passed = mode === "any" ? checks.some((item) => item.passed) : checks.length > 0 && checks.every((item) => item.passed);
+  const independentTypes = new Set(["file_exists", "file_contains", "http_status", "tool_called"]);
+  const independentEvidencePassed = checks.some((item) => independentTypes.has(item.type) && item.passed);
+  const modePassed = mode === "any" ? checks.some((item) => item.passed) : checks.length > 0 && checks.every((item) => item.passed);
+  // Text-only success can never override failed artifact / tool / HTTP evidence, even in `any` mode.
+  const passed = modePassed && independentEvidencePassed;
   return {
     passed,
     reason: passed ? `Acceptance contract passed (${mode} mode).` : `Acceptance contract failed (${mode} mode).`,

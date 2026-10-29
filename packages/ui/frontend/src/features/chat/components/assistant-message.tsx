@@ -10,13 +10,18 @@ import {
 } from "@tabler/icons-react"
 import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
 import { AttachmentCard } from "@/features/chat/components/attachment-card"
 import { LinkPreviewCards } from "@/features/chat/components/link-preview-cards"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
+import { useMessageActionLabels } from "@/features/chat/components/use-message-action-labels"
 import { MessageCodeBlock } from "@/features/chat/components/message-code-block"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
+import { ToolStatusMark } from "@/features/chat/components/tool-status-mark"
+import {
+  formatToolDuration,
+  summarizeToolCalls,
+} from "@/features/chat/tool-calls"
 import { cn } from "@/lib/utils"
 import { Button } from "@/shared/ui/button"
 import {
@@ -32,6 +37,7 @@ interface AssistantMessageProps {
   content: string
   isStreaming?: boolean
   selected?: boolean
+  subtleActions?: boolean
   onSelect?: () => void
   attachments?: ChatAttachment[]
   kind?: AssistantMessageKind
@@ -46,6 +52,7 @@ interface AssistantMessageProps {
   onDelete?: () => void
   onFork?: () => void
   onRetry?: () => void
+  onInspect?: () => void
 }
 
 const EMPTY_ATTACHMENTS: ChatAttachment[] = []
@@ -111,6 +118,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   content,
   isStreaming = false,
   selected = false,
+  subtleActions = false,
   onSelect,
   attachments = EMPTY_ATTACHMENTS,
   kind = "normal",
@@ -125,8 +133,10 @@ export const AssistantMessage = memo(function AssistantMessage({
   onDelete,
   onFork,
   onRetry,
+  onInspect,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
+  const actionLabels = useMessageActionLabels()
   const isThought = kind === "thought"
   const isToolCalls = kind === "tool_calls"
   const isActionUpdate = kind === "action_update"
@@ -137,6 +147,11 @@ export const AssistantMessage = memo(function AssistantMessage({
   const translatedSystemError = errorCode ? t(`chat.errors.codes.${errorCode}`, { defaultValue: t("chat.errors.genericTitle", { defaultValue: "Something went wrong" }) }) : trimmedContent
   const hasText = trimmedContent.length > 0
   const hasToolCalls = toolCalls.length > 0
+  const toolSummary = useMemo(() => summarizeToolCalls(toolCalls), [toolCalls])
+  const toolDuration =
+    toolSummary.totalDurationMs === undefined
+      ? ""
+      : formatToolDuration(toolSummary.totalDurationMs, t)
   const imageAttachments = useMemo(
     () => attachments.filter((attachment) => attachment.type === "image"),
     [attachments],
@@ -254,7 +269,22 @@ export const AssistantMessage = memo(function AssistantMessage({
                       aria-hidden="true"
                     />
                   )}
-                  <span>{collapsedLabel}</span>
+                  <span>
+                    {isToolCalls && hasToolCalls
+                      ? t("chat.tools.used", {
+                          count: toolCalls.length,
+                          defaultValue: "Used {{count}} tools",
+                        })
+                      : collapsedLabel}
+                  </span>
+                  {isToolCalls && hasToolCalls && toolSummary.hasStatus && (
+                    <ToolStatusMark summary={toolSummary} />
+                  )}
+                  {isToolCalls && hasToolCalls && toolDuration && (
+                    <span className="text-muted-foreground/60 text-[12px] font-normal tabular-nums">
+                      {toolDuration}
+                    </span>
+                  )}
                   {trimmedModelName && (
                     <span className="text-muted-foreground/45">
                       {trimmedModelName}
@@ -278,7 +308,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             {(!isCollapsedBlock || isExpanded) &&
               isToolCalls &&
               hasToolCalls && (
-                <div className="flex flex-col gap-1.5 px-2.5 pt-0 pb-2">
+                <div className="flex flex-col gap-0 px-2.5 pt-0 pb-1">
                   {toolCalls.map((toolCall, index) => {
                     const explanation =
                       toolCall.extraContent?.toolFeedbackExplanation?.trim() ??
@@ -296,16 +326,16 @@ export const AssistantMessage = memo(function AssistantMessage({
                       <div
                         key={toolCall.id ?? `${toolName}-${index}`}
                         className={cn(
-                          "flex flex-col gap-3",
-                          index > 0 && "pt-3",
+                          "flex flex-col gap-1",
+                          index > 0 && "border-border/30 border-t",
                         )}
                       >
                         {explanation && (
-                          <div className="flex flex-col gap-1.5">
+                          <div className="flex flex-col gap-1">
                             <div className="text-muted-foreground/55 text-[10px] font-medium tracking-wide uppercase">
                               {t("chat.toolCallExplanationLabel")}
                             </div>
-                            <div className="prose dark:prose-invert prose-p:my-1 prose-p:whitespace-pre-wrap max-w-none text-[12px] leading-5 [overflow-wrap:anywhere] break-words opacity-75">
+                            <div className="prose dark:prose-invert prose-p:my-0 prose-p:whitespace-pre-wrap max-w-none text-[12px] leading-5 [overflow-wrap:anywhere] break-words opacity-75">
                               <Suspense
                                 fallback={
                                   <span className="animate-pulse opacity-50">
@@ -321,15 +351,12 @@ export const AssistantMessage = memo(function AssistantMessage({
 
                         {hasFunctionSummary && (
                           <div
-                            className={cn(
-                              "flex flex-col gap-1.5",
-                              explanation && "pt-3",
-                            )}
+                            className="flex flex-col gap-1"
                           >
                             <div className="text-muted-foreground/55 text-[11px] font-medium tracking-wide uppercase">
                               {t("chat.toolCallFunctionLabel")}
                             </div>
-                            <div className="bg-background/45 flex flex-col gap-2 rounded-md px-2.5 py-2">
+                            <div className="bg-background/45 flex flex-col gap-1 rounded-md px-2 py-1.5">
                               {toolName && !toolArguments && (
                                 <div className="text-foreground/75 font-mono text-[12px] font-semibold">
                                   {toolName}
@@ -459,7 +486,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                   className={cn(
                     "prose dark:prose-invert prose-headings:mt-3 prose-headings:mb-1.5 prose-headings:text-[0.95em] prose-headings:font-semibold prose-li:my-0.5 prose-ol:my-2 prose-ul:my-2 prose-p:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted/50 prose-pre:p-0 prose-pre:text-foreground prose-table:my-3 relative max-w-none [overflow-wrap:anywhere] break-words",
                     isThought
-                      ? "prose-p:my-1 prose-p:whitespace-pre-wrap py-0 text-[13px] leading-6 opacity-70"
+                      ? "prose-p:my-0 prose-p:whitespace-pre-wrap py-0 text-[13px] leading-6 opacity-70"
                     : "prose-p:whitespace-pre-wrap py-0 text-[13px] [line-height:1.4rem]",
                     isError && "text-[13px] opacity-90",
                   )}
@@ -482,28 +509,19 @@ export const AssistantMessage = memo(function AssistantMessage({
         {!isCollapsedBlock && !isActionUpdate && hasText && (
           <MessageActionBar
             content={content}
+            labels={actionLabels}
+            modelName={trimmedModelName || undefined}
             align="start"
-            copyLabel={t("chat.copyMessage")}
-            copiedLabel={t("chat.copiedLabel")}
-            editLabel={t("chat.actions.edit", { defaultValue: "Edit message" })}
-            retryLabel={t("chat.actions.retry", { defaultValue: "Retry" })}
-            retryDisabledLabel={t("chat.actions.retryUnavailable", { defaultValue: "Connect chat before retrying" })}
-            deleteLabel={t("chat.actions.delete", { defaultValue: "Delete message" })}
-            deleteConfirmTitle={t("chat.actions.deleteConfirmTitle", { defaultValue: "Delete message?" })}
-            deleteConfirmDescription={t("chat.actions.deleteConfirmDescription", { defaultValue: "This message will be removed from the conversation." })}
-            deleteConfirmCancelLabel={t("common.cancel")}
-            deleteConfirmActionLabel={t("chat.actions.delete", { defaultValue: "Delete message" })}
-            forkLabel={t("chat.actions.fork", { defaultValue: "Fork from here" })}
-            canRetry={canRetry}
             placement="inline"
             className="mt-1"
-            visible={selected}
+            visible={selected || subtleActions}
+            subtle={subtleActions && !selected}
+            canRetry={canRetry}
             onEdit={onEdit}
             onDelete={onDelete}
             onFork={onFork}
-            onRetry={canRetry ? onRetry : undefined}
-            inspectorLabel={t("chat.actions.inspect", { defaultValue: "Inspect agent" })}
-            modelLabel={trimmedModelName ? t("chat.actions.modelInfo", { defaultValue: `Model ${trimmedModelName}`, model: trimmedModelName }) : undefined}
+            onRetry={onRetry}
+            onInspect={onInspect}
           />
         )}
         </>

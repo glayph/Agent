@@ -308,9 +308,9 @@ const capabilities: Seed[] = [
     id: "scheduler.cron",
     name: "Scheduler",
     capability: "scheduler",
-    status: "config_only",
+    status: "functional",
     description:
-      "Scheduled and background task triggers; runtime wiring is pending.",
+      "Persistent one-shot, interval, and five-field Cron schedules wired to the autonomous supervisor, timezone-aware due calculation, misfire policy, and authenticated schedule management APIs.",
   },
   {
     id: "integration.platform-connections",

@@ -1,6 +1,7 @@
 import { IconLoader2 } from "@tabler/icons-react"
 import type { ReactNode } from "react"
 
+import { GlobalHeaderActions } from "@/app/layout/global-header-actions"
 import { cn } from "@/lib/utils"
 import { SidebarTrigger } from "@/shared/ui/sidebar"
 
@@ -131,6 +132,7 @@ export function WorkspaceHeader({
           </button>
         )}
         {controls}
+        <GlobalHeaderActions />
       </div>
     </header>
   )

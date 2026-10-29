@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { modelRetryDelayMs, retryModelCall, sleepUnlessAborted } from "./model-retry.js";
 
-const CYCLE = [1000, 2000, 4000, 8000, 16000];
+const CYCLE = [2000, 4000, 8000, 12000];
 
 describe("model retry delays", () => {
-  it("waits 1s, 2s, 4s, 8s, 16s and then starts the cycle again at 1s", () => {
+  it("waits 2s, 4s, 8s, 12s and then starts the cycle again at 2s", () => {
     const delays = Array.from({ length: 12 }, (_, index) => modelRetryDelayMs(index));
-    expect(delays).toEqual([...CYCLE, ...CYCLE, 1000, 2000]);
+    expect(delays).toEqual([...CYCLE, ...CYCLE, ...CYCLE]);
   });
 
   it("treats an invalid index as the first retry", () => {
-    expect(modelRetryDelayMs(-3)).toBe(1000);
-    expect(modelRetryDelayMs(Number.NaN)).toBe(1000);
+    expect(modelRetryDelayMs(-3)).toBe(2000);
+    expect(modelRetryDelayMs(Number.NaN)).toBe(2000);
   });
 });
 
@@ -40,7 +40,7 @@ describe("retryModelCall", () => {
     });
     expect(outcome).toEqual({ result: "fail", stopped: false });
     expect(calls).toBe(6);
-    expect(waits).toEqual(CYCLE);
+    expect(waits).toEqual([...CYCLE, 2000]);
   });
 
   it("supports disabling retries explicitly", async () => {
@@ -79,7 +79,7 @@ describe("retryModelCall", () => {
       signal: new AbortController().signal,
       sleep: async () => {},
     });
-    expect(events).toEqual(["attempt1", "retry1:1000", "resumed", "attempt2", "retry2:2000", "resumed", "attempt3"]);
+    expect(events).toEqual(["attempt1", "retry1:2000", "resumed", "attempt2", "retry2:4000", "resumed", "attempt3"]);
   });
 
   it("stops at once when the turn is stopped during a wait", async () => {

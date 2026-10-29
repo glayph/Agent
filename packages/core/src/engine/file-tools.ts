@@ -1,14 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { EngineTool } from "./types.js";
-import { isSensitivePath, resolveWorkspacePath } from "./workspace-paths.js";
+import { resolveWorkspacePath } from "./workspace-paths.js";
 import { FileRunError, runWorkspaceFile, supportedRunExtensions } from "./file-runner.js";
 import { errorMessage } from "./util.js";
 
-const MAX_TREE_ENTRIES = 5_000;
-const MAX_TREE_BYTES = 200 * 1024 * 1024;
-const MAX_TREE_DEPTH = 24;
-const MAX_READ_BYTES = 1_000_000;
+const DEFAULT_TREE_ENTRIES = Number.POSITIVE_INFINITY;
+const DEFAULT_TREE_BYTES = Number.POSITIVE_INFINITY;
+const DEFAULT_TREE_DEPTH = Number.POSITIVE_INFINITY;
+const DEFAULT_READ_BYTES = Number.MAX_SAFE_INTEGER;
 
 export interface FileToolsOptions {
   root: string | (() => string);
@@ -16,6 +16,11 @@ export interface FileToolsOptions {
   /** Kill switch for execution; evaluated on every call so it can be toggled at runtime. */
   executionEnabled?: () => boolean;
   allowNativeExecution?: boolean;
+  /** Optional per-operation safety caps. Unset means no artificial size/count cap. */
+  maxTreeEntries?: number;
+  maxTreeBytes?: number;
+  maxTreeDepth?: number;
+  maxReadBytes?: number;
   /** Called after each execution so the host can keep an audit trail. */
   onRun?: (entry: { file: string; args: string[]; status: string; exitCode: number | null; durationMs: number; runId: string }) => void;
 }
@@ -32,21 +37,21 @@ function validName(name: string): string {
 }
 
 /** Walk a tree, refusing symlinks, and enforce size/entry/depth budgets before anything is copied. */
-function measureTree(source: string): { entries: number; bytes: number } {
+function measureTree(source: string, limits: { entries: number; bytes: number; depth: number }): { entries: number; bytes: number } {
   let entries = 0;
   let bytes = 0;
   const walk = (current: string, depth: number) => {
-    if (depth > MAX_TREE_DEPTH) throw new Error("Directory tree is nested too deeply.");
+    if (depth > limits.depth) throw new Error(`Directory tree exceeds configured depth limit (${limits.depth}).`);
     const stat = fs.lstatSync(current);
     entries += 1;
-    if (entries > MAX_TREE_ENTRIES) throw new Error(`Tree has more than ${MAX_TREE_ENTRIES} entries.`);
+    if (entries > limits.entries) throw new Error(`Tree exceeds configured entry limit (${limits.entries}).`);
     if (stat.isDirectory()) {
       for (const name of fs.readdirSync(current)) walk(path.join(current, name), depth + 1);
     } else if (stat.isFile()) {
       bytes += stat.size;
-      if (bytes > MAX_TREE_BYTES) throw new Error("Tree is larger than the 200 MB limit.");
+      if (bytes > limits.bytes) throw new Error(`Tree exceeds configured byte limit (${limits.bytes}).`);
     } else {
-      throw new Error("Special filesystem entries are not supported.");
+      throw new Error("Symbolic links and other special filesystem entries are not supported.");
     }
   };
   walk(source, 0);
@@ -74,6 +79,12 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       : options.restrictToWorkspace !== false;
   const rel = (abs: string) => path.relative(getRoot(), abs) || ".";
   const executionOn = () => options.executionEnabled?.() ?? true;
+  const treeLimits = {
+    entries: options.maxTreeEntries ?? DEFAULT_TREE_ENTRIES,
+    bytes: options.maxTreeBytes ?? DEFAULT_TREE_BYTES,
+    depth: options.maxTreeDepth ?? DEFAULT_TREE_DEPTH,
+  };
+  const maxReadBytes = options.maxReadBytes ?? DEFAULT_READ_BYTES;
 
   const resolve = (input: unknown, name = "path"): string => {
     const root = getRoot();
@@ -85,7 +96,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         : path.resolve(root, raw);
     return abs;
   };
-  const notRoot = (abs: string) => {
+  const notRoot = (_abs: string) => {
     const root = getRoot();
     void root; // the workspace root may be modified
   };
@@ -107,7 +118,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
     if (!fs.existsSync(path.dirname(target))) throw new Error("Destination folder does not exist.");
     if (target === source || target.startsWith(`${source}${path.sep}`))
       throw new Error("A folder cannot be moved or copied into itself.");
-    measureTree(source);
+    measureTree(source, treeLimits);
     if (mode === "copy") copyTree(source, target);
     else fs.renameSync(source, target);
     return { from: rel(source), to: rel(target) };
@@ -130,7 +141,8 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         const info = fs.statSync(file);
         if (!info.isFile()) throw new Error("Path is not a file.");
         const offset = Math.max(0, Number(input.offset ?? 0));
-        const limit = Math.min(MAX_READ_BYTES, Math.max(1, Number(input.maxBytes ?? MAX_READ_BYTES)));
+        const requested = Number(input.maxBytes ?? maxReadBytes);
+        const limit = Math.min(maxReadBytes, Math.max(1, Number.isFinite(requested) ? requested : maxReadBytes));
         const fd = fs.openSync(file, "r");
         try {
           const buffer = Buffer.alloc(Math.min(limit, Math.max(0, info.size - offset)));
@@ -245,7 +257,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         const stat = fs.lstatSync(abs);
         if (stat.isDirectory() && !stat.isSymbolicLink()) {
           if (input.recursive !== true) throw new Error("recursive=true is required to delete a folder.");
-          const { entries } = measureTree(abs);
+          const { entries } = measureTree(abs, treeLimits);
           fs.rmSync(abs, { recursive: true });
           return { path: rel(abs), deleted: true, entriesRemoved: entries };
         }

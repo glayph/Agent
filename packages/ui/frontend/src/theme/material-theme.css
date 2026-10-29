@@ -1,13 +1,12 @@
 /* =============================================================================
-   MIKI DESIGN TOKEN SYSTEM — "Kimi Dark" (Material Design 3 Dark + Glassmorphism)
-   Deep black/graphite surfaces · cool blue accent · pill-shaped controls
-   Glass headers/cards · soft glow states · 8px-aligned spacing
+   MIKI DESIGN TOKENS — Material Design 3
+   Neutral light and graphite dark surfaces, cool blue accent, compact controls.
    ============================================================================= */
 
 @theme inline {
   /* Primary — cool blue accent */
   --md-sys-color-primary: #4a9eff;
-  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-on-primary: #041e49;
   --md-sys-color-primary-container: #1b3a5c;
   --md-sys-color-on-primary-container: #cfe6ff;
 
@@ -25,7 +24,7 @@
 
   /* Error — clear failure red */
   --md-sys-color-error: #ff5252;
-  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-on-error: #3b0000;
   --md-sys-color-error-container: #3f1414;
   --md-sys-color-on-error-container: #ffd4d4;
 
@@ -145,7 +144,7 @@
    ============================================================================= */
 .dark {
   --md-sys-color-primary: #4a9eff;
-  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-on-primary: #041e49;
   --md-sys-color-primary-container: #1b3a5c;
   --md-sys-color-on-primary-container: #cfe6ff;
 
@@ -160,7 +159,7 @@
   --md-sys-color-on-tertiary-container: #9e9e9e;
 
   --md-sys-color-error: #ff5252;
-  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-on-error: #3b0000;
   --md-sys-color-error-container: #3f1414;
   --md-sys-color-on-error-container: #ffd4d4;
 
@@ -197,6 +196,58 @@
   --md-sys-elevation-4: 0 8px 32px rgba(0, 0, 0, 0.6);
   --md-sys-elevation-5: 0 12px 40px rgba(0, 0, 0, 0.65);
   --md-sys-elevation-glow: 0 0 20px var(--md-sys-color-primary-glow);
+}
+
+/* =============================================================================
+   LIGHT MODE — clear neutral workspace
+   The dark class keeps the graphite palette above. In default/light mode,
+   surfaces and text use a separate high-contrast palette instead of inheriting
+   the dark defaults from the design-token declaration.
+   ============================================================================= */
+:root:not(.dark) {
+  --md-sys-color-primary: #2458b8;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #dce7ff;
+  --md-sys-color-on-primary-container: #10234c;
+
+  --md-sys-color-secondary: #526071;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #e0e6f0;
+  --md-sys-color-on-secondary-container: #202833;
+
+  --md-sys-color-tertiary: #655a79;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #eee5ff;
+  --md-sys-color-on-tertiary-container: #251b39;
+
+  --md-sys-color-error: #b3261e;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #f9dedc;
+  --md-sys-color-on-error-container: #410e0b;
+
+  --md-sys-color-background: #f7f8fb;
+  --md-sys-color-on-background: #191c20;
+  --md-sys-color-surface: #ffffff;
+  --md-sys-color-on-surface: #191c20;
+  --md-sys-color-surface-variant: #e7eaf0;
+  --md-sys-color-on-surface-variant: #444b56;
+  --md-sys-color-outline: #777e89;
+  --md-sys-color-outline-variant: #c6cbd4;
+
+  --md-sys-color-inverse-surface: #2e3137;
+  --md-sys-color-inverse-on-surface: #f1f2f6;
+  --md-sys-color-inverse-primary: #b6c8ff;
+  --md-sys-color-surface-elevated: #ffffff;
+  --md-sys-color-border-strong: rgba(25, 33, 48, 0.18);
+  --md-sys-color-primary-hover: #194a9f;
+  --md-sys-color-primary-pressed: #153f89;
+  --md-sys-color-primary-glow: rgba(36, 88, 184, 0.12);
+  --md-sys-color-success: #1d7138;
+  --md-sys-color-warning: #855600;
+
+  --md-sys-glass-bg: rgba(255, 255, 255, 0.84);
+  --md-sys-glass-border: rgba(25, 33, 48, 0.1);
+  --md-sys-glass-blur: blur(16px) saturate(130%);
 }
 
 /* =============================================================================

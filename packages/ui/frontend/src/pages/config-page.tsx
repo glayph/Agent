@@ -3,8 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
+import { notify } from "@/lib/notify"
 import { patchAppConfig, resetAppConfig } from "@/api/channels"
 import { launcherFetch } from "@/api/http"
 import { postLauncherDashboardPassword } from "@/api/launcher-auth"
@@ -102,10 +102,15 @@ function buildTurnProfilePatch(
   return result
 }
 
+/** Picks the view first; each view owns its hooks so none run after a conditional return. */
 export function ConfigPage() {
   if (new URLSearchParams(globalThis.location.search).get("view") === "raw") {
     return <RawConfigPage />
   }
+  return <ConfigFormView />
+}
+
+function ConfigFormView() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [form, setForm] = useState<CoreConfigForm>(EMPTY_FORM)
@@ -274,7 +279,7 @@ export function ConfigPage() {
     setForm(baseline)
     setLauncherForm(launcherBaseline)
     setAutoStartEnabled(autoStartBaseline)
-    toast.info(t("pages.config.reset_success"))
+    notify.info(t("pages.config.reset_success"), { id: "config-page:info:pages.config.reset_success" })
   }
 
   const handleFactoryReset = async () => {
@@ -286,12 +291,12 @@ export function ConfigPage() {
       setBaseline(parsed)
       await queryClient.invalidateQueries({ queryKey: ["config"] })
       await refreshGatewayState()
-      toast.success(t("pages.config.factory_reset_success"))
+      notify.success(t("pages.config.factory_reset_success"), { id: "config-page:success:pages.config.factory_reset_success" })
     } catch (err) {
-      toast.error(
+      notify.error(
         err instanceof Error
           ? err.message
-          : t("pages.config.factory_reset_error"),
+          : t("pages.config.factory_reset_error"), { id: "config-page:error:handleFactoryReset" }
       )
     } finally {
       setShowFactoryResetDialog(false)
@@ -741,8 +746,8 @@ export function ConfigPage() {
         configApply?.runtime_apply_error,
       )
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("pages.config.save_error"),
+      notify.error(
+        err instanceof Error ? err.message : t("pages.config.save_error"), { id: "config-page:error:savedLauncherConfig" }
       )
     } finally {
       setSaving(false)
@@ -796,7 +801,7 @@ export function ConfigPage() {
   )
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-miki-page="config">
       <PageHeader
         title={t("navigation.config")}
         titleExtra={
@@ -823,17 +828,17 @@ export function ConfigPage() {
             aria-label={t("pages.config.open_raw")}
             title={t("pages.config.open_raw")}
           >
-            <a href="/config?view=raw">
+            <Link to="/config" search={{ view: "raw" }}>
               <IconCode className="size-4" />
               <span className="max-sm:hidden">
                 {t("pages.config.open_raw")}
               </span>
-            </a>
+            </Link>
             </Button>
           </div>
         }
       />
-      <div className="flex-1 overflow-auto p-3 lg:p-6">
+      <div className="flex-1 overflow-auto p-3 lg:p-6" data-miki-page-body="true">
         <div className="mx-auto w-full max-w-[1000px] space-y-6">
           {isLoading ? (
             <div className="text-muted-foreground py-6 text-sm">

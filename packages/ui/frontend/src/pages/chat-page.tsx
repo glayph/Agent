@@ -10,27 +10,27 @@ import {
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
-
 import type { SessionSummary } from "@/api/sessions"
+import { uploadChatAttachment } from "@/api/chat-attachments"
 import { type VoiceCloudAudioResult, transcribeVoiceAudio } from "@/api/voice"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
+import { chatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
 import { ModelSelector } from "@/features/chat/components/model-selector"
 import { SessionHistoryMenu } from "@/features/chat/components/session-history-menu"
-import { LiveActivityStrip } from "@/features/chat/components/live-activity-strip"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
 import { Composer } from "@/features/chat/components/workspace/composer"
-import { getRetryableMessageIds } from "@/features/chat/retryable"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
 import { WorkspaceHeader } from "@/features/chat/components/workspace/workspace-header"
 import { WorkspaceShell } from "@/features/chat/components/workspace/workspace-shell"
-import { monitorAtom, selectMonitorNode } from "@/features/monitor/store"
+import { getRetryableMessageIds } from "@/features/chat/retryable"
+import { monitorAtom } from "@/features/monitor/store"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useMikiChat } from "@/hooks/use-miki-chat"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSessionHistory } from "@/hooks/use-session-history"
+import { notify } from "@/lib/notify"
 import { Button } from "@/shared/ui/button"
 import {
   DropdownMenu,
@@ -43,8 +43,10 @@ import type { ChatAttachment, ChatMessage } from "@/store/chat"
 import { assistantDetailVisibilityAtom, thinkingModeAtom } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
 
-const MAX_FILE_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024
-const MAX_FILE_ATTACHMENT_SIZE_LABEL = "10 MB"
+const MAX_FILE_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024
+const MAX_FILE_ATTACHMENT_SIZE_LABEL = "25 MB"
+const MAX_TOTAL_ATTACHMENT_SIZE_BYTES = 100 * 1024 * 1024
+const MAX_ATTACHMENTS_PER_MESSAGE = 16
 const MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
 const MAX_AUDIO_SIZE_LABEL = "25 MB"
 const MAX_AUDIO_DURATION_MS = 5 * 60 * 1000
@@ -63,28 +65,7 @@ const ALLOWED_AUDIO_TYPES = new Set([
   "audio/x-flac",
 ])
 const SESSION_HISTORY_REFRESH_DELAYS_MS = [500, 1800] as const
-const ALLOWED_IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/bmp",
-])
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result)
-        return
-      }
-      reject(new Error("file_read_failed"))
-    }
-    reader.onerror = () => reject(reader.error || new Error("file_read_failed"))
-    reader.readAsDataURL(file)
-  })
-}
 
 function preferredRecorderMimeType(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined
@@ -351,6 +332,7 @@ export function ChatPage() {
   const lastHistoryRefreshKeyRef = useRef("")
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false)
   const [voiceState, setVoiceState] = useState<
     "idle" | "recording" | "transcribing"
   >("idle")
@@ -371,26 +353,33 @@ export function ChatPage() {
     editMessage,
     forkFromMessage,
     retryMessage,
-    stopGeneration,
     switchSession,
     newChat,
   } = useMikiChat()
   const monitorState = useAtomValue(monitorAtom)
+  const setChatInspector = useSetAtom(chatInspectorAtom)
   const assistantDetailVisibility = useAtomValue(assistantDetailVisibilityAtom)
   const setAssistantDetailVisibility = useSetAtom(assistantDetailVisibilityAtom)
   const thinkingMode = useAtomValue(thinkingModeAtom)
   const setThinkingMode = useSetAtom(thinkingModeAtom)
   const liveActivityNodes = useMemo(() => {
-    const latestRun = Object.values(monitorState.runs).sort(
-      (a, b) => b.startedAt - a.startedAt,
-    )[0]
+    const messageRunIds = new Set(
+      messages
+        .map((message) => message.runId)
+        .filter((id): id is string => Boolean(id)),
+    )
+    if (messageRunIds.size === 0) return []
+
+    const latestRun = Object.values(monitorState.runs)
+      .filter((run) => messageRunIds.has(run.id))
+      .sort((a, b) => b.startedAt - a.startedAt)[0]
     if (!latestRun) return []
+
     return Object.values(monitorState.nodes)
       .filter((node) => node.runId === latestRun.id)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 3)
-      .reverse()
-  }, [monitorState.nodes, monitorState.runs])
+      .sort((a, b) => a.updatedAt - b.updatedAt)
+      .slice(-3)
+  }, [messages, monitorState.nodes, monitorState.runs])
   const retryableMessageIds = useMemo(
     () => getRetryableMessageIds(messages),
     [messages],
@@ -541,12 +530,13 @@ export function ChatPage() {
           throw new Error("The voice message could not be sent to Agent Miki.")
         }
       } catch (error) {
-        toast.error(
+        notify.error(
           error instanceof Error
             ? error.message
             : t("chat.voiceFailed", {
                 defaultValue: "Voice message could not be processed.",
               }),
+          { id: "chat:voice-send-failed" },
         )
       } finally {
         setVoiceState("idle")
@@ -569,11 +559,12 @@ export function ChatPage() {
       typeof navigator.mediaDevices?.getUserMedia !== "function" ||
       typeof MediaRecorder === "undefined"
     ) {
-      toast.error(
+      notify.error(
         t("chat.voiceUnsupported", {
           defaultValue:
             "This browser does not support microphone recording. Use Upload audio instead.",
         }),
+        { id: "chat:voice-unsupported" },
       )
       return
     }
@@ -600,10 +591,11 @@ export function ChatPage() {
           recorderMaxTimerRef.current = null
         }
         setVoiceState("idle")
-        toast.error(
+        notify.error(
           t("chat.voiceFailed", {
             defaultValue: "Voice message could not be processed.",
           }),
+          { id: "chat:voice-recording-failed" },
         )
       }
       recorder.onstop = () => {
@@ -645,10 +637,11 @@ export function ChatPage() {
       recorderStreamRef.current?.getTracks().forEach((track) => track.stop())
       recorderStreamRef.current = null
       recorderRef.current = null
-      toast.error(
+      notify.error(
         t("chat.voicePermissionDenied", {
           defaultValue: "Microphone access was not granted.",
         }),
+        { id: "chat:voice-permission-denied" },
       )
     }
   }, [canInput, isEditingMessage, sendVoiceBlob, t, voiceState])
@@ -667,31 +660,34 @@ export function ChatPage() {
         !ALLOWED_AUDIO_TYPES.has(file.type) &&
         !/\.(wav|mp3|m4a|mp4|ogg|oga|webm|flac)$/i.test(file.name)
       ) {
-        toast.error(
+        notify.error(
           t("chat.invalidAudio", {
             defaultValue:
               "Choose a WAV, MP3, M4A, OGG, WebM, or FLAC audio file.",
           }),
+          { id: "chat:invalid-audio" },
         )
         return
       }
       if (file.size > MAX_AUDIO_SIZE_BYTES) {
-        toast.error(
+        notify.error(
           t("chat.audioTooLarge", {
             defaultValue: "Audio must be {{size}} or smaller.",
             size: MAX_AUDIO_SIZE_LABEL,
           }),
+          { id: `chat:audio-too-large:${file.name}` },
         )
         return
       }
       const durationMs = await measureAudioDuration(file)
       if (durationMs !== undefined && durationMs > MAX_AUDIO_DURATION_MS) {
-        toast.error(
+        notify.error(
           t("chat.audioTooLong", {
             defaultValue:
               "Voice messages must be {{seconds}} seconds or shorter.",
             seconds: Math.floor(MAX_AUDIO_DURATION_MS / 1000),
           }),
+          { id: "chat:audio-too-long" },
         )
         return
       }
@@ -781,6 +777,7 @@ export function ChatPage() {
   const handleSend = async () => {
     if (
       voiceState !== "idle" ||
+      isUploadingAttachments ||
       (!input.trim() && attachments.length === 0) ||
       (!isEditingMessage && !canInput)
     ) {
@@ -801,10 +798,11 @@ export function ChatPage() {
         return
       }
 
-      toast.error(
+      notify.error(
         t("chat.actions.editUnavailable", {
           defaultValue: "Message no longer exists.",
         }),
+        { id: "chat:edit-unavailable" },
       )
       return
     }
@@ -862,21 +860,6 @@ export function ChatPage() {
     focusComposer()
   }, [focusComposer])
 
-  const handleStopGeneration = useCallback(async () => {
-    try {
-      await stopGeneration()
-    } catch (error) {
-      toast.error(
-        t("chat.actions.stopError", {
-          defaultValue:
-            error instanceof Error
-              ? error.message
-              : "Could not stop generation",
-        }),
-      )
-    }
-  }, [stopGeneration, t])
-
   const handleRetryMessage = useCallback(
     async (messageId: string) => {
       try {
@@ -884,74 +867,99 @@ export function ChatPage() {
           return
         }
       } catch (error) {
-        toast.error(
+        notify.error(
           t("chat.actions.retryError", {
             defaultValue:
               error instanceof Error
                 ? error.message
                 : "Connect chat before retrying",
           }),
+          { id: `chat:retry-error:${messageId}` },
         )
         return
       }
 
-      toast.error(
+      notify.error(
         t("chat.actions.retryUnavailable", {
           defaultValue: "Unable to retry this message",
         }),
+        { id: `chat:retry-unavailable:${messageId}` },
       )
     },
     [retryMessage, t],
   )
 
   const handleFileSelection = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []).slice(0, 1)
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ""
+    if (files.length === 0) return
 
-    if (files.length === 0) {
+    const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - attachments.length)
+    if (availableSlots === 0) {
+      notify.error(
+        t("chat.attachmentLimit", { defaultValue: "You can attach up to 16 files to one message." }),
+        { id: "chat:attachment-limit" },
+      )
       return
     }
-
-    const nextAttachments: ChatAttachment[] = []
-    for (const file of files) {
-      if (file.size > MAX_FILE_ATTACHMENT_SIZE_BYTES) {
-        toast.error(
-          t("chat.imageTooLarge", {
-            name: file.name,
-            size: MAX_FILE_ATTACHMENT_SIZE_LABEL,
-          }),
-        )
-        continue
-      }
-
-      try {
-        nextAttachments.push({
-          type: file.type.startsWith("image/") || ALLOWED_IMAGE_TYPES.has(file.type)
-            ? "image"
-            : file.type.startsWith("video/")
-              ? "video"
-              : file.type.startsWith("audio/")
-                ? "audio"
-                : "file",
-          filename: file.name,
-          url: await readFileAsDataUrl(file),
-          ...(file.type ? { contentType: file.type } : {}),
-        })
-      } catch {
-        toast.error(
-          t("chat.imageReadFailed", {
-            name: file.name,
-          }),
-        )
-      }
+    if (files.length > availableSlots) {
+      notify.error(
+        t("chat.attachmentSlots", {
+          count: availableSlots,
+          defaultValue: `Only ${availableSlots} more file(s) can be attached.`,
+        }),
+        { id: "chat:attachment-slots" },
+      )
     }
 
-    if (nextAttachments.length > 0) {
-      setAttachments(nextAttachments.slice(0, 1))
+    let totalBytes = attachments.reduce(
+      (sum, attachment) => sum + (attachment.sizeBytes ?? 0),
+      0,
+    )
+    setIsUploadingAttachments(true)
+    try {
+      for (const file of files.slice(0, availableSlots)) {
+        if (file.size > MAX_FILE_ATTACHMENT_SIZE_BYTES) {
+          notify.error(
+            t("chat.imageTooLarge", {
+              name: file.name,
+              size: MAX_FILE_ATTACHMENT_SIZE_LABEL,
+            }),
+            { id: `chat:attachment-too-large:${file.name}` },
+          )
+          continue
+        }
+        if (totalBytes + file.size > MAX_TOTAL_ATTACHMENT_SIZE_BYTES) {
+          notify.error(
+            t("chat.attachmentTotalTooLarge", { defaultValue: "Attachments must total 100 MB or less per message." }),
+            { id: "chat:attachment-total-too-large" },
+          )
+          continue
+        }
+
+        try {
+          const uploaded = await uploadChatAttachment(file)
+          setAttachments((previous) =>
+            [...previous, uploaded].slice(0, MAX_ATTACHMENTS_PER_MESSAGE),
+          )
+          totalBytes += file.size
+        } catch (error) {
+          notify.error(
+            t("chat.attachmentUploadFailed", {
+              name: file.name,
+              defaultValue: error instanceof Error ? error.message : `Could not upload ${file.name}.`,
+            }),
+            { id: `chat:attachment-upload-failed:${file.name}` },
+          )
+        }
+      }
+    } finally {
+      setIsUploadingAttachments(false)
     }
   }
 
   const canSubmit =
+    !isUploadingAttachments &&
     (canInput || isEditingMessage) &&
     (Boolean(input.trim()) || attachments.length > 0)
   const activeSessionProjection = useMemo(
@@ -973,14 +981,27 @@ export function ChatPage() {
   const handleForkMessage = useCallback(
     async (messageId: string) => {
       if (!(await forkFromMessage(messageId))) {
-        toast.error(
+        notify.error(
           t("chat.actions.forkUnavailable", {
             defaultValue: "Unable to fork this conversation",
           }),
+          { id: `chat:fork-unavailable:${messageId}` },
         )
       }
     },
     [forkFromMessage, t],
+  )
+
+  const handleInspectMessage = useCallback(
+    (messageId: string) => {
+      if (!activeSessionId) return
+      setChatInspector({
+        chatId: activeSessionId,
+        messageId,
+        page: "outputs",
+      })
+    },
+    [activeSessionId, setChatInspector],
   )
 
   const handleModeClick = useCallback(() => {
@@ -1011,7 +1032,9 @@ export function ChatPage() {
             size="sm"
             variant="ghost"
             className="text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground size-8 px-0"
-            aria-label={t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
+            aria-label={t("chat.thinkingMenuTitle", {
+              defaultValue: "Thinking",
+            })}
             title={t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
           >
             <IconBrain className="size-4" />
@@ -1028,7 +1051,9 @@ export function ChatPage() {
               className="gap-2"
             >
               <span className="flex size-4 items-center justify-center">
-                {thinkingMode === option && <IconCheck className="size-3.5" aria-hidden="true" />}
+                {thinkingMode === option && (
+                  <IconCheck className="size-3.5" aria-hidden="true" />
+                )}
               </span>
               <span>
                 {t(`chat.thinkingMode.${option}`, {
@@ -1049,13 +1074,24 @@ export function ChatPage() {
               className="gap-2"
             >
               <span className="flex size-4 items-center justify-center">
-                {assistantDetailVisibility === option && <IconCheck className="size-3.5" aria-hidden="true" />}
+                {assistantDetailVisibility === option && (
+                  <IconCheck className="size-3.5" aria-hidden="true" />
+                )}
               </span>
               <span>
-                {t(`chat.assistantDetailVisibility.${option === "tool_calls" ? "toolCalls" : option}`, {
-                  defaultValue:
-                    option === "none" ? "Hide details" : option === "thought" ? "Reasoning" : option === "tool_calls" ? "Tool calls" : "All details",
-                })}
+                {t(
+                  `chat.assistantDetailVisibility.${option === "tool_calls" ? "toolCalls" : option}`,
+                  {
+                    defaultValue:
+                      option === "none"
+                        ? "Hide details"
+                        : option === "thought"
+                          ? "Reasoning"
+                          : option === "tool_calls"
+                            ? "Tool calls"
+                            : "All details",
+                  },
+                )}
               </span>
             </DropdownMenuItem>
           ))}
@@ -1076,7 +1112,7 @@ export function ChatPage() {
   )
 
   return (
-    <div className="bg-background h-full min-h-0">
+    <div className="bg-background h-full min-h-0" data-miki-page="chat">
       <WorkspaceShell
         header={
           <WorkspaceHeader
@@ -1092,7 +1128,6 @@ export function ChatPage() {
             <div className="min-h-0 flex-1">
               <ChatMessageList
                 messages={messages}
-                assistantDetailVisibility={assistantDetailVisibility}
                 isTyping={isTyping}
                 hasHydratedActiveSession={hasHydratedActiveSession}
                 isGatewayRunning={isGatewayRunning}
@@ -1106,17 +1141,9 @@ export function ChatPage() {
                 onDeleteMessage={deleteMessage}
                 onForkMessage={handleForkMessage}
                 onRetryMessage={handleRetryMessage}
+                onInspectMessage={handleInspectMessage}
               />
             </div>
-            {liveActivityNodes.length > 0 && (
-              <div className="shrink-0 px-3 pb-2 pt-1 sm:px-6">
-                <LiveActivityStrip
-                  nodes={liveActivityNodes}
-                  selectedNodeId={monitorState.selectedNodeId}
-                  onSelect={(node) => selectMonitorNode(node.id)}
-                />
-              </div>
-            )}
           </div>
         }
         composer={
@@ -1133,7 +1160,6 @@ export function ChatPage() {
             onModeClick={handleModeClick}
             onRemoveAttachment={handleRemoveAttachment}
             onSend={handleSend}
-            onStopGeneration={() => void handleStopGeneration()}
             isWorking={isTyping}
             isEditing={isEditingMessage}
             onCancelEdit={handleCancelEdit}
@@ -1156,7 +1182,8 @@ export function ChatPage() {
         ref={fileInputRef}
         type="file"
         aria-label={t("chat.attachImage")}
-        accept="image/*,video/*,application/pdf,text/plain,text/csv,application/json,.md,.doc,.docx,.xls,.xlsx,.zip"
+        accept="image/*,video/*,audio/*,application/pdf,text/*,.md,.txt,.csv,.json,.xml,.html,.css,.sh,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.7z,.rtf,.odt,.ods,.odp,.py,.js,.jsx,.ts,.tsx,.go,.rs,.java,.c,.cpp,.h,.yaml,.yml,.toml,.ini,.log"
+        multiple
         className="hidden"
         onChange={handleFileSelection}
       />

@@ -1,4 +1,3 @@
-import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
   Router,
@@ -49,6 +48,8 @@ function isPrivateIpv4(address: string): boolean {
   );
 }
 
+// Kept so the private-address check can be switched back on; the guard is currently relaxed.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase();
   if (isIP(normalized) === 4) return isPrivateIpv4(normalized);

@@ -1,6 +1,13 @@
 # Agent Miki HTTPS reverse proxy example.
 # Replace miki.example.com and certificate paths before enabling.
 # Keep the Node gateway bound to 127.0.0.1:18800; do not expose core:8000.
+#
+# Keep the proxy_set_header lines below. The gateway treats a loopback connection WITHOUT forwarding
+# headers (X-Forwarded-For, X-Real-IP, ...) as "the owner on this machine", which is what allows the
+# first-time password setup and the password-less agent socket. A proxy that drops them would make
+# every internet visitor look local. The gateway also requires the Host header to be localhost, an IP
+# or this machine's own name for that, so a public name such as miki.example.com never qualifies
+# unless you list it in MIKI_ALLOWED_HOSTS (do not).
 
 map $http_upgrade $connection_upgrade {
     default upgrade;

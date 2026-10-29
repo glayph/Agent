@@ -21,13 +21,15 @@ CREATE TABLE IF NOT EXISTS model_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, 
 CREATE TABLE IF NOT EXISTS memory_chunks (id TEXT PRIMARY KEY, region TEXT NOT NULL, content TEXT NOT NULL, summary TEXT NOT NULL, provenance TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1, importance REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`
 
 /** Builds the real engine + real supervisor, wired like gateway/index.ts + agent-runtime.ts. Only the model endpoint is injectable. */
-export function buildWorld({ models = [], config, env = {}, fetchImpl } = {}) {
+export function buildWorld({ models = [], config, env = {}, fetchImpl, emptyMemory = false } = {}) {
   for (const k of Object.keys(process.env)) if (/^(MIKI_(MODEL|PROVIDER|LLAMA)|OPENAI|GEMINI|OPENROUTER|GOOGLE_API)/.test(k)) delete process.env[k]
   Object.assign(process.env, env)
   const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'miki-h-')))
   fs.cpSync(path.join(SRC, 'identity'), path.join(workspace, 'identity'), { recursive: true })
   fs.mkdirSync(path.join(workspace, 'autonomy'), { recursive: true })
   const db = openDb(); db.exec(GATEWAY_SQL)
+  // An install in use already has memory; only a brand-new install (emptyMemory) triggers the first-run bootstrap goal.
+  if (!emptyMemory) { const t = new Date().toISOString(); db.prepare("INSERT INTO memory_chunks(id,region,content,summary,provenance,created_at,updated_at) VALUES('seed','long_term','seed','seed','user',?,?)").run(t, t) }
   const ins = db.prepare('INSERT INTO model_configs(payload,is_default,created_at,updated_at) VALUES(?,?,?,?)')
   for (const m of models) ins.run(JSON.stringify(m.payload), m.isDefault ? 1 : 0, new Date().toISOString(), new Date().toISOString())
   const storedModels = () => db.prepare('SELECT id,payload,is_default FROM model_configs ORDER BY id').all().map((r) => ({ payload: JSON.parse(r.payload), isDefault: r.is_default === 1 }))

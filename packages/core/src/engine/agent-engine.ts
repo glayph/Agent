@@ -11,6 +11,8 @@ import type {
   RunResult,
   RunStatus,
   RunUsage,
+  SteerInput,
+  SteerItem,
   ToolCallRecord,
 } from "./types.js";
 import { ToolRegistry } from "./tool-registry.js";
@@ -31,6 +33,48 @@ import {
   validateArguments,
 } from "./util.js";
 
+
+/** Serialize tool results incrementally to avoid allocating a second full-size JSON copy. */
+function boundedSerialize(value: unknown, maxChars: number): string {
+  const seen = new WeakSet<object>();
+  let output = "";
+  let truncated = false;
+  const append = (chunk: string) => {
+    if (output.length >= maxChars) { truncated = true; return; }
+    const remaining = maxChars - output.length;
+    if (chunk.length > remaining) { output += chunk.slice(0, remaining); truncated = true; }
+    else output += chunk;
+  };
+  const visit = (item: unknown, depth: number): void => {
+    if (truncated) return;
+    if (item === null || typeof item === "boolean" || typeof item === "number") { append(String(item)); return; }
+    if (typeof item === "string") { append(JSON.stringify(item)); return; }
+    if (typeof item === "bigint") { append(JSON.stringify(String(item))); return; }
+    if (typeof item === "undefined") { append("null"); return; }
+    if (typeof item !== "object") { append(JSON.stringify(String(item))); return; }
+    if (seen.has(item)) { append(JSON.stringify("[Circular]")); return; }
+    if (depth > 32) { append(JSON.stringify("[Max depth]")); return; }
+    seen.add(item);
+    if (Array.isArray(item)) {
+      append("[");
+      for (let i = 0; i < item.length && !truncated; i++) { if (i) append(","); visit(item[i], depth + 1); }
+      append("]");
+    } else {
+      append("{");
+      const entries = Object.entries(item as Record<string, unknown>);
+      for (let i = 0; i < entries.length && !truncated; i++) {
+        if (i) append(",");
+        append(JSON.stringify(entries[i][0]) + ":");
+        visit(entries[i][1], depth + 1);
+      }
+      append("}");
+    }
+    seen.delete(item);
+  };
+  visit(value, 0);
+  return truncated ? output + "…[tool result truncated; inspect via chunked reads or saved artifact]" : output;
+}
+
 export type LLMResolver = (model?: string) => EngineLLMClient | undefined;
 
 function isTransientModelFailure(error: unknown): boolean {
@@ -45,17 +89,37 @@ function isTransientModelFailure(error: unknown): boolean {
   return /timeout|timed out|temporarily unavailable|connection (?:error|reset|refused|closed|lost)|network|fetch failed|socket hang up|overloaded|rate limit|too many requests/.test(message)
 }
 
+/** In-place retry of a transient model failure: 2s, 4s, 8s, 12s, 12s ... (minimum 2s, maximum 12s). */
+export const TRANSIENT_RETRY_MIN_DELAY_MS = 2_000
+export const TRANSIENT_RETRY_MAX_DELAY_MS = 12_000
+const TRANSIENT_RETRY_BASE_DELAY_MS = TRANSIENT_RETRY_MIN_DELAY_MS
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const finishWait = () => {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", finishWait)
+      resolve()
+    }
+    const timer = setTimeout(finishWait, ms)
+    signal.addEventListener("abort", finishWait, { once: true })
+  })
+}
+
 export interface AgentEngineOptions {
   /** A fixed client, or a resolver that picks one per run (requested model, vault keys...). */
   llm: EngineLLMClient | LLMResolver;
   /** Optional: explains why `llm` resolved to nothing (missing key, disabled model...). Appended to the error. */
   describeNoModel?: (model?: string) => string | undefined;
   tools: ToolRegistry;
-  /** Decides tool calls that need confirmation. Without a gate, such calls are denied. */
+  /** Kept for compatibility. Turbo mode is always on, so tool calls are never held for approval. */
   approvals?: ApprovalGate;
   /**
-   * Turbo mode: run approval-gated tool calls immediately instead of asking the user.
-   * On by default; only an explicit `false` brings the approval gate back.
+   * Turbo mode: tool calls run immediately instead of waiting for the user. It is always on;
+   * this option is kept for compatibility and has no effect. Hard policy and learned "block"
+   * rules still stop a call.
    */
   turboMode?: boolean;
   /** Base system prompt, or a resolver evaluated at the start of every run. */
@@ -148,6 +212,24 @@ export interface AgentEngineOptions {
   parallelToolCalls?: boolean;
   /** Upper bound of concurrently running tool calls per turn (default 6). */
   maxParallelToolCalls?: number;
+  /**
+   * Abort the active model completion when a new message steers the run (default false). A completion
+   * that is already writing is allowed to finish; the new message is read on the next turn.
+   */
+  steerInterrupt?: boolean | (() => boolean);
+  /**
+   * Model judgement for a message that arrives while tools are running: true when the message changes
+   * or cancels what those tools are doing. The host decides with its model; this engine never matches
+   * words. When absent, steering never interrupts running tools.
+   */
+  steerToolInterrupt?: (input: SteerToolInterruptInput) => Promise<boolean>;
+}
+
+export interface SteerToolInterruptInput {
+  runId: string;
+  model?: string;
+  steerText: string;
+  runningTools: Array<{ name: string; arguments: string }>;
 }
 
 export type DynamicBudgetConfig =
@@ -189,6 +271,13 @@ export class NoModelConfiguredError extends Error {
     );
     this.name = "NoModelConfiguredError";
   }
+}
+
+interface ActiveModelCall {
+  controller: AbortController;
+  turn: number;
+  interruptedBySteer: boolean;
+  streamedText: string;
 }
 
 interface RunState {
@@ -384,20 +473,92 @@ async function classifyNeedsToolExecution(
   };
 }
 
+interface RunningToolEntry {
+  controller: AbortController;
+  name: string;
+  arguments: string;
+  interrupted: boolean;
+}
+
 export class AgentEngine {
   /**
    * Messages the user sent while a run was in flight. They are delivered to the
    * model on its next turn so the agent can answer them and adjust course
    * without being stopped (autonomous "steering").
    */
-  private readonly steerInboxes = new Map<string, string[]>();
+  private readonly steerInboxes = new Map<string, SteerItem[]>();
+  private readonly activeModelCalls = new Map<string, ActiveModelCall>();
+  /** Tool calls running right now, by run id and then call id, so a steered message can be judged against them. */
+  private readonly runningTools = new Map<string, Map<string, RunningToolEntry>>();
+  private readonly steerModels = new Map<string, string | undefined>();
 
-  /** Queue a user message for an active run. Returns false when the run is not active. */
-  steer(runId: string, text: string): boolean {
+  /**
+   * Queue a user message for an active run. Returns false when the run is not active
+   * or the message has neither text nor images. A plain string is accepted for
+   * callers that only have text.
+   */
+  steer(runId: string, input: string | SteerInput): boolean {
     const inbox = this.steerInboxes.get(runId);
-    const clean = text.trim();
-    if (!inbox || !clean) return false;
-    inbox.push(clean);
+    const raw: SteerInput = typeof input === "string" ? { text: input } : input;
+    const text = (raw.text ?? "").trim();
+    const imageUrls = (raw.imageUrls ?? []).filter(
+      (url): url is string => typeof url === "string" && url.trim().length > 0,
+    );
+    if (!inbox || (!text && imageUrls.length === 0)) return false;
+    inbox.push({ text, imageUrls, receivedAt: Date.now(), ...(raw.messageId ? { messageId: raw.messageId } : {}) });
+    const interruptEnabled = typeof this.options.steerInterrupt === "function"
+      ? this.options.steerInterrupt()
+      : (this.options.steerInterrupt ?? false);
+    const activeCall = this.activeModelCalls.get(runId);
+    if (interruptEnabled && activeCall && !activeCall.controller.signal.aborted) {
+      activeCall.interruptedBySteer = true;
+      activeCall.controller.abort();
+    }
+    if (this.options.steerToolInterrupt && this.runningTools.get(runId)?.size) {
+      void this.considerInterruptingTools(runId, text);
+    }
+    return true;
+  }
+
+  /**
+   * The model judges whether a message that arrived during tool work changes what those tools are doing.
+   * Only the tools running at that moment are affected, and only through their own abort signal. A failed
+   * judgement leaves the tools running; the message is still read by the run on its next turn.
+   */
+  private async considerInterruptingTools(runId: string, steerText: string): Promise<void> {
+    const decide = this.options.steerToolInterrupt;
+    const running = this.runningTools.get(runId);
+    if (!decide || !running || running.size === 0) return;
+    const snapshot = [...running.values()].filter((entry) => !entry.interrupted);
+    if (snapshot.length === 0) return;
+    let interrupt = false;
+    try {
+      interrupt = await decide({
+        runId,
+        model: this.steerModels.get(runId),
+        steerText: steerText.slice(0, 2000),
+        runningTools: snapshot.map((entry) => ({ name: entry.name, arguments: entry.arguments.slice(0, 300) })),
+      });
+    } catch {
+      return;
+    }
+    if (!interrupt) return;
+    for (const entry of snapshot) {
+      if (entry.interrupted) continue;
+      entry.interrupted = true;
+      entry.controller.abort();
+    }
+  }
+
+  /**
+   * Record that the user was already answered about a queued message (an immediate reply written
+   * while a long step was running). Returns false when the run no longer holds that message
+   * unread, in which case the run answers it itself and the immediate reply must be dropped.
+   */
+  noteSteerAcknowledged(runId: string, messageId: string, reply: string): boolean {
+    const item = this.steerInboxes.get(runId)?.find((entry) => entry.messageId === messageId);
+    if (!item || !reply.trim()) return false;
+    item.acknowledgedWith = reply.trim();
     return true;
   }
 
@@ -405,14 +566,33 @@ export class AgentEngine {
     const inbox = this.steerInboxes.get(state.runId);
     if (!inbox?.length) return 0;
     const items = inbox.splice(0);
-    state.messages.push({
+    const imageUrls = items.flatMap((item) => item.imageUrls);
+    const body = items
+      .map((item, index) => {
+        const text = item.text || "(The user attached an image without any text.)";
+        const timestamp = new Date(item.receivedAt).toISOString();
+        const acknowledged = item.acknowledgedWith
+          ? `\n(You already told the user: "${item.acknowledgedWith}". Do not repeat that; act on the message.)`
+          : "";
+        return `${index + 1}. [Received at ${timestamp}]\n${text}${acknowledged}`;
+      })
+      .join("\n---\n");
+    const message: EngineMessage = {
       role: "user",
       content:
-        "[New message from the user, sent while you were working. Reply to it briefly and directly, " +
-        "follow any instruction or feedback in it, then continue the task you were doing unless told otherwise.]\n" +
-        items.join("\n---\n"),
+        "[New messages from the user, received while you were working. Follow any instruction or feedback in them, adjust your plan when useful, answer when an answer is needed, and continue the task unless told otherwise.]\n" +
+        body,
+    };
+    if (imageUrls.length > 0) message.image_urls = imageUrls;
+    state.messages.push(message);
+    const messageIds = items.map((item) => item.messageId).filter((id): id is string => Boolean(id));
+    state.emit({
+      type: "user.steer",
+      runId: state.runId,
+      turn,
+      count: items.length,
+      ...(messageIds.length > 0 ? { messageIds } : {}),
     });
-    state.emit({ type: "user.steer", runId: state.runId, turn, count: items.length });
     return items.length;
   }
 
@@ -512,6 +692,7 @@ export class AgentEngine {
     };
 
     this.steerInboxes.set(runId, []);
+    this.steerModels.set(runId, request.model);
     let llm = this.resolveLLM(request.model);
     let model = llm?.model ?? request.model ?? "";
 
@@ -522,6 +703,8 @@ export class AgentEngine {
     ): RunResult => {
       clearTimeout(wallTimer);
       this.steerInboxes.delete(runId);
+      this.steerModels.delete(runId);
+      this.runningTools.delete(runId);
       const finalStatus = wallTimeExceeded && status === "cancelled" ? "limit_reached" : status;
       const finalError = wallTimeExceeded
         ? `Run wall-time budget of ${wallTimeMs} ms reached.`
@@ -591,6 +774,9 @@ export class AgentEngine {
     const maxCompletionTokens = request.maxCompletionTokens === undefined
       ? configuredMaxCompletionTokens
       : Math.max(1, Math.floor(request.maxCompletionTokens));
+    const maxTotalTokens = request.maxTotalTokens === undefined
+      ? undefined
+      : Math.max(1, Math.floor(request.maxTotalTokens));
 
     // Tool schemas are part of the model's input context. If the schemas alone
     // exceed the configured window, disable tool advertisement/execution for
@@ -618,6 +804,7 @@ export class AgentEngine {
       emit({ type: "plan.created", runId, plan: structuredClone(state.plan) });
 
     let extraContext: string | undefined;
+    const contextProviderStartedAt = Date.now();
     // Recall applies to every run, with or without tools: the one global memory
     // must never be skipped just because a turn profile disabled the tools.
     if (this.options.contextProvider) {
@@ -634,7 +821,14 @@ export class AgentEngine {
         });
       }
     }
+    this.options.logger?.("agent.context_provider.completed", {
+      runId,
+      durationMs: Date.now() - contextProviderStartedAt,
+      contextChars: extraContext?.length ?? 0,
+      toolsEnabled: runToolsEnabled,
+    });
 
+    const promptBuildStartedAt = Date.now();
     const configuredSystemPrompt = typeof this.systemPromptEnabled === "function" ? this.systemPromptEnabled() : this.systemPromptEnabled;
     const promptHistory = request.history;
     const systemMessage = configuredSystemPrompt
@@ -653,6 +847,15 @@ export class AgentEngine {
       ...(configuredSystemPrompt ? promptHistory.filter((message) => message.role === "system") : []),
       ...promptHistory.filter((message) => message.role !== "system"),
     ];
+    this.options.logger?.("agent.prompt.prepared", {
+      runId,
+      durationMs: Date.now() - promptBuildStartedAt,
+      messageCount: state.messages.length,
+      promptChars: state.messages.reduce((total, message) => total + String(message.content ?? "").length, 0),
+      toolSchemaCount: schemas.length,
+      toolSchemaChars: JSON.stringify(schemas).length,
+      systemPromptEnabled: configuredSystemPrompt,
+    });
 
     // 2. Agent loop.
     let nudged = false;
@@ -671,7 +874,8 @@ export class AgentEngine {
     const tryExtend = (budgetHit?: string): boolean => {
       if (!dynamic || request.maxToolCalls !== undefined) return false;
       if (extensions >= Math.max(0, Math.floor(dynamic.maxExtensions ?? 2))) return false;
-      const progress = assessProgress(state.records, {
+      // Polling calls repeat on purpose; leave them out so they do not spoil the distinct-call rate.
+      const progress = assessProgress(state.records.filter((record) => !tools.get(record.name)?.repeatSafe), {
         window: dynamic.window,
         minSuccessRate: dynamic.minSuccessRate,
         ignore: (record) => budgetHit !== undefined && record.status === "blocked" && record.error === budgetHit,
@@ -696,8 +900,13 @@ export class AgentEngine {
     const keepRecentToolResults = Math.max(0, Math.floor(compactionConfig?.keepRecentToolResults ?? 4));
     let compactions = 0;
     const triedModels = new Set<string>([llm.model]);
+    // A failover lasts for one turn only: the next turn starts on the primary model again.
+    const primaryLlm = llm;
 
-    for (let turn = 1; ; turn += 1) {
+    turnLoop: for (let turn = 1; ; turn += 1) {
+      if (maxTotalTokens !== undefined && usage.totalTokens >= maxTotalTokens) {
+        return finish("limit_reached", "", `Total-token budget of ${maxTotalTokens} reached.`);
+      }
       if (turn > turnCap && !tryExtend()) break;
       if (toolIterations >= iterationCap && !tryExtend()) {
         limitReason = `Tool iteration budget of ${iterationCap} reached.`;
@@ -706,6 +915,12 @@ export class AgentEngine {
       if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
       turns = turn;
       emit({ type: "turn.started", runId, turn });
+      if (llm !== primaryLlm) {
+        llm = primaryLlm;
+        model = primaryLlm.model;
+        triedModels.clear();
+        triedModels.add(primaryLlm.model);
+      }
 
       // Keep long tasks inside the window: prune old tool output from the prompt,
       // then summarise the oldest agent steps when that is still not enough.
@@ -725,13 +940,27 @@ export class AgentEngine {
       let visibleMessages = compactionEnabled
         ? pruneToolResults(state.messages, { keepRecentToolResults })
         : state.messages;
-      if (contextWindowTokens && compactionEnabled && compactions < 3) {
+      if (contextWindowTokens && compactionEnabled) {
         if (estimateContext(visibleMessages, schemas) > Math.floor(contextWindowTokens * triggerRatio)) {
+          const compactionStartedAt = Date.now();
+          this.options.logger?.("agent.context_compaction.started", {
+            runId,
+            turn,
+            visibleMessageCount: visibleMessages.length,
+            contextWindowTokens,
+          });
           const outcome = await compactRunContext({
             messages: state.messages,
             llm,
             signal,
             keepRecentUnits,
+          });
+          this.options.logger?.("agent.context_compaction.completed", {
+            runId,
+            turn,
+            durationMs: Date.now() - compactionStartedAt,
+            compacted: Boolean(outcome),
+            droppedMessages: outcome?.droppedMessages ?? 0,
           });
           if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
           if (outcome) {
@@ -761,28 +990,120 @@ export class AgentEngine {
       }
 
       let response;
+      let promptMessages: EngineMessage[] = visibleMessages;
+      let transientRetries = 0;
       for (;;) {
+        let activeCallForAttempt: ActiveModelCall | undefined;
         try {
-          const promptMessages = contextWindowTokens
+          promptMessages = contextWindowTokens
             ? fitContextWindow(visibleMessages, contextWindowTokens, schemas)
             : visibleMessages;
-          response = await llm.complete(promptMessages, {
-            ...(schemas.length ? { tools: schemas, toolChoice: "auto" as const } : {}),
-            ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-            ...(maxCompletionTokens ? { maxCompletionTokens } : {}),
-            // Stream text to listeners as it is generated; the assembled response
-            // below is still what drives tool calls and the final answer.
-            ...(request.onEvent
-              ? { onTextDelta: (delta: string) => emit({ type: "message.delta", runId, turn, delta }) }
-              : {}),
-            signal,
+          const remainingTotalTokens = maxTotalTokens === undefined ? undefined : Math.max(1, maxTotalTokens - usage.totalTokens);
+          const perCompletionTokenCap = remainingTotalTokens === undefined
+            ? maxCompletionTokens
+            : Math.min(maxCompletionTokens ?? remainingTotalTokens, remainingTotalTokens);
+          const activeCall: ActiveModelCall = {
+            controller: new AbortController(),
+            turn,
+            interruptedBySteer: false,
+            streamedText: "",
+          };
+          activeCallForAttempt = activeCall;
+          this.activeModelCalls.set(runId, activeCall);
+          const abortModelCall = () => activeCall.controller.abort();
+          if (signal.aborted) abortModelCall();
+          else signal.addEventListener("abort", abortModelCall, { once: true });
+          const providerRequestStartedAt = Date.now();
+          let firstTokenMs: number | undefined;
+          const requestPromptChars = promptMessages.reduce((total, message) => total + String(message.content ?? "").length, 0);
+          const streamingRequested = Boolean(request.onEvent);
+          this.options.logger?.("llm.request.started", {
+            runId,
+            turn,
+            model: llm.model,
+            promptMessageCount: promptMessages.length,
+            promptChars: requestPromptChars,
+            toolSchemaCount: schemas.length,
+            streaming: streamingRequested,
           });
+          try {
+            response = await llm.complete(promptMessages, {
+              ...(schemas.length ? { tools: schemas, toolChoice: "auto" as const } : {}),
+              ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+              ...(perCompletionTokenCap ? { maxCompletionTokens: perCompletionTokenCap } : {}),
+              // Stream text to listeners as it is generated; the assembled response
+              // below is still what drives tool calls and the final answer.
+              ...(request.onEvent
+                ? { onTextDelta: (delta: string) => {
+                    if (firstTokenMs === undefined) firstTokenMs = Date.now() - providerRequestStartedAt;
+                    activeCall.streamedText += delta;
+                    emit({ type: "message.delta", runId, turn, delta });
+                  } }
+                : {}),
+              signal: activeCall.controller.signal,
+            });
+            this.options.logger?.("llm.request.completed", {
+              runId,
+              turn,
+              model: llm.model,
+              durationMs: Date.now() - providerRequestStartedAt,
+              ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
+              streamedChars: activeCall.streamedText.length,
+              toolCallCount: response.choices?.[0]?.message?.tool_calls?.length ?? 0,
+            });
+          } catch (error) {
+            this.options.logger?.("llm.request.failed", {
+              runId,
+              turn,
+              model: llm.model,
+              durationMs: Date.now() - providerRequestStartedAt,
+              errorType: error instanceof Error ? error.name : "unknown",
+            });
+            throw error;
+          } finally {
+            signal.removeEventListener("abort", abortModelCall);
+            if (this.activeModelCalls.get(runId) === activeCall) this.activeModelCalls.delete(runId);
+          }
+          if (activeCall.interruptedBySteer && !signal.aborted) {
+            if (activeCall.streamedText.trim()) emit({ type: "thought", runId, turn, content: activeCall.streamedText, interim: false });
+            emit({ type: "model.steer_interrupt", runId, turn });
+            this.drainSteering(state, turn);
+            continue turnLoop;
+          }
+          if (transientRetries > 0) {
+            emit({ type: "model.resumed", runId, turn, retries: transientRetries });
+            transientRetries = 0;
+          }
           break;
         } catch (error) {
           if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
+          // Steering interrupts a single model request, not the run itself. It must
+          // not consume transient retries or cause model fallback.
+          const activeCall = activeCallForAttempt;
+          if (activeCall?.interruptedBySteer) {
+            if (activeCall.streamedText.trim()) emit({ type: "thought", runId, turn, content: activeCall.streamedText, interim: false });
+            emit({ type: "model.steer_interrupt", runId, turn });
+            this.drainSteering(state, turn);
+            continue turnLoop;
+          }
           if (!isTransientModelFailure(error)) return finish("failed", "", errorMessage(error));
-          const fallback = this.nextFallbackClient(triedModels);
-          if (!fallback) return finish("failed", "", errorMessage(error));
+          // A run that must stay on its own model (autonomous goals) never switches; it waits and resumes instead.
+          const fallback = request.disableModelFallback ? undefined : this.nextFallbackClient(triedModels);
+          if (!fallback) {
+            if (!request.retryTransient) return finish("failed", "", errorMessage(error));
+            // No other model to switch to: wait and retry the same call, so the run resumes at this step.
+            const retryOptions = typeof request.retryTransient === "object" ? request.retryTransient : {};
+            // Defaults: minimum 2s, maximum 12s. An explicit caller option (e.g. a test) overrides them.
+            const maxDelayMs = Math.max(1, retryOptions.maxDelayMs ?? TRANSIENT_RETRY_MAX_DELAY_MS);
+            const baseDelayMs = Math.min(maxDelayMs, Math.max(1, retryOptions.baseDelayMs ?? TRANSIENT_RETRY_BASE_DELAY_MS));
+            transientRetries += 1;
+            const delayMs = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.min(transientRetries - 1, 16));
+            emit({ type: "model.retrying", runId, turn, retry: transientRetries, delayMs, reason: errorMessage(error) });
+            this.options.logger?.("llm.transient_retry", { retry: transientRetries, delayMs, error: errorMessage(error) });
+            await sleepUnlessAborted(delayMs, signal);
+            if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
+            continue;
+          }
           emit({
             type: "model.fallback",
             runId,
@@ -796,17 +1117,30 @@ export class AgentEngine {
           model = fallback.model;
         }
       }
-      usage.promptTokens += response.usage?.prompt_tokens ?? 0;
-      usage.completionTokens += response.usage?.completion_tokens ?? 0;
-      usage.totalTokens +=
-        response.usage?.total_tokens ??
-        (response.usage?.prompt_tokens ?? 0) +
-          (response.usage?.completion_tokens ?? 0);
-
       const message = response.choices?.[0]?.message;
+      // Some compatible providers omit usage metadata. Estimate it from the actual prompt
+      // and returned message so a finite per-run token budget still applies in that case.
+      const estimatedPromptTokens = estimateContext(promptMessages, schemas);
+      const estimatedCompletionTokens = Math.max(1, Math.ceil(JSON.stringify(message ?? {}).length / 4));
+      const hasReportedTotal = response.usage?.total_tokens !== undefined;
+      const promptTokensUsed = response.usage?.prompt_tokens ?? (hasReportedTotal ? 0 : estimatedPromptTokens);
+      const completionTokensUsed = response.usage?.completion_tokens ?? (hasReportedTotal ? 0 : estimatedCompletionTokens);
+      usage.promptTokens += promptTokensUsed;
+      usage.completionTokens += completionTokensUsed;
+      usage.totalTokens += response.usage?.total_tokens ?? (promptTokensUsed + completionTokensUsed);
+
       if (!message) return finish("failed", "", "The model returned no choices.");
       const text = typeof message.content === "string" ? message.content : "";
       const calls = runToolsEnabled ? normalizeToolCalls(message.tool_calls) : [];
+      if (maxTotalTokens !== undefined && usage.totalTokens >= maxTotalTokens) {
+        const reason = `Total-token budget of ${maxTotalTokens} reached.`;
+        // Do not execute a side effect returned by a completion that exhausted or
+        // exceeded the total budget. A text-only final can be returned as limited,
+        // but acceptance remains the caller's responsibility.
+        if (calls.length > 0) return finish("limit_reached", "", reason);
+        if (text.trim()) emit({ type: "message.final", runId, content: text.trim() });
+        return finish("limit_reached", text.trim(), reason);
+      }
       if (calls.length > 0) toolIterations += 1;
 
       if (request.preActionUpdates && calls.length > 0 && !preActionNoticeAttempted && !text.trim() && request.onEvent) {
@@ -1017,6 +1351,13 @@ export class AgentEngine {
     return !ToolRegistry.needsApproval(tool);
   }
 
+  /** Tool calls that count against the call budget; polling (repeatSafe) calls are free. */
+  private budgetedCalls(state: RunState, tools: ToolRegistry): number {
+    let count = 0;
+    for (const record of state.records) if (!tools.get(record.name)?.repeatSafe) count += 1;
+    return count;
+  }
+
   /**
    * Runs the tool calls of one model turn. Consecutive independent read-only
    * calls execute concurrently; everything else keeps the model's order. Every
@@ -1037,14 +1378,19 @@ export class AgentEngine {
     let index = 0;
     while (index < calls.length) {
       if (state.signal.aborted) return budgetHit;
-      if (state.records.length >= maxToolCalls) {
+      if (this.steerInboxes.get(state.runId)?.length) {
+        this.answerSkippedCall(state, calls[index], turn, "The user sent a new message; repeat this operation if needed.", tools);
+        index += 1;
+        continue;
+      }
+      if (this.budgetedCalls(state, tools) >= maxToolCalls) {
         budgetHit = `Tool call budget of ${maxToolCalls} reached.`;
         this.answerSkippedCall(state, calls[index], turn, budgetHit, tools);
         index += 1;
         continue;
       }
       if (parallel && this.canRunInParallel(calls[index], tools, request)) {
-        const room = maxToolCalls - state.records.length;
+        const room = maxToolCalls - this.budgetedCalls(state, tools);
         const group: EngineToolCall[] = [];
         while (
           index < calls.length &&
@@ -1168,19 +1514,22 @@ export class AgentEngine {
     }
 
     // Loop protection: identical calls repeat only a few times between state changes.
-    const key = `${tool.name}:${stableStringify(args)}`;
-    const seen = (state.callCounts.get(key) ?? 0) + 1;
-    state.callCounts.set(key, seen);
-    if (seen > this.duplicateCallLimit) {
-      state.blockedStreak += 1;
-      if (state.blockedStreak >= 3) state.loopDetected = true;
-      fail(
-        "blocked",
-        "This exact call was already made several times with the same result. Use the earlier result or change your approach.",
-      );
-      return;
+    // Polling tools (repeatSafe) are expected to repeat the same call and are exempt.
+    if (!tool.repeatSafe) {
+      const key = `${tool.name}:${stableStringify(args)}`;
+      const seen = (state.callCounts.get(key) ?? 0) + 1;
+      state.callCounts.set(key, seen);
+      if (seen > this.duplicateCallLimit) {
+        state.blockedStreak += 1;
+        if (state.blockedStreak >= 3) state.loopDetected = true;
+        fail(
+          "blocked",
+          "This exact call was already made several times with the same result. Use the earlier result or change your approach.",
+        );
+        return;
+      }
+      state.blockedStreak = 0;
     }
-    state.blockedStreak = 0;
 
     // What the user has taught applies to every run. No other built-in gate is consulted first.
     const learned = getPermissionLedger().evaluate(tool.name, args);
@@ -1206,6 +1555,18 @@ export class AgentEngine {
     let timedOut = false;
     const onRunAbort = () => toolController.abort();
     state.signal.addEventListener("abort", onRunAbort, { once: true });
+    const runningEntry: RunningToolEntry = {
+      controller: toolController,
+      name: tool.name,
+      arguments: call.function.arguments || "{}",
+      interrupted: false,
+    };
+    let runningSet = this.runningTools.get(state.runId);
+    if (!runningSet) {
+      runningSet = new Map<string, RunningToolEntry>();
+      this.runningTools.set(state.runId, runningSet);
+    }
+    runningSet.set(call.id, runningEntry);
     const effectiveTimeoutMs = tool.timeoutMs ?? this.toolTimeoutMs;
     const timer = effectiveTimeoutMs > 0
       ? setTimeout(() => {
@@ -1226,10 +1587,9 @@ export class AgentEngine {
         toolController.signal,
       );
       const serialized = redactSecrets(
-        truncate(
-          typeof output === "string" ? output : (JSON.stringify(output) ?? "null"),
-          this.maxToolResultChars,
-        ),
+        typeof output === "string"
+          ? truncate(output, this.maxToolResultChars)
+          : boundedSerialize(output, this.maxToolResultChars),
       );
       record.status = "succeeded";
       record.durationMs = Date.now() - startedMs;
@@ -1244,6 +1604,12 @@ export class AgentEngine {
     } catch (error) {
       if (state.signal.aborted) {
         fail("cancelled", "The run was cancelled.", startedMs);
+      } else if (runningEntry.interrupted) {
+        fail(
+          "cancelled",
+          "A new message from the user changed this step, so the wait was stopped. The command or change may still be running or may have partly happened; check the current state before repeating it.",
+          startedMs,
+        );
       } else if (timedOut) {
         fail("failed", `Tool timed out after ${effectiveTimeoutMs} ms.`, startedMs);
       } else {
@@ -1252,6 +1618,8 @@ export class AgentEngine {
     } finally {
       clearTimeout(timer);
       state.signal.removeEventListener("abort", onRunAbort);
+      runningSet.delete(call.id);
+      if (runningSet.size === 0 && this.runningTools.get(state.runId) === runningSet) this.runningTools.delete(state.runId);
     }
   }
 

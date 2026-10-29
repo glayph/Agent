@@ -16,6 +16,23 @@ const tools = () => {
 type R = Record<string, any>
 
 describe("ProcessManager", () => {
+  it("calls onExit once when the command finishes, is killed, or cannot start", async () => {
+    const pm = new ProcessManager()
+    let calls = 0
+    const onExit = () => { calls += 1 }
+    const done = pm.start({ command: "echo hi", cwd: cwd(), env: process.env, onExit })
+    await pm.waitForExit(done.id, 5000)
+    expect(calls).toBe(1)
+    const slow = pm.start({ command: "sleep 30", cwd: cwd(), env: process.env, onExit })
+    pm.kill(slow.id)
+    // kill() marks the process killed at once; the OS reports the exit a moment later.
+    for (let waited = 0; calls < 2 && waited < 5000; waited += 25) await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(calls).toBe(2)
+    const broken = pm.start({ command: "echo hi", cwd: path.join(os.tmpdir(), "miki-does-not-exist-xyz"), env: process.env, onExit })
+    await pm.waitForExit(broken.id, 5000)
+    for (let waited = 0; calls < 3 && waited < 5000; waited += 25) await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(calls).toBe(3)
+  })
   it("resolves waits the moment the process exits (event-driven), not at the deadline", async () => {
     const pm = new ProcessManager()
     const proc = pm.start({ command: "sleep 0.3; echo done", cwd: cwd(), env: process.env })

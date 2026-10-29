@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next"
+
 import type { ChannelConfig } from "@/api/channels"
 import {
   type ArrayFieldFlusher,
@@ -8,8 +10,11 @@ import {
   parseAllowFromInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import {
+  ChannelFieldCard,
+  ChannelSection,
+} from "@/features/channels/components/channel-section"
 import { Field, KeyInput } from "@/shared/forms/shared-form"
-import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
 
 interface WhatsAppFormProps {
@@ -36,10 +41,15 @@ export function WhatsAppForm({
   registerArrayFieldFlusher,
   arrayFieldResetVersion,
 }: WhatsAppFormProps) {
+  const { t } = useTranslation()
+
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Bridge URL"
             required
@@ -52,7 +62,34 @@ export function WhatsAppForm({
               placeholder="https://bridge.example.com"
             />
           </Field>
+        </ChannelFieldCard>
+      </ChannelSection>
 
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <ChannelFieldCard>
+          <ChannelArrayListField
+            label="Allow From"
+            hint="Allowed WhatsApp chat or sender IDs. Supports chat: and sender: prefixes."
+            value={asStringArray(config.allow_from)}
+            onChange={(value) => onChange("allow_from", value)}
+            placeholder="chat:120363000000000000@g.us, sender:8801000000000"
+            parser={parseAllowFromInput}
+            fieldPath="allow_from"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
+        </ChannelFieldCard>
+      </ChannelSection>
+
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Webhook Token"
             hint="Optional shared token accepted from the bridge and reused for outbound bridge calls"
@@ -69,24 +106,8 @@ export function WhatsAppForm({
               )}
             />
           </Field>
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
-          <ChannelArrayListField
-            label="Allow From"
-            hint="Allowed WhatsApp chat or sender IDs. Supports chat: and sender: prefixes."
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder="chat:120363000000000000@g.us, sender:8801000000000"
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }
@@ -96,10 +117,15 @@ export function WhatsAppNativeForm({
   onChange,
   fieldErrors = {},
 }: WhatsAppFormProps) {
+  const { t } = useTranslation()
+
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Configuration"
             required
@@ -112,8 +138,8 @@ export function WhatsAppNativeForm({
               placeholder="Configuration details"
             />
           </Field>
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }

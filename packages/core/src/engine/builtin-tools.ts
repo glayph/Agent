@@ -17,6 +17,8 @@ export interface WorkspaceToolsOptions {
   maxReadBytes?: number;
   maxListEntries?: number;
   maxSearchResults?: number;
+  /** Maximum files scanned by workspace_search; defaults to unlimited. */
+  maxSearchFiles?: number;
 }
 
 function asString(value: unknown, name: string): string {
@@ -41,6 +43,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
   const maxRead = options.maxReadBytes ?? 200_000;
   const maxList = options.maxListEntries ?? 300;
   const maxMatches = options.maxSearchResults ?? 50;
+  const maxSearchFiles = options.maxSearchFiles ?? Number.POSITIVE_INFINITY;
   const rel = (abs: string) => path.relative(getRoot(), abs) || ".";
 
   const guard = (input: unknown, name = "path"): string => {
@@ -148,7 +151,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
         const matches: Array<{ file: string; line: number; text: string }> = [];
         let scanned = 0;
         const walk = (dir: string): void => {
-          if (matches.length >= limit || scanned > 5000) return;
+          if (matches.length >= limit || scanned >= maxSearchFiles) return;
           let entries: fs.Dirent[];
           try {
             entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -156,7 +159,7 @@ export function createWorkspaceTools(options: WorkspaceToolsOptions): EngineTool
             return;
           }
           for (const entry of entries) {
-            if (matches.length >= limit || scanned > 5000) return;
+            if (matches.length >= limit || scanned >= maxSearchFiles) return;
             const full = path.join(dir, entry.name);
             if (entry.isSymbolicLink()) continue;
             if (entry.isDirectory()) {

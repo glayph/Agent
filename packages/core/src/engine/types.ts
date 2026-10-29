@@ -22,6 +22,28 @@ export interface EngineMessage {
   tool_calls?: EngineToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** Images attached to this message (URLs or data URLs); the provider adapter turns them into image parts. */
+  image_urls?: string[];
+}
+
+/** A user message handed to a run that is still working. */
+export interface SteerInput {
+  text: string;
+  /** Images sent with the message. */
+  imageUrls?: string[];
+  /** Id of the stored chat message, so the caller learns when the run actually read it. */
+  messageId?: string;
+}
+
+/** A steered message waiting in a run's inbox. */
+export interface SteerItem {
+  text: string;
+  imageUrls: string[];
+  messageId?: string;
+  /** Wall-clock time at which the message was received. */
+  receivedAt: number;
+  /** What the user was already told about this message while the run was busy, so the run does not repeat it. */
+  acknowledgedWith?: string;
 }
 
 export interface EngineToolSchema {
@@ -89,6 +111,8 @@ export interface EngineTool {
    * read-only tools; everything else always runs in the order the model gave.
    */
   parallelSafe?: boolean;
+  /** Polling-style tool: repeating the same call is expected and must not count as a loop or use up the call budget. */
+  repeatSafe?: boolean;
   /**
    * Per-tool timeout override in ms. `0` disables the engine's per-call timeout. Tools that
    * manage their own long-running work (terminal processes) use this so a slow command is
@@ -223,7 +247,7 @@ export type EngineEvent =
   | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
   | { type: "message.final"; runId: string; content: string }
-  | { type: "user.steer"; runId: string; turn: number; count: number }
+  | { type: "user.steer"; runId: string; turn: number; count: number; messageIds?: string[] }
   | {
       type: "context.compacted";
       runId: string;
@@ -239,6 +263,9 @@ export type EngineEvent =
       outcome: RunStatus;
     }
   | { type: "model.fallback"; runId: string; turn: number; from: string; to: string; reason: string }
+  | { type: "model.retrying"; runId: string; turn: number; retry: number; delayMs: number; reason: string }
+  | { type: "model.resumed"; runId: string; turn: number; retries: number }
+  | { type: "model.steer_interrupt"; runId: string; turn: number }
   | {
       type: "run.finished";
       runId: string;
@@ -268,10 +295,23 @@ export interface RunRequest {
   thinkingLevel?: string;
   /** Optional per-run tool registry, useful for scoped foreground/background execution. */
   tools?: ToolRegistry;
+  /**
+   * Keep retrying a transient model failure (network, timeout, 429, 5xx) in place, with
+   * exponential backoff (default 2s minimum, 12s maximum; `baseDelayMs`/`maxDelayMs` override), until the call succeeds or `signal` aborts.
+   * The run continues from the exact step that failed instead of starting over.
+   */
+  retryTransient?: boolean | { baseDelayMs?: number; maxDelayMs?: number };
+  /**
+   * Never switch to a fallback model during this run. A transient failure is then handled by
+   * `retryTransient` (wait for the same model and resume) or fails the run.
+   */
+  disableModelFallback?: boolean;
   /** Optional per-run tool-call budget override. */
   maxToolCalls?: number;
-  /** Optional per-run completion-token budget override. */
+  /** Optional per-completion output-token cap. */
   maxCompletionTokens?: number;
+  /** Optional cumulative per-run token budget (prompt + completion tokens). */
+  maxTotalTokens?: number;
   /** Optional per-run wall-clock budget override in ms. Zero disables the deadline. */
   maxWallTimeMs?: number;
   signal?: AbortSignal;

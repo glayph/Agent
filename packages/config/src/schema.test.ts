@@ -265,7 +265,7 @@ describe("runtime config schema", () => {
     expect(defaulted.valid).toBe(true);
     expect(defaulted.config.self_improvement?.behavior_learning).toEqual({
       enabled: true,
-      mode: "draft",
+      mode: "observe", // follows the canonical evolution.mode default
       exploration_rate: 0.1,
       min_samples: 3,
       max_draft_notes: 3,
@@ -352,7 +352,7 @@ describe("runtime config schema", () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toContainEqual(
       expect.objectContaining({
-        path: "channels.madeup",
+        path: "channel_list.madeup", // legacy `channels` is merged into the canonical `channel_list`
         code: "unsupported_channel",
       }),
     );

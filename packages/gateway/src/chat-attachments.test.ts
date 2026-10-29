@@ -6,7 +6,10 @@ import {
   MEDIA_ROUTE,
   candidatePathsFromToolCall,
   createAttachmentCollector,
+  describeFile,
+  imageDataUrlFromMediaUrl,
   resolveMediaPath,
+  workspaceRelativePathFromMediaUrl,
 } from "./chat-attachments.js";
 
 describe("chat attachments", () => {
@@ -93,6 +96,37 @@ describe("chat attachments", () => {
     for (const name of [".env", "miki-runtime.sqlite", "tool.exe", ".git/config.txt"]) {
       expect(resolveMediaPath(name, ctx())).toBeNull();
     }
+  });
+
+
+  it("supports common document and video attachment types", () => {
+    expect(describeFile("report.docx")).toEqual({
+      type: "file",
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    expect(describeFile("clip.mov")).toEqual({ type: "video", contentType: "video/quicktime" });
+    expect(describeFile("clip.m4v")).toEqual({ type: "video", contentType: "video/mp4" });
+    expect(describeFile("recording.opus")).toEqual({ type: "audio", contentType: "audio/opus" });
+    expect(describeFile("photo.tiff")).toEqual({ type: "image", contentType: "image/tiff" });
+    expect(describeFile("favicon.ico")).toEqual({ type: "image", contentType: "image/x-icon" });
+    expect(describeFile("notes.md")).toEqual({ type: "file", contentType: "text/markdown" });
+    expect(describeFile("installer.exe")).toBeNull();
+  });
+
+  it("resolves uploaded media URLs only to files inside the workspace", () => {
+    const uploadDir = path.join(workspace, ".miki-chat-uploads");
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const image = path.join(uploadDir, "test-image.png");
+    fs.writeFileSync(image, Buffer.from("png-test"));
+    const url = `${MEDIA_ROUTE}?path=${encodeURIComponent(image)}`;
+    expect(workspaceRelativePathFromMediaUrl(url, ctx())).toBe(".miki-chat-uploads/test-image.png");
+    expect(imageDataUrlFromMediaUrl(url, ctx())).toBe(`data:image/png;base64,${Buffer.from("png-test").toString("base64")}`);
+    const svg = path.join(uploadDir, "vector.svg");
+    fs.writeFileSync(svg, "<svg></svg>");
+    const svgUrl = `${MEDIA_ROUTE}?path=${encodeURIComponent(svg)}`;
+    expect(imageDataUrlFromMediaUrl(svgUrl, ctx())).toBeNull();
+    expect(workspaceRelativePathFromMediaUrl(svgUrl, ctx())).toBe(".miki-chat-uploads/vector.svg");
+    expect(workspaceRelativePathFromMediaUrl(`${MEDIA_ROUTE}?path=${encodeURIComponent(outside + "/photo.png")}`, ctx())).toBeNull();
   });
 
   it("refuses missing files and directories", () => {

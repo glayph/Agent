@@ -13,6 +13,8 @@ export interface ProviderCompletionRequest {
   extra?: Record<string, unknown>;
   /** Bounded request timeout in milliseconds; local models may need a longer CPU window. */
   timeoutMs?: number;
+  /** Stream text fragments to the chat UI when the provider supports streaming. */
+  onTextDelta?: (delta: string) => void;
   /** Abort an in-flight provider request when the agent turn is cancelled or times out. */
   signal?: AbortSignal;
 }

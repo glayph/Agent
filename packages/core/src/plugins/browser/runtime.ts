@@ -151,7 +151,8 @@ export class BrowserTool {
   private _maxRetries: number = 3;
   private _chromePath: string | null = null;
   private _allowMedia = true;
-  private _allowPrivateNetworks = true;
+  // Safe baseline: loopback, private and cloud-metadata addresses are blocked unless restrictions are bypassed.
+  private _allowPrivateNetworks = false;
   private _allowedDomains: string[] = [];
   private workspacePreviewServer: Server | null = null;
   private workspacePreviewRoot: string | null = null;
@@ -225,7 +226,8 @@ export class BrowserTool {
       this._allowPrivateNetworks = true;
       return;
     }
-    this._allowPrivateNetworks = true;
+    // Turning the bypass off restores the safe baseline, including the private-network block.
+    this._allowPrivateNetworks = false;
   }
 
   public setAllowedDomains(domains: string[]): void {
@@ -284,7 +286,7 @@ export class BrowserTool {
         if (!isOwnedPreview) {
           await validateNetworkUrl(rawUrl, { allowPrivateNetworks: this._allowPrivateNetworks });
         }
-      } catch (error) {
+      } catch {
         await route.abort();
         return;
       }

@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 
 import { PageHeader } from "@/app/layout/page-header"
@@ -11,11 +12,19 @@ export function HubPage() {
   const hub = useHubMarketplace()
 
   return (
-    <div className="flex h-full flex-col">
-      <PageHeader title={t("navigation.hub")} />
+    <div className="flex h-full flex-col" data-miki-page="skills-discover">
+      <PageHeader title={t("navigation.hub")}>
+        <Link
+          to="/agent/skills"
+          className="text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-md px-2 text-xs font-medium transition-colors"
+        >
+          {t("common.back", { defaultValue: "Back" })}
+        </Link>
+      </PageHeader>
 
       <div
-        className="flex-1 overflow-auto px-6 py-6"
+        className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6"
+        data-miki-page-body="true"
         onScroll={hub.handleScroll}
       >
         <div className="mx-auto w-full max-w-[1000px] space-y-8">

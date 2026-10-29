@@ -71,43 +71,46 @@ const RootLayout = () => {
     setAuthError(null)
     setAuthGateState("checking")
 
-    const checkAuth = () => {
-      void getLauncherAuthStatus()
-        .then((s) => {
-          if (cancelled) return
-          setSessionExpiresAt(s.session_expires_at ?? null)
-          if (!s.initialized && !s.authenticated) {
-            setAuthGateState("redirecting")
-            globalThis.location.assign("/launcher-setup")
-          } else if (!s.authenticated) {
-            setAuthGateState("redirecting")
-            globalThis.location.assign("/launcher-login")
-          } else {
-            setAuthGateState("authenticated")
-          }
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return
-          if (err instanceof Error && /^status 40[13]$/.test(err.message)) {
-            setAuthGateState("redirecting")
-            globalThis.location.assign("/launcher-login")
-          } else {
-            setAuthError(
-              err instanceof Error
-                ? err.message
-                : "Auth service unavailable. Reset dashboard password storage and restart the application.",
-            )
-            setAuthGateState("degraded")
-          }
-        })
+    let inFlight = false
+    const checkAuth = async () => {
+      if (cancelled || inFlight || document.visibilityState !== "visible") return
+      inFlight = true
+      try {
+        const s = await getLauncherAuthStatus()
+        if (cancelled) return
+        setSessionExpiresAt(s.session_expires_at ?? null)
+        if (!s.initialized && !s.authenticated) {
+          setAuthGateState("redirecting")
+          globalThis.location.assign("/launcher-setup")
+        } else if (!s.authenticated) {
+          setAuthGateState("redirecting")
+          globalThis.location.assign("/launcher-login")
+        } else {
+          setAuthGateState("authenticated")
+          setAuthError(null)
+        }
+      } catch (err: unknown) {
+        if (cancelled) return
+        if (err instanceof Error && /^status 40[13]$/.test(err.message)) {
+          setAuthGateState("redirecting")
+          globalThis.location.assign("/launcher-login")
+        } else {
+          setAuthError(err instanceof Error ? err.message : "Auth service unavailable. Reset dashboard password storage and restart the application.")
+          setAuthGateState("degraded")
+        }
+      } finally {
+        inFlight = false
+      }
     }
-
-    checkAuth()
-    const pollTimer = globalThis.setInterval(checkAuth, 15_000)
+    const onVisibilityChange = () => { if (document.visibilityState === "visible") void checkAuth() }
+    void checkAuth()
+    const pollTimer = globalThis.setInterval(() => void checkAuth(), 15_000)
+    document.addEventListener("visibilitychange", onVisibilityChange)
 
     return () => {
       cancelled = true
       globalThis.clearInterval(pollTimer)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
     }
   }, [isAuthPage])
 

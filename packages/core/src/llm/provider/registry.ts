@@ -185,6 +185,7 @@ export class ProviderRegistry {
     options: {
       extra?: Record<string, unknown>;
       timeoutMs?: number;
+      onTextDelta?: (delta: string) => void;
       signal?: AbortSignal;
       /** Secret name to authenticate with instead of the provider default. */
       credentialProfile?: string;
@@ -217,6 +218,7 @@ export class ProviderRegistry {
     return this.pluginRegistry.complete(pluginModel, messages, {
       extra: options.extra,
       timeoutMs: options.timeoutMs,
+      onTextDelta: options.onTextDelta,
       signal: options.signal,
       credentialProfile: options.credentialProfile,
       providerId: options.providerId,

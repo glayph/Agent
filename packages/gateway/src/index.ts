@@ -1,13 +1,17 @@
 import express from "express"
+import type { LooseConfig } from "./loose-config.js"
 import { StreamHub, sendSocketEvent } from "./stream-hub.js"
-import { createChatTurnRunner } from "./chat-turn-runner.js"
+import { findIgnoredConfigKeys, heartbeatLaneModel } from "./ignored-config.js"
+import { factualNoticeFromEvent } from "./notice-fallback.js"
+import { webhookAuthorized, webhookEventName, webhookSecret } from "./webhook-ingress.js"
+import { CHAT_QUEUE_WAIT_MS, createChatTurnRunner } from "./chat-turn-runner.js"
+import { createKeyedLane } from "./session-lane.js"
 import { ProviderRequestError, type ProviderErrorCategory } from "./provider-error.js"
 import { createGlobalMemory, initMemory } from "@miki/core/memory"
 import http from "node:http"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { mkdirSync, statSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync as makeDirSync, rmSync, renameSync, copyFileSync, chmodSync } from "node:fs"
-import os from "node:os"
+import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync as makeDirSync, copyFileSync, chmodSync, appendFileSync } from "node:fs"
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto"
 import { isIP } from "node:net"
 import Database from "better-sqlite3"
@@ -18,6 +22,7 @@ import { createFileManagerRouter, FileManagerError } from "@miki/core/file-manag
 import { DurableTaskStore, FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine"
 import { normalizeRuntimePaths } from "@miki/core/paths"
 import { createSkillsRouter, createSkillsService } from "@miki/core/skills"
+import { getPermissionLedger } from "@miki/core/permissions"
 import { createEmbeddingProvider, cosineSimilarity } from "@miki/memory"
 import { LearningStore } from "@miki/memory"
 import { globalErrorHandler } from "@miki/core/error-handler"
@@ -33,13 +38,20 @@ import { normalizeSessionScope, resolveSessionContextId } from "./session-scope.
 import { resolveToolGroupKey } from "./tool-groups.js"
 import { resolveContextWindowTokens } from "./runtime-settings.js"
 import { FileMemoryService, retrieveRelevantTurns } from "@miki/core/memory-files"
-import { feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, followUpClassifierMessages, parseFollowUpClassification, preferenceNote, previousAnswerFor, requestContextHash, type AnswerFeedbackTarget, type AnswerRating, type StoredFeedback } from "./answer-feedback.js"
+import { createLearnedBehavior } from "./learned-behavior.js"
+import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, followUpClassifierMessages, mayBeFollowUpFeedback, parseFollowUpClassification, preferenceNote, previousAnswerFor, requestContextHash, type AnswerFeedbackTarget, type AnswerRating, type StoredFeedback } from "./answer-feedback.js"
 import { SqliteMemoryIndex } from "./memory-index.js"
 import { wrapAsyncRoutes } from "./async-route.js"
-import { checkApiKey, describeResolution, interpretDefaultModel, probeModelProvider, resolveModel } from "./model-resolution.js"
+import { describeResolution, interpretDefaultModel, normalizeProvider, probeModelProvider, resolveModel } from "./model-resolution.js"
+import { configureLocalModels, synchronizeLocalRuntimeForModel } from "@miki/core/plugins"
 import { createGatewayErrorMiddleware } from "./error-middleware.js"
 import { isWsOriginAllowed, parseAllowedOrigins } from "./ws-origin.js"
-import { isLocalDirectRequest, isRemoteSetupAllowed } from "./local-request.js"
+import { isLocalDirectRequest, isRemoteSetupAllowed, parseAllowedHosts } from "./local-request.js"
+import { createHealthMonitor, type ModelProbeResult } from "./health.js"
+import { RecoveryManager } from "./recovery-manager.js"
+import { ReplaySweeper } from "./replay-sweeper.js"
+import { RecoveryLearning } from "./recovery-learning.js"
+import { DatabaseBackups, beginBoot, ensureHealthyDatabase, installCrashHandlers, installRejectionGuard, markCleanExit, recordDatabaseIncident, type BootInfo } from "./process-safety.js"
 import { sessionCookie } from "./session-cookie.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -60,10 +72,23 @@ const dataRootExistedAtStartup = existsSync(dataRoot)
 const runtimeDatabasePath = path.join(dataRoot, "miki-runtime.sqlite")
 const runtimeDatabaseExistedAtStartup = existsSync(runtimeDatabasePath)
 mkdirSync(dataRoot, { recursive: true })
+// MIKI_RECOVERY_V2=1 turns on the Recovery Manager, Replay Sweeper, database integrity check and backups, crash
+// handlers and crash-loop protection (see docs/structure/05-gateway-config-installer.md). Off by default.
+const recoveryV2 = /^(1|true|on|yes)$/i.test(process.env.MIKI_RECOVERY_V2 ?? "")
+const dbBackupDir = path.join(dataRoot, "backups")
+// A damaged database is set aside and the newest good backup restored BEFORE the database is opened.
+const dbCheckResult = recoveryV2 ? ensureHealthyDatabase(runtimeDatabasePath, dbBackupDir, (message) => console.warn(`[miki] ${message}`)) : undefined
 const db = new Database(runtimeDatabasePath)
 if (!dataRootExistedAtStartup) console.info("[miki] runtime data directory was absent; initialized a new local database. Use the authenticated runtime export endpoint to preserve state between installations.")
 else if (!runtimeDatabaseExistedAtStartup) console.warn("[miki] runtime data directory existed but miki-runtime.sqlite was missing; this instance started with a new database. Check your backup or ZIP-copy procedure.")
 db.pragma("journal_mode = WAL")
+let bootInfo: BootInfo | undefined
+if (recoveryV2) {
+  try {
+    bootInfo = beginBoot(db, dataRoot, (message) => console.warn(`[miki] ${message}`))
+    if (dbCheckResult) recordDatabaseIncident(db, dbCheckResult, new Date().toISOString())
+  } catch (error) { console.warn(`[miki] boot record failed: ${error instanceof Error ? error.message : String(error)}`) }
+}
 const durableTaskStore = new DurableTaskStore(db)
 durableTaskStore.recoverExpired()
 db.exec(`
@@ -157,7 +182,7 @@ const wsClientIp = (request: http.IncomingMessage): string => {
   return loopback && chain.length ? normalizeClientAddress(chain[chain.length - 1]) : remote
 }
 app.use((req, res, next) => {
-  if (!req.path.startsWith("/api") && req.path !== "/gateway/health") return next()
+  if (!req.path.startsWith("/api") && req.path !== "/gateway/health" && req.path !== "/gateway/live") return next()
   if (!allowedClient(req)) return res.status(403).json({ error: "Client address is not allowed by launcher CIDR policy." })
   return next()
 })
@@ -169,7 +194,9 @@ app.use("/api", (req, res, next) => {
     req.path === "/health" ||
     req.path === "/version" ||
     req.path === "/system/version" ||
-    req.path.startsWith("/auth/")
+    req.path.startsWith("/auth/") ||
+    // Webhook ingress authenticates itself with a shared secret (see the route below).
+    (req.method === "POST" && req.path.startsWith("/webhooks/"))
   return publicPath ? next() : requireAuth(req, res, next)
 })
 const LOGIN_MAX_FAILURES = 8
@@ -238,7 +265,7 @@ const ensureSession = (id: string) => {
 }
 const sessionSummary = (id: string) => {
   ensureSession(id)
-  const row = db.prepare(`SELECT s.id,s.title,s.created_at created,s.updated_at updated,COUNT(CASE WHEN m.context_id IS NULL OR m.context_id NOT LIKE 'proactive:%' THEN m.id END) message_count,COALESCE((SELECT content FROM chat_messages WHERE session_id=s.id AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') ORDER BY created_at DESC LIMIT 1),'') preview,s.pinned FROM chat_sessions s LEFT JOIN chat_messages m ON m.session_id=s.id WHERE s.id=? GROUP BY s.id`).get(id) as Record<string, unknown>
+  const row = db.prepare(`SELECT s.id,s.title,s.created_at created,s.updated_at updated,COUNT(CASE WHEN (m.context_id IS NULL OR m.context_id NOT LIKE 'proactive:%' OR m.context_id LIKE 'proactive:discovery:%' OR m.context_id LIKE 'proactive:result:%') THEN m.id END) message_count,COALESCE((SELECT content FROM chat_messages WHERE session_id=s.id AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%' OR context_id LIKE 'proactive:discovery:%' OR context_id LIKE 'proactive:result:%') ORDER BY created_at DESC LIMIT 1),'') preview,s.pinned FROM chat_sessions s LEFT JOIN chat_messages m ON m.session_id=s.id WHERE s.id=? GROUP BY s.id`).get(id) as Record<string, unknown>
   return row
 }
 const workspaceRoot = path.resolve(process.env.MIKI_WORKSPACE_DIR || projectRoot)
@@ -257,13 +284,6 @@ const readStoredEmbedding = (chunkId: string): number[] | undefined => {
   const row = db.prepare("SELECT embedding FROM memory_vectors WHERE chunk_id=?").get(chunkId) as { embedding?: string } | undefined
   if (!row?.embedding) return undefined
   try { return JSON.parse(row.embedding) as number[] } catch { return undefined }
-}
-const ensureStoredEmbedding = async (row: Record<string, unknown>): Promise<number[]> => {
-  const existing = readStoredEmbedding(String(row.id))
-  if (existing?.length) return existing
-  const vector = Array.from(await embeddingProvider.embed(`${String(row.summary || "")}\n${String(row.content || "")}`)) as number[]
-  db.prepare("INSERT INTO memory_vectors(chunk_id,embedding,dimensions,updated_at) VALUES(?,?,?,?) ON CONFLICT(chunk_id) DO UPDATE SET embedding=excluded.embedding,dimensions=excluded.dimensions,updated_at=excluded.updated_at").run(String(row.id), JSON.stringify(vector), vector.length, now())
-  return vector
 }
 const lexicalMemorySearch = (query: string, limit: number) => {
   const terms = query.toLowerCase().split(/\s+/).map((value) => value.trim()).filter((value) => value.length >= 2).slice(0, 12)
@@ -300,24 +320,32 @@ const gatewayRole = "primary-node-gateway"
 let shutdownRequested = false
 const shutdownHandlers: Array<() => void | Promise<void>> = []
 const lifecycleOwner = process.env.MIKI_24_7_RUNTIME === "1" ? "24-7-supervisor" : "launcher"
+/** Exit code that tells the supervisor "restart me now" (EX_TEMPFAIL). Any other exit is handled as a crash. */
+const RESTART_EXIT_CODE = 75
+let restartRequested = false
+const restartRequestPath = () => (process.env.MIKI_GATEWAY_RESTART_FILE || "").trim() || undefined
+const restartRequestPending = () => { const file = restartRequestPath(); try { return Boolean(file) && existsSync(file as string) } catch { return false } }
 
-const gatewayHealthPayload = () => ({
-  status: "ok",
-  ok: true,
-  coreHealthy: true,
-  gateway: "persistent-node-backend",
-  backend_role: gatewayRole,
-  lifecycle_owner: lifecycleOwner,
-  pid: process.pid,
-})
-app.get("/gateway/health", (_req, res) => {
+let healthMonitor: ReturnType<typeof createHealthMonitor> | undefined
+// Before the monitor exists (very early startup) the gateway only reports that it is starting.
+const startingHealthPayload = () => ({ status: "ok" as const, ok: true, coreHealthy: true, gateway: "persistent-node-backend", backend_role: gatewayRole, lifecycle_owner: lifecycleOwner, pid: process.pid, starting: true })
+const sendGatewayHealth = (req: express.Request, res: express.Response) => {
   res.setHeader("X-Miki-Backend-Role", gatewayRole)
-  return res.json(gatewayHealthPayload())
-})
-app.get("/api/health", (_req, res) => {
+  if (!healthMonitor) return res.json(startingHealthPayload())
+  const report = healthMonitor.report()
+  // Anyone may ask whether the gateway is up; the reasons and channel/model details are for the owner only.
+  const detailed = isLocalDirectRequest(req.socket.remoteAddress, req.socket.localAddress, req.headers, { allowedHosts: parseAllowedHosts(process.env.MIKI_ALLOWED_HOSTS) }) || authenticated(req)
+  const body = detailed ? report : { status: report.status, ok: report.ok, coreHealthy: report.coreHealthy, gateway: report.gateway, backend_role: report.backend_role, lifecycle_owner: report.lifecycle_owner, pid: report.pid, uptime_s: report.uptime_s }
+  // Only a failed database is 503. A degraded gateway (model or network trouble) still answers 200 so that nothing restarts it for that.
+  return res.status(report.status === "unhealthy" ? 503 : 200).json(body)
+}
+// Light liveness: answers whenever the event loop is running. A hung process does not answer, which is how watchdogs spot a hang.
+app.get("/gateway/live", (_req, res) => {
   res.setHeader("X-Miki-Backend-Role", gatewayRole)
-  return res.json(gatewayHealthPayload())
+  return res.json(healthMonitor ? healthMonitor.live() : { status: "ok", ok: true, pid: process.pid, starting: true })
 })
+app.get("/gateway/health", sendGatewayHealth)
+app.get("/api/health", sendGatewayHealth)
 app.get("/api/auth/status", (req, res) => {
   const token = cookie(req, "miki_session")
   const isAuthenticated = authenticated(req)
@@ -336,8 +364,8 @@ app.get("/api/auth/status", (req, res) => {
 app.post("/api/auth/setup", (req, res, next) => {
   if (setting("dashboard_password")) return next(Object.assign(new Error("Dashboard is already configured."), { status: 409 }))
   // Before a password exists, whoever reaches this endpoint first becomes the owner: only this machine may, unless explicitly opened.
-  if (!isRemoteSetupAllowed(process.env.MIKI_ALLOW_REMOTE_SETUP) && !isLocalDirectRequest(req.socket.remoteAddress, req.socket.localAddress, req.headers)) {
-    return next(Object.assign(new Error("First-time setup must be done from the machine Miki runs on. To set it up remotely, start Miki with MIKI_ALLOW_REMOTE_SETUP=1."), { status: 403 }))
+  if (!isRemoteSetupAllowed(process.env.MIKI_ALLOW_REMOTE_SETUP) && !isLocalDirectRequest(req.socket.remoteAddress, req.socket.localAddress, req.headers, { allowedHosts: parseAllowedHosts(process.env.MIKI_ALLOWED_HOSTS) })) {
+    return next(Object.assign(new Error("First-time setup must be done from the machine Miki runs on, using localhost, its IP address or its host name (other names: MIKI_ALLOWED_HOSTS). To set it up remotely, start Miki with MIKI_ALLOW_REMOTE_SETUP=1."), { status: 403 }))
   }
   const password = typeof req.body?.password === "string" ? req.body.password.trim() : ""
   const confirm = typeof req.body?.confirm === "string" ? req.body.confirm.trim() : ""
@@ -377,14 +405,19 @@ app.post("/api/auth/login", (req, res, next) => {
 })
 app.post("/api/auth/logout", (req, res) => { const token = cookie(req, "miki_session"); if (token) db.prepare("DELETE FROM auth_sessions WHERE token=?").run(token); res.setHeader("Set-Cookie", "miki_session=; Path=/; Max-Age=0; HttpOnly; SameSite=None; Secure"); res.json({ ok: true }) })
 
-app.get("/api/gateway/status", (_req, res) => res.json({
-  gateway_status: shutdownRequested ? "stopping" : "running",
-  gateway_start_allowed: !shutdownRequested,
-  pid: process.pid,
-  lifecycle_owner: lifecycleOwner,
-  gateway_restart_required: false,
-  runtime_apply_status: "applied",
-}))
+app.get("/api/gateway/status", (_req, res) => {
+  // A restart is pending while the supervisor has not yet replaced this process (the request file is still there).
+  const restartPending = restartRequested || restartRequestPending()
+  res.json({
+    gateway_status: shutdownRequested ? "stopping" : restartPending ? "restarting" : "running",
+    gateway_start_allowed: !shutdownRequested,
+    pid: process.pid,
+    lifecycle_owner: lifecycleOwner,
+    gateway_restart_required: restartPending,
+    runtime_apply_status: restartPending ? "pending_restart" : "applied",
+    restart_supervised: Boolean(restartRequestPath()),
+  })
+})
 app.get("/api/gateway/logs", (req, res) => {
   const requestedRunIdRaw = req.query.run_id
   const requestedRunId = requestedRunIdRaw === undefined || requestedRunIdRaw === "" ? undefined : Number(requestedRunIdRaw)
@@ -402,16 +435,27 @@ app.post("/api/gateway/start", (_req, res) => {
   appendGatewayLog("Gateway start requested; current persistent process is already running.")
   return res.json({ status: "running", pid: process.pid, already_running: true, started: false, action: "already_running" })
 })
+// Restart protocol: this process writes a request file for its supervisor (MIKI_GATEWAY_RESTART_FILE), answers, and then
+// exits with RESTART_EXIT_CODE. The supervisor sees the code or the file and starts a new gateway at once, without backoff.
+// Without a supervisor nothing would start the process again, so the endpoint says so instead of pretending.
 app.post("/api/gateway/restart", (_req, res) => {
-  appendGatewayLog("Gateway restart requested; process replacement remains owned by the launcher/supervisor.")
-  return res.status(202).json({
-    status: "pending_restart",
-    pid: process.pid,
-    process_restart_required: true,
-    gateway_restart_required: true,
-    runtime_apply_status: "pending_restart",
-    message: "The launcher/supervisor must replace the gateway process. Use runtime reload only for in-process configuration changes.",
-  })
+  const file = restartRequestPath()
+  if (!file) {
+    return res.status(501).json({ status: "failed", supported: false, error: "No supervisor owns this process, so it cannot be restarted from the dashboard. Restart Miki from the launcher or the service manager." })
+  }
+  if (shutdownRequested) return res.status(409).json({ status: "failed", error: "Gateway shutdown is already in progress." })
+  if (restartRequested) return res.status(202).json({ status: "restarting", pid: process.pid, pending: true })
+  try {
+    makeDirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify({ requested_at: now(), pid: process.pid }) + "\n", { mode: 0o600 })
+  } catch (error) {
+    return res.status(500).json({ status: "failed", error: `Unable to record the restart request: ${error instanceof Error ? error.message : String(error)}` })
+  }
+  restartRequested = true
+  appendGatewayLog("Gateway restart requested; the supervisor will replace this process.")
+  res.status(202).json({ status: "restarting", pid: process.pid, process_restart_required: true, gateway_restart_required: false, runtime_apply_status: "applied" })
+  setTimeout(() => void shutdownWith(RESTART_EXIT_CODE), 100).unref()
+  return undefined
 })
 app.post("/api/gateway/shutdown", (_req, res) => {
   if (shutdownRequested) return res.status(202).json({ status: "pending_shutdown", supported: true, pending: true, pid: process.pid })
@@ -439,7 +483,7 @@ app.get("/api/sessions", (_req, res) => {
 app.get("/api/sessions/:id", (req, res) => {
   const id = req.params.id; ensureSession(id)
   const summary = sessionSummary(id)
-  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,reply_to_message_id,status,status_detail FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
+  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,reply_to_message_id,status,status_detail FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%' OR context_id LIKE 'proactive:discovery:%' OR context_id LIKE 'proactive:result:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
     let attachments: unknown
     try { attachments = message.attachments_json ? JSON.parse(String(message.attachments_json)) : undefined } catch { attachments = undefined }
     const { attachments_json: _attachmentsJson, ...rest } = message
@@ -464,6 +508,7 @@ app.patch("/api/sessions/:id/messages/:messageId", (req, res) => {
   db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(now(), sessionId)
   return res.json({ session_id: sessionId, message: sessionMessage(sessionId, messageId) })
 })
+// Delete one selected chat row only. Saved memory uses a separate store and is intentionally untouched.
 app.delete("/api/sessions/:id/messages/:messageId", (req, res) => {
   const result = db.prepare("DELETE FROM chat_messages WHERE session_id=? AND id=?").run(req.params.id, req.params.messageId)
   if (!result.changes) return res.status(404).json({ error: "Message not found" })
@@ -474,7 +519,7 @@ app.post("/api/sessions/:id/fork", (req, res) => {
   const sessionId = req.params.id
   ensureSession(sessionId)
   const targetId = String(req.body?.message_id || "")
-  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(sessionId) as Array<Record<string, unknown>>
+  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%' OR context_id LIKE 'proactive:discovery:%' OR context_id LIKE 'proactive:result:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(sessionId) as Array<Record<string, unknown>>
   const targetIndex = messages.findIndex((message) => message.id === targetId)
   if (targetIndex < 0) return res.status(404).json({ error: "Message not found" })
   const forkId = randomUUID()
@@ -663,6 +708,22 @@ const providerOptions = () => [
 const storedEntries = () => storedModels().map((row) => ({ payload: hydrateStoredModel(row.id, JSON.parse(row.payload) as Record<string, unknown>), isDefault: row.is_default === 1 }))
 /** What chat will actually run right now (stored default, or environment fallback). */
 const currentResolution = (requested?: string) => resolveModel(storedEntries(), requested)
+/** One real, time-limited request to the model provider for health reporting. Never throws. */
+const probeModelForHealth = async (): Promise<ModelProbeResult> => {
+  try {
+    const resolved = currentResolution()
+    if (!resolved.configured) return { configured: false, reachable: false, detail: resolved.reason }
+    const probe = await probeModelProvider(resolved, { timeoutMs: 5_000 })
+    const local = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(resolved.baseUrl)
+    // A local llama server answers 503 while it is still loading the model: that is "starting", not "broken".
+    const loading = local && probe.status === 503
+    return { configured: true, reachable: probe.reachable && probe.state === "ok", loading, detail: loading ? "The local model server is still loading." : probe.detail }
+  } catch (error) {
+    return { configured: true, reachable: false, detail: error instanceof Error ? error.message : String(error) }
+  }
+}
+let modelConfigVersion = 0
+const modelMutationState = () => ({ model_config_version: modelConfigVersion, active_runs: agent.activeRunCount(), applies: "next_run" as const })
 const effectiveModel = () => {
   const rows = storedModels()
   if (rows.length) return modelPayload(rows.find((row) => row.is_default === 1) || rows[0])
@@ -671,6 +732,25 @@ const effectiveModel = () => {
     ? { index: 0, ...envModel(), model_name: resolved.modelName, model: resolved.model, api_key: "", available: resolved.configured, status: resolved.configured ? (resolved.keyCheck.status === "valid" ? "available" : "configured") : "unconfigured", key_status: resolved.keyCheck.status, is_default: true, is_virtual: true }
     : null
 }
+// The llama.cpp runtime (core) is the only owner of the local server. It is told about the stored models after every
+// change, and it starts or stops the server for the default model. Starts run in the background; the result is logged.
+const refreshLocalRuntimeConfig = (): void => {
+  try {
+    configureLocalModels(storedModels().map((row) => JSON.parse(row.payload) as Record<string, unknown>))
+  } catch (error) {
+    appendGatewayLog(`Local model list not updated: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+const syncLocalRuntimeForDefault = (reason: string): void => {
+  const model = currentResolution().model
+  if (!model) return
+  void synchronizeLocalRuntimeForModel(model)
+    .then((transition) => appendGatewayLog(`Local runtime (${reason}): ${transition.action}${transition.error ? ` - ${transition.error}` : ""}`))
+    .catch((error: unknown) => appendGatewayLog(`Local runtime (${reason}) failed: ${error instanceof Error ? error.message : String(error)}`))
+}
+refreshLocalRuntimeConfig()
+syncLocalRuntimeForDefault("startup")
+
 app.get("/api/models", (_req, res) => {
   const rows = storedModels()
   const models = rows.map(modelPayload)
@@ -678,8 +758,24 @@ app.get("/api/models", (_req, res) => {
   // Environment-only setups (no stored model) still expose the model chat will use.
   if (!models.length && resolved.model) models.push(effectiveModel() as never)
   const storedDefault = (models.find((item) => item.is_default) as { model?: string } | undefined)?.model || ""
-  res.json({ models, total: models.length, default_model: storedDefault || resolved.model || "", resolved: describeResolution(resolved), provider_options: providerOptions() })
+  res.json({ models, total: models.length, default_model: storedDefault || resolved.model || "", resolved: describeResolution(resolved), provider_options: providerOptions(), model_config_version: modelConfigVersion, active_runs: agent.activeRunCount() })
 })
+/** Model ids the provider offers, or undefined when the provider gives no usable list (the check is then skipped). */
+const providerModelIds = async (base: string, key: string): Promise<string[] | undefined> => {
+  if (!base) return undefined
+  try {
+    const response = await fetch(`${base.replace(/\/+$/, "")}/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(8_000) })
+    if (!response.ok) return undefined
+    const body = await response.json().catch(() => ({})) as { data?: Array<{ id?: unknown }>; models?: Array<{ name?: unknown }> }
+    const ids = [
+      ...(Array.isArray(body.data) ? body.data.map((item) => item?.id) : []),
+      ...(Array.isArray(body.models) ? body.models.map((item) => item?.name) : []),
+    ].filter((id): id is string => typeof id === "string" && id.length > 0).map((id) => id.replace(/^models\//, ""))
+    return ids.length ? [...new Set(ids)] : undefined
+  } catch {
+    return undefined
+  }
+}
 // Live resolution straight from the backend; the chat UI calls this on mount instead of trusting cached client state.
 app.get("/api/models/resolve", async (req, res) => {
   const requested = typeof req.query.model === "string" ? req.query.model : undefined
@@ -712,32 +808,82 @@ app.post("/api/models", (req, res) => {
       }
       return id
     })()
-    return res.json({ status: "created", index, default_model: existing ? undefined : model })
+    modelConfigVersion += 1
+    refreshLocalRuntimeConfig()
+    autonomy.wake({ forceAmbient: !existing })
+    return res.json({ status: "created", index, default_model: existing ? undefined : model, ...modelMutationState() })
   } catch (error) {
     console.warn(`[miki] model create failed; API key value withheld: ${error instanceof Error ? error.message : "storage error"}`)
     return res.status(500).json({ error: "Model configuration could not be saved securely." })
   }
 })
-app.put("/api/models/:index", (req, res) => {
-  const id = Number(req.params.index); const row = db.prepare("SELECT payload FROM model_configs WHERE id=?").get(id) as { payload: string } | undefined
+// Settings that belong to one provider. They are dropped when the provider changes, unless the new save supplies them.
+const PROVIDER_SPECIFIC_FIELDS = ["thinking_level", "extra_body", "custom_headers", "proxy", "request_timeout"] as const
+const apiOrigin = (base: unknown): string => { try { return new URL(String(base || "")).origin } catch { return String(base || "").trim() } }
+app.put("/api/models/:index", async (req, res) => {
+  const id = Number(req.params.index); const row = db.prepare("SELECT payload,is_default,updated_at FROM model_configs WHERE id=?").get(id) as { payload: string; is_default: number; updated_at: string } | undefined
   if (!row) return res.status(404).json({ error: "Model not found" })
   const incoming = { ...(req.body as Record<string, unknown>) }
   const clearKey = incoming.clear_api_key === true
   const suppliedKey = typeof incoming.api_key === "string" ? incoming.api_key.trim() : ""
+  const keyProvided = Boolean(suppliedKey) && suppliedKey !== SECRET_MASK
   delete incoming.api_key
   delete incoming.api_key_ref
   delete incoming.clear_api_key
-  const payload = { ...(JSON.parse(row.payload) as Record<string, unknown>), ...incoming }
+  const current = JSON.parse(row.payload) as Record<string, unknown>
+  const providerChanged = incoming.provider !== undefined && normalizeProvider(incoming.provider) !== normalizeProvider(current.provider)
+  const baseAfter = incoming.api_base !== undefined ? incoming.api_base : current.api_base
+  // P1: a changed provider or API address is a new host. The saved key belongs to the old one and is never sent there.
+  const hostChanged = providerChanged || apiOrigin(baseAfter) !== apiOrigin(current.api_base)
+  const providerAfter = String(incoming.provider ?? current.provider ?? "")
+  const keyOptionalHere = providerKeyOptional(providerAfter) || isLocalProvider(providerAfter, String(baseAfter || ""))
+  if (hostChanged && !keyProvided && !clearKey && !keyOptionalHere) {
+    return res.status(400).json({ error: "The provider or API address changed. Enter the API key for the new provider; the saved key belongs to the previous one and is not sent to it.", error_category: "provider_api_key_required" })
+  }
+  const dropOldKey = hostChanged && !keyProvided
+  const payload: Record<string, unknown> = { ...current }
+  // P2: provider-specific settings of the old provider are not carried over.
+  if (providerChanged) for (const field of PROVIDER_SPECIFIC_FIELDS) if (!(field in incoming)) delete payload[field]
+  Object.assign(payload, incoming)
+  delete payload.api_key
+  // P3: the model id must exist at the provider. Checked when the provider, host, model or key changes; skipped when the provider gives no list.
+  const modelChanged = incoming.model !== undefined && String(incoming.model) !== String(current.model ?? "")
+  let modelCheck: "matched" | "skipped" = "skipped"
+  if (!isLocalProvider(String(payload.provider || ""), String(payload.api_base || "")) && (providerChanged || modelChanged || hostChanged || keyProvided)) {
+    const checkKey = keyProvided ? suppliedKey : dropOldKey ? "" : String((hydrateStoredModel(id, current).api_key as string | undefined) || "")
+    const base = String(payload.api_base || providerDefaultApiBase(payload.provider) || "")
+    const offered = await providerModelIds(base, checkKey)
+    if (offered) {
+      const wanted = String(payload.model || "").replace(/^models\//, "")
+      if (!offered.includes(wanted)) {
+        return res.status(400).json({ error: `The provider does not offer model '${wanted}'. Pick one it lists.`, error_category: "model_not_offered", choices: offered.slice(0, 50) })
+      }
+      modelCheck = "matched"
+    }
+  }
   try {
-    if (clearKey) {
-      modelSecrets().delete(modelSecretRef(id))
+    if (clearKey || dropOldKey) {
       delete payload.api_key_ref
-    } else if (suppliedKey && suppliedKey !== SECRET_MASK) {
-      modelSecrets().set(modelSecretRef(id), suppliedKey)
+    } else if (keyProvided) {
       payload.api_key_ref = modelSecretRef(id)
     }
-    db.prepare("UPDATE model_configs SET payload=?,updated_at=? WHERE id=?").run(JSON.stringify(payload), now(), id)
-    return res.json({ status: "updated", index: id, api_key_set: !clearKey && Boolean(modelSecrets().get(modelSecretRef(id))) })
+    let keyCheck: "valid" | "rejected" | "unreachable" | "skipped" = "skipped"
+    if (keyProvided) {
+      const candidate = resolveModel([{ payload: { ...payload, api_key: suppliedKey }, isDefault: true }])
+      if (candidate.configured) {
+        const checked = await probeModelProvider(candidate, { timeoutMs: 5_000 })
+        keyCheck = checked.state === "key_rejected" ? "rejected" : checked.reachable ? "valid" : "unreachable"
+      } else keyCheck = "unreachable"
+    }
+    const write = db.prepare("UPDATE model_configs SET payload=?,updated_at=? WHERE id=? AND updated_at=?").run(JSON.stringify(payload), now(), id, row.updated_at)
+    if (write.changes === 0) return res.status(409).json({ error: "This model changed while you were editing it. Reload and retry.", error_category: "model_changed_elsewhere" })
+    if (clearKey || dropOldKey) modelSecrets().delete(modelSecretRef(id))
+    else if (keyProvided) modelSecrets().set(modelSecretRef(id), suppliedKey)
+    modelConfigVersion += 1
+    refreshLocalRuntimeConfig()
+    if (row.is_default === 1) syncLocalRuntimeForDefault("model updated")
+    autonomy.wake({ forceAmbient: false })
+    return res.json({ status: "updated", index: id, api_key_set: !clearKey && !dropOldKey && Boolean(modelSecrets().get(modelSecretRef(id))), model_check: modelCheck, key_check: keyCheck, ...modelMutationState() })
   } catch (error) {
     console.warn(`[miki] model update failed; API key value withheld: ${error instanceof Error ? error.message : "storage error"}`)
     return res.status(500).json({ error: "Model configuration could not be saved securely." })
@@ -760,14 +906,57 @@ app.delete("/api/models/:index", (req, res) => {
   try { modelSecrets().delete(modelSecretRef(id)) } catch (error) {
     console.warn(`[miki] orphaned model secret cleanup deferred for model ${id}: ${error instanceof Error ? error.message : "vault error"}`)
   }
+  modelConfigVersion += 1
   const remaining = storedModels(); if (remaining.length && !remaining.some((row) => row.is_default)) db.prepare("UPDATE model_configs SET is_default=1 WHERE id=?").run(remaining[0].id)
-  return res.json({ status: "deleted", index: id })
+  refreshLocalRuntimeConfig()
+  syncLocalRuntimeForDefault("model deleted")
+  autonomy.wake({ forceAmbient: true })
+  return res.json({ status: "deleted", index: id, ...modelMutationState() })
 })
-app.post("/api/models/default", (req, res) => {
-  const target = String(req.body?.model_name || ""); const row = storedModels().find((item) => { const value = JSON.parse(item.payload) as Record<string, unknown>; return value.model === target || value.model_name === target })
+// Makes a stored model the default. The model is chosen by index when given (names can repeat), it must be enabled and
+// must answer its availability check (a local model is started on demand instead). The response says what will run now.
+app.post("/api/models/default", async (req, res) => {
+  const rows = storedModels()
+  const rawIndex = req.body?.index ?? req.body?.model_index
+  const wantedIndex = rawIndex === undefined || rawIndex === null || rawIndex === "" ? undefined : Number(rawIndex)
+  let row: { id: number; payload: string; is_default: number } | undefined
+  if (wantedIndex !== undefined) {
+    row = Number.isInteger(wantedIndex) ? rows.find((item) => item.id === wantedIndex) : undefined
+  } else {
+    const target = String(req.body?.model_name || "")
+    const matches = rows.filter((item) => { const value = JSON.parse(item.payload) as Record<string, unknown>; return value.model === target || value.model_name === target })
+    if (matches.length > 1) return res.status(409).json({ error: "More than one saved model has this name. Choose the model by its index.", error_category: "ambiguous_model_name" })
+    row = matches[0]
+  }
   if (!row) return res.status(404).json({ error: "Model not found" })
-  db.transaction(() => { db.prepare("UPDATE model_configs SET is_default=0").run(); db.prepare("UPDATE model_configs SET is_default=1,updated_at=? WHERE id=?").run(now(), row.id) })()
-  return res.json({ status: "ok", default_model: target })
+  const source = JSON.parse(row.payload) as Record<string, unknown>
+  if (source.enabled === false) return res.status(409).json({ error: "This model is disabled. Enable it before making it the default.", error_category: "model_disabled" })
+  const hydrated = hydrateStoredModel(row.id, source)
+  const candidate = resolveModel([{ payload: hydrated, isDefault: true }])
+  if (!candidate.configured) return res.status(409).json({ error: candidate.reason || "This model is not configured yet.", error_category: "model_not_configured" })
+  const local = isLocalProvider(String(source.provider || ""), String(candidate.baseUrl || ""))
+  let availability: Awaited<ReturnType<typeof probeModelProvider>> | undefined
+  if (!local) {
+    availability = await probeModelProvider(candidate, { timeoutMs: 8_000 })
+    if (!availability.reachable || availability.state === "key_rejected") {
+      return res.status(409).json({ error: `The model did not pass its availability check, so it was not made the default. ${availability.detail ?? ""}`.trim(), error_category: "model_unavailable", availability })
+    }
+  }
+  const modelName = String(source.model_name || source.model || "")
+  try {
+    db.transaction(() => {
+      db.prepare("UPDATE model_configs SET is_default=0").run()
+      const update = db.prepare("UPDATE model_configs SET is_default=1,updated_at=? WHERE id=?").run(now(), row!.id)
+      if (update.changes === 0) throw new Error("model_disappeared_during_default_change")
+    })()
+  } catch (error) {
+    if (error instanceof Error && error.message === "model_disappeared_during_default_change") return res.status(404).json({ error: "Model not found", error_category: "model_disappeared_during_default_change" })
+    throw error
+  }
+  modelConfigVersion += 1
+  syncLocalRuntimeForDefault("default changed")
+  autonomy.wake({ forceAmbient: true })
+  return res.json({ status: "ok", index: row.id, default_model: modelName, local, availability, resolved: describeResolution(currentResolution()), ...modelMutationState() })
 })
 const modelForIndex = (index: number) => { const row = storedModels().find((item) => item.id === index); return row ? hydrateStoredModel(row.id, JSON.parse(row.payload) as Record<string, unknown>) : effectiveModel() }
 app.post("/api/models/:index/test", async (req, res) => {
@@ -823,7 +1012,7 @@ const getAppConfig = () => {
 }
 const fileMemory = new FileMemoryService({
   identityDir: path.join(workspaceRoot, "identity"),
-  agentMemoryConfig: (getAppConfig() as any)?.agent?.memory,
+  agentMemoryConfig: (getAppConfig() as LooseConfig)?.agent?.memory,
   seed: { summarizeTokenPercent: 75, summarizeMessageThreshold: 8 },
 })
 const memoryIndex = new SqliteMemoryIndex(db, fileMemory, embeddingProvider, (message) => console.warn(`[miki] ${message}`))
@@ -953,6 +1142,7 @@ app.put("/api/config", requireAuth, (req, res) => {
   persistAppConfig(normalized)
   void configureRuntimeLoop()
   applyChannelConfigNow()
+  autonomy.wake({ forceAmbient: true })
   res.json({ status: "ok", config: maskSecretFields(normalized), warnings: result.warnings, backup_file: backupFile, runtime_apply_status: "applied", gateway_restart_required: false })
 })
 app.post("/api/config/rollback", requireAuth, (_req, res) => {
@@ -968,6 +1158,7 @@ app.post("/api/config/rollback", requireAuth, (_req, res) => {
     if (!result.valid) return res.status(422).json({ error: "Configuration backup failed validation.", errors: result.errors })
     persistAppConfig(result.config)
     applyChannelConfigNow()
+    autonomy.wake({ forceAmbient: true })
     return res.json({ status: "rolled_back", config: maskSecretFields(result.config), backup_file: latest, runtime_apply_status: "applied", gateway_restart_required: false })
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) })
@@ -985,6 +1176,7 @@ app.patch("/api/config", requireAuth, (req, res) => {
   persistAppConfig(normalized)
   void configureRuntimeLoop()
   applyChannelConfigNow()
+  autonomy.wake({ forceAmbient: true })
   res.json({ status: "ok", config: maskSecretFields(normalized), warnings: result.warnings, runtime_apply_status: "applied", gateway_restart_required: false })
 })
 app.post("/api/config/test-command-patterns", requireAuth, (req, res) => {
@@ -1124,7 +1316,8 @@ const composeNotice = async (input: { text?: string; event?: Record<string, unkn
       appendGatewayLog(`Could not compose a background notice (${String(input.event.type ?? "event")}): ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  return (input.detail ?? "").trim()
+  // No model could write the note: fall back to the provider detail, then to a factual line built from the event fields.
+  return (input.detail ?? "").trim() || factualNoticeFromEvent(input.event)
 }
 const broadcastProactive = async (input: { text?: string; event?: Record<string, unknown>; detail?: string; runId?: string; goalId?: number; kind?: string }) => {
   const text = await composeNotice(input)
@@ -1134,10 +1327,14 @@ const broadcastProactive = async (input: { text?: string; event?: Record<string,
   const sessionId = "miki-main-chat"
   ensureSession(sessionId)
   db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,kind,model_name,context_id) VALUES(?,?,?,?,?,?,?,?)").run(
-    messageId, sessionId, "assistant", text, createdAt, "normal", null, `proactive:${input.runId || messageId}`,
+    messageId, sessionId, "assistant", text, createdAt, "normal", null,
+    // `proactive:<kind>:<id>`: discovery and result notices stay in the chat history (visible after a refresh);
+    // progress and warning notices (and older `proactive:<id>` rows) are hidden from it.
+    `proactive:${input.kind ?? "progress"}:${input.runId || messageId}`,
   )
   const payload = {
     message_id: messageId,
+    session_id: sessionId,
     content: text,
     kind: "normal",
     proactive: true,
@@ -1152,20 +1349,37 @@ const broadcastProactive = async (input: { text?: string; event?: Record<string,
   }
   await channelRuntime?.sendProactiveNotice(text)
 }
+let warnedLaneModel = ""
 const autonomy = new AutonomousSupervisor({
   db,
   agent: agent.engine,
   tools: agent.registry,
   activeRunCount: agent.activeRunCount,
+  processes: agent.processes,
+  isRunActive: agent.isRunActive,
   getConfig: getAppConfig,
   log: appendGatewayLog,
   workspaceRoot,
   notify: broadcastProactive,
-  heartbeatProbe: () => {
+  // Background runs use the model_router heartbeat lane when it names a model that is actually configured.
+  backgroundModel: () => {
+    const wanted = heartbeatLaneModel(getAppConfig())
+    if (!wanted) return undefined
+    if (agent.resolveCurrentModel(wanted).matchedRequested) return wanted
+    if (warnedLaneModel !== wanted) {
+      warnedLaneModel = wanted
+      appendGatewayLog(`model_router heartbeat lane names "${wanted}" but no stored model matches it; background runs use the default model.`)
+    }
+    return undefined
+  },
+  heartbeatProbe: async () => {
     const model = agent.llmFor()
-    return model
+    if (!model) return { ok: false, detail: `No LLM provider is currently ready. ${agent.resolveCurrentModel().reason ?? ""}`.trim() }
+    // A real request to the provider (time-limited), not just a look at the configuration.
+    const probe = await probeModelForHealth()
+    return probe.reachable
       ? { ok: true, detail: `LLM provider ready: ${model.model}` }
-      : { ok: false, detail: `No LLM provider is currently ready. ${agent.resolveCurrentModel().reason ?? ""}`.trim() }
+      : { ok: false, detail: `LLM provider ${model.model} is not reachable${probe.detail ? `: ${probe.detail}` : "."}` }
   },
   recordExperience: (input) => {
     autonomyLearningStore.recordExperience({
@@ -1197,6 +1411,53 @@ getLifecycleBus().on("message:sent", (payload) => forwardToAutonomy("message:sen
 getLifecycleBus().emit("gateway:startup", { pid: process.pid, reason: "gateway_initialized" })
 agent.mount(app)
 
+// Live view of the desktop Miki is working on (Activity view). Read-only: captures one screenshot.
+app.get("/api/autonomy/screenshot", requireAuth, async (_req, res) => {
+  const tool = agent.registry.get("computer_screenshot")
+  if (!tool) return res.status(404).json({ error: "Computer screenshots are not available." })
+  try {
+    const raw = await tool.execute({}, { runId: "activity-view", callId: `activity-${randomUUID()}`, signal: AbortSignal.timeout(20_000) })
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+    const data = isRecord(parsed) && isRecord(parsed.data) ? parsed.data : undefined
+    if (!data || typeof data.screenshot !== "string") return res.status(502).json({ error: typeof (parsed as Record<string, unknown>)?.message === "string" ? String((parsed as Record<string, unknown>).message) : "Screenshot failed." })
+    return res.json({ png_base64: data.screenshot, width: data.width ?? null, height: data.height ?? null, captured_at: now() })
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message.slice(0, 300) : "Screenshot failed." })
+  }
+})
+// Rules Miki has learned from the user (Allow / Ask / Block). Taught through chat (permission_learn);
+// the dashboard lists them and the user can remove one. They apply to the next run.
+app.get("/api/permissions/rules", requireAuth, (_req, res) => {
+  const ledger = getPermissionLedger()
+  res.json({ rules: ledger.rules(), grants: ledger.grants() })
+})
+app.delete("/api/permissions/rules", requireAuth, (req, res) => {
+  const body = isRecord(req.body) ? req.body : {}
+  const category = typeof body.category === "string" ? body.category.trim() : ""
+  if (!category) return res.status(400).json({ error: "category is required." })
+  const match = typeof body.match === "string" ? body.match : ""
+  const removed = getPermissionLedger().forget(category, match)
+  return res.status(removed ? 200 : 404).json({ removed })
+})
+// External systems can start work: POST /api/webhooks/<name> with the shared secret fires the autonomy
+// event "webhook:<name>"; only event triggers registered for that name (POST /api/autonomy/triggers) run.
+app.post("/api/webhooks/:name", (req, res) => {
+  const secret = webhookSecret(getAppConfig())
+  if (!secret) return res.status(404).json({ error: "Webhook ingress is not configured." })
+  if (!webhookAuthorized(secret, req.headers as Record<string, string | string[] | undefined>)) return res.status(401).json({ error: "Invalid webhook secret." })
+  const eventName = webhookEventName(req.params.name)
+  if (!eventName) return res.status(400).json({ error: "Invalid webhook name." })
+  const payload = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {}
+  try {
+    autonomy.wake()
+    const result = autonomy.triggerEvent(eventName, payload)
+    appendGatewayLog(`Webhook "${eventName}" accepted (${result.triggered} trigger(s) fired).`)
+    return res.status(202).json({ accepted: true, event: eventName, triggered: result.triggered })
+  } catch (error) {
+    appendGatewayLog(`Webhook "${eventName}" failed: ${error instanceof Error ? error.message : String(error)}`)
+    return res.status(500).json({ error: "Webhook could not be processed." })
+  }
+})
 app.get("/api/autonomy/status", requireAuth, (_req, res) => res.json({ ...autonomy.status(), model: describeResolution(agent.resolveCurrentModel()) }))
 app.post("/api/autonomy/tick", requireAuth, async (_req, res) => {
   try {
@@ -1229,12 +1490,18 @@ app.post("/api/autonomy/tasks", requireAuth, (req, res) => {
     if (body.description !== undefined && typeof body.description !== "string") return res.status(400).json({ error: "description must be a string." })
     if (body.due_at !== undefined && typeof body.due_at !== "string") return res.status(400).json({ error: "due_at must be an ISO date/time string." })
     if (body.interval_seconds !== undefined && typeof body.interval_seconds !== "number") return res.status(400).json({ error: "interval_seconds must be a number." })
+    if (body.cron_expression !== undefined && typeof body.cron_expression !== "string") return res.status(400).json({ error: "cron_expression must be a string." })
+    if (body.timezone !== undefined && typeof body.timezone !== "string") return res.status(400).json({ error: "timezone must be a string." })
+    if (body.misfire_policy !== undefined && !["skip", "run_once"].includes(String(body.misfire_policy))) return res.status(400).json({ error: "misfire_policy must be 'skip' or 'run_once'." })
     if (body.max_retries !== undefined && typeof body.max_retries !== "number") return res.status(400).json({ error: "max_retries must be a number." })
     const task = autonomy.enqueueTask({
       title: body.title,
       description: body.description as string | undefined,
       dueAt: body.due_at as string | undefined,
       intervalSeconds: body.interval_seconds as number | undefined,
+      cronExpression: body.cron_expression as string | undefined,
+      timezone: body.timezone as string | undefined,
+      misfirePolicy: body.misfire_policy as "skip" | "run_once" | undefined,
       priority: typeof body.priority === "number" ? body.priority : undefined,
       maxRetries: typeof body.max_retries === "number" ? body.max_retries : undefined,
       idempotencyKey: typeof body.idempotency_key === "string" ? body.idempotency_key : undefined,
@@ -1272,11 +1539,54 @@ app.post("/api/autonomy/triggers/:id/disable", requireAuth, (req, res) => {
   if (!Number.isSafeInteger(id)) return res.status(400).json({ error: "invalid trigger id" })
   return res.json({ disabled: autonomy.disableEventTrigger(id) })
 })
+app.patch("/api/autonomy/tasks/:id", requireAuth, (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid task id." })
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {}
+    if (body.title !== undefined && typeof body.title !== "string") return res.status(400).json({ error: "title must be a string." })
+    if (body.description !== undefined && typeof body.description !== "string") return res.status(400).json({ error: "description must be a string." })
+    if (body.cron_expression !== undefined && typeof body.cron_expression !== "string") return res.status(400).json({ error: "cron_expression must be a string." })
+    if (body.timezone !== undefined && typeof body.timezone !== "string") return res.status(400).json({ error: "timezone must be a string." })
+    if (body.misfire_policy !== undefined && !["skip", "run_once"].includes(String(body.misfire_policy))) return res.status(400).json({ error: "misfire_policy must be 'skip' or 'run_once'." })
+    const task = autonomy.updateScheduledTask(id, {
+      title: body.title as string | undefined,
+      description: body.description as string | undefined,
+      cronExpression: body.cron_expression as string | undefined,
+      timezone: body.timezone as string | undefined,
+      misfirePolicy: body.misfire_policy as "skip" | "run_once" | undefined,
+    })
+    if (!task) return res.status(404).json({ error: "Scheduled task not found or cannot be updated while active." })
+    autonomy.wake()
+    return res.json({ task })
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) })
+  }
+})
+app.post("/api/autonomy/tasks/:id/pause", requireAuth, (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid task id." })
+  const task = autonomy.pauseScheduledTask(id)
+  if (!task) return res.status(404).json({ error: "Scheduled task not found or already active/paused." })
+  return res.json({ task })
+})
+app.post("/api/autonomy/tasks/:id/resume", requireAuth, (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid task id." })
+  try {
+    const task = autonomy.resumeScheduledTask(id)
+    if (!task) return res.status(404).json({ error: "Paused task not found." })
+    autonomy.wake()
+    return res.json({ task })
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) })
+  }
+})
 app.delete("/api/autonomy/tasks/:id", requireAuth, (req, res) => {
   const id = Number(req.params.id)
   if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid task id." })
   const task = autonomy.cancelScheduledTask(id)
-  if (!task) return res.status(404).json({ error: "Scheduled task not found or already started." })
+  if (!task) return res.status(404).json({ error: "Scheduled task not found, already started, or not cancellable." })
   return res.json({ task })
 })
 
@@ -1330,6 +1640,45 @@ app.post("/api/models/test-tools-inline", async (req, res) => {
     return res.json({ ...toolReadinessResponse(model, false, false, started), provider: String(req.body?.provider || "openai-compatible"), ...providerFailure(error, String(req.body?.provider || "openai-compatible"), String(req.body?.api_base || providerDefaultApiBase(req.body?.provider) || "")) })
   }
 })
+
+// Upload chat attachments as binary files rather than embedding large base64 strings in WebSocket frames.
+// The uploaded file stays inside the workspace and is only served through the authenticated media route.
+app.post(
+  "/api/chat-uploads",
+  express.raw({ type: "application/octet-stream", limit: 25 * 1024 * 1024 }),
+  (req, res) => {
+    const body = req.body
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      return res.status(400).json({ error: "Choose a file to upload." })
+    }
+    if (body.length > 25 * 1024 * 1024) {
+      return res.status(413).json({ error: "Files must be 25 MB or smaller." })
+    }
+    const rawName = typeof req.query.filename === "string" ? req.query.filename : ""
+    const originalName = path.basename(rawName).replace(/[\\/\u0000-\u001f\u007f]/g, "_").trim().slice(0, 180)
+    const extension = path.extname(originalName).toLowerCase()
+    const fileInfo = describeFile(`attachment${extension}`)
+    if (!originalName || !extension || !fileInfo) {
+      return res.status(415).json({ error: "This file type is not supported." })
+    }
+    const uploadDir = path.join(workspaceRoot, ".miki-chat-uploads")
+    const target = path.join(uploadDir, `${randomUUID()}${extension}`)
+    try {
+      makeDirSync(uploadDir, { recursive: true })
+      writeFileSync(target, body, { flag: "wx", mode: 0o600 })
+      return res.status(201).json({
+        status: "uploaded",
+        type: fileInfo.type,
+        filename: originalName,
+        content_type: fileInfo.contentType,
+        url: `${MEDIA_ROUTE}?path=${encodeURIComponent(target)}`,
+      })
+    } catch (error) {
+      appendGatewayLog(`Chat attachment upload failed: ${error instanceof Error ? error.message : String(error)}`)
+      return res.status(500).json({ error: "The file could not be saved." })
+    }
+  },
+)
 
 // Chat proof media: screenshots and files the agent produced, shown inline in chat.
 // /api is already behind requireAuth; the resolver additionally limits this to the
@@ -1427,7 +1776,7 @@ app.get("/api/tools", async (_req, res) => {
     group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
     group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"], browserBlocked),
-    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to add approval and guard rails).", "system", true, ["terminal_run", "terminal_status", "terminal_kill"]),
+    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to block catastrophic commands, keep the working directory in the workspace and hide secrets from the environment).", "system", true, ["terminal_run", "terminal_status", "terminal_kill", "delegate_coding_agent"]),
     group("computer", "computer-use", "Operate desktop windows with platform-supported screenshots, mouse, keyboard, clipboard and app controls; element-level automation varies by platform.", "system", computerAllowed, ["computer_observe", "computer_focus", "computer_invoke", "computer_set_text", "computer_hotkey", "computer_clipboard", "computer_launch", "computer_verify", "computer_screenshot", "computer_click_at", "computer_drag", "computer_scroll", "computer_terminate_app", "computer_list_processes", "computer_get_system_info", "computer_list_displays"]),
   ] })
 })
@@ -1662,11 +2011,10 @@ async function completeWithProviderResult(messages: { role: string; content: str
       body: JSON.stringify({
         model: requestModel,
         messages,
-        temperature: 0.7,
         max_completion_tokens: 1024,
-        // Gemini's OpenAI-compatible endpoint rejects the OpenAI reasoning
-        // object with HTTP 400; only send it to other providers.
-        ...(/^(gemini|google)$/i.test(provider) ? {} : { reasoning: { effort: "minimal" } }),
+        // temperature is not sent: GPT-5 models accept only the default value. reasoning_effort is sent only to
+        // OpenAI reasoning models; other models and Gemini reject it (the chat path sends its own parameters).
+        ...(!/^(gemini|google)$/i.test(provider) && /^(gpt-5|o\d)/i.test(requestModel) ? { reasoning_effort: "minimal" } : {}),
         ...(tools?.length ? { tools, tool_choice: "required" } : {}),
       }),
       signal: AbortSignal.timeout(30_000),
@@ -1747,8 +2095,7 @@ const detectFollowUpFeedback = async (input: { sessionId: string; contextId: str
   if (!followUp || followUp.length > 1000) return
   const target = previousAnswerFor(db, input.sessionId, input.contextId, input.userMessageId)
   if (!target) return
-  const explicitFeedback = /\b(thanks|thank you|good answer|that'?s (?:right|wrong)|you are wrong|not what i asked|i meant|incorrect|that is incorrect|make it (?:shorter|longer|simpler)|please correct|please remember|my preference is|from now on|i prefer|i always want|don'?t do that|do not do that)\b|সঠিক নয়|ভুল হয়েছে|আমি বলতে চেয়েছি|মনে রাখবে/i.test(followUp)
-  if (!explicitFeedback) return
+  if (!mayBeFollowUpFeedback(followUp)) return
   const llm = agent.llmFor()
   if (!llm) return
   const response = await llm.complete(followUpClassifierMessages(target, followUp) as Parameters<typeof llm.complete>[0], { json: true, temperature: 0, maxCompletionTokens: 160 })
@@ -1763,6 +2110,12 @@ const detectFollowUpFeedback = async (input: { sessionId: string; contextId: str
     await rememberCorrection(followUp)
   }
 }
+const learnedBehavior = createLearnedBehavior({
+  getLearningStore: () => initMemory(dataRoot).tkg.learningStore,
+  getAppConfig,
+  resolveModel: (model) => agent.llmFor(model),
+  scope: learningScope,
+})
 const chatTurns = createChatTurnRunner({
   db,
   streamHub,
@@ -1780,6 +2133,9 @@ const chatTurns = createChatTurnRunner({
   resolveContextWindowTokens,
   recordLearningExperience,
   detectFollowUpFeedback,
+  lane: createKeyedLane(CHAT_QUEUE_WAIT_MS),
+  recallLearnedGuidance: () => learnedBehavior.guidanceNote(),
+  chooseLearnedModel: (question) => learnedBehavior.chooseModel(question),
   recallLearningFeedback: (question) => {
     const store = initMemory(dataRoot).tkg.learningStore
     if (!store) return undefined
@@ -1805,22 +2161,15 @@ const chatTurns = createChatTurnRunner({
   },
 })
 // Explicit feedback endpoint is rate-limited independently so automated clients cannot flood learning storage.
-const feedbackRateBuckets = new Map<string, { windowStart: number; count: number }>()
+// The counter lives in the shared database, so the limit holds across gateway workers that share it.
 const feedbackRateLimit = (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
-  const nowMs = Date.now()
   const auth = (req as unknown as { user?: { id?: string; username?: string } }).user
   const key = String(auth?.id || auth?.username || req.ip || "unknown")
-  let bucket = feedbackRateBuckets.get(key)
-  if (!bucket || nowMs - bucket.windowStart >= 60_000) {
-    bucket = { windowStart: nowMs, count: 0 }
-    feedbackRateBuckets.set(key, bucket)
-  }
-  bucket.count += 1
-  if (bucket.count > 30) return res.status(429).json({ error: "Too many feedback requests. Try again in one minute." })
-  if (feedbackRateBuckets.size > 5000) {
-    for (const [client, value] of feedbackRateBuckets) {
-      if (nowMs - value.windowStart >= 60_000) feedbackRateBuckets.delete(client)
-    }
+  try {
+    if (!consumeFeedbackRateLimit(db, key).allowed) return res.status(429).json({ error: "Too many feedback requests. Try again in one minute." })
+  } catch (error) {
+    appendGatewayLog(`Feedback rate limit unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    return res.status(503).json({ error: "Feedback is temporarily unavailable." })
   }
   return next()
 }
@@ -1850,11 +2199,124 @@ app.post("/api/chat/feedback", requireAuth, feedbackRateLimit, (req, res) => {
 channelRuntime = new ChannelRuntimeManager({ db, chatTurns, getAppConfig, log: appendGatewayLog })
 channelRuntime.start()
 shutdownHandlers.push(() => channelRuntime.close())
-// Anything still queued/processing when the process starts belonged to a run that died with the previous process.
+healthMonitor = createHealthMonitor({
+  db,
+  probeModel: probeModelForHealth,
+  channels: () => (["telegram", "discord", "slack"] as const).map((name) => { const st = channelRuntime!.status(name); return { name, enabled: st.enabled, configured: st.configured, connected: st.connected, lastError: st.lastError } }),
+  outbox: () => channelRuntime!.deliveryStats(),
+  runProgress: () => chatTurns.runProgress(),
+  recovery: () => recoveryManager?.state,
+  gatewayRole,
+  lifecycleOwner,
+})
+healthMonitor.start()
+shutdownHandlers.push(() => healthMonitor?.stop())
+// Messages that were waiting or being worked on when the process stopped are picked up again, in their original order.
+// Earlier steps of those requests may already have run, so the resumed turn is told to check the current state first.
+// Set MIKI_RESUME_INTERRUPTED=0 to mark them failed instead (they can then be retried by the user).
+let interrupted: Array<{ id: string; session_id: string; context_id: string | null; status?: string }> = []
 try {
-  const stale = db.prepare("UPDATE chat_messages SET status='failed', status_detail='Interrupted by a gateway restart.' WHERE status IN ('queued','processing','retrying')").run()
-  if (stale.changes > 0) console.warn(`[miki] marked ${stale.changes} interrupted chat message(s) as failed`)
+  interrupted = db.prepare("SELECT id,session_id,context_id,status FROM chat_messages WHERE role='user' AND status IN ('queued','processing','retrying') ORDER BY created_at ASC").all() as typeof interrupted
+  if (process.env.MIKI_RESUME_INTERRUPTED === "0") {
+    const stale = db.prepare("UPDATE chat_messages SET status='failed', status_detail='Interrupted by a gateway restart.' WHERE status IN ('queued','processing','retrying')").run()
+    if (stale.changes > 0) console.warn(`[miki] marked ${stale.changes} interrupted chat message(s) as failed`)
+    interrupted = []
+  } else if (interrupted.length > 0) {
+    db.prepare("UPDATE chat_messages SET status='queued', status_detail='Resuming after a gateway restart.' WHERE role='user' AND status IN ('queued','processing','retrying')").run()
+  }
 } catch { /* column is created above; never block startup */ }
+const restartNote = "The gateway restarted while this request was in progress. Earlier steps may already have run and their results were not saved. Check the current state before repeating any action that changes something."
+// Recovery v2 (MIKI_RECOVERY_V2) is decided at the top of this file. Off, the original startup resume below runs,
+// now answering on the channel the message came from.
+const resumeCarryover = (item: { id: string; session_id: string; context_id: string | null }, note: string) => channelRuntime!.resumeInbound(item.id, () => chatTurns.run({
+  sessionId: item.session_id,
+  contextId: item.context_id || item.session_id,
+  peerId: item.session_id,
+  trigger: { type: "user", mode: "carryover", content: "", attachments: [], carryoverMessageId: item.id, carryoverNote: note },
+}))
+let replaySweeper: ReplaySweeper | undefined
+let recoveryManager: RecoveryManager | undefined
+if (recoveryV2 && process.env.MIKI_RESUME_INTERRUPTED !== "0") {
+  replaySweeper = new ReplaySweeper({
+    db,
+    isContextActive: (contextId) => chatTurns.isContextActive(contextId),
+    replay: (message) => resumeCarryover(message, restartNote),
+    onGivenUp: (message, why) => channelRuntime!.noticeForMessage(message.id, why),
+    log: appendGatewayLog,
+  })
+  // Crash loop (several crashes in a short time): the messages that were being worked on when the process died are the
+  // suspects. They are set aside and the user is told; Miki itself stays up and keeps serving everything else.
+  if (bootInfo?.crashLoop) {
+    const suspects = interrupted.filter((item) => item.status === "processing" || item.status === "retrying")
+    for (const item of suspects) {
+      db.prepare("UPDATE chat_messages SET status='failed', status_detail=?, replay_state='quarantined' WHERE id=?").run(`Set aside after ${bootInfo.crashesInWindow} gateway crashes in a short time while this request was running.`, item.id)
+      try { channelRuntime!.noticeForMessage(item.id, "quarantined") } catch { /* the notice is best effort */ }
+    }
+    if (suspects.length > 0) appendGatewayLog(`Crash loop detected (${bootInfo.crashesInWindow} crashes); set aside ${suspects.length} suspect message(s).`)
+  }
+  // Same path at startup and after a recovery: every unanswered message is found, replayed in order and answered.
+  void replaySweeper.sweep("startup").catch((error) => appendGatewayLog(`Startup replay failed: ${error instanceof Error ? error.message : String(error)}`))
+} else {
+  for (const item of interrupted) {
+    // A message that arrived on Telegram/Discord/Slack is answered back on that channel through the outbox.
+    void resumeCarryover(item, restartNote).catch((error) => appendGatewayLog(`Could not resume interrupted message ${item.id}: ${error instanceof Error ? error.message : String(error)}`))
+  }
+}
+if (recoveryV2 && replaySweeper) {
+  const sweeper = replaySweeper
+  // Everything Miki depends on must answer: the database, the model provider, and the host of each configured channel.
+  const channelHosts: Record<string, string> = { telegram: "https://api.telegram.org", discord: "https://discord.com/api/v10/gateway", slack: "https://slack.com/api/api.test" }
+  const hostReachable = async (url: string) => { try { await fetch(url, { method: "GET", signal: AbortSignal.timeout(5_000) }); return true } catch { return false } }
+  const recoveryCheck = async () => {
+    if (!healthMonitor!.report().checks.database.ok) return { ok: false, reason: "database check failed" }
+    const model = await probeModelForHealth()
+    if (model.configured && !model.reachable) return { ok: false, reason: model.loading ? "model server is still loading" : "model server is not reachable" }
+    const custom = (process.env.MIKI_CONNECTIVITY_URLS ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+    const urls = custom.length ? custom : (["telegram", "discord", "slack"] as const).filter((name) => channelRuntime!.status(name).configured).map((name) => channelHosts[name])
+    for (const url of urls) if (!(await hostReachable(url))) return { ok: false, reason: `cannot reach ${new URL(url).host}` }
+    return { ok: true }
+  }
+  // Self-learning: each incident goes to the learning store and the identity notes; the number of good checks needed
+  // is tuned inside fixed limits (3-6 by default) and every change is logged.
+  const recoveryLearning = new RecoveryLearning({
+    db,
+    log: appendGatewayLog,
+    record: (input) => recordLearningExperience(input),
+    remember: (line) => {
+      try {
+        const dir = path.join(workspaceRootHint, "identity", "memory")
+        // Only an existing identity folder is written to; it is never created here.
+        if (!existsSync(dir)) return
+        appendFileSync(path.join(dir, `${new Date().toISOString().slice(0, 10)}.md`), `\n- ${line}\n`)
+      } catch { /* a notes problem never affects recovery */ }
+    },
+  })
+  recoveryManager = new RecoveryManager({
+    db,
+    check: recoveryCheck,
+    log: appendGatewayLog,
+    requiredGreen: () => recoveryLearning.requiredGreen(),
+    onIncidentClosed: (incident) => recoveryLearning.onIncidentClosed(incident),
+    onRecovered: async () => {
+      channelRuntime!.flushOutbox()
+      const result = await sweeper.sweep("recovered")
+      return result.replayed
+    },
+  })
+  recoveryManager.start()
+  shutdownHandlers.push(() => recoveryManager?.stop())
+  // A message that failed for a temporary reason while no outage was noticed is still picked up, a few times at most.
+  const sweepMinutes = Number(process.env.MIKI_REPLAY_INTERVAL_MINUTES)
+  const sweepTimer = setInterval(() => { if (recoveryManager?.state === "healthy") void sweeper.sweep("periodic").catch(() => undefined) }, (Number.isFinite(sweepMinutes) && sweepMinutes >= 1 ? sweepMinutes : 5) * 60_000)
+  sweepTimer.unref()
+}
+if (recoveryV2) {
+  const backups = new DatabaseBackups(db, dbBackupDir, appendGatewayLog)
+  backups.start()
+  shutdownHandlers.push(() => backups.stop())
+  // One backup soon after start (when none exists yet), so a damaged database always has something to be restored from.
+  setTimeout(() => { void backups.backupNow().catch(() => undefined) }, 60_000).unref()
+}
 const purgeExpiredSessions = () => {
   try { db.prepare("DELETE FROM auth_sessions WHERE expires_at<>? AND expires_at<?").run(NO_AUTH_EXPIRY, now()) } catch { /* best effort */ }
 }
@@ -1888,10 +2350,10 @@ server.on("upgrade", (request, socket, head) => {
     return socket.destroy()
   }
   // With no dashboard password the socket accepts commands without a login, so only this machine may open it.
-  if (!setting("dashboard_password") && !isLocalDirectRequest(request.socket.remoteAddress, request.socket.localAddress, request.headers)) {
+  if (!setting("dashboard_password") && !isLocalDirectRequest(request.socket.remoteAddress, request.socket.localAddress, request.headers, { allowedHosts: parseAllowedHosts(process.env.MIKI_ALLOWED_HOSTS) })) {
     if (!warnedRemoteWithoutPassword) {
       warnedRemoteWithoutPassword = true
-      appendGatewayLog("Rejected a remote WebSocket because no dashboard password is set yet. Set one from the machine Miki runs on first.")
+      appendGatewayLog("Rejected a WebSocket because no dashboard password is set yet and the request is not a direct local one (remote address, proxy headers, or a Host name that is not localhost/an IP/this machine; see MIKI_ALLOWED_HOSTS). Set a password from the machine Miki runs on first.")
     }
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
     return socket.destroy()
@@ -1964,11 +2426,15 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
     if (message.type === "cancel_task") {
       if (message.task_id) {
-        agent.cancelRun(message.task_id)
+        const cancelledRun = agent.cancelRun(message.task_id)
         // Also stops a turn that is waiting between automatic model retries (cancelRun cannot reach that wait).
-        chatTurns.cancelRetry(message.task_id)
+        const cancelledRetry = chatTurns.cancelRetry(message.task_id)
         const run = streamHub.get(message.task_id)
-        if (run) streamHub.finish(run, "cancelled")
+        // The ChatTurnRunner owns the terminal event and persisted message
+        // status. Only finish here when no runner can report the cancellation;
+        // finishing an active stream early used to hide the later cancelled
+        // status and left the user's message looking completed in the UI.
+        if (run && !cancelledRun && !cancelledRetry) streamHub.finish(run, "cancelled")
       }
       return
     }
@@ -1979,7 +2445,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
     }
     // Resolve this at message time so changing Session Scope in Settings takes
     // effect on the next turn without requiring a gateway or websocket restart.
-    const sessionScope = normalizeSessionScope((getAppConfig() as any)?.session?.dm_scope)
+    const sessionScope = normalizeSessionScope((getAppConfig() as LooseConfig)?.session?.dm_scope)
     const contextId = resolveSessionContextId(sessionScope, channelId, peerId)
     await chatTurns.run({
       sessionId,
@@ -2051,6 +2517,8 @@ async function configureRuntimeLoop() {
       appendGatewayLog("24/7 FULL_AGENT autonomy loop is disabled; interactive chat remains available.")
       return
     }
+    const ignoredConfigKeys = findIgnoredConfigKeys(getAppConfig())
+    if (ignoredConfigKeys.length) appendGatewayLog(`Ignored config keys (present in the configuration but not read by the runtime): ${ignoredConfigKeys.join(", ")}`)
     autonomy.start()
     appendGatewayLog("24/7 FULL_AGENT autonomy loop started.")
   } catch (error) {
@@ -2114,12 +2582,12 @@ void listenServer(currentPort, currentHost).then(() => {
   process.exitCode = 1
   setImmediate(() => process.exit(1))
 })
-async function shutdown() {
+async function shutdownWith(exitCode: number) {
   if (shutdownRequested) return
   shutdownRequested = true
   // Always terminate: a failing stop(), a failing db.close() or lingering keep-alive/WebSocket
   // connections must not leave a zombie process behind a supervisor that sent SIGTERM.
-  const forceExit = setTimeout(() => { appendGatewayLog("Graceful shutdown timed out; forcing exit."); process.exit(0) }, 15_000)
+  const forceExit = setTimeout(() => { appendGatewayLog("Graceful shutdown timed out; forcing exit."); process.exit(exitCode) }, 15_000)
   forceExit.unref()
   const serverClosed = new Promise<void>((resolve) => {
     if (!server.listening) return resolve()
@@ -2137,7 +2605,21 @@ async function shutdown() {
   try { await autonomy.stop() } catch (error) { appendGatewayLog(`Autonomy stop failed during shutdown: ${error instanceof Error ? error.message : String(error)}`) }
   await serverClosed
   try { db.close() } catch (error) { appendGatewayLog(`Database close failed during shutdown: ${error instanceof Error ? error.message : String(error)}`) }
-  process.exit(0)
+  if (recoveryV2) markCleanExit(dataRoot)
+  process.exit(exitCode)
 }
-process.once("SIGINT", shutdown)
-process.once("SIGTERM", shutdown)
+// An unhandled exception is written down and the process stops in a controlled way; the supervisor restarts it.
+// A single unhandled rejection (usually one failed channel or network call) is logged and the gateway keeps running;
+// it stops only when rejections keep coming. This guard is on in every mode, not only in recovery mode.
+const crashHandlerOptions = {
+  dataDir: dataRoot,
+  log: appendGatewayLog,
+  shutdown: async () => {
+    for (const handler of shutdownHandlers) { try { await handler() } catch { /* keep going */ } }
+    try { db.close() } catch { /* already closed or broken */ }
+  },
+}
+if (recoveryV2) installCrashHandlers(crashHandlerOptions)
+else installRejectionGuard(crashHandlerOptions)
+process.once("SIGINT", () => void shutdownWith(0))
+process.once("SIGTERM", () => void shutdownWith(0))

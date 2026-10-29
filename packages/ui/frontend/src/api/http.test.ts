@@ -40,7 +40,7 @@ describe("launcherFetch HTTP client wrapper", () => {
 
     const result = await launcherFetch("/api/model", { showErrorToast: true })
 
-    expect(toast.error).toHaveBeenCalledWith("Provider is offline")
+    expect(toast.error).toHaveBeenCalledWith("Provider is offline", expect.objectContaining({ id: expect.stringContaining("http:"), duration: 6000, closeButton: true }))
     await expect(result.json()).resolves.toMatchObject({ code: "provider_error" })
   })
 
@@ -51,13 +51,13 @@ describe("launcherFetch HTTP client wrapper", () => {
     })))
 
     await expect(launcherFetch("/api/tools", { showErrorToast: true })).rejects.toBeInstanceOf(GatewayBackendError)
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("compatibility stub"))
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("compatibility stub"), expect.objectContaining({ id: expect.any(String), duration: 6000, closeButton: true }))
   })
 
   it("shows a generic network message only when the fetch itself fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))
 
     await expect(launcherFetch("/api/test", { showErrorToast: true })).rejects.toThrow("fetch failed")
-    expect(toast.error).toHaveBeenCalledWith("Network error: Please check your connection.")
+    expect(toast.error).toHaveBeenCalledWith("Network error: Please check your connection.", expect.objectContaining({ id: expect.stringContaining("http:network:"), duration: 6000, closeButton: true }))
   })
 })

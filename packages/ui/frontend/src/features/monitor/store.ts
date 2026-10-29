@@ -98,7 +98,24 @@ export function updateMonitorStore(
 ) {
   const prev = store.get(monitorAtom)
   const patch = typeof updater === "function" ? updater(prev) : updater
-  store.set(monitorAtom, { ...prev, ...patch })
+  const next: MonitorState = { ...prev, ...patch }
+  const completed = Object.values(next.runs)
+    .filter((run) => run.status !== "running")
+    .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))
+  const expiredRuns = completed.slice(8)
+  if (expiredRuns.length > 0) {
+    const expiredIds = new Set(expiredRuns.map((run) => run.id))
+    const expiredNodeIds = new Set(
+      Object.values(next.nodes).filter((node) => expiredIds.has(node.runId)).map((node) => node.id),
+    )
+    next.runs = Object.fromEntries(Object.entries(next.runs).filter(([id]) => !expiredIds.has(id)))
+    next.nodes = Object.fromEntries(Object.entries(next.nodes).filter(([, node]) => !expiredIds.has(node.runId)))
+    next.edges = Object.fromEntries(Object.entries(next.edges).filter(([, edge]) => !expiredIds.has(edge.runId)))
+    next.nodeOrder = next.nodeOrder.filter((id) => !expiredNodeIds.has(id))
+    if (next.selectedRunId && expiredIds.has(next.selectedRunId)) next.selectedRunId = undefined
+    if (next.selectedNodeId && expiredNodeIds.has(next.selectedNodeId)) next.selectedNodeId = undefined
+  }
+  store.set(monitorAtom, next)
 }
 
 export function resetMonitorStore() {

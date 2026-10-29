@@ -3,10 +3,11 @@ import path from "node:path";
 
 // The permission ledger stores what the user has taught Miki about acting on
 // its own. There are no built-in restrictions: a call is allowed unless a rule
-// learned from user feedback says to ask first. A one-time grant lets a single
-// asked-about call proceed after the user agrees.
+// learned from user feedback says to ask first (or never to do it). A one-time
+// grant lets a single asked-about call proceed after the user agrees; a "block"
+// rule is final and is not lifted by a one-time grant.
 
-export type LearnedDecision = "act" | "ask";
+export type LearnedDecision = "act" | "ask" | "block";
 
 export interface LearnedRule {
   /** Tool category such as "shell", "file_delete", or "tool:<name>". */
@@ -40,6 +41,7 @@ const CATEGORY_BY_TOOL: Record<string, string> = {
   shell_execute: "shell",
   terminal_run: "shell",
   terminal_kill: "shell",
+  delegate_coding_agent: "shell",
   file_write: "file_write",
   file_mkdir: "file_write",
   file_delete: "file_delete",
@@ -73,7 +75,7 @@ function isRule(value: unknown): value is LearnedRule {
   return (
     typeof rule?.category === "string" &&
     typeof rule?.match === "string" &&
-    (rule?.decision === "act" || rule?.decision === "ask") &&
+    (rule?.decision === "act" || rule?.decision === "ask" || rule?.decision === "block") &&
     typeof rule?.note === "string" &&
     typeof rule?.updatedAt === "string"
   );
@@ -114,6 +116,15 @@ export class PermissionLedger {
     const rule = this.strongestRule(category, haystack);
     if (!rule || rule.decision === "act") {
       return { mode: "auto", reason: "No learned restriction applies." };
+    }
+    if (rule.decision === "block") {
+      const blockScope = rule.match ? ` matching "${rule.match}"` : "";
+      return {
+        mode: "block",
+        reason:
+          `The user taught that "${category}" actions${blockScope} must not be done. Note: ${rule.note || "no note"}. ` +
+          "Do not retry this action. Tell the user it is blocked by their rule; only they can lift it (permission_forget).",
+      };
     }
     const grantIndex = this.data.grants.findIndex(
       (grant) => grant.category === category && matches(grant, haystack),

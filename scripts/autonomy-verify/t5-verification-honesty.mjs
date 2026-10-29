@@ -25,7 +25,7 @@ console.log('### T5a per-goal-cycle tool budget wiring')
   const b = await scenario('budget explicit 5', { brain: goalBrain(), autonomy: { max_tool_calls_per_goal_cycle: 5 }, spy: true })
   check('T5a explicit max_tool_calls_per_goal_cycle=5 is honoured', () => assert.equal(b.seen[0].maxToolCalls, 5))
   const c = await scenario('unlimited_budgets', { brain: goalBrain(), autonomy: { unlimited_budgets: true }, spy: true })
-  check('T5a unlimited_budgets removes the tool-call cap', () => assert.equal(c.seen[0].maxToolCalls, undefined))
+  check('T5a legacy unlimited_budgets cannot remove the tool-call cap', () => assert.equal(c.seen[0].maxToolCalls, 12))
 }
 console.log('\n### T5b completion verification at the budget limit (cap = 3 tool calls, goal needs 5)')
 {
@@ -45,11 +45,21 @@ console.log('\n### T5c the model claims DONE but did nothing')
 }
 console.log('\n### T5d idle decision where the model answers in plain text (does not call the tool)')
 {
-  const stub = await startStub((req) => kind(req) === 'ambient' ? { content: 'I would write a report.' } : { content: 'NO_ACTION' })
+  const stub = await startStub((req) => kind(req) === 'ambient' ? { content: 'I would write a report.' } : { content: 'Acknowledged.' })
   const w = buildWorld({ models: model(stub.url) })
   await w.supervisor.runAmbientDecision('startup')
-  console.log('goals:', row(w.db, 'SELECT COUNT(*) c FROM pursue_goals')[0].c, '| log:', w.logs.filter((l) => /queued no goal/.test(l)))
-  check('T5d no goal is invented and the gap is logged explicitly', () => { assert.equal(row(w.db, 'SELECT COUNT(*) c FROM pursue_goals')[0].c, 0); assert.ok(w.logs.some((l) => /queued no goal/.test(l))) })
+  console.log('goals:', row(w.db, 'SELECT COUNT(*) c FROM pursue_goals')[0].c, '| log:', w.logs.filter((l) => /finished inline work/.test(l)))
+  check('T5d no goal is invented and the gap is logged explicitly', () => { assert.equal(row(w.db, 'SELECT COUNT(*) c FROM pursue_goals')[0].c, 0); assert.ok(w.logs.some((l) => /finished inline work/.test(l))) })
+  await stub.close()
+}
+console.log('\n### T5e first run on an empty install: the startup decision creates the environment-exploration goal itself')
+{
+  const stub = await startStub(() => ({ content: 'Acknowledged.' }))
+  const w = buildWorld({ models: model(stub.url), emptyMemory: true })
+  const queued = await w.supervisor.runAmbientDecision('startup')
+  const goal = row(w.db, 'SELECT title, source, priority, acceptance_contract FROM pursue_goals')[0]
+  console.log('queued:', queued, '| goal:', goal && { title: goal.title, source: goal.source, priority: goal.priority })
+  check('T5e bootstrap goal created server-side (no model call needed)', () => { assert.equal(queued, true); assert.equal(goal.source, 'drive'); assert.equal(goal.priority, 9); assert.ok(JSON.parse(goal.acceptance_contract).checks.some((c) => c.type === 'file_exists' && c.path === 'identity/memory/environment.md')) })
   await stub.close()
 }
 console.log(`\nSUMMARY T5: pass=${pass} fail=${fail}`)

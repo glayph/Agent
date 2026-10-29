@@ -1,9 +1,9 @@
 import {
-  IconActivityHeartbeat,
   IconAlertTriangle,
   IconLoader2,
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -38,6 +38,12 @@ import {
 } from "@/features/channels/channel-forms/whatsapp-form"
 import { type ArrayFieldFlusher } from "@/features/channels/components/channel-array-list-field"
 import {
+  filterChannels,
+  groupCatalogChannels,
+  isLiveChannel,
+} from "@/features/channels/components/channel-catalog"
+import { ChannelStatusBlock } from "@/features/channels/components/channel-status-block"
+import {
   buildEditConfig,
   getFieldValueForValidation,
 } from "@/features/channels/components/channel-config-fields"
@@ -54,7 +60,7 @@ import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
-import { Switch } from "@/shared/ui/switch"
+import { Input } from "@/shared/ui/input"
 import { refreshGatewayState } from "@/store/gateway"
 
 interface ChannelConfigPageProps {
@@ -65,10 +71,10 @@ function channelCatalogStatus(channel: SupportedChannel): {
   labelKey: "channels.page.statusLive" | "channels.page.statusSavedOnly" | "channels.page.statusNotConfigured"
   className: string
 } {
-  if (channel.configured && channel.runtime_live === true && channel.runtime_connected === true) {
+  if (isLiveChannel(channel)) {
     return {
       labelKey: "channels.page.statusLive",
-      className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      className: "border-emerald-500/30 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300",
     }
   }
   if (channel.configured) {
@@ -88,6 +94,7 @@ export function ChannelCatalogPage() {
   const [channels, setChannels] = useState<SupportedChannel[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [search, setSearch] = useState("")
 
   useEffect(() => {
     let active = true
@@ -96,7 +103,7 @@ export function ChannelCatalogPage() {
         if (active) setChannels(response.channels)
       })
       .catch((reason: unknown) => {
-        if (active) setError(reason instanceof Error ? reason.message : "Unable to load channels.")
+        if (active) setError(reason instanceof Error ? reason.message : t("channels.loadError"))
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -104,69 +111,112 @@ export function ChannelCatalogPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [t])
 
   const configuredCount = channels.filter((channel) => channel.configured).length
+  const filteredChannels = filterChannels(channels, search)
+  const groups = groupCatalogChannels(filteredChannels).map((group) => ({
+    ...group,
+    title: t(`channels.catalog.groups.${group.key}`),
+  }))
+  const isLive = isLiveChannel
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-miki-page="channels">
       <PageHeader
         title={t("channels.title", { defaultValue: "Channels" })}
         titleExtra={
           <Badge variant="outline" className="text-muted-foreground">
-            {configuredCount}/{channels.length} configured
+            {t("channels.catalog.configuredCount", {
+              count: configuredCount,
+              total: channels.length,
+              defaultValue: "{{count}}/{{total}} configured",
+            })}
           </Badge>
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-6">
-        <div className="mx-auto w-full max-w-6xl space-y-4 pt-4">
-          <div className="flex items-center justify-between gap-4 px-1">
-            <p className="text-muted-foreground text-sm">Configure a channel, then run its health check.</p>
-            <span className="text-muted-foreground hidden text-xs sm:inline">Select a channel to continue</span>
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-6" data-miki-page-body="true">
+        <div className="mx-auto w-full max-w-4xl space-y-5 pt-4">
+          <p className="text-muted-foreground text-sm">
+            {t("channels.catalog.description")}
+          </p>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("channels.catalog.searchPlaceholder")}
+            aria-label={t("channels.catalog.searchPlaceholder")}
+            className="h-9 max-w-md shadow-none"
+          />
 
           {loading ? (
-            <div className="text-muted-foreground flex justify-center py-16"><IconLoader2 className="size-6 animate-spin" /></div>
+            <div className="text-muted-foreground flex justify-center py-16">
+              <IconLoader2 className="size-6 animate-spin" />
+            </div>
           ) : error ? (
-            <div className="text-destructive bg-destructive/10 rounded-xl px-4 py-3 text-sm">{error}</div>
+            <div className="text-destructive bg-destructive/10 rounded-xl px-4 py-3 text-sm" role="alert">
+              {error}
+            </div>
+          ) : filteredChannels.length === 0 ? (
+            <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-8 text-center text-sm">
+              {t("channels.catalog.noResults")}
+            </p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {channels.map((channel) => {
-                const connection = channelCatalogStatus(channel)
-                const runtime = channel.runtime_status !== "functional"
-                  ? t("channels.page.runtimeUnavailable")
-                  : channel.runtime_connected === true
-                    ? t("channels.page.runtimeLive")
-                    : channel.configured && channel.runtime_live === true
-                      ? t("channels.page.runtimeStarting", { defaultValue: "Adapter running; waiting for connection" })
-                      : channel.configured
-                        ? t("channels.page.runtimeDisconnected")
-                        : t("channels.page.runtimeNotConfigured")
-                return (
-                  <a
-                    key={channel.name}
-                    href={`/channels/${channel.name}`}
-                    className="border-border/60 bg-card hover:border-primary/40 group rounded-lg border p-4 transition-colors hover:shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="truncate font-semibold">{getChannelDisplayName(channel, t)}</h3>
-                        <p className="text-muted-foreground mt-1 truncate text-[11px]">{runtime}</p>
-                        {channel.runtime_error && <p className="text-destructive mt-1 line-clamp-2 text-[11px]" title={channel.runtime_error}>{channel.runtime_error}</p>}
-                      </div>
-                      <Badge variant="outline" className={connection.className}>{t(connection.labelKey)}</Badge>
-                    </div>
-                    <div className="text-muted-foreground mt-3 text-xs font-medium group-hover:text-foreground">Configure →</div>
-                  </a>
-                )
-              })}
+            <div className="space-y-6">
+              {groups.map((group) => (
+                <section key={group.key} className="space-y-2" aria-labelledby={`channel-group-${group.key}`}>
+                  <h2 id={`channel-group-${group.key}`} className="text-muted-foreground px-1 text-xs font-semibold tracking-wide uppercase">
+                    {group.title} <span className="tabular-nums">({group.channels.length})</span>
+                  </h2>
+                  <div className="divide-border/70 overflow-hidden rounded-lg border">
+                    {group.channels.map((channel) => {
+                      const status = channelCatalogStatus(channel)
+                      const capabilityLabel = channel.runtime_status === "functional"
+                        ? t("channels.catalog.capabilityLiveAdapter")
+                        : channel.runtime_status === "partial"
+                          ? t("channels.catalog.capabilityPartial")
+                          : t("channels.catalog.capabilityConfigOnly")
+                      const capabilityClass = channel.runtime_status === "functional"
+                        ? "border-emerald-500/30 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300"
+                        : channel.runtime_status === "partial"
+                          ? "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+                          : "border-border text-muted-foreground"
+                      return (
+                        <Link
+                          key={channel.name}
+                          to="/channels/$name"
+                          params={{ name: channel.name }}
+                          className="hover:bg-muted/30 focus-visible:bg-muted/30 flex items-center gap-3 px-3 py-3 outline-none transition-colors sm:px-4"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`size-2.5 shrink-0 rounded-full ${isLive(channel) ? "bg-emerald-500" : channel.runtime_status === "functional" ? "bg-amber-500" : channel.configured ? "bg-amber-500" : "bg-muted-foreground/40"}`}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="truncate text-sm font-medium">{getChannelDisplayName(channel, t)}</span>
+                              <Badge variant="outline" className={`px-1.5 py-0 text-[10px] font-normal ${capabilityClass}`}>
+                                {capabilityLabel}
+                              </Badge>
+                            </span>
+                            <span className="text-muted-foreground mt-1 block truncate text-xs">
+                              {channel.runtime_error || channel.runtime_note || t(status.labelKey)}
+                            </span>
+                          </span>
+                          <span className="text-muted-foreground hidden shrink-0 text-xs sm:inline">
+                            {t("channels.catalog.configure")}
+                          </span>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
-
           {!loading && !error && channels.length > 0 && (
             <div className="text-muted-foreground flex items-start gap-2 rounded-lg border border-dashed px-3 py-2.5 text-xs leading-5">
               <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
-              <span>Green status means a live adapter is available. Saving channel credentials alone does not activate message transport.</span>
+              <span>{t("channels.catalog.truthNotice")}</span>
             </div>
           )}
         </div>
@@ -184,6 +234,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asBool(value: unknown): boolean {
   return value === true
+}
+
+function hasAllowedPeers(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((item) => String(item).trim() !== "")
+  return typeof value === "string" && value.trim().length > 0
 }
 
 function setRecordValueByPath(
@@ -216,18 +271,18 @@ function getChannelDocSlug(channelName: string): string {
   return channelName.replaceAll("_", "-")
 }
 
-function runtimeStatusLabel(
+function runtimeStatusTranslationKey(
   status: SupportedChannel["runtime_status"],
 ): string {
   switch (status) {
     case "functional":
-      return "Functional"
+      return "channels.catalog.capabilityLiveAdapter"
     case "partial":
-      return "Partial"
+      return "channels.catalog.capabilityPartial"
     case "config_only":
-      return "Config surface"
+      return "channels.catalog.capabilityConfigOnly"
     default:
-      return ""
+      return "channels.catalog.capabilityConfigOnly"
   }
 }
 
@@ -236,76 +291,13 @@ function runtimeStatusClass(
 ): string {
   switch (status) {
     case "functional":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      return "border-emerald-500/30 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300"
     case "partial":
       return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
     case "config_only":
       return "border-muted-foreground/25 text-muted-foreground"
     default:
       return ""
-  }
-}
-
-function probeStatusLabel(
-  status: ChannelRuntimeProbeResponse["probe_status"],
-): string {
-  switch (status) {
-    case "ready":
-      return "Ready"
-    case "disabled":
-      return "Disabled"
-    case "needs_config":
-      return "Needs config"
-    case "auth_failed":
-      return "Auth failed"
-    case "webhook_failed":
-      return "Webhook failed"
-    case "rate_limited":
-      return "Rate limited"
-    case "runtime_error":
-      return "Runtime error"
-    case "partial":
-      return "Partial"
-    case "not_implemented":
-      return "Config surface only"
-    default:
-      return ""
-  }
-}
-
-function probeStatusClass(
-  status: ChannelRuntimeProbeResponse["probe_status"],
-): string {
-  switch (status) {
-    case "ready":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-    case "disabled":
-    case "needs_config":
-    case "partial":
-    case "rate_limited":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-    case "auth_failed":
-    case "webhook_failed":
-    case "runtime_error":
-    case "not_implemented":
-      return "border-destructive/30 bg-destructive/10 text-destructive"
-    default:
-      return ""
-  }
-}
-
-function checkStatusClass(
-  status: ChannelRuntimeProbeResponse["checks"][number]["status"],
-): string {
-  switch (status) {
-    case "pass":
-      return "text-emerald-700 dark:text-emerald-300"
-    case "warn":
-      return "text-amber-700 dark:text-amber-300"
-    case "fail":
-      return "text-destructive"
-    default:
-      return "text-muted-foreground"
   }
 }
 
@@ -326,6 +318,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [probing, setProbing] = useState(false)
+  const [runtimeConnecting, setRuntimeConnecting] = useState(false)
   const [fetchError, setFetchError] = useState("")
   const [serverError, setServerError] = useState("")
   const [probeError, setProbeError] = useState("")
@@ -355,6 +348,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
     setServerError("")
     setProbeError("")
     setProbeResult(null)
+    setRuntimeConnecting(false)
     setFieldErrors({})
     setArrayFieldResetVersion((version) => version + 1)
   }, [])
@@ -572,6 +566,42 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
       })
       await loadData()
       const gateway = await refreshGatewayState({ force: true })
+      if (
+        channel.runtime_status === "functional" &&
+        enabled &&
+        channelApply.runtime_apply_status === "applied"
+      ) {
+        setRuntimeConnecting(true)
+        try {
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const catalog = await getChannelsCatalog()
+            const runtimeChannel = catalog.channels.find(
+              (item) => item.name === channel.name,
+            )
+            if (runtimeChannel) {
+              setChannel((current) =>
+                current?.name === runtimeChannel.name
+                  ? { ...current, ...runtimeChannel }
+                  : current,
+              )
+              if (
+                runtimeChannel.runtime_connected ||
+                runtimeChannel.runtime_error ||
+                runtimeChannel.runtime_status !== "functional"
+              ) {
+                break
+              }
+            }
+            if (attempt < 4) {
+              await new Promise<void>((resolve) => window.setTimeout(resolve, 500))
+            }
+          }
+        } catch {
+          // Saving already succeeded; a temporary status refresh error must not undo it.
+        } finally {
+          setRuntimeConnecting(false)
+        }
+      }
       showSaveSuccessOrRestartToast(
         t,
         t("channels.page.saveSuccess"),
@@ -593,11 +623,22 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const handleProbe = async (
     mode?: ChannelRuntimeProbeResponse["check_mode"],
   ) => {
-    if (!channel || isDirty) return
+    if (!channel) return
     setProbing(true)
     setProbeError("")
     try {
-      const result = await probeChannelRuntime(channel.name, mode)
+      let result: ChannelRuntimeProbeResponse
+      if (isDirty) {
+        const preparedEditConfig = flushPendingArrayFieldDrafts(editConfig)
+        if (preparedEditConfig !== editConfig) setEditConfig(preparedEditConfig)
+        result = await probeChannelRuntime(
+          channel.name,
+          mode,
+          buildSavePayload(channel, preparedEditConfig, enabled),
+        )
+      } else {
+        result = await probeChannelRuntime(channel.name, mode)
+      }
       setProbeResult(result)
     } catch (e) {
       setProbeError(
@@ -786,7 +827,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-miki-page="channel-config">
       <PageHeader
         title={channelDisplayName}
         titleExtra={
@@ -798,7 +839,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
                   className={runtimeStatusClass(channel.runtime_status)}
                   title={channel.runtime_note}
                 >
-                  {runtimeStatusLabel(channel.runtime_status)}
+                  {t(runtimeStatusTranslationKey(channel.runtime_status))}
                 </Badge>
               )}
               {docsUrl && (
@@ -814,9 +855,16 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
             </div>
           )
         }
-      />
+      >
+        <Link
+          to="/channels"
+          className="text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-md px-2 text-xs font-medium transition-colors"
+        >
+          {t("common.back", { defaultValue: "Back" })}
+        </Link>
+      </PageHeader>
 
-      <div className="flex min-h-0 flex-1 justify-center overflow-y-auto px-4 pb-8 sm:px-6">
+      <div className="flex min-h-0 flex-1 justify-center overflow-y-auto px-4 pb-8 sm:px-6" data-miki-page-body="true">
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <IconLoader2 className="text-muted-foreground size-6 animate-spin" />
@@ -827,145 +875,36 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
           </div>
         ) : (
           <div className="w-full max-w-4xl space-y-6 pt-5">
-            {!hidesPageLevelEnableToggle && (
-              <div className="bg-card text-card-foreground border-border/60 flex items-center justify-between rounded-xl border px-6 py-4 shadow-sm">
-                <p className="text-sm font-medium">
-                  {t("channels.page.enableLabel")}
-                </p>
-                <Switch
-                  checked={enabled}
-                  onCheckedChange={setEnabled}
-                  aria-label={t("channels.page.enableLabel")}
-                />
+            <ChannelStatusBlock
+              channel={channel}
+              enabled={enabled}
+              onEnabledChange={setEnabled}
+              showEnableSwitch={!hidesPageLevelEnableToggle}
+              runtimeConnecting={runtimeConnecting}
+              probing={probing}
+              probeResult={probeResult}
+              probeError={probeError}
+              onProbe={(mode) => void handleProbe(mode)}
+            />
+
+            {channel && channel.runtime_status !== "functional" && (
+              <div role="status" className="text-amber-800 dark:text-amber-200 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm">
+                <IconAlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <span>{t("channels.page.messagesNotDelivered", { defaultValue: "Settings are saved; messages are not delivered for this channel yet." })}</span>
+              </div>
+            )}
+            {channel && enabled && ["telegram", "discord", "slack"].includes(channel.name) && !hasAllowedPeers(editConfig.allow_from) && (
+              <div role="alert" className="text-amber-800 dark:text-amber-200 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm">
+                <IconAlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <span>{t("channels.page.allowFromWarning", { defaultValue: "allow_from is empty. The channel may appear connected but will ignore every sender until trusted sender IDs are added." })}</span>
               </div>
             )}
 
-            {renderForm()}
-
-            <div className="border-border/60 bg-card text-card-foreground rounded-lg border px-4 py-3 shadow-sm">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium">
-                      {t("channels.page.probeTitle")}
-                    </p>
-                    {probeResult && (
-                      <Badge
-                        variant="outline"
-                        className={probeStatusClass(probeResult.probe_status)}
-                      >
-                        {probeStatusLabel(probeResult.probe_status)}
-                      </Badge>
-                    )}
-                  </div>
-                  {probeError && (
-                    <p className="text-destructive mt-1 text-sm">
-                      {probeError}
-                    </p>
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void handleProbe()}
-                  disabled={!channel || probing || isDirty}
-                  title={
-                    isDirty
-                      ? t("channels.page.probeSaveFirst")
-                      : t("channels.page.probeRun")
-                  }
-                >
-                  {probing ? (
-                    <IconLoader2 className="size-4 animate-spin" />
-                  ) : (
-                    <IconActivityHeartbeat className="size-4" />
-                  )}
-                  {probing
-                    ? t("channels.page.probing")
-                    : t("channels.page.probeRun")}
-                </Button>
-                {channel?.name === "telegram" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void handleProbe("live")}
-                    disabled={!channel || probing || isDirty}
-                    title={
-                      isDirty
-                        ? t("channels.page.probeSaveFirst")
-                        : t("channels.page.telegramLiveTest", {
-                            defaultValue: "Run Telegram live test",
-                          })
-                    }
-                  >
-                    {probing ? (
-                      <IconLoader2 className="size-4 animate-spin" />
-                    ) : (
-                      <IconActivityHeartbeat className="size-4" />
-                    )}
-                    {t("channels.page.telegramLiveTest", {
-                      defaultValue: "Telegram live test",
-                    })}
-                  </Button>
-                )}
-              </div>
-
-              {probeResult && (
-                <div className="mt-3 space-y-2 border-t pt-3">
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge variant="outline">
-                      {t("channels.page.probeMode", {
-                        mode: probeResult.check_mode,
-                        defaultValue: "Mode: {{mode}}",
-                      })}
-                    </Badge>
-                    <Badge variant="outline">
-                      {t("channels.page.probeLatency", {
-                        latency: probeResult.latency_ms,
-                        defaultValue: "{{latency}}ms",
-                      })}
-                    </Badge>
-                    {probeResult.send_check && (
-                      <Badge variant="outline">
-                        {t("channels.page.sendCheck", {
-                          status: probeResult.send_check.status,
-                          defaultValue: "Send: {{status}}",
-                        })}
-                      </Badge>
-                    )}
-                    {probeResult.failure_code && (
-                      <Badge variant="outline">
-                        {probeResult.failure_code}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="grid gap-2 text-xs sm:grid-cols-2">
-                    {probeResult.checks.map((check) => (
-                      <div key={check.id} className="min-w-0">
-                        <span
-                          className={`font-medium uppercase ${checkStatusClass(
-                            check.status,
-                          )}`}
-                        >
-                          {check.status}
-                        </span>
-                        <span className="text-muted-foreground break-words">
-                          {" "}
-                          {check.message}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  {probeResult.next_steps.length > 0 && (
-                    <div className="text-muted-foreground space-y-1 text-xs">
-                      {probeResult.next_steps.map((step) => (
-                        <p key={step}>{step}</p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            {
+              // Every channel form renders its own Credentials / Access /
+              // Advanced sections.
+              renderForm()
+            }
 
             {serverError && (
               <p className="text-destructive text-sm">{serverError}</p>
@@ -979,18 +918,20 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
               />
             )}
 
-            <div className="border-border/60 flex justify-end gap-2 border-t py-4">
-              <Button
-                variant="outline"
-                onClick={handleReset}
-                disabled={!isDirty || saving}
-              >
-                {t("common.reset")}
-              </Button>
-              <Button onClick={handleSave} disabled={!isDirty || saving}>
-                {saving ? t("common.saving") : t("common.save")}
-              </Button>
-            </div>
+            {isDirty && (
+              <div className="border-border/60 bg-background sticky bottom-0 flex justify-end gap-2 border-t py-3">
+                <Button
+                  variant="outline"
+                  onClick={handleReset}
+                  disabled={saving}
+                >
+                  {t("common.reset")}
+                </Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? t("common.saving") : t("common.save")}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

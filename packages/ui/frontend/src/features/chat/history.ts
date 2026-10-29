@@ -1,5 +1,6 @@
 import { getSessionHistory } from "@/api/sessions"
 import { normalizeUnixTimestamp } from "@/features/chat/state"
+import { isChatLogMessage } from "@/features/chat/chat-log-filter"
 import {
   parseToolCallsValue,
   toolCallsSignature,
@@ -43,7 +44,7 @@ export async function loadSessionMessages(
   sessionId: string,
 ): Promise<ChatMessage[]> {
   const detail = await getSessionHistory(sessionId)
-  return detail.messages.map((message, index) => ({
+  return detail.messages.filter((message) => !isChatLogMessage(message)).map((message, index) => ({
     id: message.id ?? `hist-${index}-${Date.now()}`,
     role: message.role,
     content: message.content,

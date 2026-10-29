@@ -43,13 +43,14 @@ export function ToolsPage() {
   }, [activeTab])
 
   return (
-    <div className="bg-background flex h-full flex-col">
+    <div className="bg-background flex h-full flex-col" data-miki-page="tools">
       <PageHeader title={t("navigation.tools")} />
       <ToolsTabs activeTab={activeTab} onChange={setActiveTab} />
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-auto px-6 py-6 pb-20"
+        className="flex-1 overflow-auto px-4 py-4 pb-20 sm:px-6 sm:py-6"
+        data-miki-page-body="true"
       >
         <div
           id={`tools-tab-panel-${activeTab}`}

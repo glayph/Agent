@@ -1,3 +1,4 @@
+import { notify } from "@/lib/notify"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   type ChangeEvent,
@@ -9,7 +10,6 @@ import {
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import {
   type SkillSupportItem,
@@ -82,7 +82,7 @@ export function useSkillsPage() {
     onSuccess: (importedSkill) => {
       const message = t("pages.agent.skills.import_success")
       setStatusMessage({ kind: "success", text: message })
-      toast.success(message)
+      notify.success(message, { id: "use-skills-page:success:importMutation" })
       startTransition(() => {
         setIsImportDialogOpen(false)
         setDetailView("preview")
@@ -108,7 +108,7 @@ export function useSkillsPage() {
           ? err.message
           : t("pages.agent.skills.import_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "use-skills-page:error:importMutation-2" })
     },
   })
 
@@ -117,7 +117,7 @@ export function useSkillsPage() {
     onSuccess: (_, deletedName) => {
       const message = t("pages.agent.skills.delete_success")
       setStatusMessage({ kind: "success", text: message })
-      toast.success(message)
+      notify.success(message, { id: "use-skills-page:success:deleteMutation" })
       setSkillPendingDelete(null)
       if (
         selectedSkill?.name === deletedName &&
@@ -133,7 +133,7 @@ export function useSkillsPage() {
           ? err.message
           : t("pages.agent.skills.delete_error")
       setStatusMessage({ kind: "error", text: message })
-      toast.error(message)
+      notify.error(message, { id: "use-skills-page:error:deleteMutation-2" })
     },
   })
 
@@ -268,7 +268,7 @@ export function useSkillsPage() {
     const validationMessage = validateImportFile(file)
     if (validationMessage) {
       setStatusMessage({ kind: "error", text: validationMessage })
-      toast.error(validationMessage)
+      notify.error(validationMessage, { id: "use-skills-page:error:handleImportFile" })
       return
     }
     importMutation.mutate(file)

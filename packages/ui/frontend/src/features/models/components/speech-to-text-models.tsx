@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
+import { notify } from "@/lib/notify"
 
 import { approveApprovalRequest } from "@/api/control"
 import {
@@ -107,10 +107,10 @@ function SpeechToTextModelsPanel() {
     try {
       setData(await getSpeechModels())
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.loadError", "Failed to load speech models"),
+          : t("models.speech.loadError", "Failed to load speech models"), { id: "speech-to-text-models:error:load" }
       )
     } finally {
       setLoading(false)
@@ -138,14 +138,14 @@ function SpeechToTextModelsPanel() {
 
   const saveModel = async () => {
     if (!form.id.trim() || !form.name.trim()) {
-      toast.error(
-        t("models.speech.required", "Model ID and name are required."),
+      notify.error(
+        t("models.speech.required", "Model ID and name are required."), { id: "speech-to-text-models:error:models.speech.required" }
       )
       return
     }
     if (form.transport === "endpoint" && !form.endpoint.trim()) {
-      toast.error(
-        t("models.speech.endpointRequired", "An HTTP(S) endpoint is required."),
+      notify.error(
+        t("models.speech.endpointRequired", "An HTTP(S) endpoint is required."), { id: "speech-to-text-models:error:models.speech.endpointRequired" }
       )
       return
     }
@@ -153,11 +153,11 @@ function SpeechToTextModelsPanel() {
       form.transport === "cli" &&
       (!form.executable.trim() || !form.model.trim())
     ) {
-      toast.error(
+      notify.error(
         t(
           "models.speech.cliRequired",
           "CLI executable and model paths are required.",
-        ),
+        ), { id: "speech-to-text-models:error:models.speech.cliRequired" }
       )
       return
     }
@@ -180,12 +180,12 @@ function SpeechToTextModelsPanel() {
           })
       setData(response)
       cancelForm()
-      toast.success(t("models.speech.saved", "Speech model saved."))
+      notify.success(t("models.speech.saved", "Speech model saved."), { id: "speech-to-text-models:success:models.speech.saved" })
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.saveError", "Failed to save speech model"),
+          : t("models.speech.saveError", "Failed to save speech model"), { id: "speech-to-text-models:error:saveModel" }
       )
     } finally {
       setSaving(false)
@@ -201,12 +201,12 @@ function SpeechToTextModelsPanel() {
       return
     try {
       setData(await deleteSpeechModel(model.id))
-      toast.success(t("models.speech.deleted", "Speech model deleted."))
+      notify.success(t("models.speech.deleted", "Speech model deleted."), { id: "speech-to-text-models:success:models.speech.deleted" })
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.deleteError", "Failed to delete speech model"),
+          : t("models.speech.deleteError", "Failed to delete speech model"), { id: "speech-to-text-models:error:saveModel-2" }
       )
     }
   }
@@ -214,12 +214,12 @@ function SpeechToTextModelsPanel() {
   const selectModel = async (model: SpeechToTextModel) => {
     try {
       setData(await activateSpeechModel(model.id))
-      toast.success(t("models.speech.active", "Active speech model updated."))
+      notify.success(t("models.speech.active", "Active speech model updated."), { id: "speech-to-text-models:success:models.speech.active" })
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.activateError", "Failed to activate speech model"),
+          : t("models.speech.activateError", "Failed to activate speech model"), { id: "speech-to-text-models:error:saveModel-3" }
       )
     }
   }
@@ -238,23 +238,23 @@ function SpeechToTextModelsPanel() {
           approvalRequestId: response.approval_request_id,
           plan: response.plan,
         })
-        toast.info(
+        notify.info(
           t(
             "models.speech.approvalRequired",
             "Owner approval is required before downloading this voice model.",
-          ),
+          ), { id: "speech-to-text-models:info:models.speech.approvalRequired" }
         )
         return
       }
       setData(response)
-      toast.success(
-        t("models.speech.installed", "Voice model installed and verified."),
+      notify.success(
+        t("models.speech.installed", "Voice model installed and verified."), { id: "speech-to-text-models:success:models.speech.installed" }
       )
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.installError", "Failed to install voice model"),
+          : t("models.speech.installError", "Failed to install voice model"), { id: "speech-to-text-models:error:call" }
       )
     } finally {
       setInstallingModelId(null)
@@ -273,14 +273,14 @@ function SpeechToTextModelsPanel() {
       )
       setData(response)
       setPendingInstall(null)
-      toast.success(
-        t("models.speech.installed", "Voice model installed and verified."),
+      notify.success(
+        t("models.speech.installed", "Voice model installed and verified."), { id: "speech-to-text-models:success:models.speech.installed" }
       )
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.installError", "Failed to install voice model"),
+          : t("models.speech.installError", "Failed to install voice model"), { id: "speech-to-text-models:error:call-2" }
       )
     } finally {
       setInstallingModelId(null)
@@ -292,16 +292,16 @@ function SpeechToTextModelsPanel() {
     try {
       const response = await healthCheckVoiceModel()
       setData(response)
-      toast.success(
+      notify.success(
         response.local_runtime?.healthy
           ? t("models.speech.healthOk", "Local voice model is ready.")
-          : t("models.speech.healthFailed", "Local voice model is not ready."),
+          : t("models.speech.healthFailed", "Local voice model is not ready."), { id: "speech-to-text-models:success:call-3" }
       )
     } catch (error) {
-      toast.error(
+      notify.error(
         error instanceof Error
           ? error.message
-          : t("models.speech.healthError", "Health check failed"),
+          : t("models.speech.healthError", "Health check failed"), { id: "speech-to-text-models:error:call-4" }
       )
     } finally {
       setCheckingHealth(false)

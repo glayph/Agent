@@ -142,11 +142,21 @@ export async function getChannelSecrets(
 export async function probeChannelRuntime(
   channelName: string,
   mode?: ChannelRuntimeProbeResponse["check_mode"],
+  draftConfig?: ChannelConfig,
 ): Promise<ChannelRuntimeProbeResponse> {
   const query = mode ? `?mode=${encodeURIComponent(mode)}` : ""
-  return request<ChannelRuntimeProbeResponse>(
-    `/api/channels/${encodeURIComponent(channelName)}/probe${query}`,
-  )
+  const path = `/api/channels/${encodeURIComponent(channelName)}/probe${query}`
+  // A live check contacts the provider, so it is only ever requested with POST
+  // (the gateway ignores mode=live on GET). With no unsaved draft the body is
+  // empty and the gateway tests the saved configuration.
+  if (draftConfig || mode === "live") {
+    return request<ChannelRuntimeProbeResponse>(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: draftConfig ?? {} }),
+    })
+  }
+  return request<ChannelRuntimeProbeResponse>(path)
 }
 
 function qrBindingFlowPath(channel: QrBindingChannel, flowId?: string): string {

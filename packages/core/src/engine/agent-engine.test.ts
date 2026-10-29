@@ -39,6 +39,7 @@ describe("AgentEngine", () => {
       "run.started",
       "turn.started",
       "message.final",
+      "run.budget",
       "run.finished",
     ]);
   });
@@ -61,7 +62,8 @@ describe("AgentEngine", () => {
     expect(result.status).toBe("completed");
     expect(result.finalText).toContain("written");
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(llm.requests).toHaveLength(5);
+    // Draft, completion check, nudged tool call, tool result turn. The completion check runs only once per run.
+    expect(llm.requests).toHaveLength(4);
   });
 
   it("forwards streamed text as message.delta events before the final answer", async () => {
@@ -161,14 +163,15 @@ describe("AgentEngine", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an answer as its own message when the user sends a message while it is being written", async () => {
+  it("interrupts an in-flight model completion and discards its stale answer", async () => {
     let steer: (text: string) => boolean = () => false;
     const { engine } = setup(
       [
-        async () => { steer("one more thing"); return { text: "First answer." }; },
+        async () => { steer("one more thing"); return { text: "Stale answer." }; },
         { text: "Second answer." },
       ],
       [],
+      { steerInterrupt: true },
     );
     const events: EngineEvent[] = [];
     let runId = "";
@@ -179,9 +182,156 @@ describe("AgentEngine", () => {
     });
 
     expect(result.finalText).toBe("Second answer.");
-    const thoughts = events.filter((e): e is Extract<EngineEvent, { type: "thought" }> => e.type === "thought");
-    expect(thoughts).toEqual([expect.objectContaining({ content: "First answer.", interim: true })]);
+    expect(events.filter((e) => e.type === "model.steer_interrupt")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "thought")).toHaveLength(0);
+    expect(events.filter((e) => e.type === "model.retrying" || e.type === "model.fallback")).toHaveLength(0);
     expect(events.filter((e) => e.type === "message.final")).toHaveLength(1);
+  });
+
+  it("aborts only the current model call when a new message arrives and does not count it as a retry", async () => {
+    let startedResolve!: () => void;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    const requests: Array<{ messages: any[]; options: any }> = [];
+    const llm = {
+      model: "steer-test-model",
+      async complete(messages: any[], options: any = {}) {
+        requests.push({ messages, options });
+        if (requests.length === 1) {
+          return await new Promise<any>((_resolve, reject) => {
+            options.onTextDelta?.("partial draft");
+            options.signal?.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+            startedResolve();
+          });
+        }
+        return { choices: [{ message: { role: "assistant", content: "Updated answer." } }], usage: { total_tokens: 5 } };
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry(), steerInterrupt: true });
+    const events: EngineEvent[] = [];
+    const running = engine.run({ runId: "steer-run", history: user("Original request"), onEvent: (event) => events.push(event) });
+    await started;
+    expect(engine.steer("steer-run", { text: "Use the updated requirement", messageId: "steer-message" })).toBe(true);
+
+    const result = await running;
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("Updated answer.");
+    expect(requests).toHaveLength(2);
+    expect(requests[0].options.signal.aborted).toBe(true);
+    expect(requests[1].messages.some((message) => message.role === "user" && String(message.content).includes("Use the updated requirement"))).toBe(true);
+    expect(String(requests[1].messages.find((message) => message.role === "user" && String(message.content).includes("New messages from the user"))?.content)).toMatch(/1\. \[Received at \d{4}-/);
+    expect(events.some((event) => event.type === "thought" && event.content === "partial draft")).toBe(true);
+    expect(events.filter((event) => event.type === "model.retrying" || event.type === "model.fallback")).toHaveLength(0);
+  });
+
+  it("keeps steering non-interrupting when steerInterrupt is disabled", async () => {
+    let startedResolve!: () => void;
+    let releaseFirst!: () => void;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const requests: Array<{ messages: any[]; options: any }> = [];
+    const llm = {
+      model: "steer-opt-out-model",
+      async complete(messages: any[], options: any = {}) {
+        requests.push({ messages, options });
+        if (requests.length === 1) {
+          startedResolve();
+          await firstGate;
+          return { choices: [{ message: { role: "assistant", content: "Stale draft." } }] };
+        }
+        return { choices: [{ message: { role: "assistant", content: "Updated answer." } }], usage: { total_tokens: 5 } };
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry(), steerInterrupt: false });
+    const events: EngineEvent[] = [];
+    const running = engine.run({ runId: "steer-opt-out-run", history: user("Original request"), onEvent: (event) => events.push(event) });
+    await started;
+    expect(engine.steer("steer-opt-out-run", { text: "Use the updated requirement" })).toBe(true);
+    expect(requests[0].options.signal.aborted).toBe(false);
+    releaseFirst();
+
+    const result = await running;
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("Updated answer.");
+    expect(requests[0].options.signal.aborted).toBe(false);
+    expect(requests[1].messages.some((message) => message.role === "user" && String(message.content).includes("Use the updated requirement"))).toBe(true);
+    expect(events.some((event) => event.type === "thought" && event.content === "Stale draft." && event.interim === true)).toBe(true);
+    expect(events.filter((event) => event.type === "model.steer_interrupt")).toHaveLength(0);
+  });
+
+  it("keeps user Stop separate from a steering interrupt", async () => {
+    let startedResolve!: () => void;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    const stop = new AbortController();
+    const llm = {
+      model: "stop-test-model",
+      async complete(_messages: any[], options: any = {}) {
+        return await new Promise<any>((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+          startedResolve();
+        });
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry() });
+    const running = engine.run({ runId: "stop-run", history: user("Original request"), signal: stop.signal });
+    await started;
+    stop.abort();
+    const result = await running;
+    expect(result.status).toBe("cancelled");
+    expect(result.error).toBe("Run cancelled.");
+  });
+
+  it("hands the images and message ids of a steered message to the model and the event stream", async () => {
+    let runId = "";
+    let engineRef: AgentEngine | undefined;
+    const { engine, llm } = setup(
+      [
+        async () => {
+          engineRef!.steer(runId, { text: "use this style", imageUrls: ["data:image/png;base64,AAAA", ""], messageId: "m1" });
+          engineRef!.steer(runId, { text: "", imageUrls: ["data:image/png;base64,BBBB"], messageId: "m2" });
+          return { text: "First answer." };
+        },
+        { text: "Second answer." },
+      ],
+      [],
+    );
+    engineRef = engine;
+    const events: EngineEvent[] = [];
+    await engine.run({ history: user("hello"), onEvent: (e) => { runId = e.runId; events.push(e); } });
+
+    const steered = llm.requests.flatMap((request) => request.messages).find((message) => message.role === "user" && String(message.content).includes("New message from the user"));
+    expect(steered?.image_urls).toEqual(["data:image/png;base64,AAAA", "data:image/png;base64,BBBB"]);
+    expect(String(steered?.content)).toContain("use this style");
+    expect(events.find((e) => e.type === "user.steer")).toEqual(expect.objectContaining({ count: 2, messageIds: ["m1", "m2"] }));
+  });
+
+  it("rejects a steered message with neither text nor images", () => {
+    const { engine } = setup([{ text: "ok" }], []);
+    expect(engine.steer("no-such-run", { text: "hi" })).toBe(false);
+  });
+
+  it("tells the model not to repeat a reply the user already got for a queued message", async () => {
+    let runId = "";
+    let engineRef: AgentEngine | undefined;
+    let acknowledged = false;
+    const { engine, llm } = setup(
+      [
+        async () => {
+          engineRef!.steer(runId, { text: "also rename the file", messageId: "m1" });
+          acknowledged = engineRef!.noteSteerAcknowledged(runId, "m1", "Got it, I will rename it after this step.");
+          return { text: "First answer." };
+        },
+        { text: "Second answer." },
+      ],
+      [],
+    );
+    engineRef = engine;
+    await engine.run({ history: user("hello"), onEvent: (e) => { runId = e.runId; } });
+
+    expect(acknowledged).toBe(true);
+    const steered = llm.requests.flatMap((request) => request.messages).find((message) => String(message.content).includes("New message from the user"));
+    expect(String(steered?.content)).toContain("You already told the user: \"Got it, I will rename it after this step.\"");
+    // Once the run has read the message it can no longer be acknowledged.
+    expect(engine.noteSteerAcknowledged(runId, "m1", "late")).toBe(false);
   });
 
   it("settles an LLM-created plan when the run completes", async () => {
@@ -308,6 +458,40 @@ describe("AgentEngine", () => {
     expect(result.error).toContain("loop");
     expect(result.finalText).toContain("looping");
     expect(result.toolCalls.filter((c) => c.status === "blocked").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("enforces a cumulative token budget before executing additional tools", async () => {
+    const execute = jest.fn(async () => ({ ok: true }));
+    const { engine, llm } = setup(
+      [
+        { calls: [{ name: "step", args: { n: 1 } }] },
+        { calls: [{ name: "step", args: { n: 2 } }] },
+      ],
+      [tool({ name: "step", execute, parameters: { type: "object", properties: { n: { type: "number" } } } })],
+    );
+    const result = await engine.run({ history: user("do bounded work"), maxTotalTokens: 20, maxCompletionTokens: 10 });
+    expect(result.status).toBe("limit_reached");
+    expect(result.error).toContain("Total-token budget");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(llm.requests).toHaveLength(2);
+    expect(llm.requests[1].options?.maxCompletionTokens).toBe(5);
+  });
+
+  it("estimates usage when a provider omits token metadata so budget enforcement stays active", async () => {
+    const execute = jest.fn(async () => ({ ok: true }));
+    const llm = {
+      model: "usage-less-provider",
+      async complete() {
+        return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "step", arguments: "{}" } }] } }] };
+      },
+    };
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "step", execute }));
+    const guarded = new AgentEngine({ llm: llm as never, tools: registry });
+    const result = await guarded.run({ history: user("do not exceed budget"), maxTotalTokens: 1 });
+    expect(result.usage.totalTokens).toBeGreaterThan(0);
+    expect(result.status).toBe("limit_reached");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("enforces the turn limit and still produces a final answer", async () => {

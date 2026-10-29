@@ -11,7 +11,7 @@
 
 /* =============================================================================
    THEME TOKENS
-   Minimal light workspace — quiet surfaces, high-contrast text, warm accent
+   Minimal workspace — quiet surfaces, high-contrast text, cool accent
    ============================================================================= */
 
 @theme inline {
@@ -21,15 +21,14 @@
   --radius-xl: calc(var(--radius) + 2px);
   --radius-2xl: calc(var(--radius) + 4px);
 
-  /* Kimi Dark — Tailwind's shadow-* utilities, used across ~47 components,
-     now read these instead of Tailwind's defaults. */
-  --shadow-2xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.35);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.65);
-  --shadow-2xl: 0 20px 60px rgba(0, 0, 0, 0.7);
+  /* Quiet light-mode elevations; dark mode receives stronger overrides below. */
+  --shadow-2xs: 0 1px 2px rgba(20, 30, 48, 0.04);
+  --shadow-xs: 0 1px 3px rgba(20, 30, 48, 0.06);
+  --shadow-sm: 0 2px 8px rgba(20, 30, 48, 0.07);
+  --shadow-md: 0 4px 16px rgba(20, 30, 48, 0.09);
+  --shadow-lg: 0 8px 32px rgba(20, 30, 48, 0.11);
+  --shadow-xl: 0 12px 40px rgba(20, 30, 48, 0.13);
+  --shadow-2xl: 0 20px 60px rgba(20, 30, 48, 0.16);
   --radius-3xl: calc(var(--radius) + 8px);
   --radius-4xl: calc(var(--radius) + 12px);
 
@@ -79,16 +78,16 @@
   --color-sidebar-border: var(--md-sys-color-outline);
   --color-sidebar-ring: var(--md-sys-color-primary);
 
-  /* Status colors (custom - keeping existing for now) */
-  --color-success: #ffb45c;
-  --color-warning: #b8b8b8;
+  /* Semantic colors stay consistent with the active light/dark palette. */
+  --color-success: var(--md-sys-color-success);
+  --color-warning: var(--md-sys-color-warning);
 }
 
 /* =============================================================================
    LIGHT MODE — Material Design 3 Light Theme
    ============================================================================= */
 :root {
-  --radius: 1rem; /* Kimi Dark — 16px card/dialog/popover radius */
+  --radius: 0.625rem; /* Compact, consistent card/dialog/control radius */
 
   /* Core surface - mapped from Material tokens */
   --background: var(--md-sys-color-background);
@@ -290,7 +289,7 @@
   body {
     @apply bg-background text-foreground;
     margin: 0;
-    min-width: 320px;
+    min-width: 280px;
     overflow-x: hidden;
     font-family: var(--font-sans);
     font-size: 0.9375rem;
@@ -815,51 +814,426 @@ select:focus-visible {
 }
 
 /* =============================================================================
-   LAUNCHER AUTH SHELL
+   LAUNCHER AUTH — minimal, responsive, warm-dark identity
    ============================================================================= */
 #root {
   min-height: 100svh;
 }
 
 #root:has([data-launcher-auth-shell="true"]) {
+  min-height: 100svh;
   animation: none;
 }
 
+.launcher-auth-shell {
+  position: relative;
+  isolation: isolate;
+  min-height: 100svh;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 76% 50%, rgb(177 101 39 / 0.12), transparent 34rem),
+    radial-gradient(ellipse at 8% 100%, rgb(137 75 34 / 0.09), transparent 35rem),
+    #0c0c0e;
+  color: #f4f1eb;
+}
+
+.launcher-auth-wallpaper {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.launcher-auth-wallpaper img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.12;
+  filter: saturate(0.45) brightness(0.62);
+}
+
+.launcher-auth-backdrop {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, rgb(10 10 12 / 0.48), rgb(10 10 12 / 0.16) 55%, rgb(10 10 12 / 0.45)),
+    linear-gradient(180deg, rgb(10 10 12 / 0.2), transparent 38%, rgb(10 10 12 / 0.28));
+}
+
+.launcher-auth-frame {
+  display: flex;
+  min-height: 100svh;
+  flex-direction: column;
+  padding: 0 clamp(18px, 4vw, 56px);
+}
+
+.launcher-auth-header {
+  display: flex;
+  min-height: 88px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.launcher-auth-brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  color: #f7f4ef;
+  text-decoration: none;
+  border-radius: 12px;
+}
+
+.launcher-auth-brand:focus-visible {
+  outline: 2px solid #e8a65e;
+  outline-offset: 5px;
+}
+
+.launcher-auth-mark {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid rgb(255 221 176 / 0.22);
+  border-radius: 13px;
+  background: linear-gradient(145deg, #f0bd7e, #d7853d);
+  color: #241407;
+  box-shadow: 0 5px 24px rgb(204 125 56 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.32);
+}
+
+.launcher-auth-wordmark {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.055em;
+  line-height: 1;
+}
+
+.launcher-auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.launcher-auth-language {
+  width: 42px !important;
+  height: 42px !important;
+  border-color: rgb(255 255 255 / 0.11) !important;
+  border-radius: 14px !important;
+  background: rgb(255 255 255 / 0.035) !important;
+  color: rgb(248 245 240 / 0.82) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.launcher-auth-language:hover {
+  border-color: rgb(232 166 94 / 0.38) !important;
+  background: rgb(255 255 255 / 0.075) !important;
+  color: #fff !important;
+}
+
+.launcher-auth-main {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: clamp(20px, 5vh, 64px) 0 clamp(40px, 8vh, 92px);
+}
+
+.launcher-auth-content {
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+  animation: launcher-auth-enter 420ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.launcher-auth-card[data-launcher-auth-card="true"],
 [data-launcher-auth-card="true"] {
-  border-color: rgb(255 255 255 / 0.12) !important;
-  background: color-mix(in srgb, var(--background) 72%, transparent) !important;
-  color: var(--foreground);
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.105) !important;
+  border-radius: 26px !important;
+  background: rgb(20 20 22 / 0.78) !important;
+  color: #f4f1eb;
   box-shadow:
-    0 24px 64px rgb(0 0 0 / 0.48),
-    0 0 0 1px rgb(255 255 255 / 0.05),
-    inset 0 1px 0 rgb(255 255 255 / 0.08) !important;
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    0 28px 90px rgb(0 0 0 / 0.38),
+    0 0 0 1px rgb(255 255 255 / 0.018),
+    inset 0 1px 0 rgb(255 255 255 / 0.055) !important;
+  backdrop-filter: blur(28px) saturate(1.08);
+  -webkit-backdrop-filter: blur(28px) saturate(1.08);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 [data-launcher-auth-card="true"]:hover {
-  background: color-mix(in srgb, var(--background) 82%, transparent) !important;
-  border-color: color-mix(in srgb, var(--primary) 40%, transparent) !important;
+  border-color: rgb(255 255 255 / 0.14) !important;
+  background: rgb(20 20 22 / 0.78) !important;
+}
+
+.launcher-auth-card-header {
+  gap: 0 !important;
+  padding: 34px 34px 18px !important;
+}
+
+.launcher-auth-title {
+  color: #f8f5ef;
+  font-size: clamp(23px, 2.3vw, 27px) !important;
+  font-weight: 620 !important;
+  line-height: 1.22 !important;
+  letter-spacing: -0.045em !important;
+}
+
+.launcher-auth-card-content {
+  padding: 0 34px 34px !important;
+}
+
+.launcher-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 23px;
+}
+
+.launcher-auth-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.launcher-auth-label {
+  color: rgb(244 241 235 / 0.8) !important;
+  font-size: 13px !important;
+  font-weight: 520 !important;
+  line-height: 1.35 !important;
+}
+
+.launcher-auth-password-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.launcher-auth-input,
+[data-launcher-auth-card="true"] [data-slot="input"] {
+  width: 100%;
+  height: 51px !important;
+  min-width: 0;
+  border: 1px solid rgb(255 255 255 / 0.105) !important;
+  border-radius: 13px !important;
+  background: rgb(255 255 255 / 0.035) !important;
+  padding: 0 15px !important;
+  color: #f9f6f0 !important;
+  font-size: 14px !important;
+  box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.12) !important;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.launcher-auth-password-wrap .launcher-auth-input {
+  padding-right: 49px !important;
+}
+
+.launcher-auth-input::placeholder,
+[data-launcher-auth-card="true"] [data-slot="input"]::placeholder {
+  color: rgb(244 241 235 / 0.35) !important;
+  opacity: 1;
+}
+
+.launcher-auth-input:hover,
+[data-launcher-auth-card="true"] [data-slot="input"]:hover {
+  border-color: rgb(255 255 255 / 0.19) !important;
+  background: rgb(255 255 255 / 0.048) !important;
+}
+
+.launcher-auth-input:focus-visible,
+[data-launcher-auth-card="true"] [data-slot="input"]:focus-visible {
+  border-color: rgb(232 166 94 / 0.78) !important;
+  outline: none !important;
+  background: rgb(255 255 255 / 0.045) !important;
+  box-shadow: 0 0 0 3px rgb(232 166 94 / 0.12) !important;
+}
+
+.launcher-auth-reveal {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgb(244 241 235 / 0.52);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.launcher-auth-reveal svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.8;
+}
+
+.launcher-auth-reveal:hover {
+  background: rgb(255 255 255 / 0.07);
+  color: #f6eee3;
+}
+
+.launcher-auth-reveal:focus-visible {
+  outline: 2px solid #e8a65e;
+  outline-offset: 1px;
+}
+
+.launcher-auth-submit {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 1px;
+  border: 1px solid rgb(255 226 190 / 0.25) !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #f0bd7e, #df914d) !important;
+  color: #211307 !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+  box-shadow: 0 8px 22px rgb(196 112 43 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.38);
+  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+}
+
+.launcher-auth-submit:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 28px rgb(196 112 43 / 0.2), inset 0 1px 0 rgb(255 255 255 / 0.42);
   transform: translateY(-1px);
 }
 
-[data-launcher-auth-card="true"] [data-slot="card-description"] {
-  color: color-mix(in srgb, var(--foreground) 65%, transparent);
+.launcher-auth-submit:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
 }
 
-[data-launcher-auth-card="true"] [data-slot="input"] {
-  border-color: rgb(255 255 255 / 0.14);
-  background: rgb(0 0 0 / 0.35);
-  color: var(--foreground);
+.launcher-auth-submit:focus-visible {
+  outline: 2px solid #f0bd7e;
+  outline-offset: 3px;
 }
 
-[data-launcher-auth-card="true"] [data-slot="input"]::placeholder {
-  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+.launcher-auth-error {
+  margin: -7px 0 0;
+  color: #ff9c96;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-[data-launcher-auth-card="true"] [data-slot="input"]:focus-visible {
-  border-color: color-mix(in srgb, var(--primary) 70%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+@keyframes launcher-auth-enter {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 540px) {
+  .launcher-auth-frame {
+    padding-inline: 18px;
+  }
+
+  .launcher-auth-header {
+    min-height: 72px;
+  }
+
+  .launcher-auth-mark {
+    width: 35px;
+    height: 35px;
+    border-radius: 12px;
+  }
+
+  .launcher-auth-wordmark {
+    font-size: 19px;
+  }
+
+  .launcher-auth-main {
+    align-items: start;
+    padding: clamp(38px, 9vh, 76px) 0 34px;
+  }
+
+  .launcher-auth-content {
+    max-width: 440px;
+  }
+
+  [data-launcher-auth-card="true"] {
+    border-radius: 22px !important;
+  }
+
+  .launcher-auth-card-header {
+    padding: 27px 24px 17px !important;
+  }
+
+  .launcher-auth-card-content {
+    padding: 0 24px 27px !important;
+  }
+
+  .launcher-auth-title {
+    font-size: 24px !important;
+  }
+
+  .launcher-auth-form {
+    gap: 21px;
+  }
+}
+
+@media (max-width: 360px) {
+  .launcher-auth-frame {
+    padding-inline: 13px;
+  }
+
+  .launcher-auth-header {
+    min-height: 66px;
+  }
+
+  .launcher-auth-card-header {
+    padding-inline: 19px !important;
+  }
+
+  .launcher-auth-card-content {
+    padding-inline: 19px !important;
+    padding-bottom: 23px !important;
+  }
+}
+
+@media (max-height: 650px) and (min-width: 541px) {
+  .launcher-auth-header {
+    min-height: 66px;
+  }
+
+  .launcher-auth-main {
+    padding-block: 16px 28px;
+  }
+
+  .launcher-auth-card-header {
+    padding-top: 26px !important;
+  }
+
+  .launcher-auth-card-content {
+    padding-bottom: 26px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launcher-auth-content {
+    animation: none;
+  }
+
+  .launcher-auth-input,
+  .launcher-auth-submit,
+  .launcher-auth-language {
+    transition: none !important;
+  }
 }
 
 /* =============================================================================
@@ -1739,7 +2113,10 @@ body,
 
 @media (max-width: 639px) {
   [data-text-role="supporting"] {
-    display: none;
+    display: block;
+    max-width: 100%;
+    font-size: 0.75rem;
+    line-height: 1.45;
   }
 }
 
@@ -1791,10 +2168,6 @@ body,
 /* =============================================================================
    PRINCIPAL UI / UX POLISH — shared authenticated shell
    ============================================================================= */
-:root {
-  --radius: 0.625rem;
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
@@ -2285,4 +2658,592 @@ pre {
     top: 0.5rem;
     bottom: 0.5rem;
   }
+}
+
+/* =============================================================================
+   WEB UI POLISH — final shared-shell corrections
+   Keep these rules small and token-driven; they correct the desktop navigation
+   geometry and remove clipped helper copy without changing feature behavior.
+   ============================================================================= */
+.miki-sidebar {
+  flex: 0 0 var(--sidebar-width);
+  min-width: 0;
+}
+
+.miki-sidebar__header {
+  justify-content: flex-start !important;
+  padding-inline: 1rem !important;
+}
+
+.miki-sidebar__brand-row {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.25rem;
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.miki-sidebar__brand {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--product-border-strong, var(--border));
+  border-radius: 0.55rem;
+  background: var(--card) !important;
+  padding: 0.125rem !important;
+}
+
+.miki-sidebar__brand-label {
+  min-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miki-sidebar__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  overflow-x: hidden;
+}
+
+.miki-sidebar__group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.miki-sidebar__group-title {
+  padding: 0.25rem 0.625rem 0.125rem;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 650;
+  letter-spacing: 0.085em;
+  line-height: 1.25rem;
+  text-transform: uppercase;
+}
+
+.miki-sidebar__nav-item {
+  box-sizing: border-box;
+  min-width: 0;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 520;
+  line-height: 1.25rem;
+}
+
+.miki-sidebar__nav-item[data-labels="true"] {
+  width: 100% !important;
+  min-height: 2.25rem;
+  height: auto;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  padding-inline: 0.625rem;
+  text-align: left;
+}
+
+.miki-sidebar__nav-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-weight: 520;
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miki-sidebar__nav-item.active {
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.miki-sidebar__nav-item.active::before {
+  top: 0.45rem;
+  bottom: 0.45rem;
+  left: -0.1875rem;
+  width: 2px;
+}
+
+.miki-sidebar__nav-item:focus-visible,
+.miki-sidebar__brand-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* A helper description must stay readable on touch screens; do not hide it
+   behind hover-only line clamping. */
+[data-slot="field-description"] {
+  display: block;
+  max-width: 56ch;
+  overflow: visible;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
+  text-overflow: clip;
+}
+
+[data-slot="field-description"],
+[data-text-role="supporting"] {
+  overflow-wrap: anywhere;
+}
+
+/* Keep the conversation compact but readable, including tool-heavy turns. */
+[data-chat-scroll="true"] > div {
+  gap: 1rem;
+}
+
+[data-chat-message="assistant"] .prose {
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+[data-chat-message="user"] {
+  max-width: min(86%, 42rem);
+}
+
+/* Keep interactive states restrained and consistent across feature pages. */
+:where(a, button, input, textarea, select, [role="button"]):focus-visible {
+  outline-color: var(--ring);
+  outline-offset: 2px;
+}
+
+:where(button, [role="button"]):disabled {
+  cursor: not-allowed;
+}
+
+[data-layout="route-content"] :is(img, video, canvas, svg) {
+  max-width: 100%;
+}
+
+@media (max-width: 767px) {
+  .miki-sidebar__content {
+    padding-inline: 0.75rem;
+  }
+
+  .miki-sidebar__nav-item[data-labels="true"] {
+    min-height: 2.5rem;
+    padding-inline: 0.75rem;
+  }
+
+  .miki-sidebar__group-title {
+    padding-inline: 0.75rem;
+  }
+
+  [data-chat-scroll="true"] > div {
+    gap: 0.875rem;
+  }
+
+  [data-chat-message="user"] {
+    max-width: 94%;
+  }
+
+  [data-page-actions="true"] {
+    max-width: 52vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .miki-sidebar__nav-item,
+  .miki-sidebar__brand-row {
+    transition: none !important;
+  }
+}
+
+/* =============================================================================
+   PAGE-BY-PAGE FINISHING PASS
+   Shared details for the complete Miki workspace. Keep behavior in components;
+   keep presentation here token-driven so pages remain consistent.
+   ============================================================================= */
+[data-miki-page] {
+  min-width: 0;
+  min-height: 0;
+  color: var(--foreground);
+}
+
+[data-miki-page-body] {
+  min-width: 0;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 1rem;
+}
+
+[data-miki-page-body] > * {
+  min-width: 0;
+}
+
+[data-miki-page] :is(input, textarea, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+[data-miki-page] :is(pre, code, [data-text-role="supporting"]) {
+  overflow-wrap: anywhere;
+}
+
+[data-miki-page] :is(button, a, [role="button"]) {
+  touch-action: manipulation;
+}
+
+[data-miki-page] :is(button, input, textarea, select):disabled {
+  cursor: not-allowed;
+}
+
+/* Health and Memory are information pages: keep their panels quiet and dense. */
+[data-miki-page="health"] [data-slot="card"],
+[data-miki-page="memory"] [data-slot="card"] {
+  box-shadow: none;
+}
+
+[data-miki-page="health"] [data-slot="card-title"],
+[data-miki-page="memory"] [data-slot="card-title"] {
+  line-height: 1.4;
+}
+
+/* Channel catalog rows stay easy to scan without turning each row into a card. */
+[data-miki-page="channels"] section > h2 {
+  line-height: 1.5;
+}
+
+[data-miki-page="channels"] section > div > a {
+  min-height: 3.5rem;
+  text-decoration: none;
+}
+
+[data-miki-page="channels"] section > div > a:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+/* Activity is a long-running dashboard; ensure it uses the available height. */
+[data-miki-page="activity"] {
+  margin-inline: auto;
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
+
+[data-miki-page="activity"] > section {
+  border-color: var(--product-border, var(--border));
+  border-radius: 0.75rem;
+  background: var(--product-surface, var(--card));
+  box-shadow: none;
+}
+
+[data-miki-page="activity"] > section > h2 {
+  margin-bottom: 0.875rem;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+}
+
+[data-miki-page="activity"] form input,
+[data-miki-page="activity"] form select,
+[data-miki-page="activity"] form textarea {
+  width: 100%;
+  min-height: 2.375rem;
+  border-color: var(--product-border-strong, var(--border));
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+}
+
+[data-miki-page="activity"] form textarea {
+  resize: vertical;
+}
+
+[data-miki-page="activity"] form button,
+[data-miki-page="activity"] li button {
+  min-height: 2rem;
+  border-radius: 0.5rem;
+  padding-inline: 0.75rem;
+}
+
+[data-miki-page="activity"] [role="alert"] {
+  overflow-wrap: anywhere;
+}
+
+/* The monitor graph and its controls should use the whole available canvas. */
+[data-miki-page="monitor"] {
+  isolation: isolate;
+}
+
+[data-miki-page="monitor"] .react-flow__panel {
+  overflow: hidden;
+  border: 1px solid var(--product-border, var(--border));
+  border-radius: 0.625rem;
+  background: var(--card);
+  box-shadow: none;
+}
+
+[data-miki-page="monitor"] .react-flow__controls button {
+  border-color: var(--product-border, var(--border));
+  background: var(--card);
+  color: var(--foreground);
+}
+
+/* Compact settings rows while preserving readable help text and focus states. */
+[data-miki-page="config"] [data-slot="field-group"],
+[data-miki-page="channel-config"] [data-slot="field-group"] {
+  gap: 1.125rem;
+}
+
+[data-miki-page="config"] [data-slot="field"],
+[data-miki-page="channel-config"] [data-slot="field"] {
+  min-width: 0;
+}
+
+/* Modal content remains reachable on short screens and never exceeds the viewport. */
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"],
+[data-slot="sheet-content"] {
+  max-height: calc(100dvh - 1.5rem);
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 767px) {
+  [data-miki-page-body] {
+    scrollbar-gutter: auto;
+    scroll-padding-block: 0.75rem;
+  }
+
+  [data-miki-page="activity"] {
+    gap: 0.75rem;
+    padding: 0.75rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  [data-miki-page="activity"] > section {
+    padding: 0.875rem;
+  }
+
+  [data-miki-page="channels"] section > div > a {
+    align-items: flex-start;
+    padding-block: 0.875rem;
+  }
+
+  [data-miki-page="monitor"] aside {
+    top: 0.75rem;
+    right: 0.75rem;
+    max-height: calc(100% - 1.5rem);
+    width: min(22rem, calc(100% - 1.5rem));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-miki-page] *,
+  [data-miki-page] *::before,
+  [data-miki-page] *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Plugin sections behave like tabs, with a visible and accessible active state. */
+[data-miki-page="plugins"] [data-active="true"] {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+[data-miki-page="plugins"] a[aria-current="page"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Auth pages keep the form centered on short mobile screens as well. */
+[data-miki-page="login"],
+[data-miki-page="setup"] {
+  min-height: 100dvh;
+  min-width: 0;
+}
+
+@media (max-width: 420px) {
+  [data-miki-page="login"] .launcher-auth-frame,
+  [data-miki-page="setup"] .launcher-auth-frame {
+    padding-inline: 0.875rem;
+  }
+
+  [data-miki-page="login"] .launcher-auth-card,
+  [data-miki-page="setup"] .launcher-auth-card {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Final consistency pass for all routed feature pages. */
+[data-miki-page] [data-slot="card"] {
+  border-color: var(--product-border, var(--border));
+  border-radius: 0.75rem;
+  box-shadow: none;
+}
+
+[data-miki-page] [data-slot="card-title"] {
+  text-wrap: balance;
+  letter-spacing: -0.012em;
+}
+
+[data-miki-page] :is(h1, h2, h3) {
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+[data-miki-page] :is(p, li, dd, dt) {
+  overflow-wrap: anywhere;
+}
+
+[data-miki-page] [data-page-section] {
+  scroll-margin-block: 1rem;
+}
+
+[data-miki-page] [data-page-row] {
+  min-width: 0;
+}
+
+[data-miki-page] [data-page-row]:focus-within {
+  background: color-mix(in srgb, var(--primary) 3%, transparent);
+}
+
+[data-miki-page] [aria-pressed="true"] {
+  outline-color: var(--ring);
+}
+
+[data-miki-page="models"] [data-slot="card"] {
+  background: var(--card);
+}
+
+[data-miki-page="drive"] :is(table, [role="grid"]) {
+  min-width: 0;
+}
+
+[data-miki-page="drive"] :is(td, th, [role="gridcell"], [role="columnheader"]) {
+  overflow-wrap: anywhere;
+}
+
+[data-miki-page="chat"] [data-chat-scroll="true"] {
+  overscroll-behavior-y: contain;
+  scroll-padding-block-end: 5rem;
+}
+
+[data-miki-page="chat"] :is(textarea, [contenteditable="true"]) {
+  overflow-wrap: anywhere;
+}
+
+[data-miki-page="skills"],
+[data-miki-page="skills-discover"],
+[data-miki-page="tools"] {
+  color: var(--foreground);
+}
+
+[data-miki-page="skills"] :is(button, a),
+[data-miki-page="skills-discover"] :is(button, a),
+[data-miki-page="tools"] :is(button, a) {
+  min-width: 0;
+}
+
+@media (max-width: 420px) {
+  [data-miki-page] [data-page-actions="true"] {
+    max-width: calc(100vw - 8rem);
+  }
+
+  [data-miki-page="memory"] [data-slot="card-content"] {
+    min-width: 0;
+  }
+}
+
+/* Auth screens use the same semantic theme tokens as the rest of Miki. */
+.launcher-auth-shell {
+  background:
+    radial-gradient(ellipse at 76% 50%, color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent), transparent 34rem),
+    var(--md-sys-color-background, #121212);
+  color: var(--md-sys-color-on-background, #ffffff);
+}
+.launcher-auth-brand,
+.launcher-auth-title,
+.launcher-auth-label {
+  color: var(--md-sys-color-on-surface, #ffffff) !important;
+}
+.launcher-auth-brand:focus-visible,
+.launcher-auth-reveal:focus-visible {
+  outline-color: var(--md-sys-color-primary, #4a9eff);
+}
+.launcher-auth-mark {
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 35%, transparent);
+  background: linear-gradient(145deg, var(--md-sys-color-primary), var(--md-sys-color-primary-hover, var(--md-sys-color-primary)));
+  color: var(--md-sys-color-on-primary, #041e49);
+  box-shadow: 0 5px 24px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent);
+}
+.launcher-auth-language {
+  border-color: var(--md-sys-color-outline, rgb(255 255 255 / 0.12)) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface) 78%, transparent) !important;
+  color: var(--md-sys-color-on-surface-variant, #9e9e9e) !important;
+}
+.launcher-auth-language:hover {
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent) !important;
+  color: var(--md-sys-color-on-surface, #ffffff) !important;
+}
+.launcher-auth-card[data-launcher-auth-card="true"],
+[data-launcher-auth-card="true"] {
+  border-color: var(--md-sys-color-outline, rgb(255 255 255 / 0.12)) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface) 92%, transparent) !important;
+  color: var(--md-sys-color-on-surface, #ffffff) !important;
+}
+[data-launcher-auth-card="true"]:hover {
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 35%, var(--md-sys-color-outline)) !important;
+  background: color-mix(in srgb, var(--md-sys-color-surface) 96%, transparent) !important;
+}
+.launcher-auth-input,
+[data-launcher-auth-card="true"] [data-slot="input"] {
+  border-color: var(--md-sys-color-outline, rgb(255 255 255 / 0.12)) !important;
+  background: color-mix(in srgb, var(--md-sys-color-background) 75%, transparent) !important;
+  color: var(--md-sys-color-on-surface, #ffffff) !important;
+}
+.launcher-auth-input::placeholder,
+[data-launcher-auth-card="true"] [data-slot="input"]::placeholder {
+  color: var(--md-sys-color-on-surface-variant, #9e9e9e) !important;
+}
+.launcher-auth-input:focus-visible,
+[data-launcher-auth-card="true"] [data-slot="input"]:focus-visible {
+  border-color: var(--md-sys-color-primary, #4a9eff) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent) !important;
+}
+.launcher-auth-submit {
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent) !important;
+  background: var(--md-sys-color-primary, #4a9eff) !important;
+  color: var(--md-sys-color-on-primary, #041e49) !important;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
+}
+.launcher-auth-submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent);
+}
+.launcher-auth-submit:focus-visible {
+  outline-color: var(--md-sys-color-primary, #4a9eff);
+}
+.launcher-auth-reveal,
+.launcher-auth-reveal:hover {
+  color: var(--md-sys-color-on-surface-variant, #9e9e9e);
+}
+.launcher-auth-error {
+  color: var(--md-sys-color-error, #ff5252);
+}
+.launcher-auth-wallpaper img {
+  opacity: 0.07;
+  filter: saturate(0.35);
+}
+.launcher-auth-backdrop {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-background) 65%, transparent), transparent 65%);
 }

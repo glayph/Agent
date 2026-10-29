@@ -603,7 +603,14 @@ export function migrateRuntimeConfig(
   migrated.evolution = { ...rawEvolution, mode: canonicalEvolutionMode };
   migrated.self_improvement = {
     ...rawSelfImprovement,
-    behavior_learning: { ...rawBehavior, mode: canonicalEvolutionMode },
+    // An explicitly invalid behavior mode is kept as written so validation reports it instead of hiding it.
+    behavior_learning: {
+      ...rawBehavior,
+      mode:
+        rawBehavior.mode !== undefined && !["observe", "draft", "apply"].includes(String(rawBehavior.mode))
+          ? rawBehavior.mode
+          : canonicalEvolutionMode,
+    },
   };
   if (Object.keys(agent).length > 0) {
     migrated.agent = agent;

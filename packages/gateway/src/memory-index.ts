@@ -47,6 +47,8 @@ export class SqliteMemoryIndex {
   private lastEmbeddingFailureAt = 0;
   private lastEmbeddingError?: string;
   private readonly pendingProvenance = new Map<string, "owner" | "agent">();
+  private trustFileSignature?: string;
+  private trustBootstrapPromise?: Promise<{ user: boolean; memory: boolean }>;
 
   constructor(
     private readonly db: Database.Database,
@@ -126,17 +128,50 @@ export class SqliteMemoryIndex {
     this.pendingProvenance.set(rel, provenance);
     this.db.prepare("UPDATE memory_file_sources SET provenance=? WHERE scope_id=? AND path=?")
       .run(provenance, this.scopeId, rel);
+    if (rel === "USER.md" || rel === "MEMORY.md") this.trustFileSignature = undefined;
   }
 
   async bootstrapTrust(): Promise<{ user: boolean; memory: boolean }> {
-    await this.syncFiles(false);
+    if (this.trustBootstrapPromise) return this.trustBootstrapPromise;
+    const pending = this.bootstrapTrustInner();
+    this.trustBootstrapPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.trustBootstrapPromise === pending) this.trustBootstrapPromise = undefined;
+    }
+  }
+
+  private async bootstrapTrustInner(): Promise<{ user: boolean; memory: boolean }> {
+    // A full sync can already be underway from startup or a memory-search call.
+    // Wait for it before trusting the metadata signature it may have just recorded.
+    if (this.syncPromise) await this.syncPromise;
+    // Trust only depends on USER.md and MEMORY.md. A full recursive index sync on
+    // every chat turn also scans all daily notes, which is unnecessary when these
+    // two files have not changed. Search/reindex still performs a complete sync.
+    let trustFiles = await this.memory.store.listTrustFiles();
+    let signature = this.trustSignature(trustFiles);
+    if (this.trustFileSignature !== signature) {
+      await this.syncFiles(false);
+      trustFiles = await this.memory.store.listTrustFiles();
+      signature = this.trustSignature(trustFiles);
+      this.trustFileSignature = signature;
+    }
     const rows = this.db.prepare("SELECT path,provenance FROM memory_file_sources WHERE scope_id=? AND path IN ('USER.md','MEMORY.md')")
       .all(this.scopeId) as Array<{ path: string; provenance: string }>;
     const byPath = new Map(rows.map((row) => [row.path, row.provenance]));
+    const present = new Set(trustFiles.map((file) => file.rel));
     return {
-      user: byPath.get("USER.md") === "owner",
-      memory: ["owner", "agent"].includes(byPath.get("MEMORY.md") || ""),
+      user: present.has("USER.md") && byPath.get("USER.md") === "owner",
+      memory: present.has("MEMORY.md") && ["owner", "agent"].includes(byPath.get("MEMORY.md") || ""),
     };
+  }
+
+  private trustSignature(files: Array<{ rel: string; mtimeMs: number; size: number }>): string {
+    return files.filter((file) => file.rel === "USER.md" || file.rel === "MEMORY.md")
+      .sort((a, b) => a.rel.localeCompare(b.rel))
+      .map((file) => `${file.rel}:${file.mtimeMs}:${file.size}`)
+      .join("|");
   }
 
   private async syncFiles(includeEmbeddings = true): Promise<void> {
@@ -149,6 +184,7 @@ export class SqliteMemoryIndex {
 
   private async syncFilesInner(includeEmbeddings: boolean): Promise<void> {
     const infos = await this.memory.store.listFiles();
+    this.trustFileSignature = this.trustSignature(infos);
     const seen = new Set<string>();
     const readSource = this.db.prepare(
       "SELECT mtime_ms,size,content_hash,provenance FROM memory_file_sources WHERE scope_id=? AND path=?",

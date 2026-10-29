@@ -84,6 +84,8 @@ export interface StartOptions {
   detached?: boolean
   /** Optional hard limit the agent explicitly asked for. Default: none. */
   killAfterMs?: number
+  /** Called once when the command can no longer run (exited, killed or failed to start). Best-effort cleanup hook. */
+  onExit?: () => void
 }
 
 const MAX_FINISHED_KEPT = 50
@@ -110,20 +112,33 @@ export class ProcessManager {
       announced: false,
     }
     this.processes.set(id, proc)
+    let exitNotified = false
+    const notifyExit = () => {
+      if (exitNotified) return
+      exitNotified = true
+      try { options.onExit?.() } catch { /* cleanup is best effort */ }
+    }
     let child: ChildProcess
     try {
       child = spawn(options.command, { cwd: options.cwd, shell: true, env: options.env, windowsHide: true, detached: process.platform !== "win32" })
     } catch (error) {
       this.finish(proc, { status: "failed_to_start", error: error instanceof Error ? error.message : String(error) })
+      notifyExit()
       return proc
     }
     this.children.set(id, child)
     if (child.pid) proc.pid = child.pid
     child.stdout?.on("data", (chunk) => proc.stdout.push(chunk.toString()))
     child.stderr?.on("data", (chunk) => proc.stderr.push(chunk.toString()))
-    child.on("error", (error) => this.finish(proc, { status: "failed_to_start", error: error.message }))
+    child.on("error", (error) => {
+      this.finish(proc, { status: "failed_to_start", error: error.message })
+      notifyExit()
+    })
     // "close" fires after the process exited AND its output streams are drained: output is complete here.
-    child.on("close", (code, signal) => this.finish(proc, { status: proc.status === "killed" ? "killed" : "exited", exitCode: code, signal }))
+    child.on("close", (code, signal) => {
+      this.finish(proc, { status: proc.status === "killed" ? "killed" : "exited", exitCode: code, signal })
+      notifyExit()
+    })
     if (options.killAfterMs && options.killAfterMs > 0) {
       const timer = setTimeout(() => {
         if (proc.status === "running") {

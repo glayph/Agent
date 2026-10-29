@@ -39,18 +39,43 @@ require_root() {
   fi
 }
 
+# Escape a value for use as a sed replacement (with # as the delimiter).
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\#&]/\\&/g'; }
+
 render_file() {
   local source="$1" target="$2"
-  sed "s#@MIKI_ROOT@#$ROOT_DIR#g; s#@MIKI_NODE@#$NODE_BIN#g" "$source" > "$target"
+  sed \
+    -e "s#@MIKI_ROOT@#$(sed_escape "$ROOT_DIR")#g" \
+    -e "s#@MIKI_NODE@#$(sed_escape "$NODE_BIN")#g" \
+    -e "s#@MIKI_NODE_BIN_DIR@#$(sed_escape "$NODE_BIN_DIR")#g" \
+    -e "s#@MIKI_USER@#$(sed_escape "$SERVICE_USER")#g" \
+    -e "s#@MIKI_GROUP@#$(sed_escape "$SERVICE_GROUP")#g" \
+    -e "s#@MIKI_HOME@#$(sed_escape "$SERVICE_HOME")#g" \
+    "$source" > "$target"
+}
+
+# The units run as the desktop user that invoked sudo (Miki drives that user's session).
+resolve_service_identity() {
+  SERVICE_USER="${MIKI_SERVICE_USER:-${SUDO_USER:-}}"
+  if [[ -z "$SERVICE_USER" || "$SERVICE_USER" == "root" ]]; then
+    echo "Run with sudo from the desktop user's account, or set MIKI_SERVICE_USER=<user>; refusing to run Miki as root." >&2
+    exit 1
+  fi
+  id -u "$SERVICE_USER" >/dev/null 2>&1 || { echo "Unknown user: $SERVICE_USER" >&2; exit 1; }
+  SERVICE_GROUP="${MIKI_SERVICE_GROUP:-$(id -gn "$SERVICE_USER")}"
+  SERVICE_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+  SERVICE_HOME="${SERVICE_HOME:-/home/$SERVICE_USER}"
+  NODE_BIN_DIR="$(dirname "$NODE_BIN")"
 }
 
 install_stack() {
   require_root
+  resolve_service_identity
   install -d -m 0750 "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/config"
-  chown -R "${SUDO_USER:-ubuntu}:${SUDO_USER:-ubuntu}" "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/config" 2>/dev/null || true
+  chown -R "$SERVICE_USER:$SERVICE_GROUP" "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/config" 2>/dev/null || true
   install -d -m 0755 "$UNIT_DIR" "$INSTALL_DIR" "$ENV_DIR"
   if [[ ! -e "$ENV_FILE" ]]; then
-    sed "s#/home/ubuntu/miki-final-2026-09-19#$ROOT_DIR#g; s#MIKI_NODE=/usr/bin/node#MIKI_NODE=$NODE_BIN#g" "$SYSTEMD_DIR/miki.env.example" > "$ENV_FILE"
+    render_file "$SYSTEMD_DIR/miki.env.example" "$ENV_FILE"
     chmod 0600 "$ENV_FILE"
     echo "Created $ENV_FILE; review model paths before starting."
   elif grep -q '^MIKI_NODE=/usr/bin/node$' "$ENV_FILE"; then

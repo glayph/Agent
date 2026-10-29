@@ -110,6 +110,7 @@ export const geminiProviderPlugin: MikiProviderPlugin = {
       messages: normalizeGeminiMessages(request.messages) as never,
       extra: normalizeGeminiExtra(request.extra),
       timeoutMs: request.timeoutMs,
+      onTextDelta: request.onTextDelta,
       signal: request.signal,
     });
   },

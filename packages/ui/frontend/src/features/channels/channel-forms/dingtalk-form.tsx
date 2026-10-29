@@ -2,8 +2,11 @@ import { useTranslation } from "react-i18next"
 
 import type { ChannelConfig } from "@/api/channels"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import {
+  ChannelFieldCard,
+  ChannelSection,
+} from "@/features/channels/components/channel-section"
 import { Field, KeyInput } from "@/shared/forms/shared-form"
-import { Card, CardContent } from "@/shared/ui/card"
 
 interface DingTalkFormProps {
   config: ChannelConfig
@@ -26,8 +29,11 @@ export function DingTalkForm({
 
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Webhook URL"
             required
@@ -45,7 +51,15 @@ export function DingTalkForm({
               )}
             />
           </Field>
+        </ChannelFieldCard>
+      </ChannelSection>
 
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label="Client Secret"
             hint="DingTalk app secret"
@@ -62,8 +76,8 @@ export function DingTalkForm({
               )}
             />
           </Field>
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }

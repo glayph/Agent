@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +31,15 @@ const (
 	stateError      RuntimeState = "error"
 )
 
+// restartExitCode is what the gateway exits with when the dashboard asked for a restart (see gateway /api/gateway/restart).
+const restartExitCode = 75
+
+// autoRestartCeiling caps the wait between automatic restarts, the same ceiling the 24/7 supervisor uses.
+const autoRestartCeiling = 3 * time.Minute
+
+// autoRestartResetAfter: a gateway that ran this long before failing starts the backoff from the beginning again.
+const autoRestartResetAfter = 5 * time.Minute
+
 type Runtime struct {
 	cfg    Config
 	opMu   sync.Mutex
@@ -40,6 +52,52 @@ type Runtime struct {
 	cancel context.CancelFunc
 	logs   *LogBuffer
 	logCh  chan string
+	// Last "degraded" note written to the log, so the same note is not repeated on every poll.
+	lastDegradedNote string
+	// gen changes on every user action (start, stop, restart). A pending automatic restart from an earlier
+	// generation gives up instead of starting a gateway the user has already stopped.
+	gen             uint64
+	restartAttempts int
+}
+
+// restartBackoff returns the wait before automatic restart attempt n (1 s, 2 s, 4 s ... capped at autoRestartCeiling).
+func restartBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 20 {
+		attempt = 20
+	}
+	wait := time.Second * time.Duration(1<<(attempt-1))
+	if wait > autoRestartCeiling {
+		wait = autoRestartCeiling
+	}
+	return wait
+}
+
+func exitCodeOf(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
+// closeDoneLocked closes the done channel once (callers hold r.mu). Waiters on Done() then see the runtime has stopped for good.
+func (r *Runtime) closeDoneLocked() {
+	if r.done != nil {
+		close(r.done)
+		r.done = nil
+	}
+}
+
+func (r *Runtime) bumpGen() {
+	r.mu.Lock()
+	r.gen++
+	r.mu.Unlock()
 }
 
 func NewRuntime(cfg Config) *Runtime {
@@ -54,14 +112,20 @@ func NewRuntime(cfg Config) *Runtime {
 func (r *Runtime) Start() error {
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
+	r.bumpGen()
 	return r.startRuntime()
 }
 
 func (r *Runtime) startRuntime() error {
 	r.mu.Lock()
-	if r.cmd != nil || r.state == stateStarting || r.state == stateStopping || r.state == stateRestarting {
+	if r.cmd != nil || r.state == stateStarting {
 		r.mu.Unlock()
 		return nil
+	}
+	if r.state == stateStopping {
+		// Returning nil here used to report a successful start that never happened. Tell the caller to try again.
+		r.mu.Unlock()
+		return fmt.Errorf("the Miki runtime is still stopping; try again when it has stopped")
 	}
 	r.logs.Reset()
 	r.state = stateStarting
@@ -116,9 +180,13 @@ func (r *Runtime) startRuntime() error {
 	stopRequestPath := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway-stop.request")
 	_ = os.MkdirAll(filepath.Dir(stopRequestPath), 0755)
 	_ = os.Remove(stopRequestPath)
+	_ = os.Remove(gatewayRestartRequestPath(r.cfg.WorkspaceDir))
 
 	r.mu.Lock()
-	r.done = make(chan struct{})
+	// Reuse an open done channel: an automatic restart keeps the same one, so waiters are woken only when the runtime stops for good.
+	if r.done == nil {
+		r.done = make(chan struct{})
+	}
 	r.cancel = cancel
 	r.mu.Unlock()
 
@@ -150,7 +218,7 @@ func (r *Runtime) failStart(err error) error {
 	r.err = err.Error()
 	r.cmd = nil
 	r.cancel = nil
-	r.done = nil
+	// done stays open on purpose: an automatic restart may still start the gateway, and Stop closes it for good.
 	r.appendLocked("Start failed: " + err.Error())
 	return err
 }
@@ -158,6 +226,7 @@ func (r *Runtime) failStart(err error) error {
 func (r *Runtime) Stop() error {
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
+	r.bumpGen()
 	return r.forceStop()
 }
 
@@ -167,6 +236,7 @@ func (r *Runtime) Stop() error {
 // runtime-owned PID file and leave the supervisor stop marker in place so it
 // does not immediately restart the requested shutdown.
 func (r *Runtime) StopDaemon() error {
+	r.bumpGen()
 	pidFile := filepath.Join(r.cfg.WorkspaceDir, "data", "gateway.pid")
 	pidBytes, err := os.ReadFile(pidFile)
 	if err != nil {
@@ -202,6 +272,7 @@ func (r *Runtime) StopDaemon() error {
 func (r *Runtime) ForceStop() error {
 	r.opMu.Lock()
 	defer r.opMu.Unlock()
+	r.bumpGen()
 	return r.forceStop()
 }
 
@@ -212,6 +283,7 @@ func (r *Runtime) forceStop() error {
 	done := r.done
 	if cmd == nil {
 		r.state = stateStopped
+		r.closeDoneLocked()
 		r.mu.Unlock()
 		return nil
 	}
@@ -235,9 +307,16 @@ func (r *Runtime) forceStop() error {
 		cancel()
 	}
 	if done != nil {
+		// Wait until the process has really exited (watch closes done). Only then may a new one start on the same port.
 		select {
 		case <-done:
-		case <-time.After(2 * time.Second):
+		case <-time.After(10 * time.Second):
+			r.mu.Lock()
+			r.state = stateError
+			r.err = "the gateway did not exit within 10 seconds"
+			r.appendLocked("Stop failed: " + r.err)
+			r.mu.Unlock()
+			return errors.New(r.err)
 		}
 	}
 	return nil
@@ -247,9 +326,9 @@ func (r *Runtime) stop() error {
 	r.mu.Lock()
 	cmd := r.cmd
 	cancel := r.cancel
-	done := r.done
 	if cmd == nil {
 		r.state = stateStopped
+		r.closeDoneLocked()
 		r.mu.Unlock()
 		return nil
 	}
@@ -261,10 +340,7 @@ func (r *Runtime) stop() error {
 	r.state = stateStopped
 	r.cmd = nil
 	r.cancel = nil
-	if done != nil {
-		close(done)
-		r.done = nil
-	}
+	r.closeDoneLocked()
 	r.appendLocked(fmt.Sprintf("Detached from backend (PID: %d). Backend continues running.", pid))
 	r.mu.Unlock()
 
@@ -280,17 +356,22 @@ func (r *Runtime) Restart() error {
 	defer r.opMu.Unlock()
 
 	r.mu.Lock()
-	if r.state == stateStarting || r.state == stateStopping || r.state == stateRestarting {
+	if r.state == stateStarting || r.state == stateStopping {
+		state := r.state
 		r.mu.Unlock()
-		return nil
+		return fmt.Errorf("the Miki runtime is %s; try the restart again in a moment", state)
 	}
+	r.gen++
 	r.state = stateRestarting
 	r.appendLocked("Restart requested.")
 	r.mu.Unlock()
 	if err := r.forceStop(); err != nil {
 		return err
 	}
-	time.Sleep(350 * time.Millisecond)
+	// The old gateway has exited; wait until its port is free so the new one can bind it (up to 10 s).
+	if err := waitForPortFree(r.cfg.Host, r.cfg.Port, 10*time.Second); err != nil {
+		return r.failStart(fmt.Errorf("previous gateway still holds the port: %w", err))
+	}
 	return r.startRuntime()
 }
 
@@ -366,27 +447,112 @@ func (r *Runtime) watch(cmd *exec.Cmd, cancel context.CancelFunc) {
 	if requestedStop {
 		_ = os.Remove(requestedStopPath)
 	}
+	restartPath := gatewayRestartRequestPath(r.cfg.WorkspaceDir)
+	// The gateway asked for a restart: exit code 75, or the request file it wrote before exiting.
+	restartRequested := exitCodeOf(err) == restartExitCode || fileExists(restartPath)
+	if restartRequested {
+		_ = os.Remove(restartPath)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cmd == cmd {
 		r.cmd = nil
 		r.cancel = nil
 	}
+	ranFor := time.Since(r.start)
 	if requestedStop {
 		r.state = stateStopped
 		r.err = ""
 		r.appendLocked("Runtime stopped by gateway shutdown request.")
-	} else if err != nil && r.state != stateStopping && r.state != stateRestarting {
+		r.closeDoneLocked()
+		return
+	}
+	if r.state == stateStopping || r.state == stateRestarting {
+		// A Stop or Restart from the user decides what happens next; Restart starts the runtime itself.
+		if r.state != stateRestarting {
+			r.state = stateStopped
+			r.appendLocked("Runtime stopped.")
+			r.closeDoneLocked()
+		}
+		return
+	}
+	if restartRequested {
+		r.restartAttempts = 0
+		r.state = stateRestarting
+		r.appendLocked("Gateway requested a restart; starting it again.")
+		r.scheduleAutoRestartLocked(0)
+		return
+	}
+	// The gateway exited on its own (crash or unexpected exit): start it again, with a growing wait.
+	if ranFor >= autoRestartResetAfter {
+		r.restartAttempts = 0
+	}
+	r.restartAttempts++
+	wait := restartBackoff(r.restartAttempts)
+	if err != nil {
 		r.state = stateError
 		r.err = err.Error()
-		r.appendLocked("Runtime exited: " + err.Error())
-	} else if r.state != stateRestarting {
-		r.state = stateStopped
-		r.appendLocked("Runtime stopped.")
+		r.appendLocked(fmt.Sprintf("Runtime exited: %s. Restarting in %s.", err.Error(), wait))
+	} else {
+		r.state = stateError
+		r.err = "the gateway exited unexpectedly"
+		r.appendLocked(fmt.Sprintf("Runtime exited unexpectedly. Restarting in %s.", wait))
 	}
-	if r.done != nil {
-		close(r.done)
-		r.done = nil
+	r.scheduleAutoRestartLocked(wait)
+}
+
+// scheduleAutoRestartLocked starts the restart loop for the current generation. Callers hold r.mu.
+func (r *Runtime) scheduleAutoRestartLocked(initialWait time.Duration) {
+	go r.superviseRestart(r.gen, initialWait)
+}
+
+// superviseRestart starts the gateway after wait, and keeps trying with backoff until it starts or the user acts.
+// A successful start is watched by watch(), which schedules the next restart if that process fails too.
+func (r *Runtime) superviseRestart(gen uint64, wait time.Duration) {
+	for {
+		time.Sleep(wait)
+		r.opMu.Lock()
+		r.mu.Lock()
+		if r.gen != gen || r.cmd != nil {
+			r.mu.Unlock()
+			r.opMu.Unlock()
+			return
+		}
+		r.appendLocked("Restarting Miki runtime...")
+		r.mu.Unlock()
+		err := r.startRuntime()
+		r.opMu.Unlock()
+		if err == nil {
+			return
+		}
+		r.mu.Lock()
+		if r.gen != gen {
+			r.mu.Unlock()
+			return
+		}
+		r.restartAttempts++
+		wait = restartBackoff(r.restartAttempts)
+		r.appendLocked(fmt.Sprintf("Automatic restart failed: %s. Trying again in %s.", err.Error(), wait))
+		r.mu.Unlock()
+	}
+}
+
+func gatewayRestartRequestPath(workspaceDir string) string {
+	return filepath.Join(workspaceDir, "data", "gateway-restart.request")
+}
+
+// waitForPortFree polls until the port can be bound again, or the timeout passes.
+func waitForPortFree(host string, port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := ensurePortAvailable(host, port)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -409,11 +575,30 @@ func (r *Runtime) pollHealth(ctx context.Context) {
 			if err != nil {
 				continue
 			}
+			var health struct {
+				Status         string   `json:"status"`
+				DegradedReason []string `json:"degraded_reasons"`
+			}
+			// The health body is optional detail; an older gateway without it is still healthy on HTTP 2xx.
+			_ = json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&health)
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				r.mu.Lock()
-				if r.state == stateStarting {
-					r.appendLocked("Gateway is healthy.")
+				if health.Status == "degraded" {
+					// Running, but something (model, channel, waiting replies) needs attention. Log it once per change.
+					note := "Gateway is running but degraded: " + strings.Join(health.DegradedReason, "; ")
+					if len(health.DegradedReason) == 0 {
+						note = "Gateway is running but degraded."
+					}
+					if note != r.lastDegradedNote {
+						r.lastDegradedNote = note
+						r.appendLocked(note)
+					}
+				} else {
+					r.lastDegradedNote = ""
+					if r.state == stateStarting {
+						r.appendLocked("Gateway is healthy.")
+					}
 				}
 				if r.cmd != nil {
 					r.state = stateRunning
@@ -478,6 +663,7 @@ func runtimeEnv(base []string, cfg Config) []string {
 	env = setEnv(env, "MIKI_DATA_DIR", filepath.Join(cfg.WorkspaceDir, "data"))
 	env = setEnv(env, "MIKI_CONFIG_DIR", filepath.Join(cfg.WorkspaceDir, "config"))
 	env = setEnv(env, "MIKI_GATEWAY_STOP_FILE", filepath.Join(cfg.WorkspaceDir, "data", "gateway-stop.request"))
+	env = setEnv(env, "MIKI_GATEWAY_RESTART_FILE", gatewayRestartRequestPath(cfg.WorkspaceDir))
 	env = setEnv(env, "GATEWAY_HOST", cfg.Host)
 	env = setEnv(env, "GATEWAY_PORT", fmt.Sprintf("%d", cfg.Port))
 	if cfg.CorePort > 0 {
@@ -492,15 +678,27 @@ func runtimeEnv(base []string, cfg Config) []string {
 	return env
 }
 
+// setEnv sets key=value, replacing an existing entry with the same name. Names are case-sensitive on Linux and macOS,
+// so the legacy alias Miki_WORKSPACE_DIR must not overwrite MIKI_WORKSPACE_DIR; Windows environments are case-insensitive.
 func setEnv(env []string, key string, value string) []string {
-	prefix := strings.ToUpper(key) + "="
 	for i, entry := range env {
-		if strings.HasPrefix(strings.ToUpper(entry), prefix) {
+		if envEntryHasName(entry, key) {
 			env[i] = key + "=" + value
 			return env
 		}
 	}
 	return append(env, key+"="+value)
+}
+
+func envEntryHasName(entry string, key string) bool {
+	prefix := key + "="
+	if len(entry) < len(prefix) {
+		return false
+	}
+	if goruntime.GOOS == "windows" {
+		return strings.EqualFold(entry[:len(prefix)], prefix)
+	}
+	return entry[:len(prefix)] == prefix
 }
 
 func ensurePortAvailable(host string, port int) error {

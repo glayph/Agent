@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { ChatMessage } from "@/store/chat"
 
-import { getRetryableMessageIds, messageHasRetryPrompt } from "./retryable"
+import { getRetryableMessageIds, isUnansweredUserMessage, messageHasRetryPrompt } from "./retryable"
 
 function userMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -63,5 +63,18 @@ describe("chat prompt retryability", () => {
     const answer: ChatMessage = { id: "a-1", role: "assistant", content: "ok", timestamp: 2 }
     const next = userMessage({ id: "u-new", content: "New", timestamp: 3 })
     expect(getRetryableMessageIds([failed, answer, next])).toEqual(new Set(["u-new"]))
+  })
+
+  it("keeps an earlier unanswered message retryable when the user has written since, and not an answered one", () => {
+    const cancelled = userMessage({ id: "u-stopped", content: "Also rename it", deliveryStatus: "cancelled" })
+    const answered = userMessage({ id: "u-done", content: "Hello", deliveryStatus: undefined })
+    const reply: ChatMessage = { id: "a-1", role: "assistant", content: "Hi", timestamp: 2 }
+    const latest = userMessage({ id: "u-latest", content: "Thanks", timestamp: 3 })
+    const ids = getRetryableMessageIds([cancelled, answered, reply, latest])
+    expect(ids.has("u-stopped")).toBe(true)
+    expect(ids.has("u-done")).toBe(false)
+    expect(ids.has("u-latest")).toBe(true)
+    expect(isUnansweredUserMessage(cancelled)).toBe(true)
+    expect(isUnansweredUserMessage(answered)).toBe(false)
   })
 })

@@ -27,7 +27,7 @@ console.log(`##### ${label}\n`)
 // ---- T2b: no goal at all -> ambient decision. Can the model turn its idea into a goal?
 {
   console.log('\n### T2b no active goal: ambient decision proposes work')
-  const stub = await startStub((req) => kind(req) === 'ambient' ? { content: 'I found useful work: write autonomy/out/report.txt with a status line.' } : { content: 'NO_ACTION' })
+  const stub = await startStub((req) => kind(req) === 'ambient' ? { content: 'I found useful work: write autonomy/out/report.txt with a status line.' } : { content: 'Acknowledged.' })
   const w = buildWorld({ models: model(stub.url) })
   const acted = await w.supervisor.runAmbientDecision('startup')
   const ambientReq = stub.requests.find((r) => r.tools.length)

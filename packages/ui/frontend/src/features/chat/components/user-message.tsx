@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next"
 
 import { AttachmentCard } from "@/features/chat/components/attachment-card"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
+import { useMessageActionLabels } from "@/features/chat/components/use-message-action-labels"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
 import { cn } from "@/lib/utils"
-import type { ChatAttachment, ChatDeliveryStatus } from "@/store/chat"
+import type { ChatAttachment } from "@/store/chat"
 
 interface UserMessageProps {
   id: string
@@ -14,8 +15,6 @@ interface UserMessageProps {
   onSelect?: () => void
   attachments?: ChatAttachment[]
   timestamp?: string | number
-  deliveryStatus?: ChatDeliveryStatus
-  deliveryDetail?: string
   canRetry?: boolean
   onEdit?: () => void
   onDelete?: () => void
@@ -31,8 +30,6 @@ export const UserMessage = memo(function UserMessage({
   onSelect,
   attachments = EMPTY_ATTACHMENTS,
   timestamp = "",
-  deliveryStatus,
-  deliveryDetail,
   canRetry = true,
   onEdit,
   onDelete,
@@ -40,6 +37,7 @@ export const UserMessage = memo(function UserMessage({
   onRetry,
 }: UserMessageProps) {
   const { t } = useTranslation()
+  const actionLabels = useMessageActionLabels()
   const trimmedContent = content.trim()
   const hasText = trimmedContent.length > 0
   const isCommand = trimmedContent.startsWith("/")
@@ -56,34 +54,16 @@ export const UserMessage = memo(function UserMessage({
   const actionBar = (
     <MessageActionBar
       content={content}
+      labels={actionLabels}
       align="end"
       placement="inline"
-      copyLabel={t("chat.copyMessage")}
-      copiedLabel={t("chat.copiedLabel")}
-      editLabel={t("chat.actions.edit", { defaultValue: "Edit message" })}
-      retryLabel={t("chat.actions.retry", { defaultValue: "Retry" })}
-      retryDisabledLabel={t("chat.actions.retryUnavailable", {
-        defaultValue: "Connect chat before retrying",
-      })}
-      deleteLabel={t("chat.actions.delete", { defaultValue: "Delete message" })}
-      deleteConfirmTitle={t("chat.actions.deleteConfirmTitle", {
-        defaultValue: "Delete message?",
-      })}
-      deleteConfirmDescription={t("chat.actions.deleteConfirmDescription", {
-        defaultValue: "This message will be removed from the conversation.",
-      })}
-      deleteConfirmCancelLabel={t("common.cancel")}
-      deleteConfirmActionLabel={t("chat.actions.delete", {
-        defaultValue: "Delete message",
-      })}
-      forkLabel={t("chat.actions.fork", { defaultValue: "Fork from here" })}
-      canRetry={canRetry}
       className="self-end"
       visible={selected}
+      canRetry={canRetry}
       onEdit={onEdit}
       onDelete={onDelete}
       onFork={onFork}
-      onRetry={canRetry ? onRetry : undefined}
+      onRetry={onRetry}
     />
   )
   return (
@@ -127,75 +107,39 @@ export const UserMessage = memo(function UserMessage({
 
       {hasText && (
         <>
-        <div
-          data-chat-bubble="user"
-          className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1 border px-3 py-2"
-          title={formattedTimestamp || undefined}
-          onClick={() => onSelect?.()}
-        >
           <div
-            className={cn(
-              "w-full text-[13px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap [color:var(--chat-user-text)]",
-              isCommand && "font-mono text-[12.5px] leading-5",
-            )}
+            data-chat-bubble="user"
+            className="group group/message-bubble relative flex max-w-[var(--chat-user-message-max)] flex-col items-end gap-1 border px-3 py-2"
+            title={formattedTimestamp || undefined}
+            onClick={() => onSelect?.()}
           >
-            {isCommand ? (
-              <div className="flex items-start gap-2">
-                <span className="text-primary/80 font-semibold select-none">
-                  &gt;
-                </span>
-                <span className="min-w-0 flex-1">{content}</span>
-              </div>
-            ) : (
-              content
+            <div
+              className={cn(
+                "w-full text-[13px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap [color:var(--chat-user-text)]",
+                isCommand && "font-mono text-[12.5px] leading-5",
+              )}
+            >
+              {isCommand ? (
+                <div className="flex items-start gap-2">
+                  <span className="text-primary/80 font-semibold select-none">
+                    &gt;
+                  </span>
+                  <span className="min-w-0 flex-1">{content}</span>
+                </div>
+              ) : (
+                content
+              )}
+            </div>
+            {formattedTimestamp && (
+              <span className="text-muted-foreground/70 self-end text-[11px] leading-none tabular-nums">
+                {formattedTimestamp}
+              </span>
             )}
           </div>
-          {formattedTimestamp && (
-            <span className="text-muted-foreground/70 self-end text-[11px] leading-none tabular-nums">
-              {formattedTimestamp}
-            </span>
-          )}
-        </div>
-        {actionBar}
+          {actionBar}
         </>
       )}
       {!hasText && attachments.length > 0 && actionBar}
-      {deliveryStatus === "queued" && (
-        <span role="status" className="text-muted-foreground/70 text-[11px]">
-          {t("chat.delivery.queued", {
-            defaultValue: "Queued - waiting for the previous reply",
-          })}
-        </span>
-      )}
-      {deliveryStatus === "retrying" && (
-        <span role="status" className="text-muted-foreground/70 text-[11px]">
-          {t("chat.delivery.retrying", {
-            defaultValue: "Temporary problem - retrying...",
-          })}
-        </span>
-      )}
-      {deliveryStatus === "failed" && (
-        <span
-          role="alert"
-          className="text-destructive flex max-w-[var(--chat-user-message-max)] flex-wrap items-center justify-end gap-x-2 text-[11px]"
-        >
-          <span className="[overflow-wrap:anywhere]">
-            {t("chat.delivery.failed", {
-              defaultValue: "Not answered - your message is saved.",
-            })}
-            {deliveryDetail ? ` ${deliveryDetail}` : ""}
-          </span>
-          {canRetry && onRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="underline underline-offset-2 hover:no-underline"
-            >
-              {t("chat.actions.retry", { defaultValue: "Retry" })}
-            </button>
-          )}
-        </span>
-      )}
     </div>
   )
 })

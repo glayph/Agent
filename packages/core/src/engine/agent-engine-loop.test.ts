@@ -42,6 +42,46 @@ function reply(text: string | null, calls?: Array<{ name: string; args?: unknown
   };
 }
 
+describe("steering during tool execution", () => {
+  it("skips tool calls that have not started when a new message arrives", async () => {
+    let firstStarted!: () => void;
+    const started = new Promise<void>((resolve) => { firstStarted = resolve; });
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const secondExecute = jest.fn(async () => ({ ok: true }));
+    const registry = new ToolRegistry();
+    registry.registerAll([
+      tool({
+        name: "first_action",
+        risk: "config_write",
+        approval: "auto",
+        async execute() { firstStarted(); await gate; return { ok: true }; },
+      }),
+      tool({ name: "second_action", risk: "config_write", approval: "auto", execute: secondExecute }),
+    ]);
+    const llm = scriptedLLM([
+      { calls: [
+        { name: "first_action", args: {}, id: "call_first" },
+        { name: "second_action", args: {}, id: "call_second" },
+      ] },
+      { text: "I will follow the new instruction." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    let runId = "";
+    const running = engine.run({ history: user("Run both actions"), onEvent: (event) => { if (event.type === "run.started") runId = event.runId; } });
+    await started;
+    expect(engine.steer(runId, { text: "Do not run the second action", messageId: "steer-tool-message" })).toBe(true);
+    releaseFirst();
+
+    const result = await running;
+    expect(result.status).toBe("completed");
+    expect(secondExecute).not.toHaveBeenCalled();
+    expect(result.toolCalls.map((call) => call.status)).toEqual(["succeeded", "blocked"]);
+    expect(result.toolCalls[1].error).toContain("repeat this operation if needed");
+    expect(llm.requests[1].messages.some((message) => message.role === "user" && String(message.content).includes("Do not run the second action"))).toBe(true);
+  });
+});
+
 describe("parallel tool execution", () => {
   function parallelSetup(parallelSafe: boolean) {
     let running = 0;
@@ -127,12 +167,52 @@ describe("parallel tool execution", () => {
   });
 });
 
+describe("repeatSafe polling tools", () => {
+  const pollScript = (name: string, times: number) => [
+    ...Array.from({ length: times }, (_, i) => ({ calls: [{ name, args: { process_id: "p1" }, id: `poll_${i}` }] })),
+    { text: "finished" },
+  ];
+
+  it("never blocks identical repeatSafe calls and does not flag a loop", async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "poll", repeatSafe: true }));
+    const llm = scriptedLLM(pollScript("poll", 10));
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const result = await engine.run({ history: user("wait for the build") });
+    expect(result.status).toBe("completed");
+    expect(result.toolCalls).toHaveLength(10);
+    expect(result.toolCalls.every((call) => call.status === "succeeded")).toBe(true);
+    expect(result.toolCalls.some((call) => call.status === "blocked")).toBe(false);
+  });
+
+  it("does not spend the tool-call budget on repeatSafe calls", async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "poll", repeatSafe: true }));
+    const llm = scriptedLLM(pollScript("poll", 10));
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, maxToolCalls: 5 });
+    const result = await engine.run({ history: user("wait for the build") });
+    expect(result.status).toBe("completed");
+    expect(result.toolCalls.filter((call) => call.status === "succeeded")).toHaveLength(10);
+    expect(result.toolCalls.some((call) => call.error?.includes("budget"))).toBe(false);
+  });
+
+  it("keeps blocking identical calls of tools that are not repeatSafe", async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "plain" }));
+    const llm = scriptedLLM(pollScript("plain", 4));
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const result = await engine.run({ history: user("repeat yourself") });
+    expect(result.toolCalls.map((call) => call.status)).toEqual(["succeeded", "succeeded", "blocked", "blocked"]);
+  });
+});
+
 describe("model failover", () => {
   it("switches to a fallback model when the primary request fails", async () => {
     const primary: EngineLLMClient = {
       model: "primary-model",
       async complete() {
-        throw new Error("503 upstream unavailable");
+        // Real provider errors carry the HTTP status; the engine classifies failures by it.
+        throw Object.assign(new Error("503 upstream unavailable"), { status: 503 });
       },
     };
     const backup = scriptedLLM([{ text: "answered by backup" }], "backup-model");
@@ -175,7 +255,7 @@ describe("model failover", () => {
     const broken = (name: string): EngineLLMClient => ({
       model: name,
       async complete() {
-        throw new Error(`${name} down`);
+        throw Object.assign(new Error(`${name} down`), { status: 503 });
       },
     });
     const engine = new AgentEngine({
@@ -297,6 +377,8 @@ describe("in-run context compaction", () => {
         if (typeof first?.content === "string" && first.content.includes("compress the working history")) {
           return reply("SUMMARY: inspected files a, b and c; found the config path /etc/app.conf");
         }
+        // The completion check after a final answer is not an agent turn; answer it without recording it.
+        if (options?.json === true) return reply(JSON.stringify({ needs_tool_execution: false }));
         seen.push(structuredClone(messages));
         agentTurn += 1;
         if (agentTurn <= 6 && options?.tools?.length) {
@@ -502,5 +584,94 @@ describe("run pipeline improvements", () => {
     const toolMessage = llm.requests[1].messages.find((message) => message.role === "tool");
     expect(String(toolMessage?.content)).toContain("Missing required argument");
     expect(String(toolMessage?.content)).toContain("query (string, required), limit (integer)");
+  });
+});
+
+describe("model-judged interruption of running tools", () => {
+  // The tool finishes after 50 ms unless its signal is aborted, so a test never waits on a gate.
+  const runWithSteer = async (judge: jest.Mock<Promise<boolean>, [unknown]>) => {
+    let started!: () => void;
+    const startedSignal = new Promise<void>((resolve) => { started = resolve; });
+    const registry = new ToolRegistry();
+    registry.registerAll([
+      tool({
+        name: "long_action",
+        risk: "config_write",
+        approval: "auto",
+        async execute(_args, context) {
+          started();
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, 50);
+            context.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+          });
+          return { ok: true };
+        },
+      }),
+    ]);
+    const llm = scriptedLLM([
+      { calls: [{ name: "long_action", args: {}, id: "call_long" }] },
+      { text: "Adjusted." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, steerToolInterrupt: judge as never });
+    let runId = "";
+    const running = engine.run({
+      history: user("Start the long action"),
+      onEvent: (event) => { if (event.type === "run.started") runId = event.runId; },
+    });
+    await startedSignal;
+    expect(engine.steer(runId, { text: "Use the other file instead" })).toBe(true);
+    return running;
+  };
+
+  it("stops only the running tool when the model judges the new message changes it", async () => {
+    const judge = jest.fn<Promise<boolean>, [unknown]>(async () => true);
+    const result = await runWithSteer(judge);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge.mock.calls[0][0]).toMatchObject({ steerText: "Use the other file instead", runningTools: [{ name: "long_action" }] });
+    expect(result.toolCalls[0].status).toBe("cancelled");
+    expect(result.toolCalls[0].error).toContain("A new message from the user changed this step");
+  });
+
+  it("lets the running tool finish when the model judges the message can wait", async () => {
+    const judge = jest.fn<Promise<boolean>, [unknown]>(async () => false);
+    const result = await runWithSteer(judge);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(result.toolCalls[0].status).toBe("succeeded");
+  });
+
+  it("leaves the tool running when the judgement itself fails", async () => {
+    const judge = jest.fn<Promise<boolean>, [unknown]>(async () => { throw new Error("judge unavailable"); });
+    const result = await runWithSteer(judge);
+    expect(result.toolCalls[0].status).toBe("succeeded");
+  });
+});
+
+describe("steering does not abort a completion that is already writing", () => {
+  it("lets the draft finish by default and reads the new message on the next turn", async () => {
+    const requests: Array<{ messages: any[]; options: any }> = [];
+    let runId = "";
+    let steer: (text: string) => boolean = () => false;
+    const llm = {
+      model: "steer-default-model",
+      async complete(messages: any[], options: any = {}) {
+        requests.push({ messages, options });
+        if (requests.length === 1) {
+          steer("Use the other file instead");
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { choices: [{ message: { role: "assistant", content: "First draft." } }], usage: { total_tokens: 3 } };
+        }
+        return { choices: [{ message: { role: "assistant", content: "Adjusted." } }], usage: { total_tokens: 3 } };
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry() });
+    steer = (text) => engine.steer(runId, { text });
+    const result = await engine.run({
+      history: user("Start"),
+      onEvent: (event) => { if (event.type === "run.started") runId = event.runId; },
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[0].options.signal.aborted).toBe(false);
+    expect(result.finalText).toBe("Adjusted.");
+    expect(String(requests[1].messages.find((m) => m.role === "user" && String(m.content).includes("New messages from the user"))?.content)).toContain("Use the other file instead");
   });
 });

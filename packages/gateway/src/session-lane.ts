@@ -16,6 +16,23 @@ export interface KeyedLane {
   pending(key: string): number;
 }
 
+/**
+ * A lane wait timeout is a rejection, never permission to overlap the holder.
+ * Starting a second run after a timeout would reintroduce interleaved history
+ * and duplicate tool side effects, which the lane exists to prevent.
+ */
+export class LaneWaitTimeoutError extends Error {
+  readonly key: string;
+  readonly maxWaitMs: number;
+
+  constructor(key: string, maxWaitMs: number) {
+    super(`Conversation lane '${key}' did not become available within ${maxWaitMs}ms.`);
+    this.name = "LaneWaitTimeoutError";
+    this.key = key;
+    this.maxWaitMs = maxWaitMs;
+  }
+}
+
 interface LaneEntry {
   tail: Promise<void>;
   count: number;
@@ -49,8 +66,12 @@ export function createKeyedLane(defaultMaxWaitMs = 15 * 60_000): KeyedLane {
 
       const maxWaitMs = Math.max(0, options.maxWaitMs ?? defaultMaxWaitMs);
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
       const timeout = new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, maxWaitMs);
+        timer = setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, maxWaitMs);
         // Never keep the process alive just for the wait cap.
         (timer as { unref?: () => void }).unref?.();
       });
@@ -58,6 +79,13 @@ export function createKeyedLane(defaultMaxWaitMs = 15 * 60_000): KeyedLane {
         await Promise.race([previous, timeout]);
       } finally {
         if (timer) clearTimeout(timer);
+      }
+      if (timedOut) {
+        // Remove this waiter from the count and resolve its private tail so it
+        // cannot leave a dead promise chain behind. Do not return `done`: the
+        // caller must not enter the critical section after timing out.
+        done();
+        throw new LaneWaitTimeoutError(key, maxWaitMs);
       }
       return done;
     },

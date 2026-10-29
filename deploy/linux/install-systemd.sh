@@ -8,8 +8,19 @@ RUNTIME_ROOT="${MIKI_RUNTIME_ROOT:-$INSTALL_ROOT/runtime}"
 DATA_DIR="${MIKI_DATA_DIR:-$RUNTIME_ROOT/data}"
 LOG_DIR="${MIKI_LOG_DIR:-/var/log/agent-miki}"
 ENV_FILE="${MIKI_ENV_FILE:-/etc/agent-miki/agent-miki.env}"
-SERVICE_USER="${MIKI_SERVICE_USER:-agent-miki}"
-SERVICE_GROUP="${MIKI_SERVICE_GROUP:-agent-miki}"
+# Miki drives a desktop, so by default it runs as the desktop user that invoked sudo.
+DEFAULT_USER="agent-miki"
+if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then DEFAULT_USER="$SUDO_USER"; fi
+SERVICE_USER="${MIKI_SERVICE_USER:-$DEFAULT_USER}"
+if [[ -n "${MIKI_SERVICE_GROUP:-}" ]]; then
+  SERVICE_GROUP="$MIKI_SERVICE_GROUP"
+else
+  SERVICE_GROUP="$(id -gn "$SERVICE_USER" 2>/dev/null || echo "$SERVICE_USER")"
+fi
+SERVICE_HOME="$(getent passwd "$SERVICE_USER" 2>/dev/null | cut -d: -f6 || true)"
+SERVICE_HOME="${SERVICE_HOME:-$INSTALL_ROOT}"
+DISPLAY_NAME="${MIKI_DISPLAY:-:0}"
+XAUTH_FILE="${MIKI_XAUTHORITY:-$SERVICE_HOME/.Xauthority}"
 SERVICE_NAME="${MIKI_SERVICE_NAME:-agent-miki}"
 DRY_RUN=0
 
@@ -75,18 +86,47 @@ else
   cp -a "$APP_ROOT/." "$INSTALL_ROOT/app/"
   chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_ROOT/app"
   chmod 0750 "$INSTALL_ROOT/app"
+
+  # The gateway reads config/agent.yaml from MIKI_CONFIG_DIR (and identity files
+  # from MIKI_WORKSPACE_DIR). The code lives in app/, while mutable state lives
+  # in the separate workspace. Seed these files once without overwriting an
+  # existing user's configuration or identity on upgrades.
+  install -d -m 0750 "$WORKSPACE_DIR/config" "$WORKSPACE_DIR/identity"
+  cp -a -n "$INSTALL_ROOT/app/config/." "$WORKSPACE_DIR/config/"
+  cp -a -n "$INSTALL_ROOT/app/identity/." "$WORKSPACE_DIR/identity/"
+  chown -R "$SERVICE_USER:$SERVICE_GROUP" "$WORKSPACE_DIR/config" "$WORKSPACE_DIR/identity"
+
   if [[ ! -e "$ENV_FILE" ]]; then
     umask 077
     cat > "$ENV_FILE" <<EOF
 MIKI_SOURCE_ROOT=$INSTALL_ROOT/app
 MIKI_WORKSPACE_DIR=$WORKSPACE_DIR
 MIKI_RUNTIME_ROOT=$INSTALL_ROOT/app
+MIKI_CONFIG_DIR=$WORKSPACE_DIR/config
+MIKI_DATA_DIR=$WORKSPACE_DIR/data
 MIKI_24_7_MAX_RESTARTS=5
-MIKI_24_7_ALLOW_UNLIMITED_RESTARTS=false
+MIKI_24_7_ALLOW_UNLIMITED_RESTARTS=true
 MIKI_24_7_READY_TIMEOUT_MS=45000
 EOF
+  else
+    # Preserve any custom env values, but repair paths absent from older env files.
+    grep -q '^MIKI_SOURCE_ROOT=' "$ENV_FILE" || printf 'MIKI_SOURCE_ROOT=%s/app\n' "$INSTALL_ROOT" >> "$ENV_FILE"
+    grep -q '^MIKI_WORKSPACE_DIR=' "$ENV_FILE" || printf 'MIKI_WORKSPACE_DIR=%s\n' "$WORKSPACE_DIR" >> "$ENV_FILE"
+    grep -q '^MIKI_RUNTIME_ROOT=' "$ENV_FILE" || printf 'MIKI_RUNTIME_ROOT=%s/app\n' "$INSTALL_ROOT" >> "$ENV_FILE"
+    grep -q '^MIKI_CONFIG_DIR=' "$ENV_FILE" || printf 'MIKI_CONFIG_DIR=%s/config\n' "$WORKSPACE_DIR" >> "$ENV_FILE"
+    grep -q '^MIKI_DATA_DIR=' "$ENV_FILE" || printf 'MIKI_DATA_DIR=%s/data\n' "$WORKSPACE_DIR" >> "$ENV_FILE"
   fi
   chmod 0600 "$ENV_FILE"
+  chown "$SERVICE_USER:$SERVICE_GROUP" "$ENV_FILE"
+fi
+
+# computer_* tools on Linux use X11 + xdotool (Wayland is not supported).
+if ! command -v xdotool >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    run apt-get install -y xdotool || echo "agent-miki install: could not install xdotool; computer_* UI actions will fail until it is installed" >&2
+  else
+    echo "agent-miki install: xdotool not found; install it with your package manager for computer_* UI actions" >&2
+  fi
 fi
 
 UNIT_FILE="/etc/systemd/system/$SERVICE_NAME.service"
@@ -102,6 +142,8 @@ else
     -e "s|@MIKI_WORKSPACE_DIR@|$WORKSPACE_DIR|g" \
     -e "s|@MIKI_RUNTIME_ROOT@|$INSTALL_ROOT/app|g" \
     -e "s|@MIKI_LOG_DIR@|$LOG_DIR|g" \
+    -e "s|@MIKI_DISPLAY@|$DISPLAY_NAME|g" \
+    -e "s|@MIKI_XAUTHORITY@|$XAUTH_FILE|g" \
     "$UNIT_TEMPLATE" > "$UNIT_FILE"
   chmod 0644 "$UNIT_FILE"
 fi

@@ -11,8 +11,11 @@ import {
   parseConservativeStringListInput,
 } from "@/features/channels/components/channel-array-utils"
 import { getSecretInputPlaceholder } from "@/features/channels/components/channel-config-fields"
+import {
+  ChannelFieldCard,
+  ChannelSection,
+} from "@/features/channels/components/channel-section"
 import { Field, KeyInput, SwitchCardField } from "@/shared/forms/shared-form"
-import { Card, CardContent } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
 
 interface FeishuFormProps {
@@ -55,8 +58,11 @@ export function FeishuForm({
 
   return (
     <div className="space-y-6">
-      <Card className="py-3 shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.credentials")}
+        description={t("channels.section.credentialsDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label={t("channels.field.appId")}
             required
@@ -87,11 +93,34 @@ export function FeishuForm({
               )}
             />
           </Field>
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
 
-      <Card className="py-3 shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
+      <ChannelSection
+        title={t("channels.section.access")}
+        description={t("channels.section.accessDesc")}
+      >
+        <ChannelFieldCard>
+          <ChannelArrayListField
+            label={t("channels.field.allowFrom")}
+            hint={t("channels.form.desc.allowFrom")}
+            value={asStringArray(config.allow_from)}
+            onChange={(value) => onChange("allow_from", value)}
+            placeholder={t("channels.field.allowFromPlaceholder")}
+            parser={parseAllowFromInput}
+            fieldPath="allow_from"
+            registerFlusher={registerArrayFieldFlusher}
+            resetVersion={arrayFieldResetVersion}
+          />
+        </ChannelFieldCard>
+      </ChannelSection>
+
+      <ChannelSection
+        collapsible
+        title={t("channels.section.advanced")}
+        description={t("channels.section.advancedDesc")}
+      >
+        <ChannelFieldCard>
           <Field
             label={t("channels.field.verificationToken")}
             hint={t("channels.form.desc.verificationToken")}
@@ -123,18 +152,6 @@ export function FeishuForm({
             />
           </Field>
 
-          <ChannelArrayListField
-            label={t("channels.field.allowFrom")}
-            hint={t("channels.form.desc.allowFrom")}
-            value={asStringArray(config.allow_from)}
-            onChange={(value) => onChange("allow_from", value)}
-            placeholder={t("channels.field.allowFromPlaceholder")}
-            parser={parseAllowFromInput}
-            fieldPath="allow_from"
-            registerFlusher={registerArrayFieldFlusher}
-            resetVersion={arrayFieldResetVersion}
-          />
-
           <div>
             <SwitchCardField
               label={t("channels.field.isLark")}
@@ -144,11 +161,7 @@ export function FeishuForm({
               ariaLabel={t("channels.field.isLark")}
             />
           </div>
-        </CardContent>
-      </Card>
 
-      <Card className="py-3 shadow-sm">
-        <CardContent className="divide-border/60 divide-y px-6 py-0 [&>div]:py-5">
           <div>
             <SwitchCardField
               label={t("channels.field.groupTriggerMentionOnly")}
@@ -192,8 +205,8 @@ export function FeishuForm({
             registerFlusher={registerArrayFieldFlusher}
             resetVersion={arrayFieldResetVersion}
           />
-        </CardContent>
-      </Card>
+        </ChannelFieldCard>
+      </ChannelSection>
     </div>
   )
 }

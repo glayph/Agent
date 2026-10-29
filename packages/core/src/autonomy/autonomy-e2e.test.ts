@@ -17,6 +17,10 @@ const AMBIENT_MARKER = "running the background autonomous loop";
 const isAmbient = (messages: EngineMessage[]) =>
   messages.some((m) => typeof m.content === "string" && m.content.includes(AMBIENT_MARKER));
 
+/** Requests the agent made itself; the separate "did the agent finish?" completion check is not counted. */
+const agentRequests = (llm: { requests: Array<{ messages: EngineMessage[] }> }) =>
+  llm.requests.filter((request) => !String(request.messages[0]?.content).includes("You classify whether the agent has completed"));
+
 async function waitFor(condition: () => boolean, timeoutMs = 4000, stepMs = 10) {
   const started = Date.now();
   while (!condition()) {
@@ -58,7 +62,7 @@ function setup(script: ScriptedReply[], configGuard?: () => void) {
     heartbeat: {
       enabled: true,
       auto_actions: { enabled: true, max_actions_per_cycle: 2 },
-      proactive: { enabled: true, startup_decision: true, min_poll_seconds: 5, max_poll_seconds: 10, decision_interval_seconds: 900 },
+      proactive: { enabled: true, llm_when_idle: true, startup_decision: true, min_poll_seconds: 5, max_poll_seconds: 10, decision_interval_seconds: 900 },
     },
   };
   const supervisor = new AutonomousSupervisor({
@@ -83,16 +87,16 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     return ctx;
   };
 
-  it("starts by itself, loads context, runs a tool and proactively notifies the user", async () => {
+  it("starts by itself, loads context and runs a tool; inline work is logged, not broadcast", async () => {
     const ctx = track(setup([
       { calls: [{ name: "workspace_list", args: {} }] },
       { text: "Workspace check done: 1 entry (notes.txt)." },
     ]));
 
     ctx.supervisor.start();
-    await waitFor(() => ctx.notifications.length > 0);
+    await waitFor(() => ctx.logs.some((line) => line.includes("finished inline work")));
     expect(ctx.toolRuns).toHaveLength(1);
-    expect(ctx.notifications[0]).toMatchObject({ text: "Workspace check done: 1 entry (notes.txt).", kind: "result" });
+    expect(ctx.notifications).toHaveLength(0); // routine inline work is never routine chatter
 
     // The ambient prompt carried everything the agent needs to decide on its own.
     const prompt = ctx.llm.requests[0].messages.map((m) => String(m.content)).join("\n");
@@ -102,18 +106,18 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     expect(prompt).toContain("watch the workspace for me");
   });
 
-  it("stays silent on NO_ACTION and does not re-ask the LLM when woken by events", async () => {
-    const ctx = track(setup([{ text: "NO_ACTION" }]));
+  it("stays silent and does not re-ask the LLM when woken by events (fixed interval)", async () => {
+    const ctx = track(setup([{ text: "Reviewed the workspace notes." }]));
 
     ctx.supervisor.start();
-    await waitFor(() => ctx.llm.requests.length === 1);
-    await waitFor(() => ctx.supervisor.status().proactive_loop.no_action_streak === 1);
+    await waitFor(() => agentRequests(ctx.llm).length === 1);
+    await waitFor(() => ctx.logs.some((line) => line.includes("finished inline work")));
     expect(ctx.notifications).toHaveLength(0);
 
     for (let i = 0; i < 5; i += 1) ctx.supervisor.wake(); // simulated incoming/outgoing messages
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    expect(ctx.llm.requests).toHaveLength(1);
+    expect(agentRequests(ctx.llm)).toHaveLength(1);
     expect(ctx.supervisor.status().proactive_loop.next_decision_in_seconds).toBeGreaterThan(0);
   });
 
@@ -140,9 +144,30 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     expect(ctx.notifications).toHaveLength(0); // background still pending, not killed
 
     release();
-    await waitFor(() => ctx.notifications.length > 0);
-    expect(ctx.notifications[0].text).toBe("Background research finished: found 3 sources.");
+    await waitFor(() => ctx.logs.some((line) => line.includes("finished inline work")));
+    expect(ctx.notifications).toHaveLength(0); // the result is logged; the user hears about it via goals/discoveries
   });
+
+  it("materializes a scheduled (cron/interval) task on time even while a long idle decision is still running", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ctx = track(setup([async (messages) => { if (isAmbient(messages)) await gate; return { text: "Done thinking." }; }]));
+
+    ctx.supervisor.start();
+    await waitFor(() => ctx.llm.requests.some((r) => isAmbient(r.messages)));
+    expect(ctx.logs.some((line) => line.includes("finished inline work"))).toBe(false); // the idle decision is still in flight
+
+    const task = ctx.supervisor.enqueueTask({ title: "Scheduled report", dueAt: new Date(Date.now() + 1500).toISOString() });
+    expect(task).toBeTruthy();
+    // The idle LLM call has not returned; the loop must still tick, find the due task and turn it into a goal.
+    try {
+      // The loop polls every min_poll_seconds (5s here); the LLM call is still hanging, yet the due task must be picked up.
+      await waitFor(() => (ctx.db.prepare("SELECT COUNT(*) c FROM pursue_goals WHERE title LIKE '%Scheduled report%'").get() as { c: number }).c > 0, 12_000);
+      expect(ctx.logs.some((line) => line.includes("finished inline work"))).toBe(false);
+    } finally {
+      release();
+    }
+  }, 20_000);
 
   it("shuts down promptly on stop() even while a background LLM call is in flight", async () => {
     const script: ScriptedReply[] = [
@@ -168,7 +193,6 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     ctx.supervisor.start();
     await waitFor(() => ctx.supervisor.status().proactive_loop.failure_streak === 1);
     expect(ctx.supervisor.status().proactive_loop).toMatchObject({
-      no_action_streak: 0,
       last_failure: expect.objectContaining({ kind: "rate_limit" }),
     });
 
@@ -180,7 +204,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
 
   it("keeps the loop alive when the config reader throws, and resumes when it recovers", async () => {
     let broken = true;
-    const ctx = track(setup([{ text: "NO_ACTION" }], () => { if (broken) throw new Error("agent.yaml is mid-write"); }));
+    const ctx = track(setup([{ text: "Checked in on the workspace." }], () => { if (broken) throw new Error("agent.yaml is mid-write"); }));
 
     ctx.supervisor.start(); // must not throw
     await waitFor(() => ctx.logs.some((line) => line.includes("iteration failed")));
@@ -188,7 +212,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
 
     broken = false;
     ctx.supervisor.wake();
-    await waitFor(() => ctx.llm.requests.length === 1);
+    await waitFor(() => agentRequests(ctx.llm).length === 1);
     expect(ctx.logs.some((line) => line.includes("stopped unexpectedly"))).toBe(false);
   });
 });

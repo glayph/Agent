@@ -2,69 +2,65 @@ schema_version: 1
 agent:
   name: Miki
   project: Miki
-  persona: >
-    You are Miki, a composed, concise, professional AI agent with a JARVIS-like
-    manner. Understand the goal, act autonomously within configured permissions
-    and safety boundaries, use available tools whenever the task requires current
-    information, research, file or system inspection, or verification, and check
-    results before reporting. Never claim an action without performing it; clearly
-    distinguish verified facts from uncertainty. Prefer execution and useful
-    outcomes over conversation. Write every message to the user yourself, in their
-    language, with no templates; announce the start only for large or slow work and
-    report small work after finishing it. Accept and act on user messages that arrive
-    while you work. Do not imply continuous background activity
-    unless the runtime supports it and it is actually active. Learn from explicit
-    user feedback using the permission-learning tools when available. If blocked,
-    state the concrete obstacle and report what was actually achieved.
-  language: en/english
+  persona: |-
+    You are Miki, a concise, capable, natural-sounding AI agent.
+
+    Speak like a thoughtful person in ordinary conversation: answer directly, warmly, and in the user's language. For casual chat, usually use 1–3 short sentences (about 10–40 words). This is a guide, not a limit: use the detail the task genuinely needs. Do not pad replies, repeat the user's request, add canned greetings or conclusions, narrate routine tool use, or force roleplay into every message.
+
+    Work more than you talk. When a task needs action, use the available tools, inspect the result, and then report the verified outcome briefly. For long tasks, send only meaningful progress updates. Ask questions only when a missing detail is essential; otherwise choose a sensible, safe default. Never claim an action or result that you did not verify.
+    Adapt your communication and working style from the user’s corrections, preferences, and repeated feedback. Apply learned preferences through the existing memory and behavior-learning systems; do not invent extra rules or claim to change the underlying model.
+
+    Miki's identity is computer-bound: never claim to have a real-world physical body or capabilities that the runtime does not provide. Stay warm and helpful without excessive cuteness, emojis, or repeated reminders of the persona.
+
+  language: bn
   timezone: Asia/Dhaka
-  max_tokens_per_cycle: 16384
+  max_tokens_per_cycle: 100000          # schema maximum
   browser:
-    max_retries: 2
-    clear_state_every_n_navigations: 5
+    max_retries: 10                     # schema maximum
+    clear_state_every_n_navigations: 1000000   # schema minimum is 1; a huge value keeps logins/sessions
     chrome_path: null
   resource:
     mode: balanced
-    message_history_limit: 4
-    web_search_max_calls_per_turn: 2
-    max_context_chars: 12000
+    message_history_limit: 50           # schema maximum
+    web_search_max_calls_per_turn: 5    # schema maximum
+    max_context_chars: 200000           # schema maximum
     system_index_limit: 6
     system_index_cache_ttl_ms: 15000
     tool_warmup_enabled: true
     quality_retry_limit: 1
   memory:
-    short_term_limit: 20
+    short_term_limit: 200               # schema maximum
     long_term_enabled: true
     auto_summarize: true
-    message_retention_days: null
+    message_retention_days: null        # keep forever
     vector_search_threshold: 0.5
     consolidation_batch_size: 5
     consolidation_debounce_ms: 60000
-    max_context_memories: 3
-    max_context_facts: 3
-    max_context_chars: 4000
+    max_context_memories: 30            # schema maximum
+    max_context_facts: 30               # schema maximum
+    max_context_chars: 50000            # schema maximum
     prune_low_value_facts: true
     fact_prune_threshold: 0.15
     fact_prune_min_age_days: 30
     # One global memory shared by every channel. Web chat and CLI are the owner.
     # Another platform's sender may use it only when listed as "<platform>:<sender id>".
+    # Example: owner_peers: ["telegram:123456789"]
     global:
       owner_peers: []
-      # Background extraction of entities and relations from remembered paragraphs.
-      # Spends model tokens (about one short call per paragraph), so it is off by default.
+      # Background entity/relation extraction feeds the graph memory (about one short model call per paragraph).
       extraction:
-        enabled: false
+        enabled: true
         # model: <a cheaper model name than the one used for chat>
         batch_size: 3
     files:
       enabled: true
-      bootstrap_max_chars: 6000
-      memory_md_max_chars: 3500
-      recent_days: 2
-      index_max_entries: 6
+      bootstrap_max_chars: 50000
+      memory_md_max_chars: 40000
+      recent_days: 7
+      index_max_entries: 30
       summarizer: auto
       summary_timeout_ms: 25000
-      summary_turns: 20
+      summary_turns: 50
       session_idle_minutes: 30
       min_turns_for_summary: 2
       writer:
@@ -80,26 +76,32 @@ agent:
     personality_enabled: true
     procedural_enabled: true
     max_context_procedures: 3
+  # Model routing is intentionally unchanged.
+  # NOTE: the runtime currently ignores lanes.default.primary, lanes.complex, lanes.subagent and
+  # lanes.heartbeat.fallbacks (see packages/gateway/src/ignored-config.ts). The model actually used is the
+  # default model selected on the dashboard Models page (stored in SQLite); only lanes.heartbeat.primary is honoured.
+  # Pick a model with reliable tool calling there; a 1B-class local model is not suitable for autonomous work.
   model_router:
     enabled: true
     max_attempts: 8
     lanes:
       default:
-        primary: llama.cpp/lfm2.5-1.2b-instruct-q4_0
+        primary: 
         fallbacks:
-          - gemini/gemini-3.5-flash-lite
+          - 
       complex:
-        primary: gemini/gemini-3.5-flash-lite
+        primary: 
         fallbacks:
-          - llama.cpp/lfm2.5-1.2b-instruct-q4_0
+          - 
       heartbeat:
-        primary: gemini/gemini-3.5-flash-lite
+        primary: 
+        # On provider quota/outage, continue with the configured local model where available.
         fallbacks:
-          - llama.cpp/lfm2.5-1.2b-instruct-q4_0
+          - 
       subagent:
-        primary: gemini/gemini-3.5-flash-lite
+        primary: 
         fallbacks:
-          - llama.cpp/lfm2.5-1.2b-instruct-q4_0
+          - 
     roles: {}
     credential_profiles: {}
   security:
@@ -107,14 +109,14 @@ agent:
     system_access: full
     sandbox_mode: false
     risk_acceptance: true
+    # Keep false: true would refuse to start without admin/root. Run Miki as admin/root yourself for real full access.
     privileged_account_required: false
     audit_logging: true
     approval_note: >-
-      Systemwide access is enabled for autonomous operation. Miki decides and
-      executes actions without asking the user for interactive approval; every
-      action remains validated, bounded, and audit-logged.
+      Full autonomous operation is enabled by the owner. Miki decides and
+      executes actions without interactive approval. Every action is audit-logged.
   visual:
-    screen_cooldown_seconds: 10
+    screen_cooldown_seconds: 2
   tools:
     auto_approve_safe: true
     require_confirm_destructive: false
@@ -124,14 +126,14 @@ self_improvement:
   reflection_interval_minutes: 60
   optimization_interval_minutes: 180
   prompt_tuning_interval_minutes: 120
-  max_reflections_per_day: 12
-  auto_apply_optimizations: false
+  max_reflections_per_day: 24           # one per hour
+  auto_apply_optimizations: true
   guardrails:
     enabled: true
     max_prompt_drift_percent: 20
   behavior_learning:
     enabled: true
-    mode: observe
+    mode: apply
     exploration_rate: 0.1
     exploration_floor: 0.02
     exploration_decay: 0.995
@@ -139,74 +141,161 @@ self_improvement:
     max_draft_notes: 3
     retention_days: 90
     edge_credit_eta: 0.05
+# Several keys below are accepted but not read by the runtime (toolLockTimeoutMs, taskQueueSize,
+# schedulerIntervalMs, maxScheduledTaskAttempts, retryBaseDelayMs, retryMaxDelayMs, recoveryStaleAfterMs).
 concurrency:
-  maxConcurrentTasks: 3
+  maxConcurrentTasks: 8
   maxParallelToolCalls: 8
   toolLockTimeoutMs: 30000
-  taskQueueSize: 50
+  taskQueueSize: 1000                   # schema maximum; matches autonomy.max_queue_depth
   schedulerIntervalMs: 100
-  maxScheduledTaskAttempts: 3
+  maxScheduledTaskAttempts: 20          # schema maximum
   retryBaseDelayMs: 60000
-  retryMaxDelayMs: 900000
-  recoveryStaleAfterMs: 300000
+  retryMaxDelayMs: 180000
+  recoveryStaleAfterMs: 3600000         # 1 hour: watchdog for tasks that stopped making progress
 heartbeat:
   enabled: true
-  interval_seconds: 30
+  interval_seconds: 20
   checklist_path: identity/HEARTBEAT.md
+  # Each HEARTBEAT.md line becomes a persisted recurring task that runs on this interval.
+  checklist_tasks:
+    enabled: true
+    interval_seconds: 3600
   proactive:
     enabled: true
     # Allow periodic/background LLM decisions while idle; queued goals continue through the same supervisor.
     llm_when_idle: true
     startup_decision: true
+    # Limits on goals Miki may propose for itself while idle.
+    proposal_limits:
+      max_open: 3
+      max_per_day: 10
     min_poll_seconds: 5
-    max_poll_seconds: 60
+    max_poll_seconds: 20
     idle_backoff_multiplier: 2
+    # Idle decisions run at this fixed interval (+-20% jitter). Every cycle ends with one piece of work;
+    # the interval never grows. A scheduled (cron) task due within 30 seconds always takes the slot first.
     decision_interval_seconds: 30
-    # Adaptive LLM gating: after each NO_ACTION the next paid decision waits
-    # base * multiplier^streak (capped) unless chat/goals/tasks/memory changed.
-    max_decision_interval_seconds: 300
-    decision_backoff_multiplier: 1.5
-    # Provider failure handling: exponential retry delay, and one warning to the
-    # user after this many consecutive failed decisions (self-heals on success).
     failure_threshold: 3
-    failure_backoff_base_seconds: 30
-    failure_backoff_max_seconds: 300
+    failure_backoff_base_seconds: 2
+    # A failed model call or goal is retried by Miki itself; the wait is at least 2 seconds and never exceeds 12 seconds.
+    failure_backoff_max_seconds: 12
+    # "Free time": no chat activity for this many minutes. Self-directed (curiosity/drive) goals wait for it,
+    # because they may use the mouse and keyboard. User goals and scheduled (cron) tasks are never held back.
+    idle_after_minutes: 10
+    # Curiosity cycle: while idle Miki researches topics from identity/INTERESTS.md as low-priority goals.
+    curiosity:
+      max_open: 2
+      max_per_day: 10
+    # Server-side rules for telling the user about discoveries (the model only proposes; these decide).
+    share_min_importance: 3
+    share_max_per_day: 10
+    share_min_gap_minutes: 30
+    # Let idle decisions look at the computer (screenshot, processes, windows). Acting tools stay goal-only.
+    observe_computer: true
   auto_actions:
     enabled: true
-    max_actions_per_cycle: 3
+    max_actions_per_cycle: 3            # runtime maximum
   resource_limits:
-    max_tokens_per_cycle: 32768
-    max_idle_minutes: 1
+    max_tokens_per_cycle: 32768         # ignored by the runtime (unbounded)
+    max_idle_minutes: 1                 # idle time before the next heartbeat probe
 autonomy:
   enabled: true
   mode: operator
-  # Autonomous work is always bounded; tune explicit limits below instead of
-  # allowing unbounded tool calls, tokens, retries, or wall-clock execution.
+  # Agent-level tool/token/cycle budgets are disabled for long-running autonomous workflows.
   unlimited_budgets: true
-  # Tool calls one goal cycle may use (read, write, verify...). Separate from
-  # heartbeat.auto_actions.max_actions_per_cycle, which only bounds idle decisions.
-  max_tool_calls_per_goal_cycle: 12
+  history_retention_days: 30
+  # Stop accepting new scheduled/queued/running tasks when the backlog reaches this cap.
+  max_queue_depth: 1000
   tool_policy:
-    mode: safe
-    max_retries: 3
-    retry_backoff_seconds: 15
-    require_acceptance_contract: false
+    mode: operator
+    # Retries are unbounded in the runtime; backoff applies between attempts (retry_backoff_seconds).
+    retry_backoff_seconds: 2            # retry waits are clamped to 2-12 seconds
+    require_acceptance_contract: false  # goals run without a pre-defined acceptance contract
     allow_browser: true
-    browser_allowed_domains: []
+    # The runtime blocks ALL browser actions when this list is empty. A domain entry matches the
+    # domain itself and every subdomain, so top-level domains open the browser broadly.
+    browser_allowed_domains:
+      - com
+      - org
+      - net
+      - edu
+      - gov
+      - io
+      - co
+      - dev
+      - app
+      - ai
+      - me
+      - info
+      - xyz
+      - tv
+      - cc
+      - to
+      - bd
+      - uk
+      - us
+      - in
+      - ca
+      - au
+      - de
+      - fr
+      - jp
+      - cn
+      - ru
     allow_computer_use: true
     capability_profile: operator
-    allowed_tools: []
-    allowed_external_side_effect_tools: []
+    # Additive: browser/computer/operator tools come from the flags and profile above.
+    # web_search lets goals (and the curiosity cycle) research on their own.
+    allowed_tools:
+      - web_search
+    allowed_external_side_effect_tools:
+      - terminal_run
+      - terminal_kill
+      - delegate_coding_agent
+      - file_delete
+      - file_run
+      - skill_install
+      - skill_delete
+      - browser_click
+      - browser_type
+      - computer_invoke
+      - computer_set_text
+      - computer_hotkey
+      - computer_clipboard
+      - computer_launch
+      - computer_terminate_app
+      - computer_click_at
+      - computer_drag
+      - computer_scroll
+      - goal_create
+      - goal_update
+    # Relative to the workspace only; absolute paths are ignored by the runtime.
+    # Applies to autonomous file_* tools. terminal_run is not path-restricted (not even its starting
+    # directory) unless agents.defaults.restrict_to_workspace is explicitly true or MIKI_TERMINAL_SAFE=true.
     safe_write_roots:
       - autonomy
       - identity/memory
+      - packages
+      - apps
+      - config
+      - scripts
+      - docs
+      - tests
+      - test
+      - src
+      - workspace
+      - projects
+      - data
+      - output
+      - downloads
   event_triggers:
     max_per_minute: 30
     cooldown_seconds: 5
 messaging:
   adaptive: true
   enableStreaming: true
-  enableProgressMessages: false
+  enableProgressMessages: true          # Miki decides when an update is worth sending
   avoidUnnecessaryMessages: true
   streamingMinLength: 1200
   progressIntervalMs: 1800
@@ -220,11 +309,17 @@ agents:
   defaults:
     # Resolve relative to the running installation; stale absolute paths are ignored by the runtime.
     workspace: .
+    # file_* tools: restricted unless false. terminal_run: its starting directory is confined only when this is true.
     restrict_to_workspace: false
     split_on_marker: false
     max_completion_tokens: 16384
     context_window: 0
-    max_tool_iterations: 12
+    # Bound the working prompt for faster interactive turns. Older history remains
+    # stored and recoverable through memory/search; set context_window > 0 to override.
+    context_window_cap: 65536
+    max_tool_iterations: 100000
+    max_wall_time_ms: 21600000          # 6 h hang guard per run (0 disables); long goals continue in a new run
+    steer_interrupt: true                # interrupt the active model request for new chat messages
     summarize_message_threshold: 20
     summarize_token_percent: 75
     tool_feedback:
@@ -253,103 +348,83 @@ evolution:
   cold_path_times: []
 tools:
   cron:
+    # Canonical legacy Cron command policy. v1 Cron schedules create autonomous goals only.
     allow_command: false
     exec_timeout_minutes: 5
+  exec:
+    enabled: true
+    allow_remote: false
+    enable_deny_patterns: false
+    timeout_seconds: 0                  # no per-command timeout; Miki handles stuck commands itself
 devices:
   enabled: true
   monitor_usb: true
-channels:
-  telegram:
-    enabled: true
-    type: telegram
-  discord:
-    enabled: true
-    type: discord
-  slack:
-    enabled: true
-    type: slack
-  feishu:
-    enabled: true
-    type: feishu
-  dingtalk:
-    enabled: true
-    type: dingtalk
-  qq:
-    enabled: true
-    type: qq
-  weixin:
-    enabled: true
-    type: weixin
-  wecom:
-    enabled: true
-    type: wecom
-  line:
-    enabled: true
-    type: line
-  onebot:
-    enabled: true
-    type: onebot
-  whatsapp:
-    enabled: true
-    type: whatsapp
-  miki:
-    enabled: true
-    type: miki
-  matrix:
-    enabled: true
-    type: matrix
-  irc:
-    enabled: true
-    type: irc
-  mqtt:
-    enabled: true
-    type: mqtt
+# Channels: add each bot token/API key under "settings" (dashboard or here).
+# IMPORTANT: a token only connects the bot. Miki ignores EVERY sender until allow_from lists
+# trusted sender IDs, e.g. allow_from: ["123456789"]. Do not use "*" (anyone could control this computer).
+# The old duplicate "channels" block was removed; the runtime merges it into channel_list anyway.
 channel_list:
   telegram:
     enabled: true
     type: telegram
+    allow_from: []
   discord:
     enabled: true
     type: discord
+    allow_from: []
   slack:
     enabled: true
     type: slack
+    allow_from: []
   feishu:
     enabled: true
     type: feishu
+    allow_from: []
   dingtalk:
     enabled: true
     type: dingtalk
+    allow_from: []
   qq:
     enabled: true
     type: qq
+    allow_from: []
   weixin:
     enabled: true
     type: weixin
+    allow_from: []
   wecom:
     enabled: true
     type: wecom
+    allow_from: []
   line:
     enabled: true
     type: line
+    allow_from: []
   onebot:
     enabled: true
     type: onebot
+    allow_from: []
   whatsapp:
     enabled: true
     type: whatsapp
+    allow_from: []
   miki:
     enabled: true
     type: miki
   matrix:
     enabled: true
     type: matrix
+    allow_from: []
   irc:
     enabled: true
     type: irc
+    allow_from: []
+  # Enabled MQTT requires settings.broker (e.g. mqtt://host:1883) or the config fails validation.
+  # Set enabled: true after adding the broker.
   mqtt:
-    enabled: true
+    enabled: false
     type: mqtt
+    allow_from: []
 speech_to_text:
   enabled: false
   provider: whisper.cpp

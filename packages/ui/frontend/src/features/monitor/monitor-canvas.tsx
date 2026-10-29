@@ -10,6 +10,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { Link } from "@tanstack/react-router"
+import { PageHeader } from "@/app/layout/page-header"
 import {
   Background,
   BackgroundVariant,
@@ -25,6 +26,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { useAtomValue } from "jotai"
+import { useTranslation } from "react-i18next"
 import { useEffect, useMemo, useRef } from "react"
 
 import {
@@ -82,18 +84,33 @@ function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
   const hasFitOnce = useRef(false)
   const previousNodeCount = useRef(0)
 
-  const { nodes, edges } = useMemo(() => {
-    const rawNodes = Object.values(state.nodes)
-    const rawEdges = Object.values(state.edges)
-    const { nodes: positioned } = computeLayout(rawNodes, rawEdges)
-    return {
-      nodes: toReactFlowNodes(positioned).map((node) => ({
-        ...node,
-        selected: node.id === selectedNodeId,
-      })),
-      edges: toReactFlowEdges(rawEdges),
+  const rawNodes = Object.values(state.nodes)
+  const rawEdges = Object.values(state.edges)
+  // Status/output updates are frequent. Re-run Dagre only when graph topology,
+  // node size or a manually assigned position changes, not on every event.
+  const layoutKey = `${rawNodes
+    .map((node) => `${node.id}:${node.uiState}:${node.hasManualPosition ? `${node.position?.x ?? 0},${node.position?.y ?? 0}` : "auto"}`)
+    .join("|")}#${rawEdges.map((edge) => `${edge.id}:${edge.source}:${edge.target}`).join("|")}`
+  const layoutCache = useRef<{
+    key: string
+    positions: Map<string, { x: number; y: number }>
+  } | null>(null)
+  if (layoutCache.current?.key !== layoutKey) {
+    const positioned = computeLayout(rawNodes, rawEdges).nodes
+    layoutCache.current = {
+      key: layoutKey,
+      positions: new Map(positioned.flatMap((node) => node.position ? [[node.id, node.position] as const] : [])),
     }
-  }, [selectedNodeId, state.edges, state.nodes])
+  }
+  const positions = layoutCache.current.positions
+  const nodes = toReactFlowNodes(rawNodes.map((node) => ({
+    ...node,
+    position: node.hasManualPosition && node.position ? node.position : positions.get(node.id),
+  }))).map((node) => ({
+    ...node,
+    selected: node.id === selectedNodeId,
+  }))
+  const edges = toReactFlowEdges(rawEdges)
 
   useEffect(() => {
     if (nodes.length === 0) return
@@ -165,6 +182,7 @@ function ActivityInspector({
   node: MonitorNode
   run?: MonitorRun
 }) {
+  const { t } = useTranslation()
   const input = stringifyInspectorValue(node.input)
   const action = stringifyInspectorValue(node.action)
   const result = stringifyInspectorValue(node.resultMessage)
@@ -172,7 +190,7 @@ function ActivityInspector({
 
   return (
     <aside
-      aria-label="Live activity inspector"
+      aria-label={t("pages.monitor.inspector", { defaultValue: "Live activity inspector" })}
       className="border-primary/25 bg-card/95 text-card-foreground shadow-primary/10 pointer-events-auto absolute top-4 right-4 z-20 flex max-h-[calc(100%-2rem)] w-[min(390px,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl"
     >
       <div className="border-border/70 bg-primary/[0.06] flex items-start gap-3 border-b px-4 py-3.5">
@@ -181,7 +199,7 @@ function ActivityInspector({
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-primary flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] uppercase">
-            <span>Live inspector</span>
+            <span>{t("pages.monitor.liveInspector", { defaultValue: "Live inspector" })}</span>
             <span className="bg-primary size-1 rounded-full" />
             <span>{activityTypeLabel(node.type)}</span>
           </div>
@@ -197,7 +215,7 @@ function ActivityInspector({
         </div>
         <button
           type="button"
-          aria-label="Close activity inspector"
+          aria-label={t("pages.monitor.closeInspector", { defaultValue: "Close activity inspector" })}
           onClick={() => selectMonitorNode(undefined)}
           className="border-border/70 text-muted-foreground hover:border-primary/35 hover:bg-primary/10 hover:text-foreground focus-visible:ring-ring inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:outline-none"
         >
@@ -208,27 +226,27 @@ function ActivityInspector({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
-            <div className="text-muted-foreground">Status</div>
+            <div className="text-muted-foreground">{t("pages.monitor.status", { defaultValue: "Status" })}</div>
             <div className="mt-1 flex items-center gap-2 font-medium">
               <StatusGlyph node={node} />
               <span>{activityStatusLabel(node.status)}</span>
             </div>
           </div>
           <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
-            <div className="text-muted-foreground">Duration</div>
+            <div className="text-muted-foreground">{t("pages.monitor.duration", { defaultValue: "Duration" })}</div>
             <div className="mt-1 flex items-center gap-1.5 font-medium">
               <IconClock className="text-primary size-3.5" />
               {formatActivityDuration(node.durationMs)}
             </div>
           </div>
           <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
-            <div className="text-muted-foreground">Started</div>
+            <div className="text-muted-foreground">{t("pages.monitor.started", { defaultValue: "Started" })}</div>
             <div className="mt-1 font-medium">
               {formatActivityTime(node.createdAt) || "—"}
             </div>
           </div>
           <div className="border-border/60 bg-muted/35 rounded-xl border px-3 py-2.5">
-            <div className="text-muted-foreground">Planner level</div>
+            <div className="text-muted-foreground">{t("pages.monitor.plannerLevel", { defaultValue: "Planner level" })}</div>
             <div className="mt-1 font-medium">{node.level + 1}</div>
           </div>
         </div>
@@ -236,45 +254,44 @@ function ActivityInspector({
         {node.parallel && (
           <div className="border-primary/20 bg-primary/[0.07] text-primary mt-3 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[11px]">
             <IconRefresh className="size-3.5" />
-            Running in parallel with sibling activities
+            {t("pages.monitor.parallel", { defaultValue: "Running in parallel with sibling activities" })}
           </div>
         )}
 
         <div className="mt-4 space-y-3">
-          {action && <InspectorBlock label="Action" value={action} />}
-          {input && <InspectorBlock label="Input" value={input} code />}
-          {result && <InspectorBlock label="Result" value={result} />}
+          {action && <InspectorBlock label={t("pages.monitor.action", { defaultValue: "Action" })} value={action} />}
+          {input && <InspectorBlock label={t("pages.monitor.input", { defaultValue: "Input" })} value={input} code />}
+          {result && <InspectorBlock label={t("pages.monitor.result", { defaultValue: "Result" })} value={result} />}
           {output && (
-            <InspectorBlock label="Output preview" value={output} code />
+            <InspectorBlock label={t("pages.monitor.outputPreview", { defaultValue: "Output preview" })} value={output} code />
           )}
           {node.error && (
-            <InspectorBlock label="Error" value={node.error} tone="danger" />
+            <InspectorBlock label={t("pages.monitor.error", { defaultValue: "Error" })} value={node.error} tone="danger" />
           )}
           {!action && !input && !result && !output && !node.error && (
             <div className="border-border/70 text-muted-foreground flex items-start gap-2 rounded-xl border border-dashed px-3 py-3 text-[11px] leading-5">
               <IconInfoCircle className="text-primary mt-0.5 size-3.5 shrink-0" />
-              Detailed activity output will appear here as Miki receives live
-              execution events.
+              {t("pages.monitor.detailPending", { defaultValue: "Activity details will appear here as Miki receives execution events." })}
             </div>
           )}
         </div>
 
         <div className="border-border/60 text-muted-foreground mt-4 space-y-2 border-t pt-3 text-[11px]">
           <div className="flex items-center justify-between gap-3">
-            <span>Run</span>
+            <span>{t("pages.monitor.run", { defaultValue: "Run" })}</span>
             <span className="truncate font-mono" title={run?.id}>
               {run?.id?.slice(0, 18) || "—"}
             </span>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span>Node</span>
+            <span>{t("pages.monitor.node", { defaultValue: "Node" })}</span>
             <span className="truncate font-mono" title={node.id}>
               {node.id.slice(-18)}
             </span>
           </div>
           {node.attempt !== undefined && (
             <div className="flex items-center justify-between gap-3">
-              <span>Attempt</span>
+              <span>{t("pages.monitor.attempt", { defaultValue: "Attempt" })}</span>
               <span className="font-mono">{node.attempt}</span>
             </div>
           )}
@@ -287,7 +304,7 @@ function ActivityInspector({
         className="border-border/70 text-muted-foreground hover:border-primary/35 hover:bg-primary/[0.07] hover:text-foreground m-3 inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-medium transition-colors"
       >
         <IconExternalLink className="size-3.5" />
-        Open conversation
+        {t("pages.monitor.openConversation", { defaultValue: "Open conversation" })}
       </Link>
     </aside>
   )
@@ -336,6 +353,7 @@ function InspectorBlock({
 
 function MonitorWorkspace() {
   const state = useAtomValue(monitorAtom)
+  const { t } = useTranslation()
   const runs = useMemo(
     () => Object.values(state.runs).sort((a, b) => b.startedAt - a.startedAt),
     [state.runs],
@@ -352,15 +370,37 @@ function MonitorWorkspace() {
     : undefined
   if (nodes.length === 0) {
     return (
+      <div className="flex h-full min-h-0 flex-col" data-miki-page-shell="monitor">
+      <PageHeader title={t("navigation.monitor", { defaultValue: "Agent Monitor" })} titleLevel={1} />
       <div
-        className="bg-background h-full min-h-0"
-        aria-label="Agent Inspector"
-      />
+        className="bg-background flex min-h-0 flex-1 items-center justify-center px-6 py-10"
+        data-miki-page="monitor"
+        aria-label={t("navigation.monitor", { defaultValue: "Agent Monitor" })}
+      >
+        <div className="flex max-w-sm flex-col items-center text-center" role="status">
+          <div className="bg-muted text-muted-foreground mb-3 flex size-10 items-center justify-center rounded-xl">
+            <IconInfoCircle className="size-5" aria-hidden="true" />
+          </div>
+          <h1 className="text-foreground text-sm font-semibold">{t("pages.monitor.noActivity", { defaultValue: "No activity yet" })}</h1>
+          <p className="text-muted-foreground mt-1 text-xs leading-5">
+            {t("pages.monitor.noActivityDescription", { defaultValue: "Start a task in chat to see its steps here." })}
+          </p>
+          <Link
+            to="/"
+            className="bg-primary text-primary-foreground mt-4 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-opacity hover:opacity-90"
+          >
+            {t("pages.monitor.openChat", { defaultValue: "Open chat" })}
+          </Link>
+        </div>
+      </div>
+      </div>
     )
   }
 
   return (
-    <main className="bg-background relative h-full min-h-0 min-w-0 overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col" data-miki-page-shell="monitor">
+      <PageHeader title={t("navigation.monitor", { defaultValue: "Agent Monitor" })} titleLevel={1} />
+    <div className="bg-background relative min-h-0 min-w-0 flex-1 overflow-hidden" data-miki-page="monitor">
       <ReactFlowProvider>
         <CanvasInner selectedNodeId={state.selectedNodeId} />
       </ReactFlowProvider>
@@ -368,7 +408,8 @@ function MonitorWorkspace() {
       {selectedNode && (
         <ActivityInspector node={selectedNode} run={selectedRun} />
       )}
-    </main>
+    </div>
+    </div>
   )
 }
 

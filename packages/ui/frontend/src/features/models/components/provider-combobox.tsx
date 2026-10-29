@@ -9,7 +9,6 @@ import {
   Command,
   CommandEmpty,
   CommandGroup,
-  CommandInput,
   CommandItem,
   CommandList,
 } from "@/shared/ui/command"
@@ -116,7 +115,6 @@ export function ProviderCombobox({
         container={containerEl}
       >
         <Command>
-          <CommandInput placeholder={t("models.combobox.searchProvider")} />
           <CommandList id={listId}>
             <CommandEmpty>
               {backendOptions && backendOptions.length > 0

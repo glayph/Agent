@@ -3,7 +3,6 @@ import {
   getLifecycleBus,
   setLifecycleBus,
   LIFECYCLE_EVENTS,
-  type EventBus,
 } from "./index.js";
 
 function sleep(ms: number): Promise<void> {
