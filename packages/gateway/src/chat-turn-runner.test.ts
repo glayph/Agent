@@ -563,6 +563,34 @@ describe("ChatTurnRunner", () => {
     expect(socket.sent[socket.sent.length - 1].payload.status).toBe("failed");
   });
 
+  it("does not persist or emit a separate message when no model is configured", async () => {
+    const h = createHarness(async () => ({
+      status: "failed",
+      error: "No model name is configured: the Models page has no default model.",
+      toolCalls: [],
+    }));
+    const socket = new FakeSocket();
+    const outcome = await h.send("hi", { socket: asSocket(socket) }, "missing-model").promise;
+
+    expect(outcome.status).toBe("failed");
+    expect(h.messages()).toHaveLength(1);
+    expect(h.messages()[0]).toMatchObject({ role: "user", status: "failed", status_detail: null });
+    expect(socket.sent.some((message) => message.type === "error" || message.type === "message.create")).toBe(false);
+  });
+
+  it("does not persist a thrown missing-model configuration error", async () => {
+    const h = createHarness(async () => {
+      throw new Error("No model is configured. Add a model in the Models page.");
+    });
+    const socket = new FakeSocket();
+    const outcome = await h.send("hi", { socket: asSocket(socket) }, "missing-model-thrown").promise;
+
+    expect(outcome.status).toBe("failed");
+    expect(h.messages()).toHaveLength(1);
+    expect(h.messages()[0]).toMatchObject({ role: "user", status: "failed", status_detail: null });
+    expect(socket.sent.some((message) => message.type === "error" || message.type === "message.create")).toBe(false);
+  });
+
   it("hides internal error details from the client but keeps the message retryable", async () => {
     const h = createHarness(async () => {
       throw new Error("SQLITE_CORRUPT: secret internals");

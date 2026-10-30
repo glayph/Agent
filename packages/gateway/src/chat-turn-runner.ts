@@ -55,6 +55,9 @@ const TRANSIENT_ERROR = /timed? ?out|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|E
 const NETWORK_ERROR = /timed? ?out|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network connection|unable to reach/i
 const TOKEN_LIMIT_ERROR = /token.?limit|maximum context|context.?length|max(?:imum)?[ _-]?(?:completion|output|tokens)|too many tokens|prompt is too long|context window/i
 const PROVIDER_KEY_ERROR = /invalid api key|incorrect api key|unauthorized|authentication failed|invalid credentials|api key.{0,24}(?:invalid|rejected|incorrect)|\b(?:401|403)\b/i
+const MODEL_NOT_CONFIGURED_ERROR = /no model (?:is )?configured|no model name is configured/i
+const isModelNotConfiguredError = (error: unknown): boolean =>
+  MODEL_NOT_CONFIGURED_ERROR.test(error instanceof Error ? error.message : String(error ?? ""))
 const normalizeChatError = (error: unknown, category?: string): string => {
   const detail = error instanceof Error ? error.message : String(error ?? "")
   // Persist machine-readable status codes, not invented assistant prose. The chat
@@ -934,6 +937,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           flushRunFinished()
           if (result.toolCalls.length > 0) carryoverNote = priorWorkNote(result.toolCalls)
           const tokenLimit = TOKEN_LIMIT_ERROR.test(result.error || "")
+          const modelNotConfigured = isModelNotConfiguredError(result.error)
           const recoverableLimit = result.status === "limit_reached" || (result.status === "failed" && /limit|budget|step|empty response|could not make progress/i.test(result.error || ""))
           const normalizedFailure = result.status !== "completed" && result.status !== "cancelled"
             ? normalizeChatError(result.error, result.error?.includes("provider") ? "upstream_provider_error" : undefined)
@@ -956,16 +960,19 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
                 : "failed"
           if (result.status !== "cancelled" && resultText) {
             if (isSystemError) {
-              persistRunError(stream, resultText)
-              streamHub.publish(stream, "error", { code: resultText.slice("miki_error_".length), message: resultText, retryable: true })
+              if (!modelNotConfigured) {
+                persistRunError(stream, resultText)
+                streamHub.publish(stream, "error", { code: resultText.slice("miki_error_".length), message: resultText, retryable: true })
+              }
             } else {
               persistAdaptiveReply(resultText, result.model, streamStatus === "failed" ? "error" : "normal")
             }
           }
           const messageStatus = streamStatus === "failed" ? "failed" : streamStatus === "cancelled" ? "cancelled" : "completed"
-          setMessageStatus(persistedUserMessageId, messageStatus, streamStatus === "failed" ? (isSystemError ? resultText : result.error) : streamStatus === "cancelled" ? "The run was cancelled before this message was completed." : undefined)
-          emitMessageStatus(messageStatus, streamStatus === "failed" ? result.error : streamStatus === "cancelled" ? "The run was cancelled before this message was completed." : undefined)
-          streamHub.finish(stream, streamStatus, result.error)
+          const failureDetail = modelNotConfigured ? undefined : streamStatus === "failed" ? (isSystemError ? resultText : result.error) : streamStatus === "cancelled" ? "The run was cancelled before this message was completed." : undefined
+          setMessageStatus(persistedUserMessageId, messageStatus, failureDetail)
+          emitMessageStatus(messageStatus, failureDetail)
+          streamHub.finish(stream, streamStatus, modelNotConfigured ? undefined : result.error)
           recordLearning({
             runId,
             sessionId: contextId,
@@ -982,18 +989,21 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
         } catch (error) {
           heldRunFinished.length = 0 // the single terminal event is emitted below
           const detail = error instanceof Error ? error.message : String(error)
+          const modelNotConfigured = isModelNotConfiguredError(error)
           const category = error instanceof ProviderRequestError ? error.category : undefined
           const timedOut = error instanceof ChatRunTimeoutError
           appendGatewayLog(`Chat run ${runId} failed: ${detail}`)
           // Clean, user-facing payload: provider and timeout errors are safe to show, anything else is generic.
           const clientMessage = normalizeChatError(error, error instanceof ProviderRequestError ? error.category : timedOut ? "provider_network" : undefined)
-          setMessageStatus(persistedUserMessageId, "failed", detail)
-          persistRunError(stream, clientMessage)
-          emitMessageStatus("failed", clientMessage)
-          streamHub.publish(stream, "error", { code: timedOut ? "run_timeout" : category || "internal_error", message: clientMessage, retryable: timedOut || Boolean(category) || TRANSIENT_ERROR.test(detail), ...(category ? { error_category: category } : {}) })
+          setMessageStatus(persistedUserMessageId, "failed", modelNotConfigured ? undefined : detail)
+          if (!modelNotConfigured) {
+            persistRunError(stream, clientMessage)
+            streamHub.publish(stream, "error", { code: timedOut ? "run_timeout" : category || "internal_error", message: clientMessage, retryable: timedOut || Boolean(category) || TRANSIENT_ERROR.test(detail), ...(category ? { error_category: category } : {}) })
+          }
+          emitMessageStatus("failed", modelNotConfigured ? undefined : clientMessage)
           streamHub.publish(stream, "typing.stop", { run_id: runId })
-          streamHub.publish(stream, "node.run_end", { run_id: runId, status: "failed", error: clientMessage })
-          streamHub.finish(stream, "failed", clientMessage)
+          streamHub.publish(stream, "node.run_end", { run_id: runId, status: "failed", ...(modelNotConfigured ? {} : { error: clientMessage }) })
+          streamHub.finish(stream, "failed", modelNotConfigured ? undefined : clientMessage)
           recordLearning({ runId, sessionId: contextId, taskClass: "interactive_chat", context: [content, ...(steeredTexts.get(runId) ?? [])].filter(Boolean).join("\n"), actionKey: `model:${model || "baseline"}`, modelId: model || undefined, outcome: "failure", rewardInput: { outcome: "failure", completionQuality: 0, taskSuccess: 0, verificationSuccess: 0, safetyViolation: 0, latencyScore: 0 }, metadata: { error: detail.slice(0, 300) } })
         } finally {
           clearInterval(heartbeat)
