@@ -182,19 +182,6 @@ export class BrowserTool {
     }
   }
 
-  private get contextConfig(): Record<string, unknown> {
-    return {
-      viewport: this.viewport,
-      userAgent: this.userAgent,
-      locale: "en-US",
-      timezoneId: "America/New_York",
-      permissions: [],
-      javaScriptEnabled: true,
-      bypassCSP: false,
-      ignoreHTTPSErrors: false,
-    };
-  }
-
   private randomDelay(minMs?: number, maxMs?: number): Promise<void> {
     const lo = minMs ?? DELAY_SHORT[0];
     const hi = maxMs ?? DELAY_SHORT[1];

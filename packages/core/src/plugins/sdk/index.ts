@@ -74,6 +74,9 @@ export interface PluginContext {
 export interface PluginHealth {
   ok: boolean;
   status: PluginRuntimeStatus;
+  /** Whether this result came from a runtime probe or only manifest metadata. */
+  source?: "live_probe" | "manifest_only" | "not_checked";
+  checkedAt?: string;
   latencyMs?: number;
   message?: string;
   details?: Record<string, unknown>;

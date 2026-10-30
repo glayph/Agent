@@ -394,13 +394,13 @@ export function getBuiltinPluginManifest(
 
 /** Health derived only from the declared status. Live probes are layered on top by the host. */
 export function staticHealth(manifest: PluginManifest): PluginHealth {
-  const ok =
-    manifest.runtimeStatus === "functional" ||
-    manifest.runtimeStatus === "partial";
+  // A declared capability is not proof that a runtime integration is healthy.
+  // Keep its declared status but explicitly mark it as metadata-only.
   return {
-    ok,
+    ok: false,
     status: manifest.runtimeStatus,
-    message: ok ? undefined : `Runtime status is ${manifest.runtimeStatus}.`,
+    source: "manifest_only",
+    message: `Manifest status only: ${manifest.runtimeStatus}; no live probe has run.`,
   };
 }
 

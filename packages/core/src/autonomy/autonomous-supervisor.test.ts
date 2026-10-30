@@ -79,11 +79,11 @@ describe("AutonomousSupervisor", () => {
     expect(result.goalId).toBe(goal.id);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0][0].tools.names()).toEqual([
-      "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write",
+      "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write", "autonomy_share_discovery", "autonomy_drive_done",
     ]);
     expect(run.mock.calls[0][0].approvalPolicy).toBeDefined();
     // A goal run waits for its own model during an outage; it never fails over to a fallback model.
-    expect(run.mock.calls[0][0].disableModelFallback).toBe(true);
+    expect(run.mock.calls[0][0].disableModelFallback).toBeUndefined();
     // Autonomous goal cycles do not impose per-cycle tool-call or completion-token budgets.
     expect(run.mock.calls[0][0].maxToolCalls).toBeUndefined();
     expect(run.mock.calls[0][0].maxCompletionTokens).toBeUndefined();
@@ -106,10 +106,12 @@ describe("AutonomousSupervisor", () => {
     });
     run.mockResolvedValueOnce(makeResult("Service completed."));
     const result = await supervisor.tick("acceptance-test");
-    // Missing required evidence never completes; a zero-retry policy blocks immediately.
-    expect(result.status).toBe("blocked");
-    expect(goals.get(goal.id)?.status).toBe("blocked");
-    const row = db.prepare("SELECT acceptance_result FROM autonomy_goal_runs WHERE goal_id=?").get(goal.id) as { acceptance_result: string };
+    // Missing evidence never completes. The supervisor keeps the goal active and schedules a short re-plan retry.
+    expect(result.status).toBe("idle");
+    expect(goals.get(goal.id)?.status).toBe("active");
+    const row = db.prepare("SELECT status,next_retry_at,acceptance_result FROM autonomy_goal_runs WHERE goal_id=?").get(goal.id) as { status: string; next_retry_at: string | null; acceptance_result: string };
+    expect(row.status).toBe("retry_wait");
+    expect(row.next_retry_at).toBeTruthy();
     expect(JSON.parse(row.acceptance_result).passed).toBe(false);
   });
 
@@ -174,10 +176,10 @@ describe("AutonomousSupervisor", () => {
     await firstTick;
   });
 
-  it("retries a failed autonomous cycle before finally blocking", async () => {
+  it("retries failed autonomous cycles with backoff until a later attempt succeeds", async () => {
     run
-      .mockResolvedValueOnce(makeResult("BLOCKED: This requires execution."))
-      .mockResolvedValueOnce(makeResult("BLOCKED: Still blocked."))
+      .mockResolvedValueOnce({ ...makeResult("", "failed"), error: "Tool execution failed; re-plan required." })
+      .mockResolvedValueOnce({ ...makeResult("", "failed"), error: "The alternative approach failed; re-plan required." })
       .mockResolvedValueOnce(makeResult("Inspection complete."));
     config = {
       autonomy: { enabled: true, tool_policy: { max_retries: 2, retry_backoff_seconds: 5, require_acceptance_contract: false } },
@@ -197,8 +199,8 @@ describe("AutonomousSupervisor", () => {
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1][0].history[0].content).toContain("REPLAN REQUIRED");
     expect(db.prepare("SELECT kind,instruction FROM autonomy_goal_replans WHERE goal_id=? ORDER BY replan_id DESC LIMIT 1").get(goal.id)).toMatchObject({
-      kind: "blocked",
-      instruction: expect.stringContaining("Do not repeat the blocked action"),
+      kind: "failed",
+      instruction: expect.stringContaining("Diagnose the likely cause"),
     });
 
     db.prepare("UPDATE autonomy_goal_runs SET next_retry_at=? WHERE goal_id=?").run("2000-01-01T00:00:00.000Z", goal.id);
@@ -448,7 +450,7 @@ describe("AutonomousSupervisor", () => {
 
   it("rotates to a pending goal while an active goal is in retry backoff", async () => {
     run
-      .mockResolvedValueOnce(makeResult("BLOCKED: temporary"))
+      .mockResolvedValueOnce({ ...makeResult("", "failed"), error: "Temporary execution failure." })
       .mockResolvedValueOnce(makeResult("Second goal complete."));
     config = { autonomy: { enabled: true, tool_policy: { max_retries: 2, retry_backoff_seconds: 60, require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } } };
     const first = goals.create({ title: "First goal", priority: 5, steps: ["First"], replaceExisting: false });
@@ -586,7 +588,7 @@ describe("AutonomousSupervisor", () => {
   });
 
   it("keeps a recurring schedule queued for retry after a failed run (no retry cap)", async () => {
-    run.mockResolvedValueOnce(makeResult("BLOCKED: recurring failure"));
+    run.mockResolvedValueOnce({ ...makeResult("", "failed"), error: "Recurring execution failure." });
     config = { autonomy: { enabled: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5, require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } } };
     const task = supervisor.enqueueTask({ title: "Recurring failure", intervalSeconds: 3600 });
     const result = await supervisor.tick("schedule");
@@ -607,7 +609,7 @@ describe("AutonomousSupervisor", () => {
   });
 
   it("keeps working when the legacy autonomy.enabled flag is false (autonomy is always on)", async () => {
-    config = { autonomy: { enabled: false }, heartbeat: { enabled: true, auto_actions: { enabled: true } } };
+    config = { autonomy: { enabled: false, tool_policy: { require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true } } };
     goals.create({ title: "Still runs", steps: ["Inspect"], replaceExisting: false });
 
     const result = await supervisor.tick();
@@ -1348,7 +1350,7 @@ describe("AutonomousSupervisor", () => {
       expect(goals.get(goal.id)?.status).toBe("completed");
     });
 
-    it("blocks a genuinely failing goal once its configured logic retry budget is exhausted", async () => {
+    it("keeps retrying logic failures beyond the legacy max_retries setting", async () => {
       config = { autonomy: { enabled: true, tool_policy: { max_retries: 2, retry_backoff_seconds: 5, require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } } };
       run.mockResolvedValue(failed("Run exceeded the maximum number of turns."));
       const goal = goals.create({ title: "Genuinely failing", steps: ["Inspect"], replaceExisting: false });
@@ -1357,8 +1359,9 @@ describe("AutonomousSupervisor", () => {
         await supervisor.tick("test");
         db.prepare("UPDATE autonomy_goal_runs SET next_retry_at=? WHERE goal_id=?").run("2000-01-01T00:00:00.000Z", goal.id);
       }
-      expect(goals.get(goal.id)?.status).toBe("blocked");
-      expect(run.mock.calls.length).toBe(3);
+      expect(goals.get(goal.id)?.status).toBe("active");
+      expect(run.mock.calls.length).toBeGreaterThanOrEqual(5);
+      expect((db.prepare("SELECT next_retry_at FROM autonomy_goal_runs WHERE goal_id=? ORDER BY started_at DESC LIMIT 1").get(goal.id) as { next_retry_at: string | null }).next_retry_at).toBeTruthy();
     });
 
     describe("repeated failures and rejected API keys", () => {

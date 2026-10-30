@@ -1,5 +1,5 @@
-import { SkillInstaller } from "../../installer/skill-installer";
-import { SourceProtocol } from "../../types";
+import { SkillInstaller } from "../../installer/skill-installer.js";
+import { SourceProtocol } from "../../types.js";
 import * as os from "os";
 import * as path from "path";
 

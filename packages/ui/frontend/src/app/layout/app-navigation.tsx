@@ -67,7 +67,7 @@ export const secondaryNavigation: AppNavigationItem[] = [
     id: "plugins",
     titleKey: "navigation.plugins",
     url: "/plugins",
-    description: "Browse and manage installed plugins.",
+    description: "Browse built-in capabilities; manage installed skill plugins in Skills.",
     icon: IconPuzzle,
   },
   {

@@ -8,6 +8,7 @@
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,11 +79,7 @@ function runNpm(args, opts = {}) {
 }
 
 function requireExists(file) {
-  try {
-    return require("node:fs").existsSync(file);
-  } catch {
-    return false;
-  }
+  return existsSync(file);
 }
 
 function main() {

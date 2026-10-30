@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next"
 
 import { getLauncherAuthStatus, postLauncherDashboardSetup } from "@/api/launcher-auth"
 import { LauncherAuthShell } from "@/features/auth/launcher-auth-shell"
-import { useTheme } from "@/hooks/use-theme"
+import { useTheme } from "@/hooks/use-theme-hook"
 import { Button } from "@/shared/ui/button"
 import {
   Card,

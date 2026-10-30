@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { validatePluginManifest } from "../../utils/validator";
+import { validatePluginManifest } from "../../utils/validator.js";
 
 function createTempDir() {
   const dir = path.join(os.tmpdir(), `validator-test-${Date.now()}`);

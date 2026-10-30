@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { SkillInstaller } from "../installer/skill-installer";
+import { SkillInstaller } from "../installer/skill-installer.js";
 
 describe("SkillInstaller.preview", () => {
   let root: string;

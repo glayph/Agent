@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillInstaller } from "../installer/skill-installer";
-import { InstallResult } from "../types";
+import { SkillInstaller } from "../installer/skill-installer.js";
+import { InstallResult } from "../types.js";
 
 describe("SkillInstaller.uninstall", () => {
   let tmpDir: string;

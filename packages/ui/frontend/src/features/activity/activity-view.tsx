@@ -5,7 +5,10 @@ import { useTranslation } from "react-i18next"
 
 import { PageHeader } from "@/app/layout/page-header"
 import { monitorAtom } from "@/features/monitor/store"
+import { chatAtom } from "@/store/chat"
 import { cn } from "@/lib/utils"
+
+import { createLiveCaptureLoop } from "./live-capture-loop"
 
 import {
   cancelScheduledTask,
@@ -25,7 +28,7 @@ import {
 
 const STATUS_POLL_MS = 5000
 const TASK_POLL_MS = 30000
-const SHOT_MS = 5000
+const LIVE_CAPTURE_INTERVAL_MS = 1000
 const monitorNodesAtom = atom((get) => get(monitorAtom).nodes)
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -62,7 +65,10 @@ export function ActivityView() {
   const [shotError, setShotError] = useState<string>()
   const [shotBusy, setShotBusy] = useState(false)
   const shotInFlight = useRef(false)
-  const [autoShot, setAutoShot] = useState(false)
+  const shotController = useRef<AbortController | null>(null)
+  const shotRequestSequence = useRef(0)
+  const mounted = useRef(true)
+  const [autoShot, setAutoShot] = useState(true)
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([])
   const [scheduleError, setScheduleError] = useState<string>()
   const [scheduleBusy, setScheduleBusy] = useState(false)
@@ -76,6 +82,7 @@ export function ActivityView() {
   const [editTimezone, setEditTimezone] = useState("Asia/Dhaka")
   const [editMisfirePolicy, setEditMisfirePolicy] = useState<"skip" | "run_once">("skip")
   const monitorNodes = useAtomValue(monitorNodesAtom)
+  const connectionState = useAtomValue(chatAtom).connectionState
 
   useEffect(() => {
     let stopped = false
@@ -184,23 +191,55 @@ export function ActivityView() {
   const takeShot = useCallback(async () => {
     if (shotInFlight.current || document.visibilityState !== "visible") return
     shotInFlight.current = true
+    const requestId = ++shotRequestSequence.current
+    const controller = new AbortController()
+    shotController.current = controller
     setShotBusy(true)
     try {
-      const result = await getScreenshot()
+      const result = await getScreenshot(controller.signal)
+      if (controller.signal.aborted || requestId !== shotRequestSequence.current) return
       setShot({ src: `data:image/png;base64,${result.png_base64}`, at: result.captured_at })
       setShotError(undefined)
     } catch (error) {
-      setShotError(error instanceof Error ? error.message : String(error))
+      if (!controller.signal.aborted && requestId === shotRequestSequence.current) {
+        setShotError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
+      if (shotController.current === controller) shotController.current = null
       shotInFlight.current = false
-      setShotBusy(false)
+      if (mounted.current && requestId === shotRequestSequence.current) setShotBusy(false)
     }
   }, [])
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      shotRequestSequence.current += 1
+      shotController.current?.abort()
+      shotController.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (!autoShot) return
-    void takeShot()
-    const timer = window.setInterval(() => void takeShot(), SHOT_MS)
-    return () => window.clearInterval(timer)
+    const loop = createLiveCaptureLoop(takeShot, LIVE_CAPTURE_INTERVAL_MS)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loop.resume()
+      } else {
+        loop.pause()
+        shotController.current?.abort()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    if (document.visibilityState === "visible") loop.start()
+    else loop.pause()
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      loop.stop()
+      shotController.current?.abort()
+    }
   }, [autoShot, takeShot])
 
   const toolCalls = useMemo(
@@ -252,8 +291,14 @@ export function ActivityView() {
       </Card>
 
       <Card title={t("pages.activity.liveToolCalls", { defaultValue: "Live tool calls" })}>
+        <p className="text-muted-foreground mb-2 text-[11px]">
+          {t("pages.activity.historyInfo", { defaultValue: "Recent tool statuses persist in this browser; sensitive inputs and outputs are not retained." })}
+        </p>
+        <p className={cn("mb-2 text-xs", connectionState === "connected" ? "text-emerald-600" : "text-amber-600")} role="status">
+          {t("pages.activity.eventStreamStatus", { state: t(`pages.activity.connectionStates.${connectionState}`, { defaultValue: connectionState.replaceAll("_", " ") }), defaultValue: "Agent event stream: {{state}}" })}
+        </p>
         {toolCalls.length === 0 ? (
-          <p className="text-muted-foreground text-sm">{t("pages.activity.noToolCalls", { defaultValue: "No tool calls yet." })}</p>
+          <p className="text-muted-foreground text-sm">{connectionState === "connected" ? t("pages.activity.noToolCalls", { defaultValue: "No tool calls received in this live session yet." }) : t("pages.activity.noToolCallsDisconnected", { defaultValue: "No tool calls can be confirmed while the event stream is disconnected. Reconnect to receive live events." })}</p>
         ) : (
           <ul className="flex flex-col gap-1 text-sm">
             {toolCalls.map((node) => (
@@ -290,10 +335,20 @@ export function ActivityView() {
             <input type="checkbox" checked={autoShot} onChange={(e) => setAutoShot(e.target.checked)} />
             {t("pages.activity.autoRefresh", { defaultValue: "Auto refresh" })}
           </label>
-          {shot && <span className="text-muted-foreground ml-auto text-xs">{new Date(shot.at).toLocaleTimeString(i18n.resolvedLanguage)}</span>}
+          {shot && (
+            <span className="text-muted-foreground ml-auto text-xs" role="status" aria-live="polite">
+              {autoShot ? `${t("pages.activity.live", { defaultValue: "Live" })} · ` : ""}
+              {new Date(shot.at).toLocaleTimeString(i18n.resolvedLanguage)}
+            </span>
+          )}
         </div>
         {shotError && <p role="alert" className="text-destructive text-sm">{shotError}</p>}
         {shot && <img src={shot.src} alt={t("pages.activity.currentScreen", { defaultValue: "Current desktop screen" })} className="border-border max-h-[55svh] w-full rounded-md border bg-muted/20 object-contain object-top" />}
+        {!shot && !shotBusy && !shotError && (
+          <p className="text-muted-foreground py-8 text-center text-sm">
+            {t("pages.activity.captureWaiting", { defaultValue: "Waiting for the first desktop frame…" })}
+          </p>
+        )}
       </Card>
 
       <Card title={t("pages.activity.cronSchedules", { defaultValue: "Scheduled tasks" })}>

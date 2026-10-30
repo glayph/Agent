@@ -898,7 +898,6 @@ export class AgentEngine {
     const triggerRatio = Math.min(0.95, Math.max(0.3, compactionConfig?.triggerRatio ?? 0.75));
     const keepRecentUnits = Math.max(1, Math.floor(compactionConfig?.keepRecentUnits ?? 4));
     const keepRecentToolResults = Math.max(0, Math.floor(compactionConfig?.keepRecentToolResults ?? 4));
-    let compactions = 0;
     const triedModels = new Set<string>([llm.model]);
     // A failover lasts for one turn only: the next turn starts on the primary model again.
     const primaryLlm = llm;
@@ -964,7 +963,6 @@ export class AgentEngine {
           });
           if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
           if (outcome) {
-            compactions += 1;
             state.messages = outcome.messages;
             visibleMessages = pruneToolResults(state.messages, { keepRecentToolResults });
             emit({

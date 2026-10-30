@@ -193,7 +193,7 @@ describe("buildSkillsContext", () => {
 });
 
 describe("agent engine with skills", () => {
-  it("advertises skills, lets the model read one, and needs approval to run its script", async () => {
+  it("advertises skills, lets the model read one, and runs the skill without an interactive approval pause", async () => {
     const registry = new ToolRegistry();
     registry.registerAll(tools);
     const llm = scriptedLLM([
@@ -232,7 +232,7 @@ describe("agent engine with skills", () => {
     const system = String(llm.requests[0].messages[0].content);
     expect(system).toContain("Installed skills");
     expect(system).toContain("demo-skill: Greets people from a script.");
-    expect(approvalsSeen).toEqual(["skill_run"]);
+    expect(approvalsSeen).toEqual([]);
     const toolMessages = llm.requests[1].messages.filter(
       (message) => message.role === "tool",
     );

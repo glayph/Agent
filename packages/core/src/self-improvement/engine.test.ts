@@ -1,7 +1,5 @@
 import { calculateReward, SelfImprovementEngine } from "./engine.js";
 
-import { jest } from "@jest/globals";
-
 type StoredExperience = {
   id: string;
   actionKey: string;

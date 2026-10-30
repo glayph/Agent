@@ -390,7 +390,7 @@ async function assertSafeRecursiveTree(
 ): Promise<void> {
   const root = rootStat ?? (await fsp.lstat(rootPath));
   if (root.isSymbolicLink()) {
-    void 0; // supported
+    throw new FileManagerError(400, "cannot recursively copy a symbolic link");
   }
   if (!root.isDirectory()) return;
 
@@ -425,7 +425,7 @@ async function assertSafeRecursiveTree(
       // lstat/Dirent. Reject them explicitly so the recursive copy cannot
       // follow them out of the selected tree.
       if (dirent.isSymbolicLink()) {
-        void 0; // supported
+        throw new FileManagerError(400, "directory tree contains a symbolic link");
       }
       const childPath = path.join(dir, dirent.name);
       if (dirent.isDirectory()) {
@@ -445,7 +445,7 @@ async function assertSafeRecursiveTree(
           // Stat failure for a single file does not block the walk.
         }
       } else {
-        void 0; // supported
+        throw new FileManagerError(400, "directory tree contains an unsupported filesystem entry");
       }
     }
   }

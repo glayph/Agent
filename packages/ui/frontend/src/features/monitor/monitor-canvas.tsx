@@ -10,6 +10,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { Link } from "@tanstack/react-router"
+import { Button } from "@/shared/ui/button"
 import { PageHeader } from "@/app/layout/page-header"
 import {
   Background,
@@ -26,8 +27,9 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { useAtomValue } from "jotai"
+import { selectAtom } from "jotai/utils"
 import { useTranslation } from "react-i18next"
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
   activityStatusLabel,
@@ -48,15 +50,38 @@ import "@/features/monitor/monitor.css"
 import {
   type MonitorNode,
   type MonitorRun,
+  type MonitorState,
   monitorAtom,
   selectMonitorNode,
   setNodePosition,
   toggleNodeUIState,
+  hydrateMonitorHistory,
 } from "@/features/monitor/store"
 import { cn } from "@/lib/utils"
+import { fetchMonitorHistory, importLocalMonitorHistory, type MonitorHistoryCursor } from "@/features/monitor/history-api"
 
 const nodeTypes: NodeTypes = { agentNode: AgentNode }
 const edgeTypes: EdgeTypes = { flowEdge: FlowEdge }
+
+type MonitorLayoutSnapshot = {
+  key: string
+  nodes: MonitorNode[]
+  edges: MonitorState["edges"][string][]
+}
+
+/** Keep layout inputs stable across status/output-only updates so Dagre runs only for geometry changes. */
+const monitorLayoutAtom = selectAtom(
+  monitorAtom,
+  (state): MonitorLayoutSnapshot => {
+    const nodes = Object.values(state.nodes)
+    const edges = Object.values(state.edges)
+    const key = `${nodes
+      .map((node) => `${node.id}:${node.uiState}:${node.hasManualPosition ? `${node.position?.x ?? 0},${node.position?.y ?? 0}` : "auto"}`)
+      .join("|")}#${edges.map((edge) => `${edge.id}:${edge.source}:${edge.target}`).join("|")}`
+    return { key, nodes, edges }
+  },
+  (previous, next) => previous.key === next.key,
+)
 
 function stringifyInspectorValue(value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined
@@ -86,23 +111,14 @@ function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
 
   const rawNodes = Object.values(state.nodes)
   const rawEdges = Object.values(state.edges)
-  // Status/output updates are frequent. Re-run Dagre only when graph topology,
-  // node size or a manually assigned position changes, not on every event.
-  const layoutKey = `${rawNodes
-    .map((node) => `${node.id}:${node.uiState}:${node.hasManualPosition ? `${node.position?.x ?? 0},${node.position?.y ?? 0}` : "auto"}`)
-    .join("|")}#${rawEdges.map((edge) => `${edge.id}:${edge.source}:${edge.target}`).join("|")}`
-  const layoutCache = useRef<{
-    key: string
-    positions: Map<string, { x: number; y: number }>
-  } | null>(null)
-  if (layoutCache.current?.key !== layoutKey) {
-    const positioned = computeLayout(rawNodes, rawEdges).nodes
-    layoutCache.current = {
-      key: layoutKey,
-      positions: new Map(positioned.flatMap((node) => node.position ? [[node.id, node.position] as const] : [])),
-    }
-  }
-  const positions = layoutCache.current.positions
+  // `selectAtom` preserves this geometry-only snapshot when live status/output
+  // events arrive, so rendering never mutates or reads refs during render and
+  // Dagre only runs when topology, node size, or manual positions change.
+  const layoutInput = useAtomValue(monitorLayoutAtom)
+  const positions = useMemo(() => {
+    const positioned = computeLayout(layoutInput.nodes, layoutInput.edges).nodes
+    return new Map(positioned.flatMap((node) => node.position ? [[node.id, node.position] as const] : []))
+  }, [layoutInput])
   const nodes = toReactFlowNodes(rawNodes.map((node) => ({
     ...node,
     position: node.hasManualPosition && node.position ? node.position : positions.get(node.id),
@@ -351,9 +367,88 @@ function InspectorBlock({
   )
 }
 
+function MonitorHistoryStatusBar({
+  source,
+  loadingOlder,
+  hasOlder,
+  error,
+  onLoadOlder,
+}: {
+  source: "loading" | "server" | "offline"
+  loadingOlder: boolean
+  hasOlder: boolean
+  error?: string
+  onLoadOlder: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 border-b px-4 py-1.5 text-[11px]">
+      <div className="min-w-0">
+        <span>{t("pages.monitor.historyInfo", { defaultValue: "Run and node metadata is shared through the local Gateway; sensitive inputs and outputs are not saved." })}</span>
+        {source === "offline" && <span> · {t("pages.monitor.historyOffline", { defaultValue: "Gateway history is unavailable; showing local fallback." })}</span>}
+        {source === "loading" && <span> · {t("pages.monitor.historyLoading", { defaultValue: "Syncing history…" })}</span>}
+        {error && <span role="alert" className="text-destructive"> · {error}</span>}
+      </div>
+      {hasOlder && <Button size="sm" variant="outline" disabled={loadingOlder} onClick={onLoadOlder}>
+        {loadingOlder ? t("pages.monitor.historyLoadingOlder", { defaultValue: "Loading…" }) : t("pages.monitor.loadOlder", { defaultValue: "Load older history" })}
+      </Button>}
+    </div>
+  )
+}
+
 function MonitorWorkspace() {
   const state = useAtomValue(monitorAtom)
   const { t } = useTranslation()
+  const [historySource, setHistorySource] = useState<"loading" | "server" | "offline">("loading")
+  const [nextBefore, setNextBefore] = useState<MonitorHistoryCursor | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [historyError, setHistoryError] = useState<string>()
+
+  useEffect(() => {
+    let cancelled = false
+    const hydrate = async () => {
+      try {
+        // Import old metadata once. Never delete the local fallback unless the API confirms the import.
+        const localHistory = window.localStorage.getItem("miki.monitor.history.v1")
+        if (localHistory && !window.localStorage.getItem("miki.monitor.history.migrated.v1")) {
+          const importId = window.localStorage.getItem("miki.monitor.history.import-id.v1") || crypto.randomUUID()
+          window.localStorage.setItem("miki.monitor.history.import-id.v1", importId)
+          try {
+            await importLocalMonitorHistory(JSON.parse(localHistory) as unknown, importId)
+            window.localStorage.setItem("miki.monitor.history.migrated.v1", "1")
+          } catch {
+            // Keep local fallback intact; a later mount retries the idempotent migration.
+          }
+        }
+        const snapshot = await fetchMonitorHistory()
+        if (cancelled) return
+        hydrateMonitorHistory(snapshot)
+        setNextBefore(snapshot.next_before)
+        setHistorySource("server")
+      } catch {
+        if (!cancelled) setHistorySource("offline")
+      }
+    }
+    void hydrate()
+    return () => { cancelled = true }
+  }, [])
+
+  const loadOlderHistory = async () => {
+    if (nextBefore === null || loadingOlder) return
+    setLoadingOlder(true)
+    setHistoryError(undefined)
+    try {
+      const snapshot = await fetchMonitorHistory(nextBefore)
+      hydrateMonitorHistory(snapshot)
+      setNextBefore(snapshot.next_before)
+      setHistorySource("server")
+    } catch {
+      setHistoryError(t("pages.monitor.historyOlderFailed", { defaultValue: "Could not load older history. Try again." }))
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
   const runs = useMemo(
     () => Object.values(state.runs).sort((a, b) => b.startedAt - a.startedAt),
     [state.runs],
@@ -385,6 +480,7 @@ function MonitorWorkspace() {
           <p className="text-muted-foreground mt-1 text-xs leading-5">
             {t("pages.monitor.noActivityDescription", { defaultValue: "Start a task in chat to see its steps here." })}
           </p>
+          <MonitorHistoryStatusBar source={historySource} loadingOlder={loadingOlder} hasOlder={nextBefore !== null} error={historyError} onLoadOlder={() => void loadOlderHistory()} />
           <Link
             to="/"
             className="bg-primary text-primary-foreground mt-4 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-opacity hover:opacity-90"
@@ -400,6 +496,7 @@ function MonitorWorkspace() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-miki-page-shell="monitor">
       <PageHeader title={t("navigation.monitor", { defaultValue: "Agent Monitor" })} titleLevel={1} />
+      <MonitorHistoryStatusBar source={historySource} loadingOlder={loadingOlder} hasOlder={nextBefore !== null} error={historyError} onLoadOlder={() => void loadOlderHistory()} />
     <div className="bg-background relative min-h-0 min-w-0 flex-1 overflow-hidden" data-miki-page="monitor">
       <ReactFlowProvider>
         <CanvasInner selectedNodeId={state.selectedNodeId} />

@@ -8,8 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageDir, "..", "..");
 const VERSION = readVersion();
-const STATES = ["stopped", "starting", "running", "stopping", "error"] as const;
-type State = (typeof STATES)[number];
+type State = "stopped" | "starting" | "running" | "stopping" | "error";
 
 type Config = {
   command: string;

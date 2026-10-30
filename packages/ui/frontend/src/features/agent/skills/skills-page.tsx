@@ -85,7 +85,7 @@ function SkillsListView() {
               ref={importInputRef}
               type="file"
               aria-label={t("pages.agent.skills.import")}
-              accept=".md,text/markdown,text/plain"
+              accept=".md,.zip,.tar.gz,application/zip,application/gzip,text/markdown,text/plain"
               className="hidden"
               onChange={handleImportFileChange}
             />

@@ -18,7 +18,8 @@ import { useTranslation } from "react-i18next"
 import { postLauncherDashboardLogout } from "@/api/launcher-auth"
 import { notify } from "@/lib/notify"
 import { useGateway } from "@/hooks/use-gateway.ts"
-import { type ThemePreference, useTheme } from "@/hooks/use-theme"
+import type { ThemePreference } from "@/hooks/theme-context"
+import { useTheme } from "@/hooks/use-theme-hook"
 import {
   formatSessionRemaining,
   useSessionRemainingMs,
@@ -95,12 +96,12 @@ export function GlobalHeaderActions() {
     try {
       const loggedOut = await postLauncherDashboardLogout()
       if (!loggedOut) {
-        notify.error(t("header.logout.failed", { defaultValue: "Could not sign out. Please try again." }))
+        notify.error(t("header.logout.failed", { defaultValue: "Could not sign out. Please try again." }), { id: "global-header:error:logout-failed" })
         return
       }
       globalThis.location.assign("/launcher-login")
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : t("header.logout.failed", { defaultValue: "Could not sign out. Please try again." }))
+      notify.error(error instanceof Error ? error.message : t("header.logout.failed", { defaultValue: "Could not sign out. Please try again." }), { id: "global-header:error:logout-exception" })
     }
   }
 

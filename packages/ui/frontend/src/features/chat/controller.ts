@@ -865,7 +865,10 @@ export async function sendChatMessage({
 
 export async function deleteChatMessage(messageId: string): Promise<boolean> {
   try {
-    await deleteSessionMessage(activeSessionIdRef, messageId)
+    // The store is the source shown to the UI; prefer its active session so an
+    // externally restored session cannot be deleted against a stale socket ref.
+    const sessionId = getChatState().activeSessionId || activeSessionIdRef
+    await deleteSessionMessage(sessionId, messageId)
     updateChatStore((prev) => ({
       messages: prev.messages.filter((message) => message.id !== messageId),
     }))

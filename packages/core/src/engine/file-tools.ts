@@ -96,9 +96,22 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         : path.resolve(root, raw);
     return abs;
   };
-  const notRoot = (_abs: string) => {
+  const notRoot = (abs: string) => {
     const root = getRoot();
-    void root; // the workspace root may be modified
+    if (path.resolve(abs) === root) throw new Error("The workspace root cannot be modified.");
+  };
+  const assertNotSensitive = (abs: string) => {
+    const relative = path.relative(getRoot(), path.resolve(abs));
+    const segments = relative.split(path.sep).filter(Boolean);
+    const protectedDirectories = new Set([".git", ".ssh", ".aws", ".azure", ".gnupg"]);
+    const protectedFile = (name: string) => {
+      const lower = name.toLowerCase();
+      if (lower === ".env.example" || lower === ".env.sample" || lower === ".env.template") return false;
+      return lower === ".env" || lower.startsWith(".env.") || /^(id_rsa|id_ed25519|credentials\.json|secrets\.json)$/.test(lower) || /\.(pem|key|p12|pfx|keystore)$/i.test(lower);
+    };
+    if (segments.some((segment, index) => protectedDirectories.has(segment) || (index === segments.length - 1 && protectedFile(segment)))) {
+      throw new Error("Access to sensitive files and directories is blocked.");
+    }
   };
   const requireExisting = (abs: string) => {
     if (!fs.existsSync(abs)) throw new Error("Path does not exist.");
@@ -108,12 +121,14 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
   const transfer = (input: Record<string, unknown>, mode: "move" | "copy") => {
     const source = resolve(input.path);
     notRoot(source);
+    assertNotSensitive(source);
     requireExisting(source);
     const destination = resolve(input.destination, "destination");
     let target: string;
     if (fs.existsSync(destination) && fs.statSync(destination).isDirectory()) target = path.join(destination, path.basename(source));
     else target = destination;
     notRoot(target);
+    assertNotSensitive(target);
     if (fs.existsSync(target)) throw new Error(`Target already exists: ${rel(target)}.`);
     if (!fs.existsSync(path.dirname(target))) throw new Error("Destination folder does not exist.");
     if (target === source || target.startsWith(`${source}${path.sep}`))
@@ -137,6 +152,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       },
       async execute(input) {
         const file = resolve(input.path);
+        assertNotSensitive(file);
         requireExisting(file);
         const info = fs.statSync(file);
         if (!info.isFile()) throw new Error("Path is not a file.");
@@ -184,6 +200,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       execute(input) {
         const abs = resolve(input.path);
         notRoot(abs);
+        assertNotSensitive(abs);
         if (fs.existsSync(abs)) {
           if (fs.statSync(abs).isDirectory()) return { path: rel(abs), created: false };
           throw new Error("A file with that name already exists.");
@@ -206,8 +223,10 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       execute(input) {
         const source = resolve(input.path);
         notRoot(source);
+        assertNotSensitive(source);
         requireExisting(source);
         const target = path.join(path.dirname(source), validName(str(input.newName, "newName")));
+        assertNotSensitive(target);
         if (fs.existsSync(target)) throw new Error(`Target already exists: ${rel(target)}.`);
         fs.renameSync(source, target);
         return { from: rel(source), to: rel(target) };
@@ -253,6 +272,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       execute(input) {
         const abs = resolve(input.path);
         notRoot(abs);
+        assertNotSensitive(abs);
         requireExisting(abs);
         const stat = fs.lstatSync(abs);
         if (stat.isDirectory() && !stat.isSymbolicLink()) {

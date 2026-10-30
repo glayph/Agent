@@ -30,6 +30,8 @@ import { getLifecycleBus } from "@miki/core/hooks"
 import { planAdaptiveOutput } from "@miki/core"
 import { calculateReward } from "@miki/core/self-improvement"
 import { createDashboardExtendedRouter } from "./dashboard-extended.js"
+import { createMonitorHistoryRouter, ensureMonitorHistorySchema, markInterruptedMonitorRuns, persistMonitorEvent, pruneMonitorHistory } from "./monitor-history.js"
+import { createPluginManagementRouter } from "./plugin-management-router.js"
 import { MEDIA_ROUTE, describeFile, resolveMediaPath } from "./chat-attachments.js"
 import { validateRuntimeConfig, migrateRuntimeConfig, createWorkspaceSecretVault, stripChannelSecrets as stripChannelSecretsFromConfig, hydrateChannelSecrets as hydrateChannelSecretsFromConfig } from "@miki/config"
 import { ChannelRuntimeManager } from "./channel-runtime.js"
@@ -43,7 +45,7 @@ import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findA
 import { SqliteMemoryIndex } from "./memory-index.js"
 import { wrapAsyncRoutes } from "./async-route.js"
 import { describeResolution, interpretDefaultModel, normalizeProvider, probeModelProvider, resolveModel } from "./model-resolution.js"
-import { configureLocalModels, synchronizeLocalRuntimeForModel } from "@miki/core/plugins"
+import { configureLocalModels, synchronizeLocalRuntimeForModel, listBuiltinPluginManifests } from "@miki/core/plugins"
 import { createGatewayErrorMiddleware } from "./error-middleware.js"
 import { isWsOriginAllowed, parseAllowedOrigins } from "./ws-origin.js"
 import { isLocalDirectRequest, isRemoteSetupAllowed, parseAllowedHosts } from "./local-request.js"
@@ -1413,6 +1415,8 @@ agent.mount(app)
 
 // Live view of the desktop Miki is working on (Activity view). Read-only: captures one screenshot.
 app.get("/api/autonomy/screenshot", requireAuth, async (_req, res) => {
+  // Screens are private and must always represent a fresh capture, never a cached GET response.
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate")
   const tool = agent.registry.get("computer_screenshot")
   if (!tool) return res.status(404).json({ error: "Computer screenshots are not available." })
   try {
@@ -1726,11 +1730,12 @@ app.use("/api/skills", requireAuth, createSkillsRouter({
   pluginHealth: () => {
     const llm = agent.llmFor()
     const executionOn = fileExecutionEnabled()
+    const checkedAt = new Date().toISOString()
     return {
-      "tools.core-registry": { ok: agent.registry.size > 0, status: agent.registry.size > 0 ? "functional" : "partial", message: `${agent.registry.size} tool(s) registered.` },
-      "workflow.agent-loop": { ok: Boolean(llm), status: llm ? "functional" : "partial", message: llm ? `Model ${llm.model} resolved.` : "No model with credentials is configured." },
-      "code-execution.runtime-fetch": { ok: executionOn, status: executionOn ? "partial" : "disabled", message: executionOn ? undefined : "Script execution is switched off." },
-      "storage.local": { ok: existsSync(dataRoot), status: existsSync(dataRoot) ? "functional" : "partial", message: dataRoot },
+      "tools.core-registry": { ok: agent.registry.size > 0, status: agent.registry.size > 0 ? "functional" : "partial", source: "live_probe", checkedAt, message: `${agent.registry.size} tool(s) registered.` },
+      "workflow.agent-loop": { ok: Boolean(llm), status: llm ? "functional" : "partial", source: "live_probe", checkedAt, message: llm ? `Model ${llm.model} resolved.` : "No model with credentials is configured." },
+      "code-execution.runtime-fetch": { ok: executionOn, status: executionOn ? "partial" : "disabled", source: "live_probe", checkedAt, message: executionOn ? "Script execution is enabled; capability remains partial." : "Script execution is switched off." },
+      "storage.local": { ok: existsSync(dataRoot), status: existsSync(dataRoot) ? "functional" : "partial", source: "live_probe", checkedAt, message: dataRoot },
     }
   },
 }))
@@ -2038,7 +2043,15 @@ async function completeWithProvider(messages: { role: string; content: string }[
 }
 
 const wss = new WebSocketServer({ noServer: true })
-const streamHub = new StreamHub()
+ensureMonitorHistorySchema(db)
+markInterruptedMonitorRuns(db, now())
+pruneMonitorHistory(db, now(), Number(process.env.MIKI_MONITOR_RETENTION_DAYS ?? 30), Number(process.env.MIKI_MONITOR_MAX_RUNS_PER_SESSION ?? 100))
+const monitorRetentionTimer = setInterval(() => {
+  try { pruneMonitorHistory(db, now(), Number(process.env.MIKI_MONITOR_RETENTION_DAYS ?? 30), Number(process.env.MIKI_MONITOR_MAX_RUNS_PER_SESSION ?? 100)) }
+  catch (error) { appendGatewayLog(`Monitor history retention sweep failed: ${error instanceof Error ? error.message : String(error)}`) }
+}, 6 * 60 * 60 * 1000)
+monitorRetentionTimer.unref()
+const streamHub = new StreamHub({ onEvent: (event) => persistMonitorEvent(db, event) })
 const learningScope = () => ({ agentId: process.env.MIKI_AGENT_ID || "miki", ownerId: process.env.MIKI_OWNER_ID || "default-owner", workspaceId: process.env.MIKI_WORKSPACE_ID || "default-workspace" })
 const recordLearningExperience = (input: { runId: string; sessionId: string; taskClass: string; context: string; actionKey: string; modelId?: string; outcome: string; rewardInput: Record<string, unknown>; metadata?: Record<string, unknown>; contextHash?: string; idempotencyKey?: string; actionPayload?: Record<string, unknown> }) => {
   const integration = initMemory(dataRoot)
@@ -2479,6 +2492,14 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
 
 // Do not leave commands the agent started running after the gateway stops.
 shutdownHandlers.push(() => agent.processes.killAll())
+app.use("/api/monitor", requireAuth, createMonitorHistoryRouter(db, requireAuth, now))
+const pluginManagement = createPluginManagementRouter({
+  db, dataRoot, configDir, requireAuth, now,
+  builtinIds: new Set(listBuiltinPluginManifests().map((manifest) => manifest.id)),
+  registerShutdownHandler: (handler) => { shutdownHandlers.push(handler) },
+})
+app.use("/api/plugins", pluginManagement.router)
+void pluginManagement.startEnabledPlugins()
 app.use("/api", createDashboardExtendedRouter({
   db,
   app,
@@ -2498,6 +2519,7 @@ app.use("/api", createDashboardExtendedRouter({
   getGatewayLogs: (offset, runId) => { const filtered = gatewayLogs.filter((entry) => runId === undefined || entry.runId === runId); return { logs: filtered.slice(Math.max(0, offset)).map((entry) => `[${entry.at}] ${entry.message}`), log_total: filtered.length, log_run_id: gatewayRunId } },
   appendGatewayLog: (message) => appendGatewayLog(message),
   channelRuntimeStatus: (name) => channelRuntime.status(name),
+  channelTestDelivery: (name, recipient, text, idempotencyKey) => channelRuntime.sendTestMessage(name, recipient, text, idempotencyKey),
   registerShutdownHandler: (handler) => { shutdownHandlers.push(handler) },
   approvals: agent.approvals,
 }))

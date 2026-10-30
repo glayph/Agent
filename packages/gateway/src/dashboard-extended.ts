@@ -53,6 +53,8 @@ export interface DashboardExtendedDeps {
   getGatewayLogs: (offset: number, runId?: number) => { logs: string[]; log_total: number; log_run_id: number }
   appendGatewayLog: (message: string) => void
   channelRuntimeStatus?: (name: string) => { runtime_live: boolean; connected: boolean; enabled: boolean; configured: boolean; lastError?: string; lastConnectedAt?: string; lastEventAt?: string }
+  /** Single-recipient provider delivery with durable idempotency; only exposed behind explicit E2E gate. */
+  channelTestDelivery?: (name: string, recipient: string, text: string, idempotencyKey: string) => Promise<{ status: "sent" | "duplicate"; channel: string; recipientHash: string; providerAckId: string; idempotencyKey: string }>
   approvals: {
     requestApproval: (request: { operationId: string; capability: string; action: string; risk: "install"; reason: string; sanitizedInput: Record<string, unknown>; context: { origin: "dashboard"; actor: string } }) => Promise<{ requestId: string }>
     isApproved: (request: { operationId: string; capability: string; action: string; risk: "install"; reason: string; sanitizedInput: Record<string, unknown>; context: { origin: "dashboard"; actor: string }; approvalRequestId?: string }) => boolean
@@ -535,6 +537,29 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
 
 
 
+  router.post("/channels/:name/test-delivery", deps.requireAuth, async (req, res) => {
+    if (process.env.MIKI_E2E_CHANNEL_SEND_ENABLED !== "true") return res.status(403).json({ error: "live_test_delivery_disabled" })
+    const configuredRecipient = (process.env.MIKI_E2E_TEST_RECIPIENT || "").trim()
+    if (!configuredRecipient || configuredRecipient === "*") return res.status(503).json({ error: "test_recipient_not_configured" })
+    const name = typeof req.params.name === "string" ? req.params.name : ""
+    if (!(name === "telegram" || name === "discord" || name === "slack")) return res.status(404).json({ error: "channel_test_not_supported" })
+    const body = asRecord(req.body)
+    const recipient = typeof body.recipient === "string" ? body.recipient.trim() : ""
+    const idempotencyKey = String(req.header("idempotency-key") || "")
+    const text = typeof body.text === "string" ? body.text : ""
+    if (recipient !== configuredRecipient) return res.status(403).json({ error: "test_recipient_mismatch" })
+    if (!/^[A-Za-z0-9._:-]{8,120}$/.test(idempotencyKey) || text !== `MIKI-E2E:${idempotencyKey}`) return res.status(400).json({ error: "test_message_marker_invalid" })
+    if (!deps.channelTestDelivery) return res.status(503).json({ error: "channel_test_delivery_unavailable" })
+    try {
+      const result = await deps.channelTestDelivery(name, recipient, text, idempotencyKey)
+      return res.json({ ok: true, status: result.status, channel: result.channel, recipient_hash: result.recipientHash, provider_ack_id: result.providerAckId, idempotency_key: result.idempotencyKey })
+    } catch (error) {
+      const code = error instanceof Error && /^[a-z0-9_:-]{1,100}$/i.test(error.message) ? error.message : "channel_test_delivery_failed"
+      const status = code.endsWith("in_progress") || code.endsWith("idempotency_key_conflict") ? 409 : code.endsWith("not_configured") ? 409 : code.endsWith("disabled") || code.endsWith("recipient_mismatch") ? 403 : code.endsWith("auth_rejected") || code.endsWith("provider_rejected") || code.endsWith("provider_unavailable") ? 502 : 400
+      return res.status(status).json({ ok: false, error: code })
+    }
+  })
+
   router.get("/channels/catalog", (_req, res) => {
     const config = deps.getAppConfig()
     res.json({ channels: CHANNEL_META.map((meta) => {
@@ -564,16 +589,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     res.json({ ...safe, config_key: meta.name, variant: meta.name === "whatsapp_native" ? "native" : undefined })
   })
 
-  // Authenticated owner view of the saved credentials, so a saved token can be seen again when the form is reopened.
-  // The list/config responses stay masked; only this endpoint returns values.
-  router.get("/channels/:name/secrets", deps.requireAuth, (req, res) => {
-    const name = req.params.name
-    if (!CHANNEL_META.some((item) => item.name === name)) return res.status(404).json({ error: `Unknown channel \"${name}\".` })
-    const { settings } = splitChannelConfig(getChannelRecord(deps.getAppConfig(), name))
-    const secrets = Object.fromEntries(Object.entries(settings).filter(([key, value]) => CHANNEL_SECRET_KEYS.has(key) && typeof value === "string" && value.trim() !== "").map(([key, value]) => [key, String(value)]))
-    res.setHeader("Cache-Control", "no-store")
-    res.json({ secrets })
-  })
+
 
   function buildChannelProbeResponse(
     name: string,

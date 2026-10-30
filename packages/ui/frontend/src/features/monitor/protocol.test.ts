@@ -110,6 +110,13 @@ describe("handleMonitorMessage: node.spawn", () => {
     expect(getMonitorState().nodes["n1"].label).toBe("unknown")
   })
 
+  it("keeps a queued node pending until the tool actually starts", () => {
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "n1", label: "file_read", status: "pending" }))
+    expect(getMonitorState().nodes["n1"].status).toBe("pending")
+    handleMonitorMessage(msg("node.update", { node_id: "n1", status: "running" }))
+    expect(getMonitorState().nodes["n1"].status).toBe("running")
+  })
+
   it("adds the node id to nodeOrder exactly once even if spawned twice", () => {
     handleMonitorMessage(
       msg("node.spawn", { run_id: "r", node_id: "n1", label: "shell_execute" }),
@@ -313,6 +320,12 @@ describe("handleMonitorMessage: node.run_end", () => {
     expect(getMonitorState().runs["unknown"]).toBeUndefined()
   })
 })
+
+  it("treats a completed-with-warning run as terminal and successful", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "run-1" }))
+    handleMonitorMessage(msg("node.run_end", { run_id: "run-1", status: "completed_with_warning" }))
+    expect(getMonitorState().runs["run-1"].status).toBe("completed")
+  })
 
 describe("handleMonitorMessage: unrelated/unknown message types", () => {
   it("does not throw and does not mutate state for a chat message type", () => {

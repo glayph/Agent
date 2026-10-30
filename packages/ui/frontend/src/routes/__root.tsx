@@ -1,6 +1,7 @@
 import { IconX } from "@tabler/icons-react"
 import { Outlet, createRootRoute, useRouterState } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import { getLauncherAuthStatus } from "@/api/launcher-auth"
 import { AppLayout } from "@/app/layout/app-layout"
@@ -16,24 +17,31 @@ import {
 type AuthGateState = "checking" | "authenticated" | "redirecting" | "degraded"
 
 function AuthGateFallback() {
+  const { t } = useTranslation()
   return (
     <div
       className="bg-background text-muted-foreground flex h-dvh items-center justify-center text-sm"
       role="status"
       aria-live="polite"
     >
-      Loading…
+      {t("labels.loading", { defaultValue: "Loading…" })}
     </div>
   )
 }
 
-function AuthGateError({ message }: { message: string }) {
+function AuthGateError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation()
   return (
     <div
       className="bg-background text-destructive flex h-dvh items-center justify-center px-6 text-center text-sm"
       role="alert"
     >
-      Auth service unavailable: {message}
+      <div className="flex max-w-lg flex-col items-center gap-3">
+        <p>{t("labels.authServiceUnavailable", { message, defaultValue: "Auth service unavailable: {{message}}" })}</p>
+        <button type="button" className="border-border bg-background text-foreground rounded-md border px-3 py-2 text-sm" onClick={onRetry}>
+          {t("labels.retryConnection", { defaultValue: "Retry connection" })}
+        </button>
+      </div>
     </div>
   )
 }
@@ -61,6 +69,7 @@ const RootLayout = () => {
     )
 
   const [authError, setAuthError] = useState<string | null>(null)
+  const [authRetryVersion, setAuthRetryVersion] = useState(0)
   const [authGateState, setAuthGateState] = useState<AuthGateState>("checking")
   const sessionRemainingMs = useSessionRemainingMs()
 
@@ -112,7 +121,7 @@ const RootLayout = () => {
       globalThis.clearInterval(pollTimer)
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [isAuthPage])
+  }, [authRetryVersion, isAuthPage])
 
   useEffect(() => {
     if (sessionRemainingMs !== null && sessionRemainingMs <= 0) {
@@ -142,6 +151,7 @@ const RootLayout = () => {
           authError ||
           "Reset dashboard password storage and restart the application."
         }
+        onRetry={() => setAuthRetryVersion((version) => version + 1)}
       />
     )
   }

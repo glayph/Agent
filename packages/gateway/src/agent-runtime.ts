@@ -1,5 +1,5 @@
 import { wireToolCallExtras } from "./tool-call-wire.js"
-import { resolveContextWindowTokens, resolveMaxToolIterations, resolveMaxWallTimeMs } from "./runtime-settings.js";
+import { resolveContextWindowTokens, resolveMaxWallTimeMs } from "./runtime-settings.js";
 import type { LooseConfig } from "./loose-config.js"
 import { createTerminalTools } from "./terminal-tool.js";
 import { ProcessManager } from "./process-manager.js";
@@ -39,6 +39,7 @@ import {
   type RunResult,
   type AgentPlan,
   type ToolApprovalPolicy,
+  redactSecrets,
 } from "@miki/core/engine"
 import type { SkillRegistryClient, SkillStore } from "@miki/core/skills"
 import { searchWeb } from "@miki/core/web-search-service"
@@ -1106,12 +1107,125 @@ export function createWsEventMapper(
   const attachmentCollector = getAttachmentContext ? createAttachmentCollector(getAttachmentContext) : undefined
   const attachmentsFor = (): ChatAttachmentPayload[] => attachmentCollector?.list() ?? []
   const created = new Set<string>()
+  /** Tool-call nodes already introduced to the monitor for this run. */
+  const monitorNodes = new Set<string>()
   /** Id of the primary/final assistant message (finalIds holds the same single id). */
   let finalId: string = randomUUID()
   const finalIds: string[] = []
   /** Live message that is currently receiving streamed text, keyed by run. */
   const streamed = new Map<string, { id: string; turn: number; text: string }>()
   let toolFeedbackSeq = 0
+
+  const monitorStatus = (status: string): "pending" | "running" | "retrying" | "completed" | "failed" => {
+    if (status === "running") return "running"
+    if (status === "retrying") return "retrying"
+    if (status === "succeeded") return "completed"
+    if (["failed", "denied", "blocked", "cancelled"].includes(status)) return "failed"
+    return "pending"
+  }
+
+  const safeMonitorInput = (argumentsText: string): unknown => {
+    const secretKey = /(?:password|passwd|secret|token|api[-_]?key|authorization|credential|private[-_]?key|cookie|client[-_]?secret)/i
+    const sanitize = (value: unknown): unknown => {
+      if (typeof value === "string") {
+        const redacted = redactSecrets(value)
+        return redacted.length > 1000 ? `${redacted.slice(0, 999)}…` : redacted
+      }
+      if (Array.isArray(value)) return value.slice(0, 50).map(sanitize)
+      if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 100).map(([key, item]) => [
+          key,
+          secretKey.test(key) ? "[REDACTED]" : sanitize(item),
+        ]))
+      }
+      return value
+    }
+    try {
+      const parsed: unknown = JSON.parse(argumentsText || "{}")
+      return JSON.stringify(parsed).length > 2000
+        ? `${JSON.stringify(sanitize(parsed)).slice(0, 1999)}…`
+        : sanitize(parsed)
+    } catch {
+      const redacted = redactSecrets(argumentsText || "{}")
+      return redacted.length > 2000 ? `${redacted.slice(0, 1999)}…` : redacted
+    }
+  }
+
+  const emitMonitorToolCall = (
+    call: { id: string; name: string; arguments?: string; status: string; error?: string; durationMs?: number; resultPreview?: string },
+    runId: string,
+    turn: number,
+  ) => {
+    const nodeId = `${runId}:${call.id}`
+    const isNew = !monitorNodes.has(nodeId)
+    const terminal = ["succeeded", "failed", "denied", "blocked", "cancelled"].includes(call.status)
+    if (isNew) {
+      monitorNodes.add(nodeId)
+      send("node.spawn", {
+        run_id: runId,
+        node_id: nodeId,
+        label: call.name,
+        // Tool calls from one model turn form one execution wave; a later turn
+        // only starts after the current turn's tool results have been returned.
+        level: Math.max(0, turn - 1),
+        parallel: false,
+        status: terminal ? "pending" : monitorStatus(call.status),
+        input: safeMonitorInput(typeof call.arguments === "string" ? call.arguments : "{}"),
+        action: call.name,
+      })
+    }
+
+    if (terminal) {
+      const successful = call.status === "succeeded"
+      const resultPreview = typeof call.resultPreview === "string"
+        ? redactSecrets(call.resultPreview).slice(0, 1000)
+        : undefined
+      const error = typeof call.error === "string"
+        ? redactSecrets(call.error).slice(0, 1000)
+        : undefined
+      send("node.complete", {
+        run_id: runId,
+        node_id: nodeId,
+        ok: successful,
+        ...(typeof call.durationMs === "number" ? { duration_ms: call.durationMs } : {}),
+        ...(resultPreview ? { result_message: resultPreview, output_preview: resultPreview } : {}),
+        ...(!successful ? { result_message: error || `Tool ${call.status}.` } : {}),
+      })
+    } else if (!isNew) {
+      send("node.update", {
+        run_id: runId,
+        node_id: nodeId,
+        status: monitorStatus(call.status),
+        action: call.name,
+      })
+    }
+  }
+
+  const emitMonitorPlan = (runId: string, plan: AgentPlan) => {
+    const steps = new Map(plan.steps.map((step) => [step.id, step]))
+    const depths = new Map<string, number>()
+    const depthOf = (id: string, visiting = new Set<string>()): number => {
+      const cached = depths.get(id)
+      if (cached !== undefined) return cached
+      const step = steps.get(id)
+      if (!step || visiting.has(id)) return 0
+      const nextVisiting = new Set(visiting).add(id)
+      const dependencies = (step.dependsOn ?? []).filter((dependency) => steps.has(dependency))
+      const depth = dependencies.length
+        ? Math.max(...dependencies.map((dependency) => depthOf(dependency, nextVisiting))) + 1
+        : 0
+      depths.set(id, depth)
+      return depth
+    }
+    const levels = plan.steps.length
+      ? Math.max(...plan.steps.map((step) => depthOf(step.id))) + 1
+      : 0
+    send("node.plan", {
+      run_id: runId,
+      total: plan.steps.length,
+      levels,
+    })
+  }
   const toolFeedbackPayload = (call: { id: string; name: string; arguments?: string; status: string; error?: string; durationMs?: number }, runId: string) => {
     const cfg = getToolFeedbackConfig()
     if (!cfg.enabled) return
@@ -1178,10 +1292,11 @@ export function createWsEventMapper(
     const runId = event.runId
     switch (event.type) {
       case "run.started":
-        send("node.run_start", { run_id: runId, status: "running" })
+        send("node.run_start", { run_id: runId, status: "running", objective: event.goal })
         send("typing.start", { run_id: runId })
         break
       case "plan.created":
+        emitMonitorPlan(runId, event.plan)
         send("message.create", {
           message_id: `plan-${event.plan.id}`,
           content: describePlan(event.plan),
@@ -1191,6 +1306,7 @@ export function createWsEventMapper(
         })
         break
       case "plan.updated":
+        emitMonitorPlan(runId, event.plan)
         send("message.create", {
           message_id: `plan-update-${event.plan.id}-${Date.now()}`,
           content: describePlan(event.plan),
@@ -1251,6 +1367,8 @@ export function createWsEventMapper(
         break
       }
       case "tool.call":
+        // Monitor lifecycle events are independent of optional chat tool-feedback messages.
+        emitMonitorToolCall(event.call, runId, event.turn)
         toolFeedbackPayload(event.call, runId)
         attachmentCollector?.observe(event.call)
         break

@@ -129,16 +129,6 @@ export async function getChannelConfig(
   )
 }
 
-/** Saved credentials of one channel (authenticated owner view), keyed by field name. */
-export async function getChannelSecrets(
-  channelName: string,
-): Promise<Record<string, string>> {
-  const response = await request<{ secrets?: Record<string, string> }>(
-    `/api/channels/${encodeURIComponent(channelName)}/secrets`,
-  )
-  return response.secrets ?? {}
-}
-
 export async function probeChannelRuntime(
   channelName: string,
   mode?: ChannelRuntimeProbeResponse["check_mode"],

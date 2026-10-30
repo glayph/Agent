@@ -26,6 +26,7 @@ import {
   getSkillOriginKind,
   sortOrigins,
 } from "./origin-utils"
+import { validateSkillImportFile } from "./skill-import-utils"
 import type {
   SkillDetailView,
   SkillGroupSection,
@@ -34,7 +35,6 @@ import type {
   SkillStatItem,
 } from "./types"
 
-const MAX_IMPORT_FILE_SIZE = 1 << 20
 
 export function useSkillsPage() {
   const { t } = useTranslation()
@@ -247,20 +247,14 @@ export function useSkillsPage() {
   }
 
   const validateImportFile = (file: File) => {
-    const fileName = file.name.toLowerCase()
-    const isMarkdownFile =
-      fileName.endsWith(".md") ||
-      file.type === "text/markdown" ||
-      file.type === "text/plain"
-
-    if (!isMarkdownFile) {
-      return t("pages.agent.skills.import_invalid_type")
+    const result = validateSkillImportFile(file)
+    if (result === "invalid_type") return t("pages.agent.skills.import_invalid_type")
+    if (result === "invalid_size") {
+      return t("pages.agent.skills.import_invalid_size", {
+        maxMb: 55,
+        defaultValue: "Skill file must be 55 MB or smaller.",
+      })
     }
-
-    if (file.size > MAX_IMPORT_FILE_SIZE) {
-      return t("pages.agent.skills.import_invalid_size")
-    }
-
     return null
   }
 

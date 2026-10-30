@@ -1,6 +1,5 @@
 import { AgentEngine } from "./agent-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
-import { ApprovalStore } from "./approval-store.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
 import type { EngineEvent, EngineTool } from "./types.js";
 
@@ -298,7 +297,7 @@ describe("AgentEngine", () => {
     const events: EngineEvent[] = [];
     await engine.run({ history: user("hello"), onEvent: (e) => { runId = e.runId; events.push(e); } });
 
-    const steered = llm.requests.flatMap((request) => request.messages).find((message) => message.role === "user" && String(message.content).includes("New message from the user"));
+    const steered = llm.requests.flatMap((request) => request.messages).find((message) => message.role === "user" && String(message.content).includes("New messages from the user"));
     expect(steered?.image_urls).toEqual(["data:image/png;base64,AAAA", "data:image/png;base64,BBBB"]);
     expect(String(steered?.content)).toContain("use this style");
     expect(events.find((e) => e.type === "user.steer")).toEqual(expect.objectContaining({ count: 2, messageIds: ["m1", "m2"] }));
@@ -328,7 +327,7 @@ describe("AgentEngine", () => {
     await engine.run({ history: user("hello"), onEvent: (e) => { runId = e.runId; } });
 
     expect(acknowledged).toBe(true);
-    const steered = llm.requests.flatMap((request) => request.messages).find((message) => String(message.content).includes("New message from the user"));
+    const steered = llm.requests.flatMap((request) => request.messages).find((message) => String(message.content).includes("New messages from the user"));
     expect(String(steered?.content)).toContain("You already told the user: \"Got it, I will rename it after this step.\"");
     // Once the run has read the message it can no longer be acknowledged.
     expect(engine.noteSteerAcknowledged(runId, "m1", "late")).toBe(false);
@@ -386,58 +385,28 @@ describe("AgentEngine", () => {
     expect(toolMessages[2].content).toContain("path");
   });
 
-  it("denies risky tools without an approval gate and never executes them", async () => {
-    const execute = jest.fn();
+  it("executes risky tools without an interactive approval pause in autonomous mode", async () => {
+    const execute = jest.fn(async () => ({ deleted: true }));
     const { engine } = setup(
-      [{ calls: [{ name: "danger" }] }, { text: "I could not do that." }],
-      [tool({ name: "danger", risk: "destructive", execute })],
+      [{ calls: [{ name: "danger" }] }, { text: "Completed the requested operation." }],
+      [tool({ name: "danger", risk: "destructive", execute, approval: "required" })],
     );
     const result = await engine.run({ history: user("hi") });
-    expect(execute).not.toHaveBeenCalled();
-    expect(result.toolCalls[0].status).toBe("denied");
-    expect(result.status).toBe("completed");
-  });
-
-  it("waits for approval, then executes the approved call", async () => {
-    const approvals = new ApprovalStore();
-    const execute = jest.fn(async () => ({ written: true }));
-    const { engine } = setup(
-      [{ calls: [{ name: "write_it", args: { v: 1 } }] }, { text: "written" }],
-      [tool({ name: "write_it", risk: "config_write", execute, parameters: { type: "object", properties: { v: { type: "number" } } } })],
-      { approvals },
-    );
-    const events: EngineEvent[] = [];
-    const running = engine.run({ history: user("hi"), onEvent: (e) => events.push(e) });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const pending = approvals.list({ status: "pending" });
-    expect(pending).toHaveLength(1);
-    expect(execute).not.toHaveBeenCalled();
-    approvals.approve(pending[0].id);
-    const result = await running;
     expect(execute).toHaveBeenCalledTimes(1);
     expect(result.toolCalls[0].status).toBe("succeeded");
-    expect(result.toolCalls[0].approvalId).toBe(pending[0].id);
-    expect(
-      events.some((e) => e.type === "tool.call" && e.call.status === "awaiting_approval"),
-    ).toBe(true);
+    expect(result.toolCalls[0].approvalId).toBeUndefined();
   });
 
-  it("reports a denied approval to the model", async () => {
-    const approvals = new ApprovalStore();
+  it("still enforces an explicit policy block without creating an approval request", async () => {
     const execute = jest.fn();
     const { engine, llm } = setup(
-      [{ calls: [{ name: "write_it" }] }, { text: "ok, not doing it" }],
+      [{ calls: [{ name: "write_it" }] }, { text: "The policy blocked that operation." }],
       [tool({ name: "write_it", risk: "config_write", execute })],
-      { approvals },
     );
-    const running = engine.run({ history: user("hi") });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    approvals.deny(approvals.list()[0].id, "tester", "no thanks");
-    const result = await running;
+    const result = await engine.run({ history: user("hi"), approvalPolicy: { decide: () => ({ mode: "block", reason: "policy denied" }) } });
     expect(execute).not.toHaveBeenCalled();
-    expect(result.toolCalls[0].status).toBe("denied");
-    const toolMessage = llm.requests[1].messages.find((m) => m.role === "tool");
-    expect(toolMessage?.content).toContain("did not approve");
+    expect(result.toolCalls[0].status).toBe("blocked");
+    expect(llm.requests[1].messages.find((message) => message.role === "tool")?.content).toContain("policy denied");
   });
 
   it("blocks identical repeated calls and stops a stuck loop with a wrap-up answer", async () => {
@@ -645,20 +614,21 @@ describe("AgentEngine", () => {
     expect(result.toolCalls[0].status).toBe("cancelled");
   });
 
-  it("cancels while waiting for approval and marks the approval denied", async () => {
-    const approvals = new ApprovalStore();
+  it("cancels a running tool when the user stops the autonomous run", async () => {
+    let started!: () => void;
+    const toolStarted = new Promise<void>((resolve) => { started = resolve; });
     const controller = new AbortController();
-    const { engine } = setup(
-      [{ calls: [{ name: "write_it" }] }],
-      [tool({ name: "write_it", risk: "config_write" })],
-      { approvals },
-    );
+    const execute = jest.fn((_input: unknown, context: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      started();
+      context.signal.addEventListener("abort", () => reject(new Error("tool cancelled")), { once: true });
+    }));
+    const { engine } = setup([{ calls: [{ name: "write_it" }] }], [tool({ name: "write_it", risk: "config_write", execute, approval: "required" })]);
     const running = engine.run({ history: user("hi"), signal: controller.signal });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await toolStarted;
     controller.abort();
     const result = await running;
     expect(result.status).toBe("cancelled");
-    expect(approvals.list()[0].status).toBe("denied");
+    expect(result.toolCalls[0].status).toBe("cancelled");
   });
 
   it("fails clearly when no model is configured", async () => {

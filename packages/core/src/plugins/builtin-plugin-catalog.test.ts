@@ -3,6 +3,7 @@ import {
   builtinPluginCatalog,
   getBuiltinPluginManifest,
   listBuiltinPluginManifests,
+  listBuiltinPluginHealth,
 } from "./builtin-plugin-catalog.js";
 
 describe("unified built-in plugin catalog", () => {
@@ -63,6 +64,16 @@ describe("unified built-in plugin catalog", () => {
       capabilities: ["scheduler"],
     });
   });
+
+  it("does not report manifest-only capability metadata as live healthy", () => {
+    const health = listBuiltinPluginHealth()
+    expect(health["scheduler.cron"]).toMatchObject({
+      ok: false,
+      status: "functional",
+      source: "manifest_only",
+    })
+    expect(health["scheduler.cron"]?.message).toMatch(/no live probe/i)
+  })
 
   it("registers capability descriptors without allowing duplicate ids", () => {
     expect(builtinCapabilityRegistry.list().length).toBeGreaterThanOrEqual(15);

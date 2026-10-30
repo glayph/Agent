@@ -138,6 +138,10 @@ export function handleMonitorMessage(message: mikiMessage) {
 
       const label = str(payload.label, "unknown")
       const level = num(payload.level, 0)
+      const requestedStatus = str(payload.status)
+      const status: MonitorNodeStatus = ["pending", "running", "retrying", "completed", "failed"].includes(requestedStatus)
+        ? requestedStatus as MonitorNodeStatus
+        : "running"
       const edges = buildEdgesForLevel(runId, level, nodeId)
 
       updateMonitorStore((prev) => {
@@ -146,7 +150,7 @@ export function handleMonitorMessage(message: mikiMessage) {
           runId,
           type: inferNodeType(label),
           label,
-          status: "running",
+          status,
           level,
           parallel: bool(payload.parallel, false),
           input: payload.input,
@@ -249,7 +253,9 @@ export function handleMonitorMessage(message: mikiMessage) {
     case "node.run_end": {
       const runId = str(payload.run_id)
       if (!runId) break
-      const status = str(payload.status) as "completed" | "failed"
+      const rawStatus = str(payload.status)
+      const status: "completed" | "failed" =
+        rawStatus === "failed" || rawStatus === "cancelled" ? "failed" : "completed"
 
       updateMonitorStore((prev) => {
         const run = prev.runs[runId]

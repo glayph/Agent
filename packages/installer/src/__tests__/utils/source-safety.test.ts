@@ -3,7 +3,7 @@ import {
   safeTempName,
   validateGitBranchName,
   validateNpmPackageName,
-} from "../../utils/source-safety";
+} from "../../utils/source-safety.js";
 
 describe("source safety helpers", () => {
   it("rejects path segments in Clawhub-style package names", () => {

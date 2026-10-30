@@ -11,7 +11,6 @@ import {
   type ChannelRuntimeProbeResponse,
   type SupportedChannel,
   getChannelConfig,
-  getChannelSecrets,
   getChannelsCatalog,
   patchAppConfig,
   probeChannelRuntime,
@@ -330,7 +329,6 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const [baseConfig, setBaseConfig] = useState<ChannelConfig>({})
   const [editConfig, setEditConfig] = useState<ChannelConfig>({})
   const [configuredSecrets, setConfiguredSecrets] = useState<string[]>([])
-  const [secretValues, setSecretValues] = useState<Record<string, string>>({})
   const [enabled, setEnabled] = useState(false)
   const [arrayFieldResetVersion, setArrayFieldResetVersion] = useState(0)
   const arrayFieldFlushersRef = useRef(new Map<string, ArrayFieldFlusher>())
@@ -342,7 +340,6 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
     setBaseConfig({})
     setEditConfig({})
     setConfiguredSecrets([])
-    setSecretValues({})
     setEnabled(false)
     setFetchError("")
     setServerError("")
@@ -376,18 +373,14 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
 
         const channelConfig = await getChannelConfig(channelName)
         if (loadRequestIdRef.current !== requestId) return
-        // Saved credentials are fetched from the authenticated endpoint so they show again on reopen.
-        const secrets = await getChannelSecrets(channelName).catch(
-          () => ({}) as Record<string, string>,
-        )
-        if (loadRequestIdRef.current !== requestId) return
+        // Never retrieve saved tokens into browser state. The safe config response
+        // supplies configured_secrets so secret fields can show “already set” placeholders.
         const raw = asRecord(channelConfig.config)
         const normalized = normalizeConfig(matched, raw)
 
         setChannel(matched)
         setBaseConfig(normalized)
-        setSecretValues(secrets)
-        setEditConfig(buildEditConfig(matched.name, normalized, secrets))
+        setEditConfig(buildEditConfig(matched.name, normalized))
         setConfiguredSecrets(channelConfig.configured_secrets ?? [])
         setEnabled(asBool(normalized.enabled))
         setFetchError("")
@@ -427,12 +420,12 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
     if (loading || !channel || channel.name !== channelName) return false
     const basePayload = buildSavePayload(
       channel,
-      buildEditConfig(channel.name, baseConfig, secretValues),
+      buildEditConfig(channel.name, baseConfig),
       asBool(baseConfig.enabled),
     )
     const currentPayload = buildSavePayload(channel, editConfig, enabled)
     return JSON.stringify(basePayload) !== JSON.stringify(currentPayload)
-  }, [baseConfig, channel, channelName, editConfig, enabled, loading, secretValues])
+  }, [baseConfig, channel, channelName, editConfig, enabled, loading])
   useUnsavedChangesGuard(isDirty)
 
   const docsUrl = useMemo(() => {
@@ -510,7 +503,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
 
   const handleReset = () => {
     if (!channel) return
-    setEditConfig(buildEditConfig(channel.name, baseConfig, secretValues))
+    setEditConfig(buildEditConfig(channel.name, baseConfig))
     setEnabled(asBool(baseConfig.enabled))
     setServerError("")
     setFieldErrors({})

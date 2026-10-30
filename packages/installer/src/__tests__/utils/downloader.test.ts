@@ -1,6 +1,6 @@
 import * as http from "http";
 import type { AddressInfo } from "net";
-import { downloadText } from "../../utils/downloader";
+import { downloadText } from "../../utils/downloader.js";
 
 async function withServer(
   handler: http.RequestListener,

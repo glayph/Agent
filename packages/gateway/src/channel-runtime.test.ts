@@ -104,6 +104,53 @@ describe("external channel runtime", () => {
     }
   });
 
+  it("performs one authenticated test delivery and makes retries idempotent without storing message content or recipient IDs", async () => {
+    const db = new Database(":memory:")
+    const calls: Array<{ url: string; body: Record<string, unknown>; authorization?: string }> = []
+    const fetchImpl: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as Record<string, unknown>, authorization: new Headers(init?.headers).get("authorization") ?? undefined })
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 987654 } }), { status: 200 })
+    }
+    const config = { channel_list: { telegram: { enabled: true, settings: { token: "do-not-save-this-token" } } } }
+    const manager = new ChannelRuntimeManager({ db, chatTurns: {} as never, getAppConfig: () => config, log: () => undefined, fetchImpl })
+    try {
+      const first = await manager.sendTestMessage("telegram", "test-recipient-100", "MIKI-E2E:run-abc12345", "run-abc12345")
+      const duplicate = await manager.sendTestMessage("telegram", "test-recipient-100", "MIKI-E2E:run-abc12345", "run-abc12345")
+      expect(first).toMatchObject({ status: "sent", providerAckId: "987654", idempotencyKey: "run-abc12345" })
+      expect(duplicate).toMatchObject({ status: "duplicate", providerAckId: "987654" })
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.body).toMatchObject({ chat_id: "test-recipient-100", text: "MIKI-E2E:run-abc12345" })
+      expect(calls[0]?.authorization).toBeUndefined()
+      const stored = JSON.stringify(db.prepare("SELECT * FROM channel_test_deliveries").all())
+      expect(stored).not.toContain("test-recipient-100")
+      expect(stored).not.toContain("MIKI-E2E")
+      expect(stored).not.toContain("do-not-save-this-token")
+      await expect(manager.sendTestMessage("telegram", "different-recipient", "MIKI-E2E:run-abc12345", "run-abc12345")).rejects.toThrow("channel_test_idempotency_key_conflict")
+    } finally { await manager.close(); db.close() }
+  })
+
+  it("validates provider acknowledgements for Discord and Slack test deliveries", async () => {
+    for (const name of ["discord", "slack"] as const) {
+      const db = new Database(":memory:")
+      const calls: Array<{ url: string; authorization?: string }> = []
+      const fetchImpl: typeof fetch = async (input, init) => {
+        calls.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") ?? undefined })
+        const body = name === "discord" ? { id: "discord-ack-101" } : { ok: true, ts: "slack-ack-101" }
+        return new Response(JSON.stringify(body), { status: 200 })
+      }
+      const settings = name === "slack" ? { bot_token: "slack-bot-secret", app_token: "slack-app-secret" } : { token: "discord-bot-secret" }
+      const config = { channel_list: { [name]: { enabled: true, settings } } }
+      const manager = new ChannelRuntimeManager({ db, chatTurns: {} as never, getAppConfig: () => config, log: () => undefined, fetchImpl })
+      try {
+        const key = `run-${name}-12345`
+        const result = await manager.sendTestMessage(name, "test-destination-100", `MIKI-E2E:${key}`, key)
+        expect(result).toMatchObject({ status: "sent", providerAckId: name === "discord" ? "discord-ack-101" : "slack-ack-101" })
+        expect(calls[0]?.url).toContain(name === "discord" ? "/channels/test-destination-100/messages" : "chat.postMessage")
+        expect(calls[0]?.authorization).toBe(name === "discord" ? "Bot discord-bot-secret" : "Bearer slack-bot-secret")
+      } finally { await manager.close(); db.close() }
+    }
+  })
+
   it("sends proactive Telegram notices only to explicit allow_from user IDs", async () => {
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {

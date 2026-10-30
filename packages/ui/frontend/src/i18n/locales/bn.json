@@ -735,7 +735,7 @@
       "paused": "বিরতি দেওয়া",
       "runningGoals": "চলমান লক্ষ্য",
       "noRunningGoals": "কোনো লক্ষ্য চলছে না।",
-      "liveToolCalls": "চলমান টুল কল",
+      "liveToolCalls": "সাম্প্রতিক টুল কার্যক্রম",
       "noToolCalls": "এখনও কোনো টুল কল নেই।",
       "screen": "স্ক্রিন",
       "capture": "ক্যাপচার",
@@ -789,7 +789,8 @@
         "act": "কাজ করুন",
         "ask": "আগে জিজ্ঞাসা করুন",
         "block": "আটকান"
-      }
+      },
+      "historyInfo": "সাম্প্রতিক টুলের স্ট্যাটাস এই ব্রাউজারে সংরক্ষিত থাকে; সংবেদনশীল ইনপুট ও আউটপুট রাখা হয় না।"
     },
     "monitor": {
       "inspector": "লাইভ কার্যক্রম পরিদর্শক",
@@ -812,34 +813,40 @@
       "openConversation": "কথোপকথন খুলুন",
       "noActivity": "এখনও কোনো কার্যক্রম নেই",
       "noActivityDescription": "ধাপগুলো দেখতে চ্যাটে একটি কাজ শুরু করুন।",
-      "openChat": "চ্যাট খুলুন"
+      "openChat": "চ্যাট খুলুন",
+      "historyInfo": "Run ও node-এর metadata Gateway-এ সংরক্ষিত হয়; সংবেদনশীল input ও output সংরক্ষণ করা হয় না।",
+      "historyOffline": "Gateway history পাওয়া যাচ্ছে না; স্থানীয় history দেখানো হচ্ছে।",
+      "historyLoading": "History sync হচ্ছে…",
+      "loadOlder": "পুরোনো ইতিহাস দেখুন",
+      "historyLoadingOlder": "লোড হচ্ছে…",
+      "historyOlderFailed": "পুরোনো ইতিহাস লোড করা যায়নি। আবার চেষ্টা করুন।"
     },
     "plugins": {
       "catalog": "ক্যাটালগ",
       "coreServices": "মূল সেবা",
       "healthLogs": "স্বাস্থ্য ও লগ",
-      "availablePlugins": "উপলভ্য প্লাগইন",
-      "availablePluginsDescription": "রানটাইমের প্লাগইন দেখুন। কনফিগারেশন লিংক সংশ্লিষ্ট ব্যবস্থাপনা পৃষ্ঠা খুলবে।",
+      "availablePlugins": "বিল্ট-ইন সক্ষমতা",
+      "availablePluginsDescription": "বিল্ট-ইন provider, channel ও capability-এর তালিকা। ইনস্টল করা skill plugin ও contract readiness Skills পৃষ্ঠায় ব্যবস্থাপনা করা হয়।",
       "searchPlugins": "প্লাগইন খুঁজুন",
       "allCategories": "সব বিভাগ",
       "providers": "প্রোভাইডার",
       "channels": "চ্যানেল",
-      "skillsTools": "স্কিল ও টুল",
+      "skillsTools": "সক্ষমতা",
       "loadingCatalog": "প্লাগইন ক্যাটালগ লোড হচ্ছে…",
       "catalogUnavailable": "প্লাগইন ক্যাটালগ পাওয়া যাচ্ছে না।",
       "noPluginsMatch": "এই ফিল্টারে কোনো প্লাগইন নেই।",
       "retry": "আবার চেষ্টা করুন",
       "moreInformation": "আরও তথ্য",
-      "coreServicesDescription": "রানটাইম থেকে মূল সেবার অবস্থা দেখানো হয়।",
+      "coreServicesDescription": "লাইভ প্রোব ও শুধু ম্যানিফেস্টের তথ্যের মধ্যে স্পষ্ট পার্থক্যসহ core capability-এর বিবরণ।",
       "loadingCore": "মূল সেবা লোড হচ্ছে…",
       "coreUnavailable": "মূল সেবার তথ্য পাওয়া যাচ্ছে না।",
       "noCoreMetadata": "মূল সেবার কোনো তথ্য নেই।",
       "restartRequested": "রিস্টার্টের অনুরোধ করা হয়েছে",
       "restartFailed": "রিস্টার্ট ব্যর্থ হয়েছে",
-      "healthLogsDescription": "প্লাগইন ও মূল সেবার অবস্থা এবং সাম্প্রতিক gateway log।",
+      "healthLogsDescription": "রানটাইম হেলথ প্রোব, ম্যানিফেস্ট-ভিত্তিক স্ট্যাটাস, সার্ভিস হেলথ ও সাম্প্রতিক gateway লগ। হেলথ তথ্য প্রতি ৩০ সেকেন্ডে রিফ্রেশ হয়।",
       "restart": "রিস্টার্ট",
       "loadingHealth": "স্বাস্থ্য ও লগ লোড হচ্ছে…",
-      "healthUnavailable": "স্বাস্থ্য-সংক্রান্ত তথ্য পাওয়া যাচ্ছে না।",
+      "healthUnavailable": "স্বাস্থ্য পরীক্ষা করা যায়নি।",
       "noPluginHealth": "প্লাগইনের স্বাস্থ্য পরীক্ষা রিপোর্ট করা হয়নি।",
       "services": "সেবা",
       "noServiceHealth": "কোনো সেবার স্বাস্থ্য রিপোর্ট নেই।",
@@ -870,8 +877,58 @@
         "blocked": "ব্লক করা",
         "auth_failed": "প্রমাণীকরণ ব্যর্থ",
         "runtime_error": "রানটাইম ত্রুটি",
-        "unknown": "অজানা"
-      }
+        "unknown": "অজানা",
+        "metadata_only": "লাইভ পরীক্ষা হয়নি"
+      },
+      "agentSwarm": "এজেন্ট সোয়ার্ম",
+      "browser": "ব্রাউজার অটোমেশন",
+      "checkedAt": "পরীক্ষার সময় {{at}}",
+      "codeExecution": "কোড এক্সিকিউশন",
+      "computerUse": "কম্পিউটার নিয়ন্ত্রণ",
+      "integrations": "প্ল্যাটফর্ম ইন্টিগ্রেশন",
+      "knowledge": "জ্ঞানভান্ডার",
+      "manifestOnly": "শুধু ম্যানিফেস্টের স্ট্যাটাস; লাইভ পরীক্ষা হয়নি।",
+      "mcp": "MCP সার্ভার",
+      "modelRouter": "মডেল রাউটার",
+      "notMeasured": "পরিমাপ করা হয়নি",
+      "partialHealthError": "কিছু হেলথ সেকশনের তথ্য লোড হয়নি। যেসব তথ্য পাওয়া গেছে সেগুলো দেখানো হচ্ছে।",
+      "search": "ওয়েব অনুসন্ধান",
+      "tools": "টুল রেজিস্ট্রি",
+      "installed": "ইনস্টল করা এক্সটেনশন",
+      "installedDescription": "স্থানীয় ZIP প্যাকেজ ইনস্টল করুন, চাওয়া অনুমতি পর্যালোচনা করুন এবং বিচ্ছিন্ন runtime পরিচালনা করুন। Built-in সুবিধা অপরিবর্তনীয়।",
+      "installSucceeded": "প্লাগইন প্যাকেজ ইনস্টল হয়েছে। এটি এখনও চালু করা হয়নি।",
+      "installFailed": "প্লাগইন ইনস্টল করা যায়নি।",
+      "installing": "ইনস্টল হচ্ছে…",
+      "installArchive": "ZIP ইনস্টল",
+      "runtimeIsolationNote": "OS sandbox উপলব্ধ এবং চাওয়া সব অনুমতি সমর্থিত ও স্পষ্টভাবে অনুমোদিত হলেই executable extension চালু হবে। সফল ইনস্টল মানেই কোড চলছে না।",
+      "loadingInstalled": "ইনস্টল করা এক্সটেনশন লোড হচ্ছে…",
+      "installedUnavailable": "ইনস্টল করা এক্সটেনশনের তথ্য পাওয়া যাচ্ছে না।",
+      "noInstalled": "কোনো বাহ্যিক এক্সটেনশন ইনস্টল নেই। Built-in সুবিধা Catalog-এ রয়েছে।",
+      "lastFailure": "সর্বশেষ lifecycle ত্রুটি",
+      "checkHealth": "স্বাস্থ্য পরীক্ষা",
+      "disable": "বন্ধ করুন",
+      "enable": "চালু করুন",
+      "uninstall": "আনইনস্টল",
+      "requestedPermissions": "চাওয়া অনুমতি",
+      "dependencies": "নির্ভরতা",
+      "confirmUninstall": "এই এক্সটেনশন সরিয়ে অনুমতিগুলোও প্রত্যাহার করবেন?",
+      "permissionGrants": "অনুমোদিত অনুমতি",
+      "permissionGrantNotice": "অনুমতি দিলে ফাইল-সিস্টেম অ্যাক্সেস কেবল এই প্যাকেজের ডিরেক্টরিতে সীমাবদ্ধ থাকবে। অসমর্থিত উচ্চ-প্রভাবের ক্ষমতা runtime sandbox ব্লক করে।",
+      "none": "কোনোটিই নয়",
+      "healthChecked": "স্বাস্থ্য পরীক্ষা হয়েছে",
+      "lifecycleUpdated": "প্লাগইন সেটিংস আপডেট হয়েছে।",
+      "lifecycleFailed": "প্লাগইন lifecycle কাজ ব্যর্থ।",
+      "enableSucceeded": "প্লাগইন runtime সুস্থ আছে।",
+      "uninstallSucceeded": "প্লাগইন আনইনস্টল হয়েছে।",
+      "sandboxUnavailable": "OS sandbox উপলব্ধ নয়",
+      "unsupportedPermissions": "অসমর্থিত অনুমতি",
+      "trustedExtensions": "বিশ্বস্ত এক্সটেনশন",
+      "trustedExtensionsDescription": "স্থানীয়ভাবে কনফিগার করা trust key-এর সঙ্গে ZIP-এর checksum ও Ed25519 signature মিললেই প্যাকেজ দেখানো হয়।",
+      "loadingTrustedMarketplace": "বিশ্বস্ত প্যাকেজ যাচাই হচ্ছে…",
+      "trustedMarketplaceUnavailable": "বিশ্বস্ত প্যাকেজ registry পাওয়া যাচ্ছে না।",
+      "noTrustedPackages": "বিশ্বস্ত registry-তে এখন কোনো যাচাইকৃত প্যাকেজ নেই।",
+      "signatureVerified": "Signature যাচাই হয়েছে",
+      "install": "ইনস্টল"
     },
     "memory": {
       "title": "মেমরি",
@@ -927,9 +984,19 @@
         "rule_emotion": "নিয়ম ও অনুভূতি"
       },
       "region_filter": "মেমরির ধরন অনুযায়ী ছাঁকুন"
+    },
+    "agent": {
+      "skills": {
+        "import_constraints": "সর্বোচ্চ ৫৫ MB-এর Markdown, ZIP বা TAR.GZ স্কিল ফাইল ইমপোর্ট করুন।",
+        "import_invalid_size": "স্কিল ফাইলের আকার ৫৫ MB বা কম হতে হবে।"
+      }
     }
   },
   "common": {
     "refresh": "রিফ্রেশ"
+  },
+  "labels": {
+    "authServiceUnavailable": "প্রমাণীকরণ সেবা পাওয়া যাচ্ছে না: {{message}}",
+    "retryConnection": "আবার সংযোগ করুন"
   }
 }

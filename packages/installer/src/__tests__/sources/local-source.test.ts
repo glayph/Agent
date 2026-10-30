@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { fetchSkill } from "../../source-dispatch";
-import { SourceProtocol } from "../../types";
+import { fetchSkill } from "../../source-dispatch.js";
+import { SourceProtocol } from "../../types.js";
 
 describe("fetchSkill local", () => {
   let srcDir: string;

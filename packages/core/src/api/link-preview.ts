@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
 import {
   Router,
   type Request,
@@ -49,7 +50,6 @@ function isPrivateIpv4(address: string): boolean {
 }
 
 // Kept so the private-address check can be switched back on; the guard is currently relaxed.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase();
   if (isIP(normalized) === 4) return isPrivateIpv4(normalized);
@@ -75,7 +75,25 @@ async function assertPublicUrl(rawUrl: string): Promise<URL> {
   } catch {
     throw new Error("A valid URL is required");
   }
-  // No network-location restrictions: any URL the owner asks to preview is fetched.
+  if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) throw new Error("Only HTTP(S) URLs can be previewed");
+  if (parsed.username || parsed.password) throw new Error("URLs with embedded credentials are not allowed");
+  const hostname = normalizeHostname(parsed.hostname);
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".test") || hostname === "metadata.google.internal") {
+    throw new Error("Private network addresses are not allowed");
+  }
+  if (isIP(hostname)) {
+    if (isPrivateAddress(hostname)) throw new Error("Private network addresses are not allowed");
+    return parsed;
+  }
+  let addresses: Array<{ address: string; family: number }>;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("The preview hostname could not be resolved");
+  }
+  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
+    throw new Error("Private network addresses are not allowed");
+  }
   return parsed;
 }
 

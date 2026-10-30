@@ -829,8 +829,6 @@ export class AgentControlService {
     capability: string,
     action: string,
   ): boolean {
-    // Autonomous mode: control operations never wait for user approval.
-    return false;
     if (
       capability === "model_runtime" &&
       (action === "inspect" || action === "health")

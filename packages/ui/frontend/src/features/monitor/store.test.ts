@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   type MonitorNode,
@@ -9,6 +9,8 @@ import {
   selectMonitorNode,
   selectMonitorRun,
   setNodePosition,
+  serializeMonitorHistory,
+  restoreMonitorHistory,
   toggleNodeUIState,
   updateMonitorStore,
 } from "./store"
@@ -64,8 +66,63 @@ describe("updateMonitorStore", () => {
   })
 })
 
+describe("sanitized local monitor history", () => {
+  it("persists status metadata without tool inputs or results", () => {
+    const run = { id: "run-1", objective: "sensitive prompt", status: "running" as const, startedAt: 10 }
+    const node = baseNode({
+      input: { token: "should-not-persist" },
+      action: "private action",
+      resultMessage: "private result",
+      outputPreview: "private preview",
+      error: "private error",
+    })
+    const serialized = serializeMonitorHistory({
+      runs: { "run-1": run },
+      nodes: { "node-1": node },
+      edges: {},
+      nodeOrder: ["node-1"],
+    })
+    expect(serialized).not.toContain("sensitive prompt")
+    expect(serialized).not.toContain("should-not-persist")
+    expect(serialized).not.toContain("private result")
+    expect(serialized).toContain("shell_execute")
+  })
+
+  it("restores completed history and marks interrupted runs as failed", () => {
+    const serialized = serializeMonitorHistory({
+      runs: { "run-1": { id: "run-1", status: "running", startedAt: 10 } },
+      nodes: { "node-1": baseNode({ id: "node-1", status: "running" }) },
+      edges: {},
+      nodeOrder: ["node-1"],
+    })
+    const restored = restoreMonitorHistory(serialized, 500)
+    expect(restored.runs["run-1"]).toMatchObject({ status: "failed", endedAt: 500 })
+    expect(restored.nodes["node-1"]?.status).toBe("failed")
+    expect(restored.nodes["node-1"]?.input).toBeUndefined()
+    expect(restoreMonitorHistory("invalid json").nodes).toEqual({})
+  })
+
+  it("writes updates to browser storage and removes them on reset", () => {
+    const values = new Map<string, string>()
+    const localStorageMock = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    }
+    vi.stubGlobal("window", { localStorage: localStorageMock })
+    try {
+      updateMonitorStore({ runs: { "run-1": { id: "run-1", status: "completed", startedAt: 10, endedAt: 20 } } })
+      expect(localStorageMock.getItem("miki.monitor.history.v1")).toContain("run-1")
+      resetMonitorStore()
+      expect(localStorageMock.getItem("miki.monitor.history.v1")).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
 describe("completed run retention", () => {
-  it("keeps the eight newest completed runs and every active run", () => {
+  it("keeps completed runs available for server-side pagination and every active run", () => {
     const runs: MonitorState["runs"] = Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
       const id = `done-${index}`
       return [id, { id, status: "completed" as const, startedAt: index, endedAt: index + 1 }]
@@ -77,10 +134,10 @@ describe("completed run retention", () => {
     ]))
     updateMonitorStore({ runs, nodes, nodeOrder: Object.keys(nodes) })
     const state = getMonitorState()
-    expect(Object.keys(state.runs)).toHaveLength(9)
+    expect(Object.keys(state.runs)).toHaveLength(11)
     expect(state.runs.active).toBeDefined()
-    expect(state.runs["done-0"]).toBeUndefined()
-    expect(state.nodes["node-done-0"]).toBeUndefined()
+    expect(state.runs["done-0"]).toBeDefined()
+    expect(state.nodes["node-done-0"]).toBeDefined()
     expect(state.nodes["node-active"]).toBeDefined()
   })
 })

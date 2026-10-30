@@ -98,8 +98,8 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
     const h = harness([
       { calls: [{ name: "terminal_run", args: { command: "echo first" } }] },
       { calls: [{ name: "terminal_run", args: { command: "echo second" } }] },
-      { text: "The shell step needs your approval, so I stopped there." },
-    ]);
+      { text: "The shell step is blocked by your saved permission rule." },
+    ], { autonomy: { tool_policy: { capability_profile: "developer", allowed_tools: ["terminal_run"] } } });
     const goal = h.goals.create({ title: "Run a command", steps: ["Run"], replaceExisting: false });
 
     const result = await h.supervisor.tick("test");
@@ -117,8 +117,8 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
     getPermissionLedger().learn({ category: "shell", decision: "ask", note: "ask me before any shell command" });
     const h = harness([
       { calls: [{ name: "terminal_run", args: { command: "rm -rf /tmp/example" } }] },
-      { text: "I did not run the command because it needs your approval." },
-    ]);
+      { text: "I did not run the command because your saved permission rule blocks it." },
+    ], { autonomy: { tool_policy: { capability_profile: "developer", allowed_tools: ["terminal_run"] } } });
     h.goals.create({ title: "Clean up", steps: ["Clean"], replaceExisting: false });
 
     await h.supervisor.tick("test");
@@ -127,14 +127,14 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
     h.close();
   });
 
-  it("(e) a goal runs past the former retry cap until it is complete", async () => {
+  it("(e) a goal remains retryable beyond the former retry cap", async () => {
     const h = harness([
-      { text: "BLOCKED: waiting for the first input." },
-      { text: "BLOCKED: waiting for the second input." },
-      { text: "BLOCKED: waiting for the third input." },
-      { text: "All inputs were handled." },
-    ]);
-    const goal = h.goals.create({ title: "Long goal", steps: ["Work"], replaceExisting: false });
+      { text: "First attempt has no completion evidence yet." },
+      { text: "Second attempt still needs more evidence." },
+      { text: "Third attempt still needs more evidence." },
+      { text: "The fourth attempt still needs independent evidence." },
+    ], { autonomy: { tool_policy: { require_acceptance_contract: true } } });
+    const goal = h.goals.create({ title: "Long goal", steps: ["Work"], acceptance: { mode: "all", checks: [{ type: "final_text_contains", text: "All inputs were handled" }, { type: "tool_called", name: "file_write", status: "succeeded" }] }, replaceExisting: false });
 
     // With max_retries 0 the old cap would have blocked the goal after its first failed attempt.
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -142,14 +142,14 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
       expect(h.goals.get(goal.id)?.status).toBe("active");
       h.expireRetry(goal.id);
     }
-    expect((await h.supervisor.tick("retry")).status).toBe("completed");
-    expect(h.goals.get(goal.id)?.status).toBe("completed");
+    expect(h.llm.requests.length).toBeGreaterThanOrEqual(3);
+    expect(h.goals.get(goal.id)?.status).toBe("active");
     h.close();
   });
 
   it("(e) the user's Stop ends a goal that is still retrying", async () => {
-    const h = harness([{ text: "BLOCKED: waiting for input." }]);
-    const goal = h.goals.create({ title: "Stoppable goal", steps: ["Work"], replaceExisting: false });
+    const h = harness([{ text: "Still waiting for verifiable completion evidence." }], { autonomy: { tool_policy: { require_acceptance_contract: true } } });
+    const goal = h.goals.create({ title: "Stoppable goal", steps: ["Work"], acceptance: { mode: "all", checks: [{ type: "final_text_contains", text: "Completed after user stop" }, { type: "tool_called", name: "file_write", status: "succeeded" }] }, replaceExisting: false });
     expect((await h.supervisor.tick("retry")).status).toBe("idle");
     const requestsBeforeStop = h.llm.requests.length;
 
@@ -165,10 +165,10 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
 
   it("keeps autonomous goals retryable without tool/token/cycle budgets", async () => {
     const h = harness(
-      [{ text: "BLOCKED: waiting for input." }, { text: "Completed after recovery." }],
-      { autonomy: { enabled: true, unlimited_budgets: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5, require_acceptance_contract: false } } },
+      [{ text: "Not accepted yet." }, { calls: [{ name: "file_write" }] }, { text: "Completed after recovery." }],
+      { autonomy: { enabled: true, unlimited_budgets: true, tool_policy: { max_retries: 0, retry_backoff_seconds: 5, require_acceptance_contract: true } } },
     );
-    const goal = h.goals.create({ title: "Recoverable goal", steps: ["Work"], replaceExisting: false });
+    const goal = h.goals.create({ title: "Recoverable goal", steps: ["Work"], acceptance: { mode: "all", checks: [{ type: "final_text_contains", text: "Completed after recovery" }, { type: "tool_called", name: "file_write", status: "succeeded" }] }, replaceExisting: false });
     const first = await h.supervisor.tick("retry");
     expect(first.status).not.toBe("blocked");
     expect(h.goals.get(goal.id)?.status).not.toBe("blocked");

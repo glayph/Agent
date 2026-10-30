@@ -43,6 +43,8 @@ export interface StreamHubOptions {
   /** Cap on buffered events per run. */
   maxBufferedEvents?: number
   clock?: () => number
+  /** Optional durable event sink. Failures must never interrupt a live chat stream. */
+  onEvent?: (event: { runId: string; sessionId: string; sequence: number; type: string; payload: Record<string, unknown>; timestamp: number }) => void
 }
 
 const SOCKET_OPEN = 1
@@ -65,6 +67,7 @@ export class StreamHub {
   private readonly finishedRetentionMs: number
   private readonly maxBufferedEvents: number
   private readonly clock: () => number
+  private readonly onEvent?: StreamHubOptions["onEvent"]
   private sweepTimer: ReturnType<typeof setInterval> | undefined
 
   constructor(options: StreamHubOptions = {}) {
@@ -72,6 +75,7 @@ export class StreamHub {
     this.finishedRetentionMs = options.finishedRetentionMs ?? 10_000
     this.maxBufferedEvents = options.maxBufferedEvents ?? 500
     this.clock = options.clock ?? Date.now
+    this.onEvent = options.onEvent
     const sweepMs = options.sweepIntervalMs ?? 5_000
     if (sweepMs > 0) {
       this.sweepTimer = setInterval(() => this.sweep(), sweepMs)
@@ -142,13 +146,20 @@ export class StreamHub {
   publish(run: RunStream, type: string, payload: Record<string, unknown> = {}): void {
     if (run.done) return
     run.sequence += 1
+    const timestamp = this.clock()
+    const eventPayload = { ...payload, run_id: run.runId, ...(run.replyToMessageId ? { reply_to_message_id: run.replyToMessageId } : {}) }
+    try {
+      this.onEvent?.({ runId: run.runId, sessionId: run.sessionId, sequence: run.sequence, type, payload: eventPayload, timestamp })
+    } catch {
+      // Durable observability is best-effort and must never stop the user-facing stream.
+    }
     const message = JSON.stringify({
       type,
       session_id: run.sessionId,
-      timestamp: Date.now(),
+      timestamp,
       checkpoint_id: run.checkpointId,
       sequence: run.sequence,
-      payload: { ...payload, run_id: run.runId, ...(run.replyToMessageId ? { reply_to_message_id: run.replyToMessageId } : {}) },
+      payload: eventPayload,
     })
     run.events.push(message)
     if (run.events.length > this.maxBufferedEvents) run.events.splice(0, run.events.length - this.maxBufferedEvents)

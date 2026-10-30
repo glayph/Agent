@@ -156,6 +156,72 @@ export class ChannelRuntimeManager {
     }
   }
 
+  /**
+   * Explicitly gated single-recipient delivery used by authenticated E2E sign-off.
+   * Only an idempotency key and provider acknowledgement metadata are persisted; message text and tokens are never stored.
+   */
+  async sendTestMessage(name: string, recipient: string, text: string, idempotencyKey: string): Promise<{ status: "sent" | "duplicate"; channel: string; recipientHash: string; providerAckId: string; idempotencyKey: string }> {
+    if (!supportedChannels.includes(name as ChannelName)) throw new Error("channel_test_not_supported")
+    const channel = name as ChannelName
+    if (!recipient || recipient.length > 200 || recipient === "*") throw new Error("channel_test_recipient_invalid")
+    if (!/^MIKI-E2E:[A-Za-z0-9._:-]{8,120}$/.test(text) || text.length > 200) throw new Error("channel_test_marker_invalid")
+    if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) throw new Error("channel_test_idempotency_key_invalid")
+    this.deps.db.exec(`CREATE TABLE IF NOT EXISTS channel_test_deliveries (
+      idempotency_key TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_hash TEXT NOT NULL,
+      status TEXT NOT NULL, provider_ack_id TEXT, error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_channel_test_deliveries_channel_at ON channel_test_deliveries(channel, created_at DESC);`)
+    const recipientHash = createHash("sha256").update(recipient).digest("hex")
+    const existing = this.deps.db.prepare("SELECT channel,recipient_hash,status,provider_ack_id,error_code FROM channel_test_deliveries WHERE idempotency_key=?").get(idempotencyKey) as { channel: string; recipient_hash: string; status: string; provider_ack_id?: string; error_code?: string } | undefined
+    if (existing) {
+      if (existing.channel !== channel || existing.recipient_hash !== recipientHash) throw new Error("channel_test_idempotency_key_conflict")
+      if (existing.status === "sent" && existing.provider_ack_id) return { status: "duplicate", channel, recipientHash, providerAckId: existing.provider_ack_id, idempotencyKey }
+      throw new Error(existing.status === "sending" ? "channel_test_delivery_in_progress" : existing.error_code || "channel_test_delivery_already_failed")
+    }
+    const insertedAt = this.now()
+    const insert = this.deps.db.prepare("INSERT INTO channel_test_deliveries(idempotency_key,channel,recipient_hash,status,created_at,updated_at) VALUES(?,?,?,'sending',?,?)")
+    try { insert.run(idempotencyKey, channel, recipientHash, insertedAt, insertedAt) }
+    catch { throw new Error("channel_test_delivery_in_progress") }
+
+    try {
+      const settings = channelSettings(this.deps.getAppConfig(), channel)
+      if (!settings.enabled || !settings.token || (channel === "slack" && !settings.appToken)) throw new Error("channel_test_channel_not_configured")
+      let providerAckId = ""
+      if (channel === "telegram") {
+        const response = await this.fetchImpl(`https://api.telegram.org/bot${settings.token}/sendMessage`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chat_id: recipient, text, disable_web_page_preview: true }), signal: AbortSignal.timeout(15_000),
+        })
+        const body = await response.json().catch(() => ({})) as RecordValue
+        const result = isRecord(body.result) ? body.result : {}
+        if (!response.ok || body.ok !== true || result.message_id == null) throw new Error(response.status === 401 || response.status === 403 ? "channel_test_auth_rejected" : "channel_test_provider_rejected")
+        providerAckId = String(result.message_id)
+      } else if (channel === "discord") {
+        const response = await this.fetchImpl(`https://discord.com/api/v10/channels/${encodeURIComponent(recipient)}/messages`, {
+          method: "POST", headers: { authorization: `Bot ${settings.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ content: text, allowed_mentions: { parse: [] } }), signal: AbortSignal.timeout(15_000),
+        })
+        const body = await response.json().catch(() => ({})) as RecordValue
+        if (!response.ok || typeof body.id !== "string") throw new Error(response.status === 401 || response.status === 403 ? "channel_test_auth_rejected" : "channel_test_provider_rejected")
+        providerAckId = body.id
+      } else {
+        const response = await this.fetchImpl("https://slack.com/api/chat.postMessage", {
+          method: "POST", headers: { authorization: `Bearer ${settings.token}`, "content-type": "application/json; charset=utf-8" },
+          body: JSON.stringify({ channel: recipient, text, mrkdwn: false, link_names: false }), signal: AbortSignal.timeout(15_000),
+        })
+        const body = await response.json().catch(() => ({})) as RecordValue
+        if (!response.ok || body.ok !== true || typeof body.ts !== "string") throw new Error(response.status === 401 || response.status === 403 ? "channel_test_auth_rejected" : "channel_test_provider_rejected")
+        providerAckId = body.ts
+      }
+      if (!providerAckId || providerAckId.length > 200) throw new Error("channel_test_ack_missing")
+      this.deps.db.prepare("UPDATE channel_test_deliveries SET status='sent',provider_ack_id=?,updated_at=? WHERE idempotency_key=?").run(providerAckId, this.now(), idempotencyKey)
+      return { status: "sent", channel, recipientHash, providerAckId, idempotencyKey }
+    } catch (error) {
+      const code = error instanceof Error && /^[a-z0-9_:-]{1,100}$/i.test(error.message) ? error.message : "channel_test_provider_unavailable"
+      this.deps.db.prepare("UPDATE channel_test_deliveries SET status='failed',error_code=?,updated_at=? WHERE idempotency_key=?").run(code, this.now(), idempotencyKey)
+      throw new Error(code)
+    }
+  }
+
   /** Deliver an already-composed proactive notice only to explicit trusted recipients. */
   async sendProactiveNotice(text: string): Promise<void> {
     const message = text.trim()

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillInstaller } from "../installer/skill-installer";
+import { SkillInstaller } from "../installer/skill-installer.js";
 
 describe("SkillInstaller.install", () => {
   let tmpDir: string;

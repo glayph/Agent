@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const CURRENT_CONFIG_SCHEMA_VERSION = 1;
 
-const JsonRecordSchema = z.record(z.unknown());
+const JsonRecordSchema = z.record(z.string(), z.unknown());
 const PrimitiveConfigValueSchema = z.union([
   z.string(),
   z.number(),
@@ -79,10 +79,10 @@ const MCPServerSchema = z
     type: MCPTransportSchema.optional(),
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
-    env: z.record(PrimitiveConfigValueSchema).optional(),
+    env: z.record(z.string(), PrimitiveConfigValueSchema).optional(),
     env_file: z.string().nullable().optional(),
     url: z.string().optional(),
-    headers: z.record(HeaderValueSchema).optional(),
+    headers: z.record(z.string(), HeaderValueSchema).optional(),
   })
   .passthrough();
 
@@ -119,7 +119,7 @@ const ToolsSchema = z
           })
           .passthrough()
           .optional(),
-        servers: z.record(MCPServerSchema).optional(),
+        servers: z.record(z.string(), MCPServerSchema).optional(),
       })
       .passthrough()
       .optional(),
@@ -164,7 +164,7 @@ const WebSearchSchema = z
     proxy: z.string().optional(),
     optimization: WebSearchOptimizationSchema.optional(),
     providers: z.array(WebSearchProviderSchema).optional(),
-    settings: z.record(WebSearchProviderSettingsSchema).optional(),
+    settings: z.record(z.string(), WebSearchProviderSettingsSchema).optional(),
   })
   .passthrough();
 
@@ -327,7 +327,7 @@ const AgentMemorySchema = z
  *   roles:   { <specialistId>: "<lane>" | { primary, fallbacks: [..] } }
  *   credential_profiles: { <providerId>: [SECRET_NAME, ..] }   # names only
  */
-const AgentModelRouterSchema = z.record(z.unknown());
+const AgentModelRouterSchema = z.record(z.string(), z.unknown());
 
 const AgentBlockSchema = z
   .object({
@@ -456,7 +456,7 @@ export const RuntimeConfigSchema = z
           })
           .passthrough()
           .optional(),
-        behavior_learning: BehaviorLearningSchema.default({}),
+        behavior_learning: BehaviorLearningSchema.prefault({}),
       })
       .passthrough()
       .optional(),

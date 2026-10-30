@@ -1,7 +1,6 @@
-import OpenAI from "openai";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { LLMResponse } from "@miki/config";
-import { providerClient, type ProviderTransportConfig } from "./transport.js";
+import type { ProviderTransportConfig } from "./transport.js";
 import {
   LLMAPIError,
   LLMRateLimitError,
@@ -15,8 +14,6 @@ import type {
   ProviderCompletionRequest,
 } from "./contracts.js";
 
-const clientCache = new Map<string, OpenAI>();
-
 export function defaultTimeoutMs(provider: ProviderTransportConfig): number {
   if (provider.local) {
     const configured = Number.parseInt(
@@ -28,21 +25,6 @@ export function defaultTimeoutMs(provider: ProviderTransportConfig): number {
       : 90_000;
   }
   return 120_000;
-}
-
-function getClient(
-  provider: ProviderTransportConfig,
-  apiKey: string,
-  timeoutMs?: number,
-): OpenAI {
-  const effectiveTimeout = timeoutMs ?? defaultTimeoutMs(provider);
-  const keyFingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
-  const cacheKey = `${provider.id}:${provider.baseUrl}:${keyFingerprint}:${effectiveTimeout}`;
-  const existing = clientCache.get(cacheKey);
-  if (existing) return existing;
-  const client = providerClient(provider, apiKey, effectiveTimeout);
-  clientCache.set(cacheKey, client);
-  return client;
 }
 
 function retryDelayMs(message: string): number | null {
@@ -63,12 +45,12 @@ function errorMessage(error: unknown): string {
       body?: unknown;
     };
     const candidates: unknown[] = [
-      value.message,
       typeof value.error === "object" && value.error !== null
         ? (value.error as { message?: unknown; code?: unknown }).message
         : value.error,
       value.response?.data,
       value.body,
+      value.message,
     ];
     const meaningful = candidates.find((candidate) => {
       if (candidate === undefined || candidate === null) return false;
@@ -197,6 +179,118 @@ interface StreamChunk {
     };
   }>;
   usage?: LLMResponse["usage"];
+}
+
+class ProviderHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ProviderHttpError";
+  }
+}
+
+async function requestNonStreamingCompletion(
+  provider: ProviderTransportConfig,
+  apiKey: string,
+  requestBody: Record<string, unknown>,
+  request: ProviderCompletionRequest,
+): Promise<LLMResponse> {
+  const effectiveKey = apiKey || (provider.emptyApiKeyAllowed ? "local-no-auth-required" : apiKey);
+  const timeout = AbortSignal.timeout(request.timeoutMs ?? defaultTimeoutMs(provider));
+  const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
+  const endpoint = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { authorization: `Bearer ${effectiveKey}`, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(requestBody),
+    signal,
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    let message = raw;
+    try {
+      const parsed = JSON.parse(raw) as { error?: { message?: unknown }; message?: unknown };
+      const detail = parsed.error?.message ?? parsed.message;
+      if (typeof detail === "string") message = detail;
+    } catch { /* keep the bounded provider response text */ }
+    throw new ProviderHttpError(message.slice(0, 1_000) || `HTTP ${response.status}`, response.status);
+  }
+  return await response.json() as LLMResponse;
+}
+
+async function* parseSseStream(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamChunk> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      let boundary = pending.search(/\r?\n\r?\n/);
+      while (boundary >= 0) {
+        const block = pending.slice(0, boundary);
+        const separator = pending.slice(boundary).match(/^\r?\n\r?\n/)?.[0] ?? "\n\n";
+        pending = pending.slice(boundary + separator.length);
+        const data = block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+        if (data && data !== "[DONE]") {
+          try { yield JSON.parse(data) as StreamChunk; }
+          catch { throw new Error("Provider returned malformed server-sent event data."); }
+        }
+        boundary = pending.search(/\r?\n\r?\n/);
+      }
+      if (done) break;
+    }
+    const tail = pending.trim();
+    if (tail.startsWith("data:") && tail.slice(5).trim() !== "[DONE]") {
+      try { yield JSON.parse(tail.slice(5).trim()) as StreamChunk; }
+      catch { throw new Error("Provider returned malformed server-sent event data."); }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function requestStreamingCompletion(
+  provider: ProviderTransportConfig,
+  apiKey: string,
+  requestBody: Record<string, unknown>,
+  request: ProviderCompletionRequest,
+  model: string,
+): Promise<LLMResponse> {
+  const effectiveKey = apiKey || (provider.emptyApiKeyAllowed ? "local-no-auth-required" : apiKey);
+  const timeout = AbortSignal.timeout(request.timeoutMs ?? defaultTimeoutMs(provider));
+  const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
+  const endpoint = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${effectiveKey}`,
+      "content-type": "application/json",
+      accept: "text/event-stream, application/json",
+    },
+    body: JSON.stringify(requestBody),
+    signal,
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    let message = raw;
+    try {
+      const parsed = JSON.parse(raw) as { error?: { message?: unknown }; message?: unknown };
+      const detail = parsed.error?.message ?? parsed.message;
+      if (typeof detail === "string") message = detail;
+    } catch { /* keep the bounded provider response text */ }
+    throw new ProviderHttpError(message.slice(0, 1_000) || `HTTP ${response.status}`, response.status);
+  }
+  if (!response.body) throw new Error("Provider returned an empty streaming response.");
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("text/event-stream")) {
+    const body = await response.json() as LLMResponse;
+    const content = body.choices?.[0]?.message?.content;
+    if (typeof content === "string") {
+      try { request.onTextDelta?.(content); } catch { /* listeners must not break completion */ }
+    }
+    return body;
+  }
+  return readStreamingCompletion(parseSseStream(response.body), request, model);
 }
 
 async function readStreamingCompletion(
@@ -342,16 +436,8 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        const result = await getClient(
-          provider,
-          apiKey,
-          request.timeoutMs,
-        ).chat.completions.create(requestBody as never, {
-          signal: request.signal,
-        });
-        return streaming
-          ? await readStreamingCompletion(result, request, model)
-          : result as LLMResponse;
+        if (streaming) return await requestStreamingCompletion(provider, apiKey, requestBody, request, model);
+        return await requestNonStreamingCompletion(provider, apiKey, requestBody, request);
       } catch (error) {
         lastError = error;
         const message = errorMessage(error).toLowerCase();
@@ -414,7 +500,7 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
   }
 
   clearCache(): void {
-    clientCache.clear();
+    // Requests are stateless fetches; there is no provider client cache to clear.
   }
 }
 

@@ -1,15 +1,14 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react"
 
-export type ThemePreference = "system" | "light" | "dark"
-export type ResolvedTheme = "light" | "dark"
+import { ThemeContext } from "./theme-context"
+import type { ThemePreference, ResolvedTheme } from "./theme-context"
+export type { ThemePreference, ResolvedTheme } from "./theme-context"
 
 function readStoredPreference(): ThemePreference {
   if (typeof window === "undefined") return "system"
@@ -28,14 +27,6 @@ function resolveTheme(preference: ThemePreference): ResolvedTheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
-interface ThemeContextValue {
-  theme: ResolvedTheme
-  preference: ThemePreference
-  setTheme: (next: ThemePreference) => void
-  toggleTheme: () => void
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setPreference] = useState<ThemePreference>(readStoredPreference)
@@ -70,10 +61,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ theme, preference, setTheme, toggleTheme }), [theme, preference, setTheme, toggleTheme])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
-}
-
-export function useTheme(): ThemeContextValue {
-  const value = useContext(ThemeContext)
-  if (!value) throw new Error("useTheme must be used inside ThemeProvider")
-  return value
 }

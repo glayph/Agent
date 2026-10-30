@@ -148,21 +148,32 @@ export function HealthPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [nextReport, nextDeliveryReport] = await Promise.all([
+      const [reportResult, deliveriesResult] = await Promise.allSettled([
         getFullHealthReport(),
         getRuntimeDeliveries(),
       ])
-      setReport(nextReport)
-      setDeliveryReport(nextDeliveryReport)
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : t("pages.health.load_error")
-      setStatusMessage({ kind: "error", text: message })
-      notify.error(message, { id: "health-page:error:load" })
+      const failures: string[] = []
+      if (reportResult.status === "fulfilled") {
+        setReport(reportResult.value)
+      } else {
+        failures.push(`Health report: ${reportResult.reason instanceof Error ? reportResult.reason.message : String(reportResult.reason)}`)
+      }
+      if (deliveriesResult.status === "fulfilled") {
+        setDeliveryReport(deliveriesResult.value)
+      } else {
+        failures.push(`Runtime deliveries: ${deliveriesResult.reason instanceof Error ? deliveriesResult.reason.message : String(deliveriesResult.reason)}`)
+      }
+      if (failures.length > 0) {
+        const message = failures.join(" · ")
+        setStatusMessage({ kind: "error", text: message })
+        notify.error(message, { id: "health-page:error:partial-load" })
+      } else {
+        setStatusMessage(null)
+      }
     } finally {
       setLoading(false)
     }
-  }, [t])
+  }, [])
 
   useEffect(() => {
     void load()

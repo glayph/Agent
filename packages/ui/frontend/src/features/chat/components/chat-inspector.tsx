@@ -181,7 +181,7 @@ export function ChatInspector({
       ? messages.find((message) => message.id === selection.messageId)
       : undefined
     return explicit ?? getLatestAssistantResponse(messages)
-  }, [messages, selection?.messageId])
+  }, [messages, selection])
   const messageRunIds = useMemo(() => getMessageRunIds(messages), [messages])
   const nodes = useMemo(() => {
     const scopedNodes = scopeActivityNodes(

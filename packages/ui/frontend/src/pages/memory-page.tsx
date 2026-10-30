@@ -5,7 +5,7 @@ import {
   IconShieldCheck,
   IconTrash,
 } from "@tabler/icons-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { FormEvent } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -120,39 +120,46 @@ export function MemoryPage() {
   >(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
+  const [chunksError, setChunksError] = useState<string | null>(null)
+  const chunksRequestIdRef = useRef(0)
+  const error = chunksError ?? statsError
 
   const loadStats = useCallback(async () => {
+    setStatsError(null)
     try {
       const response = await getMemoryStats()
       setStats(response.stats)
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("pages.memory.load_error", { defaultValue: "Unable to load memory diagnostics." })
-      setError(message)
+      const message = err instanceof Error ? err.message : t("pages.memory.load_error", { defaultValue: "Unable to load memory statistics." })
+      setStatsError(message)
       notify.error(message, { id: "memory-page:error:stats" })
     }
   }, [t])
 
   const load = useCallback(async () => {
+    const requestId = ++chunksRequestIdRef.current
     setLoading(true)
-    setError(null)
+    setChunksError(null)
     try {
       const chunksResponse = await listMemoryChunks({
         region: region === "all" ? undefined : region,
         limit: 80,
       })
+      if (requestId !== chunksRequestIdRef.current) return
       setChunks(chunksResponse.chunks)
     } catch (err) {
+      if (requestId !== chunksRequestIdRef.current) return
       const message =
         err instanceof Error
           ? err.message
           : t("pages.memory.load_error", {
-              defaultValue: "Unable to load memory diagnostics.",
+              defaultValue: "Unable to load memory chunks.",
             })
-      setError(message)
+      setChunksError(message)
       notify.error(message, { id: "memory-page:error:load" })
     } finally {
-      setLoading(false)
+      if (requestId === chunksRequestIdRef.current) setLoading(false)
     }
   }, [region, t])
 
@@ -161,7 +168,9 @@ export function MemoryPage() {
   }, [loadStats])
 
   useEffect(() => {
+    setSelected(null)
     void load()
+    return () => { chunksRequestIdRef.current += 1 }
   }, [load])
 
   const inspect = async (chunkId: string) => {
@@ -281,7 +290,7 @@ export function MemoryPage() {
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" data-miki-page-body="true">
-        {error && stats && (
+        {statsError && stats && (
           <div
             role="status"
             className="border-amber-500/30 bg-amber-500/5 text-foreground mb-4 rounded-lg border px-3 py-2 text-sm"
@@ -295,7 +304,7 @@ export function MemoryPage() {
               <Skeleton key={index} className="h-28 rounded-lg" />
             ))}
           </div>
-        ) : error && !stats ? (
+        ) : statsError && !stats ? (
           <div
             role="alert"
             className="border-destructive/40 bg-destructive/5 flex flex-col items-start gap-3 rounded-xl border p-5 sm:p-6"
@@ -431,7 +440,17 @@ export function MemoryPage() {
                   ))}
                 </div>
                 <div className="space-y-2">
-                  {chunks.length ? (
+                  {chunksError ? (
+                    <div role="alert" className="flex flex-col items-start gap-2 rounded-lg border border-destructive/30 p-3 text-sm">
+                      <p className="text-destructive">{chunksError}</p>
+                      <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+                        <IconRefresh data-icon="inline-start" />
+                        {t("pages.memory.retry", { defaultValue: "Try again" })}
+                      </Button>
+                    </div>
+                  ) : loading ? (
+                    <p className="text-muted-foreground text-sm">{t("pages.memory.loadingChunks", { defaultValue: "Loading memory records…" })}</p>
+                  ) : chunks.length ? (
                     chunks.map((chunk) => (
                       <button
                         type="button"

@@ -77,7 +77,7 @@ function timeoutSignal(timeoutMs: number): AbortSignal {
   return AbortSignal.timeout(timeoutMs);
 }
 
-function providerHeaders(provider: ProviderTransportConfig, apiKey: string) {
+function providerHeaders(apiKey: string) {
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
@@ -152,7 +152,7 @@ export async function probeProviderCompletion(
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: providerHeaders(input.provider, input.apiKey),
+      headers: providerHeaders(input.apiKey),
       body: JSON.stringify(payload),
       signal: timeoutSignal(input.timeoutMs ?? 120_000),
     });

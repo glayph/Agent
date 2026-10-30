@@ -1,5 +1,4 @@
 import { AgentEngine } from "./agent-engine.js";
-import { ApprovalStore } from "./approval-store.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { RUN_SUMMARY_SENTINEL, pruneToolResults, splitUnits } from "./context-manager.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
@@ -347,18 +346,27 @@ describe("run wall-clock budget", () => {
     expect(result.toolCalls[0].status).toBe("cancelled");
   });
 
-  it("cancels an approval wait when the wall-time deadline expires", async () => {
-    const approvals = new ApprovalStore();
+  it("cancels an in-flight required-risk tool when the wall-time deadline expires", async () => {
+    let toolStarted!: () => void;
+    const started = new Promise<void>((resolve) => { toolStarted = resolve; });
     const registry = new ToolRegistry();
-    registry.register(tool({ name: "write", risk: "config_write" }));
+    registry.register(tool({
+      name: "write",
+      risk: "config_write",
+      approval: "required",
+      execute: (_input, context) => new Promise((_resolve, reject) => {
+        toolStarted();
+        context.signal.addEventListener("abort", () => reject(new Error("tool cancelled")), { once: true });
+      }),
+    }));
     const llm = scriptedLLM([{ calls: [{ name: "write", id: "write-1" }] }]);
-    const engine = new AgentEngine({ llm: llm.client, tools: registry, approvals, maxWallTimeMs: 30 });
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, maxWallTimeMs: 100 });
 
-    const result = await engine.run({ history: user("approve the write") });
-
+    const running = engine.run({ history: user("approve the write") });
+    await started;
+    const result = await running;
     expect(result.status).toBe("limit_reached");
     expect(result.toolCalls[0].status).toBe("cancelled");
-    expect(approvals.list()[0].status).toBe("denied");
   });
 });
 

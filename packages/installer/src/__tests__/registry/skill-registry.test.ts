@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillRegistry } from "../../registry/skill-registry";
-import { SourceProtocol } from "../../types";
+import { SkillRegistry } from "../../registry/skill-registry.js";
+import { SourceProtocol } from "../../types.js";
 
 function createTempDir() {
   const dir = path.join(os.tmpdir(), `skill-registry-test-${Date.now()}`);

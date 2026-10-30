@@ -1675,7 +1675,6 @@ class TemporalKnowledgeGraph {
     }
 
     const archiveDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const edgeWeightFloor = 0.05;
     const staleEntities = this.db.prepare('SELECT * FROM entities WHERE last_seen_at < ? AND access_count < 3').all(archiveDate);
     for (const ent of staleEntities) {
       this.db.prepare('UPDATE entities SET is_active = 0 WHERE id = ?').run(ent.id);
@@ -1689,17 +1688,12 @@ class TemporalKnowledgeGraph {
     // actively true stays exempt indefinitely even if it was first recorded
     // long ago. Only edges nobody has touched in 30 days — genuinely stale —
     // get archived here.
-    const oldEdges = this.db.prepare('SELECT * FROM entity_edges WHERE valid_until IS NULL AND updated_at < ? AND COALESCE(weight, 0) < 1.0').all(archiveDate);
+    const oldEdges = this.db.prepare('SELECT * FROM entity_edges WHERE valid_until IS NULL AND updated_at < ?').all(archiveDate);
     for (const edge of oldEdges) {
       this.db.prepare('UPDATE entity_edges SET valid_until = ? WHERE id = ?').run(archiveDate, edge.id);
       report.edgesDeprecated++;
     }
 
-    const lowWeightEdges = this.db.prepare('SELECT * FROM entity_edges WHERE valid_until IS NULL AND updated_at < ? AND COALESCE(weight, 0) < ?').all(archiveDate, edgeWeightFloor);
-    for (const edge of lowWeightEdges) {
-      this.db.prepare('UPDATE entity_edges SET valid_until = ? WHERE id = ?').run(archiveDate, edge.id);
-      report.edgesDeprecated++;
-    }
 
     return report;
   }

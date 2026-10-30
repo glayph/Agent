@@ -66,9 +66,10 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getAutonomyStatus = () => json<AutonomyStatus>("/api/autonomy/status")
 
-export const getScreenshot = () =>
+export const getScreenshot = (signal?: AbortSignal) =>
   json<{ png_base64: string; width: number | null; height: number | null; captured_at: string }>(
     "/api/autonomy/screenshot",
+    { cache: "no-store", ...(signal ? { signal } : {}) },
   )
 
 export const getLearnedRules = () => json<{ rules: LearnedRule[] }>("/api/permissions/rules")
