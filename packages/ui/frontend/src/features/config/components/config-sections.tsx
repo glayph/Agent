@@ -261,12 +261,9 @@ export function AgentDefaultsSection({
         hint={t("pages.config.max_tool_iterations_hint")}
         layout="setting-row"
       >
-        <Input
-          type="number"
-          min={1}
-          value={form.maxToolIterations}
-          onChange={(e) => onFieldChange("maxToolIterations", e.target.value)}
-        />
+        <p className="text-muted-foreground py-2 text-sm">
+          {t("pages.config.max_tool_iterations_unlimited")}
+        </p>
       </Field>
 
       <Field
@@ -494,11 +491,36 @@ export function EvolutionSection({
 }: EvolutionSectionProps) {
   const { t } = useTranslation()
 
+  const [manualRunState, setManualRunState] = useState<"idle" | "running" | "complete" | "failed">("idle")
+  const [manualRunDetail, setManualRunDetail] = useState("")
+  const runEvolutionNow = async () => {
+    setManualRunState("running")
+    setManualRunDetail("")
+    try {
+      const response = await launcherFetch("/api/evolution/run", { method: "POST" })
+      const body = await response.json() as { status?: string; error?: string }
+      if (!response.ok) throw new Error(body.error || `Evolution run failed (${response.status}).`)
+      setManualRunState("complete")
+      setManualRunDetail(body.status || "completed")
+    } catch (error) {
+      setManualRunState("failed")
+      setManualRunDetail(error instanceof Error ? error.message : t("pages.config.evolution_run_failed"))
+    }
+  }
+
   return (
     <ConfigSectionCard
       title={t("pages.config.sections.evolution")}
       description={t("pages.config.evolution_section_hint")}
     >
+      <Field label={t("pages.config.evolution_run_now")} hint={t("pages.config.evolution_run_now_hint")} layout="setting-row">
+        <div className="flex flex-col items-start gap-2">
+          <Button type="button" variant="outline" onClick={runEvolutionNow} disabled={!form.evolutionEnabled || manualRunState === "running"}>
+            {manualRunState === "running" ? t("pages.config.evolution_run_running") : t("pages.config.evolution_run_now")}
+          </Button>
+          {manualRunDetail && <p className={manualRunState === "failed" ? "text-destructive text-xs" : "text-muted-foreground text-xs"}>{manualRunDetail}</p>}
+        </div>
+      </Field>
       <SwitchCardField
         label={t("pages.config.evolution_enabled")}
         hint={t("pages.config.evolution_enabled_hint")}
@@ -648,13 +670,32 @@ export function MCPSection({
       const response = await launcherFetch("/api/mcp/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          config: server.type === "stdio"
+            ? {
+                enabled: server.enabled,
+                type: "stdio",
+                command: server.command.trim(),
+                args: server.argsText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
+                env: JSON.parse(server.envText || "{}"),
+                env_file: server.envFile.trim() || null,
+                deferred: server.deferredOverride,
+              }
+            : {
+                enabled: server.enabled,
+                type: server.type,
+                url: server.url.trim(),
+                headers: JSON.parse(server.headersText || "{}"),
+                deferred: server.deferredOverride,
+              },
+        }),
       })
       const body = (await response.json()) as { error?: string; status?: string; tools?: number }
       setTestResult((prev) => ({
         ...prev,
         [server.id]: response.ok
-          ? `Connected (${body.tools ?? 0} tools)`
+          ? body.status === "disabled" ? t("pages.config.mcp_server_disabled") : `Connected (${body.tools ?? 0} tools)`
           : body.error || body.status || `Failed (${response.status})`,
       }))
     } catch (error) {
@@ -1030,6 +1071,7 @@ export function ExecSection({ form, onFieldChange }: ExecSectionProps) {
         body: JSON.stringify({
           allow_patterns: allowPatterns,
           deny_patterns: denyPatterns,
+          enable_deny_patterns: form.enableDenyPatterns,
           command: testCommand,
         }),
       })
@@ -1240,7 +1282,9 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
         >
           <Input
             type="number"
-            min={1}
+            min={0.25}
+            max={1440}
+            step={0.25}
             value={form.heartbeatInterval}
             onChange={(e) => onFieldChange("heartbeatInterval", e.target.value)}
           />
@@ -1250,40 +1294,13 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
   )
 }
 
-interface CronSectionProps {
-  form: CoreConfigForm
-  onFieldChange: UpdateCoreField
-}
-
-export function CronSection({ form, onFieldChange }: CronSectionProps) {
+export function CronSection() {
   const { t } = useTranslation()
-
   return (
     <ConfigSectionCard title={t("pages.config.sections.cron")}>
-      <SwitchCardField
-        label={t("pages.config.allow_shell_execution")}
-        hint={t("pages.config.allow_shell_execution_hint")}
-        layout="setting-row"
-        checked={form.allowCommand}
-        disabled={!form.execEnabled}
-        onCheckedChange={(checked) => onFieldChange("allowCommand", checked)}
-      />
-
-      <Field
-        label={t("pages.config.cron_exec_timeout")}
-        hint={t("pages.config.cron_exec_timeout_hint")}
-        layout="setting-row"
-      >
-        <Input
-          type="number"
-          min={0}
-          disabled={!form.execEnabled}
-          value={form.cronExecTimeoutMinutes}
-          onChange={(e) =>
-            onFieldChange("cronExecTimeoutMinutes", e.target.value)
-          }
-        />
-      </Field>
+      <p className="text-muted-foreground py-3 text-sm">
+        {t("pages.config.cron_goal_only_note")}
+      </p>
     </ConfigSectionCard>
   )
 }
@@ -1428,8 +1445,6 @@ export function LauncherSection({
 }
 
 interface DevicesSectionProps {
-  form: CoreConfigForm
-  onFieldChange: UpdateCoreField
   autoStartEnabled: boolean
   autoStartHint: string
   autoStartDisabled: boolean
@@ -1437,8 +1452,6 @@ interface DevicesSectionProps {
 }
 
 export function DevicesSection({
-  form,
-  onFieldChange,
   autoStartEnabled,
   autoStartHint,
   autoStartDisabled,
@@ -1450,22 +1463,9 @@ export function DevicesSection({
     <ConfigSectionCard
       title={t("pages.config.sections.devices")}
     >
-      <SwitchCardField
-        label={t("pages.config.devices_enabled")}
-        hint={t("pages.config.devices_enabled_hint")}
-        layout="setting-row"
-        checked={form.devicesEnabled}
-        onCheckedChange={(checked) => onFieldChange("devicesEnabled", checked)}
-      />
-
-      <SwitchCardField
-        label={t("pages.config.monitor_usb")}
-        hint={t("pages.config.monitor_usb_hint")}
-        layout="setting-row"
-        checked={form.monitorUSB}
-        onCheckedChange={(checked) => onFieldChange("monitorUSB", checked)}
-      />
-
+      <p className="text-muted-foreground py-3 text-sm">
+        {t("pages.config.devices_not_available")}
+      </p>
       <SwitchCardField
         label={t("pages.config.autostart_label")}
         hint={autoStartHint}

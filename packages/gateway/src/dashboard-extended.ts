@@ -447,6 +447,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     }
     const trigger = stringValue(config.cold_path_trigger) || "after_turn"
     const scheduledTimes = Array.isArray(config.cold_path_times) ? config.cold_path_times.filter((v): v is string => typeof v === "string") : []
+    if (!force && trigger === "manual") return { status: "manual_only" }
     if (!force && trigger === "scheduled") {
       const hhmm = new Date().toTimeString().slice(0, 5)
       if (!scheduledTimes.some((time) => time.trim() === hhmm)) return { status: "not_scheduled", next_check: hhmm, configured_times: scheduledTimes }
@@ -501,7 +502,14 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   const unsubscribeMessageSent = getLifecycleBus().on?.("message:sent", onMessageSent)
 
   evolutionTimer = setInterval(() => {
-    if (!dashboardShuttingDown && evolutionConfig().enabled) void runTrackedEvolutionCycle(false).catch((error) => deps.appendGatewayLog(`Evolution cycle failed: ${error instanceof Error ? error.message : String(error)}`))
+    if (dashboardShuttingDown) return
+    const config = evolutionConfig()
+    const raw = asRecord(deps.getAppConfig().evolution)
+    const trigger = stringValue(raw.cold_path_trigger) || "after_turn"
+    // after_turn is driven by message:sent; manual is owner-triggered only.
+    // The timer exists solely to check scheduled HH:MM windows.
+    if (!config.enabled || trigger !== "scheduled") return
+    void runTrackedEvolutionCycle(false).catch((error) => deps.appendGatewayLog(`Evolution cycle failed: ${error instanceof Error ? error.message : String(error)}`))
   }, 30_000)
   evolutionTimer.unref?.()
 
@@ -511,11 +519,28 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
 
   router.use("/goals", deps.requireAuth, createGoalsRouter(new GoalStore(deps.db)))
 
+  router.post("/evolution/run", deps.requireAuth, async (_req, res) => {
+    if (!evolutionConfig().enabled) {
+      return res.status(409).json({ error: "Enable and save Evolution before running it." })
+    }
+    try {
+      return res.json(await runTrackedEvolutionCycle(true))
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : String(error) })
+    }
+  })
 
   router.post("/mcp/test", deps.requireAuth, async (req, res) => {
     const name = stringValue(req.body?.name)
     if (!name) return res.status(400).json({ ok: false, error: "MCP server name is required." })
-    const config = appMcpConfig(deps.getAppConfig())
+    const draftServer = req.body?.config
+    if (draftServer !== undefined && !isRecord(draftServer)) {
+      return res.status(400).json({ ok: false, error: "MCP server draft must be an object." })
+    }
+    const sourceConfig = draftServer === undefined
+      ? deps.getAppConfig()
+      : deepMergeLocal(deps.getAppConfig(), { tools: { mcp: { servers: { [name]: draftServer } } } })
+    const config = appMcpConfig(sourceConfig)
     const server = config.servers[name]
     if (!server) return res.status(404).json({ ok: false, error: `MCP server '${name}' was not found.` })
     if (!server.enabled) return res.json({ ok: true, status: "disabled", name, tools: 0 })

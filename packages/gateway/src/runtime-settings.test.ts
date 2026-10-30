@@ -1,6 +1,16 @@
-import { DEFAULT_MAX_COMPLETION_TOKENS, DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_MAX_WALL_TIME_MS, resolveContextWindowTokens, resolveMaxToolIterations, resolveMaxWallTimeMs } from "./runtime-settings.js";
+import { DEFAULT_MAX_COMPLETION_TOKENS, DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_MAX_WALL_TIME_MS, resolveContextWindowTokens, resolveMaxToolIterations, resolveMaxWallTimeMs, resolveToolFeedbackMaxArgsLength } from "./runtime-settings.js";
 
 describe("runtime settings defaults", () => {
+  it("preserves zero as unlimited tool feedback argument preview length", () => {
+    expect(resolveToolFeedbackMaxArgsLength(0)).toBe(0)
+    expect(resolveToolFeedbackMaxArgsLength("0")).toBe(0)
+    expect(resolveToolFeedbackMaxArgsLength(120)).toBe(120)
+    expect(resolveToolFeedbackMaxArgsLength(-1)).toBe(300)
+    expect(resolveToolFeedbackMaxArgsLength("bad")).toBe(300)
+    expect(resolveToolFeedbackMaxArgsLength(null)).toBe(300)
+    expect(resolveToolFeedbackMaxArgsLength(" ")).toBe(300)
+  })
+
   it("uses the configured max tool iterations and falls back to the Settings default", () => {
     expect(resolveMaxToolIterations({ max_tool_iterations: 7 }, {})).toBe(7);
     expect(resolveMaxToolIterations({}, { MIKI_AGENT_MAX_TURNS: "9" })).toBe(9);

@@ -347,8 +347,29 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     ...createControlTools(createControlToolFactory(control)),
     ...createTerminalTools({
       root: effectiveWorkspaceRoot,
-      // Unlike the file tools (restricted unless set to false), the terminal only confines its starting directory on an explicit `true` (or in MIKI_TERMINAL_SAFE mode).
+      // Unlike file tools, the terminal confines its starting directory only on explicit `true`.
       restrictToWorkspace: () => (deps.getAppConfig() as LooseConfig)?.agents?.defaults?.restrict_to_workspace === true,
+      executionEnabled: () => (deps.getAppConfig() as LooseConfig)?.tools?.exec?.enabled !== false,
+      allowRemote: () => (deps.getAppConfig() as LooseConfig)?.tools?.exec?.allow_remote === true,
+      isRemoteRun: (runId) => {
+        const source = String(runOrigins.get(runId)?.source ?? "").toLowerCase()
+        // The only startRun origins that execute on the local machine are the web UI and CLI.
+        // Treat every other origin (including newly-added channels and API callers) as remote.
+        return source !== "" && !new Set(["webchat", "cli", "autonomy", "scheduler", "system", "local"]).has(source)
+      },
+      enableDenyPatterns: () => (deps.getAppConfig() as LooseConfig)?.tools?.exec?.enable_deny_patterns === true,
+      allowPatterns: () => {
+        const patterns = (deps.getAppConfig() as LooseConfig)?.tools?.exec?.custom_allow_patterns
+        return Array.isArray(patterns) ? patterns.filter((value): value is string => typeof value === "string") : []
+      },
+      denyPatterns: () => {
+        const patterns = (deps.getAppConfig() as LooseConfig)?.tools?.exec?.custom_deny_patterns
+        return Array.isArray(patterns) ? patterns.filter((value): value is string => typeof value === "string") : []
+      },
+      timeoutSeconds: () => {
+        const value = Number((deps.getAppConfig() as LooseConfig)?.tools?.exec?.timeout_seconds ?? 0)
+        return Number.isFinite(value) && value > 0 ? Math.min(86_400, Math.floor(value)) : 0
+      },
       processes,
     }),
     {

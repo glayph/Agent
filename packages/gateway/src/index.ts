@@ -18,6 +18,7 @@ import Database from "better-sqlite3"
 import { WebSocketServer, type WebSocket } from "ws"
 import * as yaml from "js-yaml"
 import { createAgentRuntime, createWsEventMapper } from "./agent-runtime.js"
+import { testCommandPatterns } from "./terminal-tool.js"
 import { createFileManagerRouter, FileManagerError } from "@miki/core/file-manager"
 import { DurableTaskStore, FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine"
 import { normalizeRuntimePaths } from "@miki/core/paths"
@@ -1184,19 +1185,15 @@ app.patch("/api/config", requireAuth, (req, res) => {
 app.post("/api/config/test-command-patterns", requireAuth, (req, res) => {
   const allowPatterns = Array.isArray(req.body?.allow_patterns) ? req.body.allow_patterns.filter((v: unknown): v is string => typeof v === "string") : []
   const denyPatterns = Array.isArray(req.body?.deny_patterns) ? req.body.deny_patterns.filter((v: unknown): v is string => typeof v === "string") : []
-  const command = String(req.body?.command || "").trim().toLowerCase()
+  const command = String(req.body?.command || "").trim()
   if (!command) return res.status(400).json({ error: "command is required" })
-  for (const pattern of allowPatterns) {
-    try {
-      if (new RegExp(pattern).test(command)) return res.json({ allowed: true, blocked: false, matched_whitelist: pattern, matched_blacklist: null })
-    } catch { /* invalid regex patterns are ignored */ }
-  }
-  for (const pattern of denyPatterns) {
-    try {
-      if (new RegExp(pattern).test(command)) return res.json({ allowed: false, blocked: true, matched_whitelist: null, matched_blacklist: pattern })
-    } catch { /* invalid regex patterns are ignored */ }
-  }
-  return res.json({ allowed: false, blocked: false, matched_whitelist: null, matched_blacklist: null })
+  const result = testCommandPatterns(command, allowPatterns, denyPatterns, req.body?.enable_deny_patterns === true)
+  return res.json({
+    allowed: result.allowed,
+    blocked: result.blocked,
+    matched_whitelist: result.matchedWhitelist,
+    matched_blacklist: result.matchedBlacklist,
+  })
 })
 app.get("/api/system/version", (_req, res) => res.json({ version: "1.3.14", go_version: "not used by Node backend" }))
 /** File execution is on by default. MIKI_FILE_EXECUTION=false or app_config.files.execution_enabled=false turns it off at runtime. */

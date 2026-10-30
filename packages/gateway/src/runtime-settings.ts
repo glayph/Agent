@@ -18,6 +18,14 @@ function nonNegativeInteger(value: unknown): number | undefined {
   return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : undefined;
 }
 
+/** A configured zero intentionally disables argument preview truncation. */
+export function resolveToolFeedbackMaxArgsLength(value: unknown, fallback = 300): number {
+  if (value === 0 || value === "0") return 0
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : fallback
+}
+
 export function resolveMaxToolIterations(defaults: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): number {
   return positiveInteger(defaults.max_tool_iterations)
     ?? positiveInteger(env.MIKI_AGENT_MAX_TURNS)

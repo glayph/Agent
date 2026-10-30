@@ -18,7 +18,7 @@ import type { getLifecycleBus } from "@miki/core/hooks"
 import type { FileMemoryService, retrieveRelevantTurns } from "@miki/core/memory-files"
 import { ProviderRequestError } from "./provider-error.js"
 import { imageDataUrlFromMediaUrl, workspaceRelativePathFromMediaUrl } from "./chat-attachments.js"
-import type { resolveContextWindowTokens } from "./runtime-settings.js"
+import { resolveToolFeedbackMaxArgsLength, type resolveContextWindowTokens } from "./runtime-settings.js"
 import { createKeyedLane, LaneWaitTimeoutError, type KeyedLane } from "./session-lane.js"
 import type { RunStream, StreamHub, StreamStatus } from "./stream-hub.js"
 import { DEFAULT_CHAT_TITLE, titleFromMessage } from "./task-title.js"
@@ -749,7 +749,7 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           return {
             enabled: feedback?.enabled !== false,
             separateMessages: feedback?.separate_messages === true,
-            maxArgsLength: Math.max(0, Number(feedback?.max_args_length ?? 300) || 300),
+            maxArgsLength: resolveToolFeedbackMaxArgsLength(feedback?.max_args_length),
           }
         }, () => {
           const messaging = (getAppConfig() as LooseConfig)?.messaging || {}

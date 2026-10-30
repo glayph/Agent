@@ -37,10 +37,6 @@ describe("config page form model", () => {
           allow_remote: true,
           timeout_seconds: 45,
         },
-        cron: {
-          allow_command: true,
-          exec_timeout_minutes: 12,
-        },
         mcp: {
           enabled: true,
           discovery: {
@@ -59,8 +55,7 @@ describe("config page form model", () => {
           },
         },
       },
-      heartbeat: { enabled: false, interval_seconds: 90 },
-      devices: { enabled: true, monitor_usb: false },
+      heartbeat: { proactive: { enabled: false, decision_interval_seconds: 1800 } },
     })
 
     expect(form.workspace).toBe("D:/work")
@@ -68,12 +63,8 @@ describe("config page form model", () => {
     expect(form.bypassRestrictions).toBe(true)
     expect(form.maxCompletionTokens).toBe("64000")
     expect(form.contextWindow).toBe("")
-    expect(form.allowCommand).toBe(true)
-    expect(form.cronExecTimeoutMinutes).toBe("12")
     expect(form.heartbeatEnabled).toBe(false)
-    expect(form.heartbeatInterval).toBe("2")
-    expect(form.devicesEnabled).toBe(true)
-    expect(form.monitorUSB).toBe(false)
+    expect(form.heartbeatInterval).toBe("30")
     expect(form.turnProfile).toMatchObject({
       enabled: true,
       historyMode: "off",

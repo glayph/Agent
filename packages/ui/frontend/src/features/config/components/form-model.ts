@@ -14,19 +14,14 @@ export interface CoreConfigForm {
   customDenyPatternsText: string
   customAllowPatternsText: string
   execTimeoutSeconds: string
-  allowCommand: boolean
-  cronExecTimeoutMinutes: string
   maxCompletionTokens: string
   contextWindow: string
-  maxToolIterations: string
   summarizeMessageThreshold: string
   summarizeTokenPercent: string
   turnProfile: TurnProfileForm
   dmScope: string
   heartbeatEnabled: boolean
   heartbeatInterval: string
-  devicesEnabled: boolean
-  monitorUSB: boolean
   mcpEnabled: boolean
   mcpDiscoveryEnabled: boolean
   mcpDiscoveryTTL: string
@@ -126,11 +121,8 @@ export const EMPTY_FORM: CoreConfigForm = {
   customDenyPatternsText: "",
   customAllowPatternsText: "",
   execTimeoutSeconds: "0",
-  allowCommand: false,
-  cronExecTimeoutMinutes: "5",
   maxCompletionTokens: "32768",
   contextWindow: "",
-  maxToolIterations: "50",
   summarizeMessageThreshold: "20",
   summarizeTokenPercent: "75",
   turnProfile: {
@@ -144,9 +136,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   },
   dmScope: "per-channel-peer",
   heartbeatEnabled: true,
-  heartbeatInterval: "30",
-  devicesEnabled: false,
-  monitorUSB: true,
+  heartbeatInterval: "15",
   mcpEnabled: false,
   mcpDiscoveryEnabled: false,
   mcpDiscoveryTTL: "5",
@@ -313,12 +303,11 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const defaults = asRecord(agents.defaults)
   const session = asRecord(root.session)
   const heartbeat = asRecord(root.heartbeat)
-  const devices = asRecord(root.devices)
+  const proactive = asRecord(heartbeat.proactive)
   const evolution = asRecord(root.evolution)
   const tools = asRecord(root.tools)
   const mcp = asRecord(tools.mcp)
   const mcpDiscovery = asRecord(mcp.discovery)
-  const cron = asRecord(tools.cron)
   const exec = asRecord(tools.exec)
   const toolFeedback = asRecord(defaults.tool_feedback)
 
@@ -375,22 +364,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       exec.timeout_seconds,
       EMPTY_FORM.execTimeoutSeconds,
     ),
-    allowCommand:
-      cron.allow_command === undefined
-        ? EMPTY_FORM.allowCommand
-        : asBool(cron.allow_command),
-    cronExecTimeoutMinutes: asNumberString(
-      cron.exec_timeout_minutes,
-      EMPTY_FORM.cronExecTimeoutMinutes,
-    ),
     maxCompletionTokens: asNumberString(defaults.max_completion_tokens ?? defaults.max_tokens, EMPTY_FORM.maxCompletionTokens),
     contextWindow: asOptionalPositiveNumberString(
       defaults.context_window,
       EMPTY_FORM.contextWindow,
-    ),
-    maxToolIterations: asNumberString(
-      defaults.max_tool_iterations,
-      EMPTY_FORM.maxToolIterations,
     ),
     summarizeMessageThreshold: asNumberString(
       defaults.summarize_message_threshold,
@@ -402,26 +379,13 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
     ),
     turnProfile: mapTurnProfile(defaults.turn_profile),
     dmScope: asString(session.dm_scope) || EMPTY_FORM.dmScope,
-    heartbeatEnabled:
-      heartbeat.enabled === undefined
-        ? EMPTY_FORM.heartbeatEnabled
-        : asBool(heartbeat.enabled),
+    heartbeatEnabled: proactive.enabled !== false && proactive.llm_when_idle !== false,
     heartbeatInterval: (() => {
-      const rawSeconds = heartbeat.interval_seconds ?? heartbeat.interval
-      if (rawSeconds == null) return EMPTY_FORM.heartbeatInterval
-      const num =
-        typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds)
-      if (!Number.isFinite(num) || num <= 0) return EMPTY_FORM.heartbeatInterval
-      return String(Math.max(1, Math.round(num / 60)))
+      const rawSeconds = asRecord(heartbeat.proactive).decision_interval_seconds ?? 900
+      const num = typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds)
+      if (!Number.isFinite(num) || num < 15) return EMPTY_FORM.heartbeatInterval
+      return String(Math.max(0.25, Math.round((num / 60) * 100) / 100))
     })(),
-    devicesEnabled:
-      devices.enabled === undefined
-        ? EMPTY_FORM.devicesEnabled
-        : asBool(devices.enabled),
-    monitorUSB:
-      devices.monitor_usb === undefined
-        ? EMPTY_FORM.monitorUSB
-        : asBool(devices.monitor_usb),
     mcpEnabled:
       mcp.enabled === undefined ? EMPTY_FORM.mcpEnabled : asBool(mcp.enabled),
     mcpDiscoveryEnabled:

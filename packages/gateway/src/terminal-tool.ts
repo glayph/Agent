@@ -118,6 +118,16 @@ export interface TerminalToolOptions {
   root: () => string
   /** True keeps the starting directory of commands inside the workspace. Safe mode forces it on. */
   restrictToWorkspace: () => boolean
+  /** Live config switch for terminal_run and delegated coding-agent execution. */
+  executionEnabled?: () => boolean
+  /** Remote channel runs are blocked unless the owner explicitly enables them. */
+  allowRemote?: () => boolean
+  isRemoteRun?: (runId: string) => boolean
+  /** Owner-configured terminal command policy, read dynamically after every save. */
+  enableDenyPatterns?: () => boolean
+  allowPatterns?: () => string[]
+  denyPatterns?: () => string[]
+  timeoutSeconds?: () => number
   /** Shared registry of running/finished commands. One per gateway; a private one is created when omitted. */
   processes?: ProcessManager
 }
@@ -181,6 +191,40 @@ export function describeProcess(proc: ManagedProcess): Record<string, unknown> {
   }
 }
 
+export interface CommandPatternResult {
+  allowed: boolean
+  blocked: boolean
+  matchedWhitelist: string | null
+  matchedBlacklist: string | null
+}
+
+/** Shared by the Config pattern tester and the terminal executor. Allow patterns bypass only
+ * the configurable deny list; MIKI_TERMINAL_SAFE built-in protections remain independent. */
+export function testCommandPatterns(
+  command: string,
+  allowPatterns: string[] = [],
+  denyPatterns: string[] = [],
+  enableDenyPatterns = true,
+): CommandPatternResult {
+  for (const pattern of allowPatterns) {
+    try {
+      if (new RegExp(pattern, "i").test(command)) {
+        return { allowed: true, blocked: false, matchedWhitelist: pattern, matchedBlacklist: null }
+      }
+    } catch { /* invalid patterns are rejected by the visual Config form */ }
+  }
+  if (enableDenyPatterns) {
+    for (const pattern of denyPatterns) {
+      try {
+        if (new RegExp(pattern, "i").test(command)) {
+          return { allowed: false, blocked: true, matchedWhitelist: null, matchedBlacklist: pattern }
+        }
+      } catch { /* invalid patterns are rejected by the visual Config form */ }
+    }
+  }
+  return { allowed: false, blocked: false, matchedWhitelist: null, matchedBlacklist: null }
+}
+
 /**
  * Terminal tools for an autonomous agent: terminal_run starts a command and waits for it in a
  * bounded slice, terminal_status waits again / reports progress, terminal_kill stops it. A slow
@@ -188,10 +232,15 @@ export function describeProcess(proc: ManagedProcess): Record<string, unknown> {
  */
 export function createTerminalTools(options: TerminalToolOptions): EngineTool[] {
   const processes = options.processes ?? new ProcessManager()
-  // Safe mode is designed for unattended autonomy: known-dangerous commands are blocked rather
-  // than prompting for a human approval that would stall an overnight goal. So no tool here ever
-  // asks for approval, in either mode.
   const approvalMode = () => "auto" as const
+  const assertExecutionAllowed = (runId: string) => {
+    if (options.executionEnabled?.() === false) {
+      throw new Error("Terminal command execution is disabled in Config.")
+    }
+    if (options.isRemoteRun?.(runId) && options.allowRemote?.() !== true) {
+      throw new Error("Remote terminal command execution is disabled in Config.")
+    }
+  }
 
   const run: EngineTool = {
     name: "terminal_run",
@@ -219,11 +268,25 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
     async execute(input, context) {
       const command = typeof input.command === "string" ? input.command.trim() : ""
       if (!command) throw new Error("command is required.")
+      assertExecutionAllowed(context.runId)
+      const configuredPatterns = testCommandPatterns(
+        command,
+        options.allowPatterns?.() ?? [],
+        options.denyPatterns?.() ?? [],
+        options.enableDenyPatterns?.() === true,
+      )
+      if (configuredPatterns.blocked) {
+        throw new Error(`Command blocked by configured deny pattern (${configuredPatterns.matchedBlacklist}).`)
+      }
       const blocked = blockedReason(command)
       if (blocked) throw new Error(`Command blocked by terminal policy (${blocked}).`)
       const cwd = resolveCwd(options.root(), input.cwd, options.restrictToWorkspace())
       const background = input.background === true
-      const hardLimit = input.timeout_seconds ? clampSeconds(input.timeout_seconds, 0, 1, MAX_TIMEOUT_SECONDS) * 1000 : undefined
+      const configuredTimeout = Number(options.timeoutSeconds?.() ?? 0)
+      const requestedTimeout = input.timeout_seconds === undefined ? configuredTimeout : Number(input.timeout_seconds)
+      const hardLimit = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+        ? clampSeconds(requestedTimeout, 0, 1, MAX_TIMEOUT_SECONDS) * 1000
+        : undefined
       const proc = processes.start({
         command,
         cwd,
@@ -326,6 +389,7 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
     async execute(input, context) {
       const prompt = typeof input.prompt === "string" ? input.prompt.trim() : ""
       if (!prompt) throw new Error("prompt is required.")
+      assertExecutionAllowed(context.runId)
       const resolved = resolveCodingAgent(typeof input.agent === "string" ? input.agent : undefined)
       if ("error" in resolved) throw new Error(resolved.error)
       // The command is assembled by Miki (or set by the owner in MIKI_CODING_AGENT_COMMAND), never by the model, so it is not run through the blocklist.
@@ -336,6 +400,20 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
         writeFileSync(promptPath, prompt, { encoding: "utf8", mode: 0o600, flag: "wx" })
       }
       const cleanup = () => { if (promptPath) { try { rmSync(promptPath, { force: true }) } catch { /* best effort */ } } }
+      const configuredPatterns = testCommandPatterns(
+        resolved.command,
+        options.allowPatterns?.() ?? [],
+        options.denyPatterns?.() ?? [],
+        options.enableDenyPatterns?.() === true,
+      )
+      if (configuredPatterns.blocked) {
+        cleanup()
+        throw new Error(`Command blocked by configured deny pattern (${configuredPatterns.matchedBlacklist}).`)
+      }
+      const configuredTimeout = Number(options.timeoutSeconds?.() ?? 0)
+      const hardLimit = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? clampSeconds(configuredTimeout, 0, 1, MAX_TIMEOUT_SECONDS) * 1000
+        : undefined
       let proc: ManagedProcess
       try {
         proc = processes.start({
@@ -345,6 +423,7 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
           runId: context.runId,
           ...(context.sessionId ? { sessionId: context.sessionId } : {}),
           detached: false,
+          ...(hardLimit ? { killAfterMs: hardLimit } : {}),
           onExit: cleanup,
         })
       } catch (error) {

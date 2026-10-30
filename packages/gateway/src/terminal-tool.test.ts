@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@jest/globals"
 import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { blockedReason, createTerminalTool } from "./terminal-tool.js"
+import { blockedReason, createTerminalTool, testCommandPatterns } from "./terminal-tool.js"
 
 const ctx = () => ({ runId: "r", callId: "c", signal: new AbortController().signal })
 const makeRoot = () => mkdtempSync(path.join(os.tmpdir(), "miki-term-"))
@@ -12,6 +12,16 @@ const makeTool = (opts: { restrict?: boolean; root?: string } = {}) => {
 }
 
 describe("terminal_run", () => {
+  it("uses the same allow/deny pattern precedence as the Config tester", () => {
+    expect(testCommandPatterns("git push origin main", ["^git\\s+push"], ["^git"], true)).toMatchObject({
+      allowed: true, blocked: false, matchedWhitelist: "^git\\s+push", matchedBlacklist: null,
+    })
+    expect(testCommandPatterns("git push origin main", [], ["^git\\s+push"], true)).toMatchObject({
+      allowed: false, blocked: true, matchedBlacklist: "^git\\s+push",
+    })
+    expect(testCommandPatterns("git status", [], ["^git\\s+push"], true).blocked).toBe(false)
+  })
+
   const saved = process.env.MIKI_TERMINAL_SAFE
   afterEach(() => {
     if (saved === undefined) delete process.env.MIKI_TERMINAL_SAFE
@@ -27,6 +37,41 @@ describe("terminal_run", () => {
     process.env.MIKI_TERMINAL_SAFE = "true"
     expect(makeTool().approval).toBe("auto")
   })
+  it("blocks terminal execution when the live Config switch is off", async () => {
+    const root = makeRoot()
+    const tool = createTerminalTool({ root: () => root, restrictToWorkspace: () => false, executionEnabled: () => false })
+    await expect(tool.execute({ command: "echo blocked" }, ctx())).rejects.toThrow(/disabled in Config/)
+  })
+
+  it("blocks remote terminal runs unless Allow Remote is enabled", async () => {
+    const root = makeRoot()
+    const tool = createTerminalTool({
+      root: () => root,
+      restrictToWorkspace: () => false,
+      isRemoteRun: () => true,
+      allowRemote: () => false,
+    })
+    await expect(tool.execute({ command: "echo blocked" }, ctx())).rejects.toThrow(/Remote terminal command execution is disabled/)
+  })
+
+  it("enforces the saved custom deny list", async () => {
+    const root = makeRoot()
+    const tool = createTerminalTool({
+      root: () => root,
+      restrictToWorkspace: () => false,
+      enableDenyPatterns: () => true,
+      denyPatterns: () => ["^echo\\s+blocked"],
+    })
+    await expect(tool.execute({ command: "echo blocked" }, ctx())).rejects.toThrow(/configured deny pattern/)
+  })
+
+  it("uses the configured timeout when terminal_run omits one", async () => {
+    const root = makeRoot()
+    const tool = createTerminalTool({ root: () => root, restrictToWorkspace: () => false, timeoutSeconds: () => 1 })
+    const result = await tool.execute({ command: "sleep 5" }, ctx()) as { timed_out?: boolean }
+    expect(result.timed_out).toBe(true)
+  }, 10_000)
+
   it("runs a command and captures output", async () => {
     const result = (await makeTool().execute({ command: "echo hello" }, ctx())) as { stdout: string; exit_code: number }
     expect(result.exit_code).toBe(0)

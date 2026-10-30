@@ -60,6 +60,16 @@ import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { refreshGatewayState } from "@/store/gateway"
 
+function assertValidRegexPatterns(patterns: string[], label: string): void {
+  for (const pattern of patterns) {
+    try {
+      new RegExp(pattern)
+    } catch {
+      throw new Error(`${label} contains an invalid regular expression: ${pattern}`)
+    }
+  }
+}
+
 function buildStringMapMergePatch(
   next: Record<string, string>,
   previous: Record<string, string>,
@@ -351,11 +361,6 @@ function ConfigFormView() {
           form.contextWindow,
           "Context window",
         )
-        const maxToolIterations = parseIntField(
-          form.maxToolIterations,
-          "Max tool iterations",
-          { min: 1 },
-        )
         const toolFeedbackMaxArgsLength = parseIntField(
           form.toolFeedbackMaxArgsLength,
           "Tool feedback max args length",
@@ -372,15 +377,10 @@ function ConfigFormView() {
           { min: 1, max: 100 },
         )
         const turnProfile = buildTurnProfilePatch(form.turnProfile)
-        const heartbeatInterval = parseIntField(
+        const heartbeatInterval = parseFloatField(
           form.heartbeatInterval,
-          "Heartbeat interval",
-          { min: 1 },
-        )
-        const cronExecTimeoutMinutes = parseIntField(
-          form.cronExecTimeoutMinutes,
-          "Cron exec timeout",
-          { min: 0 },
+          "Idle decision interval",
+          { min: 0.25, max: 1440 },
         )
         const evolutionMinTaskCount = parseIntField(
           form.evolutionMinTaskCount,
@@ -572,22 +572,20 @@ function ConfigFormView() {
         }
 
         if (form.execEnabled) {
+          const allowPatterns = parseMultilineList(form.customAllowPatternsText)
+          const denyPatterns = parseMultilineList(form.customDenyPatternsText)
+          assertValidRegexPatterns(allowPatterns, "Custom allow patterns")
+          assertValidRegexPatterns(denyPatterns, "Custom deny patterns")
           execConfigPatch.allow_remote = form.allowRemote
           execConfigPatch.enable_deny_patterns = form.enableDenyPatterns
-          execConfigPatch.custom_allow_patterns = parseMultilineList(
-            form.customAllowPatternsText,
-          )
+          execConfigPatch.custom_allow_patterns = allowPatterns
+          // Keep the configured list when its switch is off so re-enabling it restores the rules.
+          execConfigPatch.custom_deny_patterns = denyPatterns
           execConfigPatch.timeout_seconds = parseIntField(
             form.execTimeoutSeconds,
             "Exec timeout",
             { min: 0 },
           )
-
-          if (form.enableDenyPatterns) {
-            execConfigPatch.custom_deny_patterns = parseMultilineList(
-              form.customDenyPatternsText,
-            )
-          }
         }
 
         configApply = await patchAppConfig({
@@ -607,8 +605,9 @@ function ConfigFormView() {
                 separate_messages: form.toolFeedbackSeparateMessages,
               },
               max_completion_tokens: maxCompletionTokens,
-              context_window: contextWindow,
-              max_tool_iterations: maxToolIterations,
+              // 0 is the runtime's documented "automatic/model-derived" value.
+              // Omitting this key would leave an old positive override after deep-merge.
+              context_window: contextWindow ?? 0,
               summarize_message_threshold: summarizeMessageThreshold,
               summarize_token_percent: summarizeTokenPercent,
               turn_profile: turnProfile,
@@ -632,10 +631,6 @@ function ConfigFormView() {
             ),
           },
           tools: {
-            cron: {
-              allow_command: form.allowCommand,
-              exec_timeout_minutes: cronExecTimeoutMinutes,
-            },
             exec: execConfigPatch,
             mcp: {
               enabled: form.mcpEnabled,
@@ -644,17 +639,10 @@ function ConfigFormView() {
             },
           },
           heartbeat: {
-            enabled: form.heartbeatEnabled,
-            interval: heartbeatInterval * 60,
-          },
-          devices: {
-            enabled: form.devicesEnabled,
-            monitor_usb: form.monitorUSB,
-          },
-          memory_files: {
-            compaction: {
-              trigger_percent: summarizeTokenPercent,
-              min_messages: summarizeMessageThreshold,
+            proactive: {
+              enabled: form.heartbeatEnabled,
+              llm_when_idle: form.heartbeatEnabled,
+              decision_interval_seconds: Math.round(heartbeatInterval * 60),
             },
           },
         })
@@ -879,11 +867,9 @@ function ConfigFormView() {
 
               <ExecSection form={form} onFieldChange={updateField} />
 
-              <CronSection form={form} onFieldChange={updateField} />
+              <CronSection />
 
               <DevicesSection
-                form={form}
-                onFieldChange={updateField}
                 autoStartEnabled={autoStartEnabled}
                 autoStartHint={autoStartHint}
                 autoStartDisabled={
