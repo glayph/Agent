@@ -196,21 +196,21 @@
     "Broaden tests/build/smoke before declaring the milestone done.",
     "Record evidence and remaining risk."
   ],
-  "outputDir": "/home/ubuntu/miki-project/Miki-final",
+  "outputDir": ".",
   "writtenFiles": [
-    "/home/ubuntu/miki-project/Miki-final/workflow.json",
-    "/home/ubuntu/miki-project/Miki-final/README.md"
+    "workflow.json",
+    "README.md"
   ],
-  "scaffoldRoot": "/home/ubuntu/miki-project/Miki-final",
+  "scaffoldRoot": ".",
   "scaffoldedFiles": [
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/README.md",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/docs/architecture.md",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/src/index.ts",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/src/domain/index.ts",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/src/adapters/index.ts",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/tests/smoke.test.ts",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/scripts/verify.mjs",
-    "/home/ubuntu/miki-project/Miki-final/miki-agent-test/package.json"
+    "miki-agent-test/README.md",
+    "miki-agent-test/docs/architecture.md",
+    "miki-agent-test/src/index.ts",
+    "miki-agent-test/src/domain/index.ts",
+    "miki-agent-test/src/adapters/index.ts",
+    "miki-agent-test/tests/smoke.test.ts",
+    "miki-agent-test/scripts/verify.mjs",
+    "miki-agent-test/package.json"
   ],
   "skippedFiles": []
 }

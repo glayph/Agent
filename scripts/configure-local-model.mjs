@@ -1,9 +1,12 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const root = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const statePath = path.join(root, "data", "launcher-state.json");
-const modelPath = "/home/ubuntu/.local/share/miki/miki/models/LFM2.5-1.2B-Instruct-Q4_0.gguf";
+const modelPath =
+  process.env.MIKI_MODEL_PATH ||
+  path.join(os.homedir(), ".local", "share", "miki", "miki", "models", "LFM2.5-1.2B-Instruct-Q4_0.gguf");
 const executablePath = path.join(
   root,
   "packages",

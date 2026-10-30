@@ -9,6 +9,40 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const CLI_EXE = process.platform === "win32" ? "Miki-cli.exe" : "Miki-cli";
 
+// Load KEY=VALUE pairs from .env files at the project root before anything
+// reads process.env. Variables already set in the real environment always win,
+// and empty values are ignored so that unfilled template lines do not override defaults.
+function loadDotEnvFiles() {
+  for (const relativePath of [".env", "config/.env"]) {
+    const filePath = path.join(PROJECT_ROOT, relativePath);
+    if (!exists(filePath)) continue;
+    let content = "";
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!match) continue;
+      const key = match[1];
+      let value = match[2].trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!value || process.env[key] !== undefined) continue;
+      process.env[key] = value;
+    }
+  }
+}
+
+loadDotEnvFiles();
+
 const requiredRuntimeFiles = [
   ["gateway", "packages/gateway/dist/index.js"],
   ["core API", "packages/core/dist/api/index.js"],
