@@ -83,12 +83,10 @@ check_llama() {
   check miki-llama.service "$url"
 }
 
-memory_port="${MEMORY_PORT:-${MIKI_MEMORY_PORT:-18700}}"
 llama_port="${MIKI_LLAMA_PORT:-39200}"
 core_port="${CORE_PORT:-8000}"
 gateway_port="${GATEWAY_PORT:-18800}"
 
-check miki-memory.service "http://127.0.0.1:${memory_port}/health"
 check_llama
 check miki-core.service "http://127.0.0.1:${core_port}/health"
 

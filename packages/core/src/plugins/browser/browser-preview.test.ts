@@ -8,6 +8,7 @@ describe("workspace browser preview server", () => {
   let blocker: Server | undefined;
   let tool: BrowserTool | undefined;
   let workspaceDir = "";
+  let outsideDir = "";
 
   afterEach(async () => {
     await tool?.close();
@@ -17,7 +18,9 @@ describe("workspace browser preview server", () => {
       blocker = undefined;
     }
     if (workspaceDir) fs.rmSync(workspaceDir, { recursive: true, force: true });
+    if (outsideDir) fs.rmSync(outsideDir, { recursive: true, force: true });
     workspaceDir = "";
+    outsideDir = "";
   });
 
   it("does not use an occupied 8765 port or serve another workspace", async () => {
@@ -58,5 +61,29 @@ describe("workspace browser preview server", () => {
     const response = await fetch(`http://127.0.0.1:${ownedPort}/index.html`);
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("current workspace");
+  });
+
+  const symlinkTest = process.platform === "win32" ? it.skip : it;
+  symlinkTest("refuses to serve workspace symlinks that point outside the workspace", async () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-preview-workspace-"));
+    outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-preview-outside-"));
+    fs.writeFileSync(path.join(outsideDir, "secret.txt"), "outside-workspace-secret", "utf8");
+    fs.symlinkSync(path.join(outsideDir, "secret.txt"), path.join(workspaceDir, "linked-file.txt"), "file");
+    fs.symlinkSync(outsideDir, path.join(workspaceDir, "linked-directory"), "dir");
+
+    tool = new BrowserTool(true, workspaceDir);
+    tool.setWorkspaceDir(workspaceDir);
+    const internalTool = tool as unknown as {
+      _ensureWorkspacePreviewServer: () => Promise<void>;
+      workspacePreviewPort: number | null;
+    };
+    await internalTool._ensureWorkspacePreviewServer();
+    const ownedPort = internalTool.workspacePreviewPort;
+    expect(ownedPort).toBeGreaterThan(0);
+
+    const fileResponse = await fetch(`http://127.0.0.1:${ownedPort}/linked-file.txt`);
+    expect(fileResponse.status).toBe(403);
+    const directoryResponse = await fetch(`http://127.0.0.1:${ownedPort}/linked-directory/secret.txt`);
+    expect(directoryResponse.status).toBe(403);
   });
 });

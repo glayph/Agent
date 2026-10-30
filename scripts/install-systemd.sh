@@ -74,6 +74,9 @@ install_stack() {
   install -d -m 0750 "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/config"
   chown -R "$SERVICE_USER:$SERVICE_GROUP" "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/config" 2>/dev/null || true
   install -d -m 0755 "$UNIT_DIR" "$INSTALL_DIR" "$ENV_DIR"
+  # Memory is hosted in-process by the gateway; retire the former health-only stub unit.
+  systemctl disable --now miki-memory.service 2>/dev/null || true
+  rm -f "$UNIT_DIR/miki-memory.service"
   if [[ ! -e "$ENV_FILE" ]]; then
     render_file "$SYSTEMD_DIR/miki.env.example" "$ENV_FILE"
     chmod 0600 "$ENV_FILE"
@@ -82,7 +85,7 @@ install_stack() {
     sed -i "s#^MIKI_NODE=.*#MIKI_NODE=$NODE_BIN#" "$ENV_FILE"
   fi
 
-  for unit in miki.target miki-memory.service miki-llama.service miki-core.service miki-gateway.service miki-health.service miki-health.timer; do
+  for unit in miki.target miki-llama.service miki-core.service miki-gateway.service miki-health.service miki-health.timer; do
     render_file "$SYSTEMD_DIR/$unit" "$UNIT_DIR/$unit"
   done
   install -m 0755 "$SYSTEMD_DIR/miki-healthcheck.sh" "$INSTALL_DIR/miki-healthcheck"
@@ -101,7 +104,7 @@ case "${1:-install}" in
   start) install_stack; systemctl start miki.target miki-health.timer ;;
   stop) stop_stack ;;
   restart) stop_stack; systemctl start miki.target miki-health.timer ;;
-  status) systemctl --no-pager --full status miki.target miki-health.timer miki-memory.service miki-llama.service miki-core.service miki-gateway.service ;;
+  status) systemctl --no-pager --full status miki.target miki-health.timer miki-llama.service miki-core.service miki-gateway.service ;;
   uninstall)
     stop_stack
     require_root

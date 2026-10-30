@@ -447,8 +447,14 @@ export class BrowserTool {
   }
 
   private async _ensureWorkspacePreviewServer(): Promise<void> {
-    const root = this.workspaceDir;
-    if (!root) return;
+    const configuredRoot = this.workspaceDir;
+    if (!configuredRoot) return;
+    let root: string;
+    try {
+      root = fs.realpathSync(configuredRoot);
+    } catch {
+      return;
+    }
     if (this.workspacePreviewServer && this.workspacePreviewRoot === root)
       return;
     if (this.workspacePreviewServer) {
@@ -481,20 +487,54 @@ export class BrowserTool {
         }
         const target = path.resolve(root, `.${pathname}`);
         const relative = path.relative(root, target);
-        if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
           response.writeHead(403);
           response.end("Forbidden");
           return;
         }
 
         let filePath = target;
+        let fd: number | undefined;
         try {
+          // lstat every existing component: stat() alone follows symlinks and can
+          // expose files outside the workspace through an apparently safe URL.
+          let cursor = root;
+          for (const segment of relative.split(path.sep).filter(Boolean)) {
+            cursor = path.join(cursor, segment);
+            if (fs.lstatSync(cursor).isSymbolicLink()) {
+              response.writeHead(403);
+              response.end("Forbidden");
+              return;
+            }
+          }
           if (fs.statSync(filePath).isDirectory()) {
             filePath = path.join(filePath, "index.html");
+            if (fs.lstatSync(filePath).isSymbolicLink()) {
+              response.writeHead(403);
+              response.end("Forbidden");
+              return;
+            }
           }
-          const stat = fs.statSync(filePath);
+
+          const canonicalFile = fs.realpathSync(filePath);
+          const canonicalRelative = path.relative(root, canonicalFile);
+          if (
+            canonicalRelative === ".." ||
+            canonicalRelative.startsWith(`..${path.sep}`) ||
+            path.isAbsolute(canonicalRelative)
+          ) {
+            response.writeHead(403);
+            response.end("Forbidden");
+            return;
+          }
+
+          // Open the canonical path and use the descriptor for both metadata and
+          // streaming. O_NOFOLLOW closes the final-component symlink race where supported.
+          const noFollow = fs.constants.O_NOFOLLOW ?? 0;
+          fd = fs.openSync(canonicalFile, fs.constants.O_RDONLY | noFollow);
+          const stat = fs.fstatSync(fd);
           if (!stat.isFile()) throw new Error("Not a file");
-          const ext = path.extname(filePath).toLowerCase();
+          const ext = path.extname(canonicalFile).toLowerCase();
           const contentType: Record<string, string> = {
             ".html": "text/html; charset=utf-8",
             ".css": "text/css; charset=utf-8",
@@ -512,13 +552,25 @@ export class BrowserTool {
             "Cache-Control": "no-store",
           });
           if (request.method === "HEAD") {
+            fs.closeSync(fd);
+            fd = undefined;
             response.end();
           } else {
-            fs.createReadStream(filePath).pipe(response);
+            const stream = fs.createReadStream(canonicalFile, { fd, autoClose: true });
+            fd = undefined;
+            stream.on("error", () => response.destroy());
+            stream.pipe(response);
           }
         } catch {
-          response.writeHead(404);
-          response.end("Not found");
+          if (fd !== undefined) {
+            try { fs.closeSync(fd); } catch { /* already closed */ }
+          }
+          if (!response.headersSent) {
+            response.writeHead(404);
+            response.end("Not found");
+          } else {
+            response.destroy();
+          }
         }
       });
 

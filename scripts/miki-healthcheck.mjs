@@ -22,7 +22,9 @@ const endpoints = [
   ["core", args.get("core") || "http://127.0.0.1:8000/health"],
   ["gateway", args.get("gateway") || "http://127.0.0.1:18800/gateway/health"],
 ];
-if (!args.has("no-memory")) {
+// The memory HTTP stub was removed; memory runs in-process inside the gateway.
+// Only probe a separate memory endpoint when one is explicitly requested.
+if (args.has("memory")) {
   endpoints.push([
     "memory",
     args.get("memory") || "http://127.0.0.1:18700/health",

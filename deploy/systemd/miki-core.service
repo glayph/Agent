@@ -2,8 +2,8 @@
 StartLimitIntervalSec=0
 Description=Miki core API
 PartOf=miki.target
-After=network-online.target miki-memory.service miki-llama.service
-Wants=network-online.target miki-memory.service miki-llama.service
+After=network-online.target miki-llama.service
+Wants=network-online.target miki-llama.service
 
 [Service]
 Type=simple

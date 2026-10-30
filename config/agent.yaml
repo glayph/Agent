@@ -105,6 +105,8 @@ agent:
     roles: {}
     credential_profiles: {}
   security:
+    # Owner-selected unrestricted browser mode (including private/local networks).
+    # This is intentional for the personal deployment; it is not a resource budget.
     bypass_restrictions: true
     system_access: full
     sandbox_mode: false
@@ -211,7 +213,7 @@ autonomy:
     mode: operator
     # Retries are unbounded in the runtime; backoff applies between attempts (retry_backoff_seconds).
     retry_backoff_seconds: 2            # retry waits are clamped to 2-12 seconds
-    require_acceptance_contract: false  # goals run without a pre-defined acceptance contract
+    require_acceptance_contract: true   # every autonomous goal needs independently verifiable completion evidence
     allow_browser: true
     # The runtime blocks ALL browser actions when this list is empty. A domain entry matches the
     # domain itself and every subdomain, so top-level domains open the browser broadly.

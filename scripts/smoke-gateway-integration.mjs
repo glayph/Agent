@@ -38,8 +38,7 @@ function waitForExit(child, timeoutMs) {
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "miki-gateway-smoke-"));
 const workspaceDir = path.join(tempRoot, "workspace");
 fs.mkdirSync(workspaceDir, { recursive: true });
-const [gatewayPort, corePort, memoryPort] = await Promise.all([
-  freePort(),
+const [gatewayPort, corePort] = await Promise.all([
   freePort(),
   freePort(),
 ]);
@@ -50,8 +49,6 @@ const env = {
   GATEWAY_HOST: "127.0.0.1",
   GATEWAY_PORT: String(gatewayPort),
   CORE_PORT: String(corePort),
-  MEMORY_PORT: String(memoryPort),
-  MIKI_MEMORY_PORT: String(memoryPort),
   MIKI_DASHBOARD_PASSWORD: "smoke-test-password",
   MIKI_AUTO_INSTALL_MODEL: "false",
   MIKI_PROVIDER: "llama.cpp",
@@ -106,7 +103,6 @@ try {
         ok: true,
         gatewayPort,
         corePort,
-        memoryPort,
         healthStatus: health.status ?? "ok",
         dashboardStatus: dashboard.status,
       },

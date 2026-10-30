@@ -73,8 +73,22 @@ export function isPrivateOrReservedIp(address: string): boolean {
   if (isIP(address) === 6) {
     const normalized = address.toLowerCase();
     if (normalized === "::1" || normalized === "::") return true;
-    if (normalized.startsWith("::ffff:")) {
-      const mapped = normalized.slice(7);
+    // IPv4-mapped IPv6 addresses may use either dotted notation or two hexadecimal
+    // tail words (for example ::ffff:127.0.0.1 and ::ffff:7f00:1). Normalize both
+    // representations to IPv4 before checking private/reserved ranges.
+    const mappedIpv6 = ipv6ToBigInt(normalized);
+    if (mappedIpv6 !== null && (mappedIpv6 >> 32n) === 0xffffn) {
+      const ipv4 = Number(mappedIpv6 & 0xffffffffn);
+      const dotted = [
+        (ipv4 >>> 24) & 0xff,
+        (ipv4 >>> 16) & 0xff,
+        (ipv4 >>> 8) & 0xff,
+        ipv4 & 0xff,
+      ].join(".");
+      return isPrivateOrReservedIp(dotted);
+    }
+    if (normalized.includes(".")) {
+      const mapped = normalized.slice(normalized.lastIndexOf(":") + 1);
       if (isIP(mapped) === 4) return isPrivateOrReservedIp(mapped);
     }
     return [

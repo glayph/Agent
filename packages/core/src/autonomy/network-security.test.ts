@@ -27,4 +27,17 @@ describe("autonomous network security without built-in restrictions", () => {
     expect(isPrivateOrReservedIp("127.0.0.1")).toBe(true);
     expect(isPrivateOrReservedIp("8.8.8.8")).toBe(false);
   });
+
+  it("blocks private IPv4 addresses embedded in IPv4-mapped IPv6", () => {
+    expect(isPrivateOrReservedIp("::ffff:127.0.0.1")).toBe(true);
+    expect(isPrivateOrReservedIp("::ffff:7f00:1")).toBe(true);
+    expect(isPrivateOrReservedIp("0:0:0:0:0:ffff:7f00:1")).toBe(true);
+    expect(isPrivateOrReservedIp("::ffff:808:808")).toBe(false);
+  });
+
+  it("rejects an IPv4-mapped IPv6 loopback URL when private networks are blocked", async () => {
+    await expect(
+      validateNetworkUrl("http://[::ffff:7f00:1]/", { allowPrivateNetworks: false }),
+    ).rejects.toThrow(/private or reserved/i);
+  });
 });

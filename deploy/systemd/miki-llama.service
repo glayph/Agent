@@ -2,8 +2,7 @@
 StartLimitIntervalSec=0
 Description=Miki local llama.cpp server
 PartOf=miki.target
-After=local-fs.target miki-memory.service
-Wants=miki-memory.service
+After=local-fs.target
 
 [Service]
 Type=simple

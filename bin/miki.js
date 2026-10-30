@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, spawnSync, fork } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,8 +54,6 @@ const requiredRuntimeFiles = [
 
 let runtimeRoot = resolveRuntimeRoot();
 let child = null;
-let memoryChild = null;
-let ownsMemoryChild = false;
 let shuttingDown = false;
 let launchWatchdog = null;
 
@@ -148,18 +146,6 @@ function ensureRuntime() {
   }
 }
 
-async function memoryServiceHealthy() {
-  const port = Number(process.env.MIKI_MEMORY_PORT || process.env.MEMORY_PORT || 18700);
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: AbortSignal.timeout(1_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function start(argv) {
   ensureRuntime();
 
@@ -197,36 +183,6 @@ async function start(argv) {
     Miki_NODE: process.execPath,
   };
 
-  if (!(await memoryServiceHealthy())) {
-    ownsMemoryChild = true;
-    memoryChild = fork(
-      path.join(PROJECT_ROOT, "packages", "memory", "src", "api", "server.js"),
-    );
-    memoryChild.once("error", (error) => {
-      ownsMemoryChild = false;
-      if (error?.code === "EADDRINUSE") {
-        console.warn("Miki memory service is already running; reusing the existing listener.");
-        return;
-      }
-      console.error(`Miki memory service failed: ${error.message}`);
-    });
-  } else {
-    console.log("Miki memory service is already healthy; reusing it.");
-  }
-
-  if (memoryChild && ownsMemoryChild) {
-    memoryChild.once("exit", (code, signal) => {
-      memoryChild = null;
-      ownsMemoryChild = false;
-      if (shuttingDown) return;
-      console.error(
-        `Miki memory service exited (code=${code}, signal=${signal}); stopping launcher for service-manager recovery.`,
-      );
-      if (child) terminateChildTree(false);
-      process.exit(1);
-    });
-  }
-
   child = spawn(childExecutable, childArgs, {
     cwd: PROJECT_ROOT,
     env,
@@ -240,11 +196,6 @@ async function start(argv) {
   child.on("exit", (code, signal) => {
     stopLaunchWatchdog();
     child = null;
-    if (memoryChild && ownsMemoryChild) {
-      memoryChild.kill("SIGTERM");
-      memoryChild = null;
-      ownsMemoryChild = false;
-    }
     if (shuttingDown) process.exit(0);
     if (signal) {
       console.error(`Miki stopped by ${signal}.`);
@@ -361,7 +312,6 @@ async function waitForReadySignal() {
 function stop() {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (memoryChild && ownsMemoryChild) memoryChild.kill();
   if (child) {
     terminateChildTree(false);
     setTimeout(() => {

@@ -2,8 +2,8 @@
 StartLimitIntervalSec=0
 Description=Miki gateway and dashboard
 PartOf=miki.target
-After=network-online.target miki-memory.service miki-llama.service miki-core.service
-Wants=network-online.target miki-memory.service miki-llama.service miki-core.service
+After=network-online.target miki-llama.service miki-core.service
+Wants=network-online.target miki-llama.service miki-core.service
 
 [Service]
 Type=simple
