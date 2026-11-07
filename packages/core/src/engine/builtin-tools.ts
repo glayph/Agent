@@ -267,10 +267,10 @@ export function createMemoryTools(memory: MemoryPort): EngineTool[] {
       async execute(input, context) {
         const query = asString(input.query, "query").trim();
         if (!query || query.length > 2_000) throw new Error("Memory search query must contain 1–2000 characters.");
-        if (input.limit !== undefined && (typeof input.limit !== "number" || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) {
+        if (input.limit !== undefined && (typeof input.limit !== "number" || !Number.isSafeInteger(input.limit) || input.limit < 1)) {
           throw new Error("Memory search result limit must be an integer between 1 and 20.");
         }
-        const limit = typeof input.limit === "number" ? input.limit : 8;
+        const limit = typeof input.limit === "number" ? Math.min(20, input.limit) : 8;
         const hits = await memory.search(query, limit, {
           runId: context.runId,
           sessionId: context.sessionId,

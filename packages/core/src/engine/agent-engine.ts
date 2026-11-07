@@ -1210,6 +1210,8 @@ export class AgentEngine {
 
     const RUN_LEDGER_SENTINEL = "[MIKI RUN LEDGER]";
     const updateRunLedger = (turn: number): void => {
+      // The ledger is a system message: it must not exist when system prompts are disabled.
+      if (!configuredSystemPrompt) return;
       const current = state.messages.filter((message) => !(message.role === "system" && typeof message.content === "string" && message.content.startsWith(RUN_LEDGER_SENTINEL)));
       const recent = state.records.slice(-12);
       const planLines = state.plan?.steps.map((step) => `${step.status.toUpperCase()}: ${step.title}`).join("\n") ?? "No explicit plan is stored for this run.";
@@ -1753,7 +1755,9 @@ export class AgentEngine {
     }
 
     // 3. Budget exhausted: ask for a wrap-up without tools so the user still gets an answer.
-    limitReason ??= `Step limit of ${turnCap} turns reached.`;
+    limitReason ??= loopRecoveries > 0
+      ? `Step limit of ${turnCap} turns reached while the run was looping on repeated tool calls (loop detected ${loopRecoveries} time${loopRecoveries === 1 ? "" : "s"}).`
+      : `Step limit of ${turnCap} turns reached.`;
     if (signal.aborted) return finish("cancelled", "", "Run cancelled.");
     let summary = "";
     try {
@@ -1863,7 +1867,7 @@ export class AgentEngine {
     while (index < calls.length) {
       if (state.signal.aborted) return budgetHit;
       if (this.steerInboxes.get(state.runId)?.length) {
-        this.answerSkippedCall(state, calls[index], turn, "Deferred because a new user message arrived. Reassess whether this operation is still needed before running it.", tools);
+        this.answerSkippedCall(state, calls[index], turn, "Deferred because a new user message arrived; reassess whether this operation is still needed before running it.", tools);
         index += 1;
         continue;
       }
@@ -2052,7 +2056,10 @@ export class AgentEngine {
         if (typeof previousResult?.content === "string") {
           // Reuse the durable in-memory result instead of executing the same
           // action again. This also repairs the prune/duplicate-guard dead end.
-          record.status = "succeeded";
+          // A repeated read past the limit is a polling symptom: it is reported as
+          // blocked and counts toward loop detection, so the model gets strategy feedback.
+          const repeatedRead = tool.risk === "read";
+          record.status = repeatedRead ? "blocked" : "succeeded";
           record.durationMs = 0;
           record.resultPreview = previous.resultPreview;
           record.traceResult = previous.traceResult;
@@ -2061,7 +2068,12 @@ export class AgentEngine {
           this.snapshot(state, turn, record);
           if (record.actionVerification?.status === "verified") this.markPlanDone(state, tool.name);
           this.pushToolResult(state, call, previousResult.content);
-          state.blockedStreak = 0;
+          if (repeatedRead) {
+            state.blockedStreak += 1;
+            if (state.blockedStreak >= 3) state.loopDetected = true;
+          } else {
+            state.blockedStreak = 0;
+          }
           return;
         }
         if (tool.risk === "read") {
@@ -2277,7 +2289,11 @@ export class AgentEngine {
       this.pushToolResult(state, call, toolResultForModel, state.supportsVision === true ? imageUrls : []);
       if (tool.risk !== "read") {
         // State changed: earlier identical read calls may now return different results.
-        state.callCounts.clear();
+        // Counts for side-effecting calls stay, so repeating the same write is still guarded.
+        for (const key of [...state.callCounts.keys()]) {
+          const name = key.slice(0, key.indexOf(":"));
+          if (tools.get(name)?.risk === "read") state.callCounts.delete(key);
+        }
       }
     } catch (error) {
       if (state.signal.aborted) {

@@ -88,6 +88,9 @@ export class DurableTaskWorker {
   /** Claims abandoned after shutdown grace must never commit late handler results. */
   private readonly abandonedByShutdown = new Set<string>();
   private shuttingDown = false;
+  /** Set when shutdown grace expired; the loop must not keep waiting on non-cooperative handlers. */
+  private shutdownAbandoned = false;
+  private readonly abandonWaiters = new Set<() => void>();
   private readonly pending = new Set<Promise<DurableTask | null>>();
   private consecutiveLoopFailures = 0;
   private lastLoopErrorAt: string | null = null;
@@ -141,7 +144,7 @@ export class DurableTaskWorker {
 
   private loopDelayMs(): number {
     if (this.consecutiveLoopFailures === 0) return this.pollMs;
-    return Math.min(60_000, Math.max(this.pollMs, 500 * (2 ** Math.min(this.consecutiveLoopFailures - 1, 7))));
+    return Math.min(60_000, Math.max(this.pollMs, this.pollMs * (2 ** Math.min(this.consecutiveLoopFailures - 1, 7))));
   }
 
   constructor(
@@ -429,6 +432,7 @@ export class DurableTaskWorker {
     if (this.loopPromise) return this.loopPromise;
     this.running = true;
     this.shuttingDown = false;
+    this.shutdownAbandoned = false;
     this.loopRestartAttempt = 0;
     this.launchLoop();
     return this.loopPromise ?? Promise.resolve();
@@ -505,7 +509,16 @@ export class DurableTaskWorker {
         this.loopRestartAttempt = 0;
       }
     }
-    await Promise.allSettled([...this.pending]);
+    await this.waitForPendingOrAbandon();
+  }
+
+  private waitForPendingOrAbandon(): Promise<void> {
+    if (this.shutdownAbandoned) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const done = () => { this.abandonWaiters.delete(done); resolve(); };
+      this.abandonWaiters.add(done);
+      void Promise.allSettled([...this.pending]).then(done);
+    });
   }
 
   async stop(): Promise<void> {
@@ -534,6 +547,8 @@ export class DurableTaskWorker {
         // is deliberately allowed to expire; the next worker reconciles any
         // action-ledger entries before it can retry them.
         for (const taskId of this.active.keys()) this.abandonedByShutdown.add(taskId);
+        this.shutdownAbandoned = true;
+        for (const waiter of [...this.abandonWaiters]) waiter();
         for (const heartbeat of this.heartbeats.values()) clearInterval(heartbeat);
         this.notifyError(new Error(`Worker shutdown grace expired with ${this.active.size} task(s) still running; their leases will expire and be recovered on restart.`));
         return;

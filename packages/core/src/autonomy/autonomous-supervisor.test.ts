@@ -1284,7 +1284,10 @@ describe("AutonomousSupervisor", () => {
         goals.update(running, { status: "completed", statusReason: "done" });
         await supervisor.tick("schedule");
         const status = (id: number) => (db.prepare("SELECT status FROM pursue_goals WHERE id=?").get(id) as { status: string }).status;
-        expect(status(scheduled)).not.toBe("pending");
+        // A goal that was started and then queued for retry returns to "pending", so "started" means it has a run record.
+        const runsOf = (id: number) => (db.prepare("SELECT COUNT(*) c FROM autonomy_goal_runs WHERE goal_id=?").get(id) as { c: number }).c;
+        expect(runsOf(scheduled)).toBeGreaterThan(0);
+        expect(runsOf(selfProposed)).toBe(0);
         expect(status(selfProposed)).toBe("pending");
       });
 
@@ -1296,11 +1299,16 @@ describe("AutonomousSupervisor", () => {
           .run("recent-assistant", "s", "assistant", "hello back", new Date(nowMs + 1).toISOString());
         const goalId = goals.create({ title: "Explore now", description: "d", priority: 9, source: "curiosity", acceptance: { mode: "all", checks: [{ type: "file_exists", path: "identity/memory/x.md" }] }, replaceExisting: false } as never).id;
         await supervisor.tick("always-active-idle");
-        expect((db.prepare("SELECT status FROM pursue_goals WHERE id=?").get(goalId) as { status: string }).status).not.toBe("pending");
+        expect((db.prepare("SELECT COUNT(*) c FROM autonomy_goal_runs WHERE goal_id=?").get(goalId) as { c: number }).c).toBeGreaterThan(0);
       });
 
       describe("legacy inactivity override (idle_after_seconds)", () => {
-        const addChat = (minutesAgo: number) => db.prepare("INSERT INTO chat_messages(id, session_id, role, content, created_at) VALUES(?,?,?,?,?)").run(`u${minutesAgo}`, "s", "user", "hi", new Date(nowMs - minutesAgo * 60_000).toISOString());
+        const addChat = (minutesAgo: number) => {
+          // A finished exchange: an answered chat counts toward the legacy idle gate, but is not a pending foreground reply.
+          const at = nowMs - minutesAgo * 60_000;
+          db.prepare("INSERT INTO chat_messages(id, session_id, role, content, created_at) VALUES(?,?,?,?,?)").run(`u${minutesAgo}`, "s", "user", "hi", new Date(at).toISOString());
+          db.prepare("INSERT INTO chat_messages(id, session_id, role, content, created_at) VALUES(?,?,?,?,?)").run(`a${minutesAgo}`, "s", "assistant", "hello", new Date(at + 1).toISOString());
+        };
         const goalStatus = (id: number) => (db.prepare("SELECT status FROM pursue_goals WHERE id=?").get(id) as { status: string }).status;
         const mk = (source: string, title: string) => goals.create({ title, description: "d", priority: 9, source, acceptance: { mode: "all", checks: [{ type: "file_exists", path: "identity/memory/x.md" }] }, replaceExisting: false } as never).id;
 
@@ -1325,7 +1333,7 @@ describe("AutonomousSupervisor", () => {
           addChat(1);
           const userGoal = mk("user", "Do what the user asked");
           await supervisor.tick("schedule");
-          expect(goalStatus(userGoal)).not.toBe("pending");
+          expect((db.prepare("SELECT COUNT(*) c FROM autonomy_goal_runs WHERE goal_id=?").get(userGoal) as { c: number }).c).toBeGreaterThan(0);
         });
       });
     });
@@ -1567,7 +1575,8 @@ describe("AutonomousSupervisor", () => {
     let notes: Array<{ text?: string; kind?: string }>;
     let notify: jest.Mock;
 
-    const failed = (error: string) => ({ ...makeResult("", "failed"), error });
+    // Failure kinds come from structured provider metadata (the engine's `failureKind`), never from message text.
+    const failed = (error: string, failureKind?: string) => ({ ...makeResult("", "failed"), error, ...(failureKind ? { failureKind } : {}) });
     it("re-plans after a model describes a blocker instead of treating wording as a terminal signal", async () => {
       config = { autonomy: { enabled: true, tool_policy: { require_acceptance_contract: true, safe_write_roots: ["autonomy"] } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 } } };
       const goal = goals.create({
@@ -1702,17 +1711,22 @@ describe("AutonomousSupervisor", () => {
     });
 
     it("classifies provider failures", () => {
-      expect(classifyFailure("No model is configured for this run.")).toBe("no_provider");
-      expect(classifyFailure("Model provider returned HTTP 429")).toBe("rate_limit");
-      expect(classifyFailure("Incorrect API key provided")).toBe("auth");
-      expect(classifyFailure(new Error("fetch failed: ECONNRESET"))).toBe("network");
-      expect(classifyFailure("HTTP 503 service unavailable")).toBe("provider_error");
+      expect(classifyFailure(Object.assign(new Error("No model is configured for this run."), { name: "NoModelConfiguredError" }))).toBe("no_provider");
+      expect(classifyFailure({ failureKind: "no_model" })).toBe("no_provider");
+      expect(classifyFailure({ failureKind: "rate_limit" })).toBe("rate_limit");
+      expect(classifyFailure(Object.assign(new Error("rejected"), { status: 401 }))).toBe("auth");
+      expect(classifyFailure({ failureKind: "auth" })).toBe("auth");
+      expect(classifyFailure(Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } }))).toBe("network");
+      expect(classifyFailure(Object.assign(new Error("unavailable"), { status: 503 }))).toBe("provider_error");
       expect(classifyFailure(Object.assign(new Error("boom"), { status: 429 }))).toBe("rate_limit");
+      expect(classifyFailure({ failureKind: "transient" })).toBe("transient");
+      // Message wording alone is never a classification signal.
+      expect(classifyFailure("Model provider returned HTTP 429")).toBe("other");
       expect(classifyFailure("Run exceeded the maximum number of turns.")).toBe("other");
     });
 
     it("treats a failed model run as a failure with short backoff, not as completed work", async () => {
-      run.mockResolvedValue(failed("Model provider returned HTTP 429"));
+      run.mockResolvedValue(failed("Model provider returned HTTP 429", "rate_limit"));
       await decide("startup");
       const loop = supervisor.status().proactive_loop;
       expect(loop.failure_streak).toBe(1);
@@ -1730,7 +1744,7 @@ describe("AutonomousSupervisor", () => {
     });
 
     it("opens the circuit with a single warning, then recovers and says so", async () => {
-      run.mockResolvedValue(failed("No model is configured"));
+      run.mockResolvedValue(failed("No model is configured", "no_model"));
       await decide("startup");
       for (let i = 0; i < 4; i += 1) { nowMs += 130_000; await decide("idle"); }
       expect(notes.filter((n) => n.kind === "warning")).toHaveLength(1);
@@ -1744,7 +1758,7 @@ describe("AutonomousSupervisor", () => {
     });
 
     it("counts a thrown provider error as a failure too", async () => {
-      run.mockRejectedValue(new Error("fetch failed ECONNREFUSED"));
+      run.mockRejectedValue(Object.assign(new Error("fetch failed"), { code: "ECONNREFUSED" }));
       await decide("startup");
       expect(supervisor.status().proactive_loop).toMatchObject({ failure_streak: 1, last_failure: expect.objectContaining({ kind: "network" }) });
     });
@@ -1778,7 +1792,7 @@ describe("AutonomousSupervisor", () => {
     });
 
     it("blocks a goal when no model provider is configured instead of retrying a permanent setup error", async () => {
-      run.mockResolvedValue(failed("No model is configured"));
+      run.mockResolvedValue(failed("No model is configured", "no_model"));
       const goal = goals.create({ title: "Provider configuration", steps: ["Inspect"], replaceExisting: false });
       const result = await supervisor.tick("test");
       expect(result.status).toBe("blocked");
@@ -1847,7 +1861,7 @@ describe("AutonomousSupervisor", () => {
 
       it("never counts an outage as a repeated goal failure", async () => {
         const goal = goals.create({ title: "Flaky network", steps: ["Try"], replaceExisting: false });
-        run.mockResolvedValue(failed("fetch failed: ECONNRESET"));
+        run.mockResolvedValue(failed("fetch failed: ECONNRESET", "network"));
         await tickMany(6, goal.id);
         expect(eventsOf("goal_repeating_failure")).toHaveLength(0);
       });
@@ -1855,16 +1869,16 @@ describe("AutonomousSupervisor", () => {
       it("an outage between identical failures does not reset their streak", async () => {
         config = { ...config, autonomy: { enabled: true, tool_policy: { max_retries: 10, retry_backoff_seconds: 5, require_acceptance_contract: false } } };
         const goal = goals.create({ title: "Impossible with blips", steps: ["Try"], replaceExisting: false });
-        const sequence = ["Required file missing.csv does not exist", "fetch failed: ECONNRESET", "Required file missing.csv does not exist", "fetch failed: ECONNRESET", "Required file missing.csv does not exist"];
+        const sequence: Array<[string, string?]> = [["Required file missing.csv does not exist"], ["fetch failed: ECONNRESET", "network"], ["Required file missing.csv does not exist"], ["fetch failed: ECONNRESET", "network"], ["Required file missing.csv does not exist"]];
         let i = 0;
-        run.mockImplementation(async () => failed(sequence[i++]));
+        run.mockImplementation(async () => failed(...sequence[i++]));
         await tickMany(5, goal.id);
         expect(eventsOf("goal_repeating_failure")).toHaveLength(1);
       });
 
       it("notifies once and blocks a goal when the API key is rejected until the owner fixes it", async () => {
         const goal = goals.create({ title: "Wrong key", steps: ["Try"], replaceExisting: false });
-        run.mockResolvedValue(failed("Model provider returned HTTP 401: Incorrect API key provided"));
+        run.mockResolvedValue(failed("Model provider returned HTTP 401: Incorrect API key provided", "auth"));
         nowMs += 1_000;
         const result = await supervisor.tick("test");
         expect(result.status).toBe("blocked");
@@ -1888,7 +1902,7 @@ describe("AutonomousSupervisor", () => {
         expect((await supervisor.tick("test")).status).toBe("completed");
         expect(db.prepare("SELECT COUNT(*) AS c FROM autonomy_notice_state").get()).toEqual({ c: 0 });
         const second = goals.create({ title: "Wrong key again", steps: ["Try"], replaceExisting: false });
-        run.mockResolvedValue(failed("Incorrect API key provided"));
+        run.mockResolvedValue(failed("Incorrect API key provided", "auth"));
         nowMs += 1_000;
         await supervisor.tick("test");
         expect(eventsOf("provider_auth_failed")).toHaveLength(2);
@@ -1896,8 +1910,8 @@ describe("AutonomousSupervisor", () => {
     });
 
     it("treats a model timeout as an environment problem and never blocks the goal", async () => {
-      expect(classifyFailure("The model provider timed out.")).toBe("timeout");
-      run.mockResolvedValue(failed("The model provider timed out."));
+      expect(classifyFailure({ failureKind: "transient" })).toBe("transient");
+      run.mockResolvedValue(failed("The model provider timed out.", "transient"));
       const goal = goals.create({ title: "Offline network", steps: ["Inspect"], replaceExisting: false });
       for (let i = 0; i < 8; i += 1) {
         nowMs += 1_000;
@@ -1914,9 +1928,9 @@ describe("AutonomousSupervisor", () => {
     it("never schedules a retry more than 12 seconds ahead, for outages or for logic failures", async () => {
       config = { ...config, autonomy: { enabled: true, tool_policy: { retry_backoff_seconds: 60, max_retries: 10, require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, failure_threshold: 3, failure_backoff_base_seconds: 2, failure_backoff_max_seconds: 12 } } };
       supervisor = build();
-      for (const message of ["fetch failed: ECONNRESET", "Run exceeded the maximum number of turns."]) {
+      for (const [message, kind] of [["fetch failed: ECONNRESET", "network"], ["Run exceeded the maximum number of turns.", undefined]] as Array<[string, string | undefined]>) {
         const goal = goals.create({ title: `Capped ${message}`, steps: ["Inspect"], replaceExisting: false });
-        run.mockResolvedValue(failed(message));
+        run.mockResolvedValue(failed(message, kind));
         for (let i = 0; i < 10; i += 1) {
           nowMs += 1_000;
           await supervisor.tick("test");
@@ -1932,7 +1946,7 @@ describe("AutonomousSupervisor", () => {
     it("lets a goal run resume in place during an outage and reports provider health", async () => {
       (supervisor as any).loopAbort = new AbortController();
       run.mockImplementation(async (request: { onEvent?: (event: unknown) => void; retryTransient?: unknown }) => {
-        request.onEvent?.({ type: "model.retrying", runId: "r", turn: 1, retry: 1, delayMs: 1, reason: "fetch failed: ECONNRESET" });
+        request.onEvent?.({ type: "model.retrying", runId: "r", turn: 1, retry: 1, delayMs: 1, reason: "fetch failed: ECONNRESET", failureKind: "network" });
         expect(supervisor.status().proactive_loop).toMatchObject({ failure_streak: 1, last_failure: expect.objectContaining({ kind: "network" }) });
         request.onEvent?.({ type: "model.resumed", runId: "r", turn: 1, retries: 1 });
         return makeResult("Inspection complete.");

@@ -191,12 +191,12 @@ describe("in-place retry of transient model failures", () => {
     const events: EngineEvent[] = [];
     const result = await engine.run({
       history: user("hi"),
-      retryTransient: { baseDelayMs: 5, maxDelayMs: 5, maxRetries: 3, continueRetryingEveryMs: 15 },
+      retryTransient: { baseDelayMs: 5, maxDelayMs: 5, maxRetries: 3, continueRetryingEveryMs: 15, jitter: false },
       onEvent: (event) => events.push(event),
     });
     expect(result.status).toBe("completed");
     expect(llm.calls()).toBe(5);
-    expect(events.filter((event) => event.type === "model.retrying").map((event) => (event as { delayMs: number }).delayMs)).toEqual([5, 5, 5, 15]);
+    expect(events.filter((event) => event.type === "model.retrying").map((event) => (event as { delayMs: number }).delayMs)).toEqual([5, 5, 5, 5]); // the continuation cadence is capped by maxDelayMs
     expect(events.some((event) => event.type === "model.retry_exhausted")).toBe(false);
   });
 
@@ -207,7 +207,7 @@ describe("in-place retry of transient model failures", () => {
     const engine = new AgentEngine({ llm: client, tools: new ToolRegistry() });
     const result = await engine.run({
       history: user("hi"),
-      retryTransient: { baseDelayMs: 1, maxDelayMs: 1, maxRetries: 1, continueRetryingEveryMs: 15 },
+      retryTransient: { baseDelayMs: 1, maxDelayMs: 1, maxRetries: 1, continueRetryingEveryMs: 15, jitter: false },
       signal: controller.signal,
       onEvent: (event) => { if (event.type === "model.retrying" && event.retry === 2) controller.abort(); },
     });

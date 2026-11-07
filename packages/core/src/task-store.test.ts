@@ -201,12 +201,15 @@ describe("DurableTaskStore", () => {
     expect(store.claimAction("late-action", "action", "browser_click", first.leaseToken!)).toEqual({ status: "execute" });
 
     clock += 1_001;
-    store.recoverExpired(now(), { taskType: "background_agent" });
+    // An in-flight external action with no recorded outcome parks the task for reconciliation.
+    expect(store.recoverExpired(now(), { taskType: "background_agent" })).toMatchObject([{ status: "needs_reconciliation" }]);
+    store.reconcileAction("late-action", "action", { outcome: "not_applied", evidence: { checked: true }, now: now() });
+    store.resumeAfterReconciliation("late-action", { operatorConfirmed: true }, now());
     const second = store.claimNext(now(), 5_000, { taskType: "background_agent", workerId: "new-worker" })!;
     expect(second.leaseToken).not.toBe(first.leaseToken);
     expect(() => store.completeAction("late-action", "action", { clicked: true }, first.leaseToken!)).toThrow(/lease was lost/i);
     expect(store.failAction("late-action", "action", "late failure", first.leaseToken!)).toBe(false);
-    expect(store.claimAction("late-action", "action", "browser_click", second.leaseToken!)).toMatchObject({ status: "needs_reconciliation" });
+    expect(store.claimAction("late-action", "action", "browser_click", second.leaseToken!)).toEqual({ status: "execute" });
   });
 
   it("accepts checkpoints larger than the former 1 MiB ceiling and rejects oversized snapshots", () => {
@@ -277,10 +280,12 @@ describe("DurableTaskStore", () => {
       outcome: "not_applied", evidence: { checked: true, resourceState: "unchanged" }, now: now(),
     });
     expect(store.listUnsettledActions("uncertain-recovery")).toHaveLength(0);
-    expect(store.resumeAfterReconciliation("uncertain-recovery", { operatorConfirmed: true }, now())).toMatchObject({
-      status: "queued", errorCategory: undefined,
+    const resumed = store.resumeAfterReconciliation("uncertain-recovery", { operatorConfirmed: true }, now());
+    expect(resumed).toMatchObject({
+      status: "queued",
       verificationResult: { reconciled: true, reconciliationEvidence: { operatorConfirmed: true } },
     });
+    expect(resumed.errorCategory).toBeUndefined();
   });
 
   it("persists dependency gates, rejects cycles, and unblocks dependents when prerequisites complete", () => {
@@ -291,6 +296,8 @@ describe("DurableTaskStore", () => {
     store.create({ taskId: "dep-cycle-b", taskType: "background_agent", goal: "cycle b", dependencies: ["dep-cycle-a"] });
     expect(() => store.setDependencies("dep-cycle-a", ["dep-cycle-b"])).toThrow(/cycle/i);
     expect(store.claimNext(undefined, 5_000, { taskType: "background_agent" })?.taskId).toBe("dep-a");
+    // dep-b stays gated behind dep-a; only the independent cycle root is claimable.
+    expect(store.claimNext(undefined, 5_000, { taskType: "background_agent" })?.taskId).toBe("dep-cycle-a");
     expect(store.claimNext(undefined, 5_000, { taskType: "background_agent" })).toBeNull();
     store.transition("dep-a", "verifying");
     store.transition("dep-a", "completed");
@@ -444,7 +451,8 @@ describe("DurableTaskStore", () => {
     store.transition("replan-old", "running");
     store.transition("replan-old", "failed", { error: "broken implementation" });
     expect(store.get("replan-downstream")?.status).toBe("blocked");
-    expect(store.get("replan-check")?.status).toBe("blocked");
+    // Dependency-blocked waiting does not cascade; the claim gate still holds the verifier back.
+    expect(store.get("replan-check")?.status).toBe("queued");
 
     const revision = {
       supersedeTaskIds: ["replan-old"],
@@ -457,7 +465,8 @@ describe("DurableTaskStore", () => {
     expect(result.superseded).toMatchObject([{ taskId: "replan-old", status: "superseded" }]);
     expect(result.replacements).toMatchObject([{ taskId: "replan-new", status: "queued" }]);
     expect(store.listDependencies("replan-downstream").map((item) => item.dependsOnTaskId)).toEqual(["replan-new"]);
-    expect(store.listDependencies("replan-check").map((item) => item.dependsOnTaskId)).toEqual(["replan-downstream"]);
+    // The final verifier also waits for every replacement step.
+    expect(store.listDependencies("replan-check").map((item) => item.dependsOnTaskId)).toEqual(["replan-downstream", "replan-new"]);
     expect(store.get("replan-check")?.status).toBe("queued");
     expect(store.replan("replan-root", revision).replacements[0]?.taskId).toBe("replan-new");
 

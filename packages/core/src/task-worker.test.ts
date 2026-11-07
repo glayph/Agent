@@ -413,7 +413,7 @@ describe("DurableTaskWorker", () => {
       await gate; // Deliberately ignores AbortSignal.
       return { result: "late result" };
     }, {
-      taskType: "background_agent", leaseMs: 100, heartbeatMs: 10, shutdownGraceMs: 10,
+      taskType: "background_agent", leaseMs: 100, heartbeatMs: 10, shutdownGraceMs: 10, now,
       onError: (error) => errors.push(error),
     });
     const loop = worker.start();

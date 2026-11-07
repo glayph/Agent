@@ -95,12 +95,12 @@ describe("structured provider error classification", () => {
       ...diagnostic,
       endpoint: "https://provider.example/v1?api_key=endpoint-secret-value",
     };
-    const error = classifyError(
-      Object.assign(new Error(`Provider echoed ${key}`), { status: 503 }),
-      "gemini",
-      diagnosticWithEndpoint,
-      [key],
-    ) as LLMAPIError;
+    let error: LLMAPIError | undefined;
+    try {
+      classifyError(Object.assign(new Error(`Provider echoed ${key}`), { status: 503 }), "gemini", diagnosticWithEndpoint, [key]);
+    } catch (caught) { error = caught as LLMAPIError; }
+    expect(error).toBeInstanceOf(LLMAPIError);
+    if (!error) return;
     expect(error.message).not.toContain(key);
     expect(diagnosticWithEndpoint.endpoint).toBe("https://provider.example/v1");
   });
@@ -307,10 +307,10 @@ describe("OpenAI-compatible provider streaming", () => {
       for await (const _part of req) { /* consume request */ }
       res.writeHead(200, { "content-type": "text/event-stream", connection: "keep-alive" });
       const write = (text: string) => new Promise<void>((resolve) => setTimeout(() => { res.write(text); resolve(); }, 30));
-      await write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "A" } }] })}\\n\\n`);
-      await write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "B" } }] })}\\n\\n`);
-      await write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\\n\\n`);
-      res.end("data: [DONE]\\n\\n");
+      await write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "A" } }] })}\n\n`);
+      await write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "B" } }] })}\n\n`);
+      await write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+      res.end("data: [DONE]\n\n");
     });
     const port = await listen(server);
     const adapter = new OpenAICompatibleAdapter();

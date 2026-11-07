@@ -39,6 +39,8 @@ function setup(script: ScriptedReply[], configGuard?: () => void) {
     CREATE TABLE memory_chunks (id TEXT PRIMARY KEY, region TEXT NOT NULL, content TEXT NOT NULL, summary TEXT NOT NULL, importance REAL NOT NULL DEFAULT 0.5, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   `);
   db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES('m0','miki-main-chat','user','Remember: watch the workspace for me.','2026-01-01T00:00:00Z')").run();
+  // The past user message is already answered; otherwise the supervisor rightly holds background work for a pending reply.
+  db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES('m0a','miki-main-chat','assistant','Noted. I will watch the workspace.','2026-01-01T00:00:01Z')").run();
   db.prepare("INSERT INTO memory_chunks(id,region,content,summary,importance,created_at,updated_at) VALUES('c0','prefs','User wants workspace reports','workspace reports',0.9,'2026-01-01','2026-01-01')").run();
 
   const toolRuns: Array<Record<string, unknown>> = [];
@@ -61,6 +63,8 @@ function setup(script: ScriptedReply[], configGuard?: () => void) {
     heartbeat: {
       enabled: true,
       auto_actions: { enabled: true, max_actions_per_cycle: 2 },
+      // HEARTBEAT.md lines are verified recurring goals by design; these tests exercise the ambient decision loop itself.
+      checklist_tasks: { enabled: false },
       proactive: { enabled: true, llm_when_idle: true, startup_decision: true, min_poll_seconds: 5, max_poll_seconds: 10, decision_interval_seconds: 900 },
     },
   };
@@ -93,7 +97,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     ]));
 
     ctx.supervisor.start();
-    await waitFor(() => ctx.logs.some((line) => line.includes("finished inline work")));
+    await waitFor(() => ctx.logs.some((line) => line.includes("decision finished observation/research")));
     expect(ctx.toolRuns).toHaveLength(1);
     expect(ctx.notifications).toHaveLength(0); // routine inline work is never routine chatter
 
@@ -110,7 +114,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
 
     ctx.supervisor.start();
     await waitFor(() => agentRequests(ctx.llm).length === 1);
-    await waitFor(() => ctx.logs.some((line) => line.includes("finished inline work")));
+    await waitFor(() => ctx.logs.some((line) => line.includes("decision finished observation/research")));
     expect(ctx.notifications).toHaveLength(0);
 
     for (let i = 0; i < 5; i += 1) ctx.supervisor.wake(); // simulated incoming/outgoing messages
@@ -143,7 +147,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     expect(ctx.notifications).toHaveLength(0); // background still pending, not killed
 
     release();
-    await waitFor(() => ctx.logs.some((line) => line.includes("finished inline work")));
+    await waitFor(() => ctx.logs.some((line) => line.includes("decision finished observation/research")));
     expect(ctx.notifications).toHaveLength(0); // the result is logged; the user hears about it via goals/discoveries
   });
 
@@ -154,7 +158,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
 
     ctx.supervisor.start();
     await waitFor(() => ctx.llm.requests.some((r) => isAmbient(r.messages)));
-    expect(ctx.logs.some((line) => line.includes("finished inline work"))).toBe(false); // the idle decision is still in flight
+    expect(ctx.logs.some((line) => line.includes("decision finished observation/research"))).toBe(false); // the idle decision is still in flight
 
     const task = ctx.supervisor.enqueueTask({ title: "Scheduled report", dueAt: new Date(Date.now() + 1500).toISOString() });
     expect(task).toBeTruthy();
@@ -162,7 +166,7 @@ describe("autonomy end-to-end (scripted LLM, no user message)", () => {
     try {
       // The loop polls every min_poll_seconds (5s here); the LLM call is still hanging, yet the due task must be picked up.
       await waitFor(() => (ctx.db.prepare("SELECT COUNT(*) c FROM pursue_goals WHERE title LIKE '%Scheduled report%'").get() as { c: number }).c > 0, 12_000);
-      expect(ctx.logs.some((line) => line.includes("finished inline work"))).toBe(false);
+      expect(ctx.logs.some((line) => line.includes("decision finished observation/research"))).toBe(false);
     } finally {
       release();
     }

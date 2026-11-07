@@ -82,7 +82,7 @@ describe("provider gateway boundary", () => {
     expect(() =>
       classifyError(
         {
-          status: 401,
+          status: 402,
           message: "No payment method. Add a payment method before completion.",
         },
         "gemini",
@@ -90,7 +90,7 @@ describe("provider gateway boundary", () => {
           correlationId: "test-entitlement",
           providerId: "gemini",
           model: "gemini-3.5-flash-lite",
-          status: 401,
+          status: 402,
           requestShape: { messageCount: 1, toolCount: 0, payloadBytes: 32 },
         },
       ),

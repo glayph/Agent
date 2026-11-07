@@ -411,14 +411,16 @@ describe("model failover", () => {
     expect(fallback).toMatchObject({ from: "primary-model", to: "backup-model" });
   });
 
-  it("does not retry or fall back for an invalid API key", async () => {
+  it("does not retry the same route for an invalid API key but uses a configured fallback model", async () => {
     const primary: EngineLLMClient = {
       model: "primary-model",
       async complete() {
         throw Object.assign(new Error("Invalid API key"), { status: 401 });
       },
     };
-    const backup = scriptedLLM([{ text: "must not run" }], "backup-model");
+    const primaryCalls = jest.fn(primary.complete);
+    primary.complete = primaryCalls as EngineLLMClient["complete"];
+    const backup = scriptedLLM([{ text: "answered by backup" }], "backup-model");
     const engine = new AgentEngine({
       llm: (model?: string) => (model === "backup" ? backup.client : primary),
       tools: new ToolRegistry(),
@@ -427,9 +429,11 @@ describe("model failover", () => {
 
     const result = await engine.run({ history: user("hi") });
 
-    expect(result.status).toBe("failed");
-    expect(result.error?.toLowerCase()).toContain("invalid api key");
-    expect(backup.requests).toHaveLength(0);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("answered by backup");
+    expect(result.model).toBe("backup-model");
+    expect(primaryCalls).toHaveBeenCalledTimes(1);
+    expect(backup.requests).toHaveLength(1);
   });
 
   it("fails clearly when every fallback also fails", async () => {
@@ -970,8 +974,14 @@ describe("non-Latin context budgeting in the engine", () => {
   });
 
   it("estimates completion tokens for a non-Latin reply without dividing its characters by four", async () => {
-    const llm = scriptedLLM([{ text: "ক".repeat(400) }]);
-    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    // Some compatible providers omit usage metadata; the engine must then estimate it.
+    const llm: EngineLLMClient = {
+      model: "test-model",
+      async complete() {
+        return { choices: [{ message: { role: "assistant", content: "ক".repeat(400) }, finish_reason: "stop" }] } as never;
+      },
+    };
+    const engine = new AgentEngine({ llm, tools: new ToolRegistry() });
     const result = await engine.run({ history: user("Answer in Bengali") });
     expect(result.status).toBe("completed");
     // A reply of 400 Bengali characters costs about 400 tokens; length / 4 would report about 110.

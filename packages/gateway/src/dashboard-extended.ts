@@ -507,7 +507,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     autonomyContext: () => deps.autonomy?.runtimeContext() ?? "AutonomousSupervisor runtime context is unavailable.",
     healthReport: () => deps.healthReport?.() ?? null,
     runLearningCycle: () => runTrackedEvolutionCycle(false),
-    log: deps.appendGatewayLog,
+    log: (message: string) => deps.appendGatewayLog?.(message),
     intervalMs: Number(process.env.MIKI_UNIFIED_CONTROLLER_INTERVAL_MS) || 30_000,
   })
   unifiedController.start()

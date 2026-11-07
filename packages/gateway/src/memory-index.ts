@@ -37,6 +37,9 @@ const EMBEDDING_CONCURRENCY = 4;
 const semanticProvider = (name: string) =>
   name !== "hash-offline" && name !== "noop" && name !== "onnx-local";
 
+type PendingProvenance = { provenance: "owner" | "agent" | "untrusted"; contentHash: string };
+const PENDING_PROVENANCE = new WeakMap<object, Map<string, Map<string, PendingProvenance>>>();
+
 /**
  * Durable derived index for the canonical Markdown memory files. Markdown is
  * never changed by indexing; this SQLite index can always be rebuilt.
@@ -47,7 +50,7 @@ export class SqliteMemoryIndex {
   private syncPromise?: Promise<void>;
   private lastEmbeddingFailureAt = 0;
   private lastEmbeddingError?: string;
-  private readonly pendingProvenance = new Map<string, { provenance: "owner" | "agent" | "untrusted"; contentHash: string }>();
+  private readonly pendingProvenance: Map<string, { provenance: "owner" | "agent" | "untrusted"; contentHash: string }>;
   private trustFileSignature?: string;
   private trustBootstrapPromise?: Promise<{ user: boolean; memory: boolean }>;
 
@@ -58,6 +61,13 @@ export class SqliteMemoryIndex {
     private readonly log: (message: string) => void = () => undefined,
   ) {
     this.scopeId = sha256(memory.memoryPaths().root).slice(0, 24);
+    // Write intents are shared by every index instance over the same database and
+    // memory root so a second reader never downgrades a freshly written file.
+    let perDb = PENDING_PROVENANCE.get(db);
+    if (!perDb) { perDb = new Map(); PENDING_PROVENANCE.set(db, perDb); }
+    let perScope = perDb.get(this.scopeId);
+    if (!perScope) { perScope = new Map(); perDb.set(this.scopeId, perScope); }
+    this.pendingProvenance = perScope;
     this.initialize();
   }
 
@@ -192,9 +202,16 @@ export class SqliteMemoryIndex {
     // only a performance hint and can be held constant by an external edit.
     // Force only these two sources through content hashing; other daily files
     // remain on the normal incremental index path.
-    await this.syncFiles(false, new Set(["USER.md", "MEMORY.md"]));
     const trustFiles = await this.memory.store.listTrustFiles();
     const signature = this.trustSignature(trustFiles);
+    const trustScope = new Set(["USER.md", "MEMORY.md"]);
+    if (signature === this.trustFileSignature) {
+      // Unchanged trust-bearing files: re-hash only those two sources and skip
+      // the full daily-file listing.
+      await this.syncFiles(false, trustScope, { infos: trustFiles, scope: trustScope });
+    } else {
+      await this.syncFiles(false, trustScope);
+    }
     this.trustFileSignature = signature;
     const rows = this.db.prepare("SELECT path,provenance FROM memory_file_sources WHERE scope_id=? AND path IN ('USER.md','MEMORY.md')")
       .all(this.scopeId) as Array<{ path: string; provenance: string }>;
@@ -213,23 +230,31 @@ export class SqliteMemoryIndex {
       .join("|");
   }
 
-  private async syncFiles(includeEmbeddings = true, forcePaths: ReadonlySet<string> = new Set()): Promise<void> {
+  private async syncFiles(
+    includeEmbeddings = true,
+    forcePaths: ReadonlySet<string> = new Set(),
+    scoped?: { infos: Array<{ rel: string; abs: string; mtimeMs: number; size: number }>; scope: ReadonlySet<string> },
+  ): Promise<void> {
     if (this.syncPromise) {
       await this.syncPromise;
       // A regular sync may have started just before a security-sensitive forced
       // read. Run the requested verification after it rather than treating the
       // in-flight scan as satisfying the force request.
-      if (forcePaths.size > 0) return this.syncFiles(includeEmbeddings, forcePaths);
+      if (forcePaths.size > 0) return this.syncFiles(includeEmbeddings, forcePaths, scoped);
       return;
     }
-    this.syncPromise = this.syncFilesInner(includeEmbeddings, forcePaths).finally(() => {
+    this.syncPromise = this.syncFilesInner(includeEmbeddings, forcePaths, scoped).finally(() => {
       this.syncPromise = undefined;
     });
     return this.syncPromise;
   }
 
-  private async syncFilesInner(includeEmbeddings: boolean, forcePaths: ReadonlySet<string>): Promise<void> {
-    const infos = await this.memory.store.listFiles();
+  private async syncFilesInner(
+    includeEmbeddings: boolean,
+    forcePaths: ReadonlySet<string>,
+    scoped?: { infos: Array<{ rel: string; abs: string; mtimeMs: number; size: number }>; scope: ReadonlySet<string> },
+  ): Promise<void> {
+    const infos = scoped ? scoped.infos : await this.memory.store.listFiles();
     this.trustFileSignature = this.trustSignature(infos);
     const seen = new Set<string>();
     const readSource = this.db.prepare(
@@ -250,7 +275,7 @@ export class SqliteMemoryIndex {
       INSERT INTO memory_file_sources(scope_id,path,mtime_ms,size,content_hash,observed_at,provenance)
       VALUES(?,?,?,?,?,?,?)
       ON CONFLICT(scope_id,path) DO UPDATE SET mtime_ms=excluded.mtime_ms,size=excluded.size,
-        content_hash=excluded.content_hash,observed_at=excluded.observed_at
+        content_hash=excluded.content_hash,observed_at=excluded.observed_at,provenance=excluded.provenance
     `);
     const insertChunk = this.db.prepare(`
       INSERT INTO memory_file_chunks(id,scope_id,path,start_line,end_line,text,token_count,observed_at,importance,provenance)
@@ -344,13 +369,17 @@ export class SqliteMemoryIndex {
     }
     // Drop stale provenance intents. They must never attribute later external
     // edits to the actor who wrote an earlier version of the same path.
-    for (const rel of this.pendingProvenance.keys()) if (!seen.has(rel)) this.pendingProvenance.delete(rel);
+    for (const rel of [...this.pendingProvenance.keys()]) {
+      if (scoped && !scoped.scope.has(rel)) continue;
+      if (!seen.has(rel)) this.pendingProvenance.delete(rel);
+    }
 
     const oldSources = this.db
       .prepare("SELECT path FROM memory_file_sources WHERE scope_id=?")
       .all(this.scopeId) as Array<{ path: string }>;
     for (const row of oldSources) {
       if (seen.has(row.path)) continue;
+      if (scoped && !scoped.scope.has(row.path)) continue;
       const prior = readChunks.all(this.scopeId, row.path) as Array<{ id: string }>;
       const removeFile = this.db.transaction(() => {
         for (const item of prior) {
@@ -735,7 +764,9 @@ export class SqliteMemoryIndex {
     const removeRows = this.db.transaction(() => {
       this.db.prepare("INSERT OR IGNORE INTO memory_file_deletions(legacy_id,deleted_at) VALUES(?,?)").run(id, timestamp);
       this.db.prepare("DELETE FROM memory_file_imports WHERE legacy_id=?").run(id);
-      this.db.prepare("DELETE FROM memory_vectors WHERE chunk_id=?").run(id);
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vectors'").get()) {
+        this.db.prepare("DELETE FROM memory_vectors WHERE chunk_id=?").run(id);
+      }
       return this.db.prepare("DELETE FROM memory_chunks WHERE id=?").run(id).changes > 0;
     });
     const removedLegacy = removeRows();

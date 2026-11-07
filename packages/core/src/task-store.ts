@@ -569,7 +569,7 @@ export class DurableTaskStore {
   listDependencies(taskId: string): TaskDependency[] {
     const rows = this.db.prepare(`SELECT d.task_id,d.depends_on_task_id,t.status
       FROM miki_task_dependencies d JOIN miki_tasks t ON t.task_id=d.depends_on_task_id
-      WHERE d.task_id=? ORDER BY d.created_at,d.depends_on_task_id`).all(taskId) as Array<{
+      WHERE d.task_id=? ORDER BY d.created_at,d.rowid`).all(taskId) as Array<{
         task_id: string; depends_on_task_id: string; status: TaskStatus;
       }>;
     return rows.map((row) => ({ taskId: row.task_id, dependsOnTaskId: row.depends_on_task_id, status: row.status }));
@@ -1096,9 +1096,7 @@ export class DurableTaskStore {
             now,
             reason: current.status === "verifying"
               ? "verification lease expired; verification will be safely retried"
-              : row.max_attempts < 0
-                ? "worker lease expired; unbounded retry policy requeued task"
-                : "worker lease expired; task requeued",
+              : "worker lease expired; task requeued",
             nextRetryAt: now,
             errorCategory: "transient",
           }));

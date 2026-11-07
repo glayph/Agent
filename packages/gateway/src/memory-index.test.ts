@@ -162,8 +162,8 @@ describe("SqliteMemoryIndex", () => {
     await memory.note("Prefers concise replies", "user");
     await memory.note("Prefers detailed, step-by-step replies", "user", "Prefers concise replies");
     const text = await memory.store.readUserMd();
-    expect(text).toContain("status: superseded] Prefers concise replies");
-    expect(text).toContain("status: active] Prefers detailed, step-by-step replies");
+    expect(text).toMatch(/status: superseded[;\]][^\n]*\] (\[memory_id: [^\]]+\] )?Prefers concise replies/);
+    expect(text).toMatch(/status: active[;\]][^\n]*\] (\[memory_id: [^\]]+\] )?Prefers detailed, step-by-step replies/);
   });
 
   it("preserves legacy SQLite rows as untrusted audit-only Markdown", async () => {

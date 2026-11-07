@@ -167,8 +167,8 @@ function fromEngineKind(kind: unknown): FailureKind | undefined {
 
 /**
  * Classification of an LLM/provider failure. Structured signals always win: the engine's `failureKind`,
- * the error class name and the HTTP status. Message text is only a fallback for legacy callers that pass a
- * bare string, and it is never extended: an unrecognised failure stays "other".
+ * the error class name, the HTTP status and system error codes. Message wording is never a signal, so an
+ * unrecognised failure stays "other".
  */
 export function classifyFailure(input: unknown): FailureKind {
   const holder = (input && typeof input === "object" ? input : {}) as {
@@ -182,11 +182,6 @@ export function classifyFailure(input: unknown): FailureKind {
   const structured = fromEngineKind(holder.failureKind);
   if (structured) return structured;
   if (holder.name === "NoModelConfiguredError") return "no_provider";
-  const taskCategory = classifyTaskError(input).category;
-  if (taskCategory === "auth_config") return "auth";
-  if (taskCategory === "rate_limit") return "rate_limit";
-  if (taskCategory === "transient") return "transient";
-  if (["uncertain_side_effect", "permanent_validation", "dependency_blocked"].includes(taskCategory)) return "owner_action";
   const status = typeof holder.status === "number" ? holder.status : undefined;
   if (status === 401 || status === 403) return "auth";
   if (status === 429) return "rate_limit";
@@ -205,6 +200,11 @@ export function classifyFailure(input: unknown): FailureKind {
     if (value.cause) pending.push(value.cause);
   }
   if (["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].some((code) => codes.has(code))) return "network";
+  const taskCategory = classifyTaskError(input).category;
+  if (taskCategory === "auth_config") return "auth";
+  if (taskCategory === "rate_limit") return "rate_limit";
+  if (taskCategory === "transient") return "transient";
+  if (["uncertain_side_effect", "permanent_validation", "dependency_blocked"].includes(taskCategory)) return "owner_action";
   return "other";
 }
 
@@ -2093,7 +2093,9 @@ export class AutonomousSupervisor {
     if (this.failureStreak > 0 && Number.isFinite(lastFailureMs)) {
       const waitSeconds = Math.min(config.failureBackoffMaxSeconds, config.failureBackoffBaseSeconds * Math.pow(2, this.failureStreak - 1));
       const remaining = Math.max(0, lastFailureMs + waitSeconds * 1000 - Date.now());
-      if (remaining > 0) return remaining;
+      // While a provider failure streak is open, its bounded backoff replaces the quiet decision cadence:
+      // once the window has elapsed, the next attempt is due immediately.
+      return remaining;
     }
     if (this.ambientWakeRequested || this.ambientLastAt === 0) return 0;
     return Math.max(0, this.ambientLastAt + config.decisionIntervalSeconds * 1000 - Date.now());
@@ -3431,8 +3433,12 @@ ${recentChat.map((row) => `${row.role}: ${truncate(row.content, 800)}`).join("\n
       // provider becomes available. Only an explicit owner-side policy/action
       // blocker is terminal.
       const exhausted = failureKind !== null && isTerminalGoalFailure(failureKind);
-      const finalStatus = succeeded ? "completed" : exhausted ? "blocked" : "retry_wait";
-      const nextRetryAt = !succeeded && !exhausted
+      // A rejected or missing provider credential parks the goal until the provider answers again
+      // (reviveProviderBlockedGoals); it is not a terminal goal failure and is never retried in a tight loop.
+      const parked = infraFailure && failureKind !== null && isOwnerActionFailure(failureKind);
+      const halted = exhausted || parked;
+      const finalStatus = succeeded ? "completed" : halted ? "blocked" : "retry_wait";
+      const nextRetryAt = !succeeded && !halted
         ? new Date(Date.parse(this.now()) + (infraFailure ? this.infraRetrySeconds(config) : this.logicRetrySeconds(config, attempt)) * 1000).toISOString()
         : null;
       let replanContext: ReplanContext | undefined;
@@ -3459,10 +3465,12 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       }
 
       this.goals.update(goal.id, {
-        status: succeeded || exhausted ? (succeeded ? "completed" : "blocked") : "pending",
+        status: succeeded || halted ? (succeeded ? "completed" : "blocked") : "pending",
         statusReason: succeeded
           ? reason
-          : exhausted ? `${reason} Goal is paused until its missing capability or policy is changed.` : `${reason} Re-planning before retry #${attempt}.`,
+          : exhausted ? `${reason} Goal is paused until its missing capability or policy is changed.`
+          : parked ? `${reason} Goal is parked until the model provider accepts the configured credentials.`
+          : `${reason} Re-planning before retry #${attempt}.`,
         ...(succeeded ? { completedSteps: goal.total_steps, progress: 1 } : {}),
       });
       this.options.db
@@ -3473,7 +3481,7 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
       }
       if (succeeded) {
         this.markTaskForGoal(goal.id, "completed", { result: truncate(result.finalText || reason, 12_000) });
-      } else if (exhausted) {
+      } else if (halted) {
         this.markTaskForGoal(goal.id, "failed", { error: reason, result: truncate(result.finalText || "", 12_000) });
       } else {
         this.markTaskForGoal(goal.id, "queued", { error: reason, result: truncate(result.finalText || "", 12_000), retryAt: nextRetryAt });
@@ -3510,10 +3518,10 @@ MANDATORY: The prior retry produced the same plan digest. Change the decompositi
         acceptance: acceptance as unknown as Record<string, unknown>,
       });
       return (this.lastOutcome = {
-        status: succeeded ? "completed" : exhausted ? "blocked" : "idle",
+        status: succeeded ? "completed" : halted ? "blocked" : "idle",
         goalId: goal.id,
         runId,
-        ...(succeeded ? {} : { reason: exhausted ? reason : `Retry scheduled for ${nextRetryAt}.` }),
+        ...(succeeded ? {} : { reason: halted ? reason : `Retry scheduled for ${nextRetryAt}.` }),
       });
     } catch (error) {
       const reason = truncate(errorText(error), 900);

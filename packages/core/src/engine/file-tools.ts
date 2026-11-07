@@ -279,7 +279,7 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
         properties: { path: { type: "string" }, recursive: { type: "boolean" } },
         additionalProperties: false,
       },
-      execute(input) {
+      async execute(input) {
         const abs = resolve(input.path);
         notRoot(abs);
         assertNotSensitive(abs);

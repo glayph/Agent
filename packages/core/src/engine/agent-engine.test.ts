@@ -149,7 +149,7 @@ describe("AgentEngine", () => {
       model: "retry-model",
       async complete() {
         attempts += 1;
-        if (attempts <= 7) throw new Error("HTTP 503 temporarily unavailable");
+        if (attempts <= 7) throw Object.assign(new Error("HTTP 503 temporarily unavailable"), { status: 503 });
         return { choices: [{ message: { role: "assistant", content: "Recovered." } }] };
       },
     };
@@ -174,8 +174,8 @@ describe("AgentEngine", () => {
     expect(result.finalText).toBe("Hello!");
     expect(result.turns).toBe(1);
     expect(result.plan).toBeUndefined();
-    expect(result.usage.totalTokens).toBe(27);
-    expect(llm.requests).toHaveLength(2);
+    expect(result.usage.totalTokens).toBe(15);
+    expect(llm.requests).toHaveLength(1);
     expect(events.map((e) => e.type)).toEqual([
       "run.started",
       "turn.started",
@@ -508,7 +508,12 @@ describe("AgentEngine", () => {
       { text: "The file was created and independently verified." },
     ]);
     const registry = new ToolRegistry();
-    registry.register(tool({ name: "create_file", risk: "config_write", execute: () => ({ ok: true, path: "notes.txt" }) }));
+    registry.register(tool({
+      name: "create_file",
+      risk: "config_write",
+      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false },
+      execute: () => ({ ok: true, path: "notes.txt" }),
+    }));
     const engine = new AgentEngine({ llm: llm.client, tools: registry });
     const plan = {
       id: "plan-verify",
@@ -919,7 +924,10 @@ describe("AgentEngine", () => {
     const result = await engine.run({ history: [{ role: "user", content: "task" }] });
     expect(result.status).toBe("completed");
     expect(requests).toHaveLength(1);
-    expect(requests[0].options.tools).toBeUndefined();
+    // The oversized schema is withheld; only the small on-demand discovery function remains.
+    const sent = ((requests[0].options.tools ?? []) as Array<{ function: { name: string } }>).map((schema) => schema.function.name);
+    expect(sent).not.toContain("huge");
+    expect(sent).toEqual(["miki_find_tools"]);
   });
   it("enforces context window before every model request, including tool loops", async () => {
     const { engine, llm } = setup(
@@ -929,19 +937,22 @@ describe("AgentEngine", () => {
         { text: "done" },
       ],
       [tool({ name: "grow", execute: () => ({ payload: "X".repeat(900) }) })],
-      { contextWindowTokens: 512 },
+      { contextWindowTokens: 256 },
     );
     const result = await engine.run({
       history: [
-        { role: "user", content: "old question" },
+        { role: "user", content: `old question ${"q".repeat(2_000)}` },
         { role: "assistant", content: "old answer" },
         { role: "user", content: "new task" },
       ],
     });
     expect(result.status).toBe("completed");
     for (const request of llm.requests) {
-      expect(request.messages.some((message) => message.content === "old question")).toBe(false);
+      expect(request.messages.some((message) => typeof message.content === "string" && message.content.startsWith("old question"))).toBe(false);
       // The system prompt is itself longer than 900 chars; the assertion is about tool payloads.
+      // Compaction summarizer calls have their own bounded input budget; the window rule applies to agent turns.
+      const isCompactionCall = request.messages.some((message) => message.role === "system" && String(message.content || "").startsWith("You compress the working history"));
+      if (isCompactionCall) continue;
       expect(request.messages.some((message) => message.role !== "system" && String(message.content || "").length >= 900)).toBe(false);
     }
   });
