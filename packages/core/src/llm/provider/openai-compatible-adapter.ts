@@ -6,6 +6,7 @@ import {
   LLMRateLimitError,
   LLMTimeoutError,
   LLMMissingCredentialError,
+  LLMAuthorizationError,
   LLMEntitlementError,
   type LLMProviderDiagnostic,
 } from "./errors.js";
@@ -27,13 +28,79 @@ export function defaultTimeoutMs(provider: ProviderTransportConfig): number {
   return 120_000;
 }
 
-function retryDelayMs(message: string): number | null {
-  const retryDelay = message.match(/retryDelay['"]?\s*[:=]\s*['"]?(\d+)s/i);
-  if (retryDelay) return Number(retryDelay[1]) * 1000;
-  const retryAfter = message.match(
-    /retry(?:-|\s*)after['"]?\s*[:=]\s*['"]?(\d+)/i,
-  );
-  return retryAfter ? Number(retryAfter[1]) * 1000 : null;
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNUNREACH",
+  "EHOSTUNREACH",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+const TIMEOUT_ERROR_CODES = new Set(["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
+const AUTH_ERROR_CODES = new Set(["invalid_api_key", "authentication_error", "unauthorized"]);
+
+function errorCodeChain(error: unknown): string[] {
+  const codes: string[] = [];
+  const pending: unknown[] = [error];
+  const seen = new Set<unknown>();
+  while (pending.length && seen.size < 8) {
+    const current = pending.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const value = current as { code?: unknown; errno?: unknown; cause?: unknown; name?: unknown };
+    for (const candidate of [value.code, value.errno, value.name]) {
+      if (typeof candidate === "string" && candidate.trim()) codes.push(candidate.toUpperCase());
+    }
+    if (value.cause) pending.push(value.cause);
+  }
+  return codes;
+}
+
+function structuredRetryDelayMs(error: unknown, body: unknown): number | null {
+  const direct = error && typeof error === "object"
+    ? (error as { retryAfterMs?: unknown }).retryAfterMs
+    : undefined;
+  if (typeof direct === "number" && Number.isFinite(direct) && direct >= 0) return Math.ceil(direct);
+  if (!body || typeof body !== "object") return null;
+  const root = body as Record<string, unknown>;
+  const nested = root.error && typeof root.error === "object" ? root.error as Record<string, unknown> : {};
+  const millisecondValues = [nested.retry_after_ms, root.retry_after_ms, nested.retryAfterMs, root.retryAfterMs];
+  for (const candidate of millisecondValues) {
+    const value = typeof candidate === "number" ? candidate : typeof candidate === "string" ? Number(candidate) : NaN;
+    if (Number.isFinite(value) && value >= 0) return Math.ceil(value);
+  }
+  const secondValues = [nested.retryDelay, root.retryDelay, nested.retry_after, root.retry_after];
+  for (const candidate of secondValues) {
+    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0) return Math.ceil(candidate * 1000);
+    if (typeof candidate === "string") {
+      const match = candidate.trim().match(/^(\d+(?:\.\d+)?)s?$/i);
+      if (match) return Math.ceil(Number(match[1]) * 1000);
+    }
+  }
+  const details = Array.isArray(nested.details) ? nested.details : Array.isArray(root.details) ? root.details : [];
+  for (const detail of details) {
+    if (!detail || typeof detail !== "object") continue;
+    const record = detail as Record<string, unknown>;
+    const candidate = record.retryDelay ?? record.retry_delay;
+    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0) return Math.ceil(candidate * 1000);
+    if (typeof candidate === "string") {
+      const match = candidate.trim().match(/^(\d+(?:\.\d+)?)s?$/i);
+      if (match) return Math.ceil(Number(match[1]) * 1000);
+    }
+  }
+  return null;
+}
+
+function retryAfterHeaderMs(value: string | null, now = Date.now()): number | null {
+  if (!value?.trim()) return null;
+  const raw = value.trim();
+  const seconds = Number(raw);
+  const milliseconds = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(raw) - now;
+  return Number.isFinite(milliseconds) && milliseconds >= 0 && Number.isSafeInteger(Math.ceil(milliseconds))
+    ? Math.ceil(milliseconds)
+    : null;
 }
 
 function errorMessage(error: unknown): string {
@@ -48,9 +115,9 @@ function errorMessage(error: unknown): string {
       typeof value.error === "object" && value.error !== null
         ? (value.error as { message?: unknown; code?: unknown }).message
         : value.error,
+      value.message,
       value.response?.data,
       value.body,
-      value.message,
     ];
     const meaningful = candidates.find((candidate) => {
       if (candidate === undefined || candidate === null) return false;
@@ -69,83 +136,138 @@ function errorMessage(error: unknown): string {
 }
 
 function statusCode(error: unknown): number {
-  if (typeof error === "object" && error !== null && "status" in error) {
-    const status = (error as { status?: unknown }).status;
-    return typeof status === "number" ? status : 0;
-  }
+  if (typeof error !== "object" || error === null) return 0;
+  const value = error as { status?: unknown; statusCode?: unknown; response?: { status?: unknown } };
+  for (const status of [value.status, value.statusCode, value.response?.status])
+    if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) return status;
   return 0;
 }
 
-function sanitizeDetail(message: string): string {
-  return message
+function structuredProviderError(error: unknown): { code?: string; type?: string; body?: unknown } {
+  if (typeof error !== "object" || error === null) return {};
+  const value = error as { payload?: unknown; body?: unknown; response?: { data?: unknown } };
+  const body = value.payload ?? value.body ?? value.response?.data;
+  if (!body || typeof body !== "object") return { body };
+  const record = body as Record<string, unknown>;
+  const nested = record.error && typeof record.error === "object"
+    ? record.error as Record<string, unknown>
+    : {};
+  const code = nested.code ?? record.code;
+  const type = nested.type ?? record.type;
+  return {
+    ...(typeof code === "string" ? { code: code.toLowerCase() } : {}),
+    ...(typeof type === "string" ? { type: type.toLowerCase() } : {}),
+    body,
+  };
+}
+
+const ENTITLEMENT_CODES = new Set([
+  "payment_required",
+  "payment_method_required",
+  "billing_hard_limit",
+  "billing_not_active",
+  "account_payment_required",
+  "insufficient_quota",
+]);
+const RATE_LIMIT_CODES = new Set([
+  "rate_limit_exceeded",
+  "resource_exhausted",
+  "too_many_requests",
+]);
+
+function sanitizeEndpoint(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/(?:api[-_]?key|access[-_]?token|token|secret|password)\/[^/]+/gi, "/[redacted]");
+    return url.toString().slice(0, 240);
+  } catch {
+    return value.split(/[?#]/, 1)[0].slice(0, 240);
+  }
+}
+
+function sanitizeDetail(message: string, knownSecrets: readonly string[] = []): string {
+  let safe = message
     .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
-    .replace(
-      /(api[_-]?key|token|authorization)[=:]\s*[^\s,;]+/gi,
-      "$1=[redacted]",
-    )
-    .replace(/https?:\/\/[^\s]+/gi, "[endpoint]")
-    .slice(0, 240);
+    .replace(/(["']?(?:api[_-]?key|access[_-]?token|token|authorization|secret|password)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, "$1[redacted]")
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/g, "[redacted-token]")
+    .replace(/https?:\/\/[^\s]+/gi, "[endpoint]");
+  for (const secret of knownSecrets) {
+    if (secret && secret.length >= 4) safe = safe.split(secret).join("[redacted]");
+  }
+  return safe.slice(0, 240);
 }
 
 export function classifyError(
   error: unknown,
   providerId: string,
   diagnostic: LLMProviderDiagnostic,
+  knownSecrets: readonly string[] = [],
 ): never {
   const message = errorMessage(error);
-  const lower = message.toLowerCase();
   const status = statusCode(error);
+  const errorCodes = errorCodeChain(error);
+  const rawProviderRetryAfter = error && typeof error === "object"
+    ? (error as { retryAfterMs?: unknown }).retryAfterMs
+    : undefined;
+  const providerRetryAfter = typeof rawProviderRetryAfter === "number" && Number.isFinite(rawProviderRetryAfter)
+    ? rawProviderRetryAfter
+    : Number.NaN;
+  const structured = structuredProviderError(error);
+  diagnostic.status = status || diagnostic.status;
+  diagnostic.providerCode = structured.code ? sanitizeDetail(structured.code, knownSecrets) : undefined;
+  diagnostic.providerType = structured.type ? sanitizeDetail(structured.type, knownSecrets) : undefined;
+  if (diagnostic.endpoint) diagnostic.endpoint = sanitizeEndpoint(diagnostic.endpoint);
 
-  const entitlementBlocked =
-    lower.includes("no payment method") ||
-    lower.includes("payment method required") ||
-    lower.includes("payment required") ||
-    lower.includes("billing") ||
-    lower.includes("creditserror") ||
-    lower.includes("insufficient credits") ||
-    lower.includes("entitlement") ||
-    lower.includes("subscription required");
-  if (entitlementBlocked) {
+  // HTTP 402 is the unambiguous payment-required response. Other statuses are
+  // classified as entitlement only when the provider supplies a documented
+  // structured code/type; prose alone (including the word "billing") is not enough.
+  const explicitEntitlement = Boolean(
+    structured.code && ENTITLEMENT_CODES.has(structured.code)
+    || structured.type && ENTITLEMENT_CODES.has(structured.type),
+  );
+  if (status === 402 || (status !== 401 && explicitEntitlement)) {
     throw new LLMEntitlementError(
       `Provider ${providerId} requires an active payment method, credits, or subscription before completion.`,
       { providerId, status, cause: error, diagnostic },
     );
   }
 
-  if (
-    status === 401 ||
-    lower.includes("invalid api key") ||
-    lower.includes("incorrect api key") ||
-    lower.includes("authentication") ||
-    lower.includes("unauthorized")
-  ) {
+  if (status === 401 || (status === 0 && errorCodes.some((code) => AUTH_ERROR_CODES.has(code.toLowerCase())))) {
     throw new LLMMissingCredentialError(
       `The API key for ${providerId} was rejected by the provider.`,
       { providerId, status, cause: error, diagnostic },
     );
   }
 
-  if (
-    status === 429 ||
-    lower.includes("429") ||
-    lower.includes("resource_exhausted") ||
-    lower.includes("quota")
-  ) {
-    const delay = retryDelayMs(message);
+  if (status === 403) {
+    throw new LLMAuthorizationError(
+      `Provider ${providerId} rejected the configured authorization.`,
+      { providerId, status, cause: error, diagnostic },
+    );
+  }
+
+  const explicitRateLimit = Boolean(
+    structured.code && RATE_LIMIT_CODES.has(structured.code)
+    || structured.type && RATE_LIMIT_CODES.has(structured.type),
+  );
+  if (status === 429 || (status === 0 && explicitRateLimit)) {
+    const delay = Number.isFinite(providerRetryAfter) && providerRetryAfter >= 0
+      ? Math.ceil(providerRetryAfter)
+      : structuredRetryDelayMs(error, structured.body);
     const hint = delay
       ? ` Retry after about ${Math.ceil(delay / 1000)} seconds.`
       : "";
     throw new LLMRateLimitError(
       `Provider ${providerId} rate limit or quota reached.${hint}`,
-      { providerId, status, cause: error, diagnostic },
+      { providerId, status, retryAfterMs: delay ?? undefined, cause: error, diagnostic },
     );
   }
 
-  if (
-    status === 408 ||
-    lower.includes("timeout") ||
-    lower.includes("timed out")
-  ) {
+  if (status === 408 || errorCodes.some((code) => TIMEOUT_ERROR_CODES.has(code)) || errorCodes.includes("TIMEOUTERROR")) {
     throw new LLMTimeoutError(`Provider ${providerId} request timed out.`, {
       providerId,
       status,
@@ -154,14 +276,15 @@ export function classifyError(
     });
   }
 
-  const detail = sanitizeDetail(message);
+  const detail = sanitizeDetail(message, knownSecrets);
+  const networkFailure = errorCodes.some((code) => NETWORK_ERROR_CODES.has(code));
   const suffix =
     status === 400
       ? ` Request rejected; verify the model and supported request fields. (${diagnostic.correlationId})`
       : ` (${diagnostic.correlationId})`;
   throw new LLMAPIError(
     `Provider ${providerId} request failed${status ? ` with HTTP ${status}` : ""}.${detail ? ` ${detail}` : ""}${suffix}`,
-    { providerId, status, cause: error, diagnostic },
+    { providerId, status, retryable: status >= 500 || networkFailure, cause: error, diagnostic },
   );
 }
 
@@ -171,10 +294,12 @@ interface StreamChunk {
     finish_reason?: string | null;
     delta?: {
       content?: unknown;
+      extra_content?: unknown;
       tool_calls?: Array<{
         index?: number;
         id?: string;
         function?: { name?: string; arguments?: unknown };
+        extra_content?: unknown;
       }>;
     };
   }>;
@@ -182,9 +307,52 @@ interface StreamChunk {
 }
 
 class ProviderHttpError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly payload?: unknown,
+    readonly retryAfterMs?: number | null,
+  ) {
     super(message);
     this.name = "ProviderHttpError";
+  }
+}
+
+function providerErrorMetadata(error: unknown): Record<string, unknown> {
+  const payload = error instanceof ProviderHttpError ? error.payload : undefined;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  const root = payload as Record<string, unknown>;
+  const nested = root.error && typeof root.error === "object" && !Array.isArray(root.error)
+    ? root.error as Record<string, unknown>
+    : {};
+  return { ...root, ...nested };
+}
+
+function reportsUnsupportedField(error: unknown, field: string): boolean {
+  if (statusCode(error) !== 400) return false;
+  const metadata = providerErrorMetadata(error);
+  const reportedField = metadata.param ?? metadata.parameter ?? metadata.field ?? metadata.target;
+  return typeof reportedField === "string" && reportedField === field;
+}
+
+function reportsUnsupportedStreaming(error: unknown): boolean {
+  if (statusCode(error) !== 400) return false;
+  const metadata = providerErrorMetadata(error);
+  const reportedField = metadata.param ?? metadata.parameter ?? metadata.field ?? metadata.target;
+  const code = String(metadata.code ?? metadata.type ?? "").toLowerCase();
+  return reportedField === "stream" || reportedField === "stream_options"
+    || ["unsupported_streaming", "stream_not_supported", "streaming_not_supported"].includes(code);
+}
+
+function providerResponseMessage(raw: string, status: number): { message: string; payload?: unknown } {
+  try {
+    const payload = JSON.parse(raw) as unknown;
+    const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+    const nested = record.error && typeof record.error === "object" ? record.error as Record<string, unknown> : {};
+    const detail = nested.message ?? record.message ?? record.error;
+    return { message: typeof detail === "string" ? detail.slice(0, 1_000) : `HTTP ${status}`, payload };
+  } catch {
+    return { message: raw.slice(0, 1_000) || `HTTP ${status}` };
   }
 }
 
@@ -206,24 +374,35 @@ async function requestNonStreamingCompletion(
   });
   if (!response.ok) {
     const raw = await response.text().catch(() => "");
-    let message = raw;
-    try {
-      const parsed = JSON.parse(raw) as { error?: { message?: unknown }; message?: unknown };
-      const detail = parsed.error?.message ?? parsed.message;
-      if (typeof detail === "string") message = detail;
-    } catch { /* keep the bounded provider response text */ }
-    throw new ProviderHttpError(message.slice(0, 1_000) || `HTTP ${response.status}`, response.status);
+    const parsed = providerResponseMessage(raw, response.status);
+    throw new ProviderHttpError(parsed.message, response.status, parsed.payload, retryAfterHeaderMs(response.headers.get("retry-after")));
   }
   return await response.json() as LLMResponse;
 }
 
-async function* parseSseStream(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamChunk> {
+async function* parseSseStream(
+  body: ReadableStream<Uint8Array>,
+  idleTimeoutMs: number,
+  requestController: AbortController,
+): AsyncGenerator<StreamChunk> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const idleRead = reader.read();
+      const timedRead = new Promise<Awaited<ReturnType<typeof reader.read>>>((_resolve, reject) => {
+        idleTimer = setTimeout(() => {
+          const timeoutError = new DOMException(`Model stream idle timeout after ${idleTimeoutMs} ms.`, "TimeoutError");
+          requestController.abort(timeoutError);
+          reject(timeoutError);
+        }, idleTimeoutMs);
+      });
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try { chunk = await Promise.race([idleRead, timedRead]); }
+      finally { if (idleTimer) clearTimeout(idleTimer); }
+      const { done, value } = chunk;
       pending += decoder.decode(value, { stream: !done });
       let boundary = pending.search(/\r?\n\r?\n/);
       while (boundary >= 0) {
@@ -245,7 +424,7 @@ async function* parseSseStream(body: ReadableStream<Uint8Array>): AsyncGenerator
       catch { throw new Error("Provider returned malformed server-sent event data."); }
     }
   } finally {
-    reader.releaseLock();
+    try { reader.releaseLock(); } catch { /* stream may already be cancelled */ }
   }
 }
 
@@ -257,40 +436,63 @@ async function requestStreamingCompletion(
   model: string,
 ): Promise<LLMResponse> {
   const effectiveKey = apiKey || (provider.emptyApiKeyAllowed ? "local-no-auth-required" : apiKey);
-  const timeout = AbortSignal.timeout(request.timeoutMs ?? defaultTimeoutMs(provider));
-  const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
+  const timeoutMs = request.timeoutMs ?? defaultTimeoutMs(provider);
+  const requestController = new AbortController();
+  const timeout = setTimeout(
+    () => requestController.abort(new DOMException(`Provider request timed out after ${timeoutMs} ms.`, "TimeoutError")),
+    timeoutMs,
+  );
+  const signal = request.signal ? AbortSignal.any([request.signal, requestController.signal]) : requestController.signal;
   const endpoint = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${effectiveKey}`,
-      "content-type": "application/json",
-      accept: "text/event-stream, application/json",
-    },
-    body: JSON.stringify(requestBody),
-    signal,
-  });
-  if (!response.ok) {
-    const raw = await response.text().catch(() => "");
-    let message = raw;
-    try {
-      const parsed = JSON.parse(raw) as { error?: { message?: unknown }; message?: unknown };
-      const detail = parsed.error?.message ?? parsed.message;
-      if (typeof detail === "string") message = detail;
-    } catch { /* keep the bounded provider response text */ }
-    throw new ProviderHttpError(message.slice(0, 1_000) || `HTTP ${response.status}`, response.status);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${effectiveKey}`,
+        "content-type": "application/json",
+        accept: "text/event-stream, application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal,
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
   }
-  if (!response.body) throw new Error("Provider returned an empty streaming response.");
+
+  if (!response.ok) {
+    try {
+      const raw = await response.text().catch(() => "");
+      const parsed = providerResponseMessage(raw, response.status);
+      throw new ProviderHttpError(parsed.message, response.status, parsed.payload, retryAfterHeaderMs(response.headers.get("retry-after")));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (!response.body) {
+    clearTimeout(timeout);
+    throw new Error("Provider returned an empty streaming response.");
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("text/event-stream")) {
-    const body = await response.json() as LLMResponse;
-    const content = body.choices?.[0]?.message?.content;
-    if (typeof content === "string") {
-      try { request.onTextDelta?.(content); } catch { /* listeners must not break completion */ }
+    try {
+      const body = await response.json() as LLMResponse;
+      const content = body.choices?.[0]?.message?.content;
+      if (typeof content === "string") {
+        try { request.onTextDelta?.(content); } catch { /* listeners must not break completion */ }
+      }
+      return body;
+    } finally {
+      clearTimeout(timeout);
     }
-    return body;
   }
-  return readStreamingCompletion(parseSseStream(response.body), request, model);
+
+  // Connection setup has a total timeout. After headers, the idle timer is reset
+  // on each SSE read, so a long but live model response is allowed to complete.
+  clearTimeout(timeout);
+  return readStreamingCompletion(parseSseStream(response.body, timeoutMs, requestController), request, model);
 }
 
 async function readStreamingCompletion(
@@ -302,7 +504,13 @@ async function readStreamingCompletion(
   let content = "";
   let finishReason: string | undefined;
   let usage: LLMResponse["usage"];
-  const calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = [];
+  let messageExtraContent: Record<string, unknown> | undefined;
+  const calls: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+    extra_content?: Record<string, unknown>;
+  }> = [];
 
   for await (const chunk of stream) {
     if (chunk.usage) usage = chunk.usage;
@@ -314,12 +522,18 @@ async function readStreamingCompletion(
       content += delta.content;
       try { request.onTextDelta?.(delta.content); } catch { /* UI listeners must not break generation */ }
     }
+    if (delta.extra_content && typeof delta.extra_content === "object" && !Array.isArray(delta.extra_content)) {
+      messageExtraContent = { ...(messageExtraContent ?? {}), ...(delta.extra_content as Record<string, unknown>) };
+    }
     for (const part of delta.tool_calls ?? []) {
       const index = typeof part.index === "number" ? part.index : calls.length;
       const target = (calls[index] ??= { id: "", type: "function", function: { name: "", arguments: "" } });
       if (part.id) target.id = part.id;
       if (part.function?.name) target.function.name += part.function.name;
       if (typeof part.function?.arguments === "string") target.function.arguments += part.function.arguments;
+      if (part.extra_content && typeof part.extra_content === "object" && !Array.isArray(part.extra_content)) {
+        target.extra_content = { ...(target.extra_content ?? {}), ...(part.extra_content as Record<string, unknown>) };
+      }
     }
   }
 
@@ -333,6 +547,7 @@ async function readStreamingCompletion(
         role: "assistant",
         content: content || "",
         ...(completeCalls.length ? { tool_calls: completeCalls } : {}),
+        ...(messageExtraContent ? { extra_content: messageExtraContent } : {}),
       },
       finish_reason: finishReason ?? (completeCalls.length ? "tool_calls" : "stop"),
     }],
@@ -405,7 +620,7 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
       correlationId: randomUUID(),
       providerId: provider.id,
       model,
-      endpoint: provider.baseUrl,
+      endpoint: sanitizeEndpoint(provider.baseUrl),
       requestShape: {
         messageCount: messages.length,
         toolCount: Array.isArray(extra?.tools) ? extra.tools.length : 0,
@@ -434,22 +649,15 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
     }
 
     let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 1; attempt += 1) {
       try {
         if (streaming) return await requestStreamingCompletion(provider, apiKey, requestBody, request, model);
         return await requestNonStreamingCompletion(provider, apiKey, requestBody, request);
       } catch (error) {
         lastError = error;
-        const message = errorMessage(error).toLowerCase();
         const status = statusCode(error);
-        // Optional provider-specific thinking controls are not recognized by
-        // every OpenAI-compatible server. Retry immediately without that field,
-        // matching the direct-fetch client while preserving all other settings.
-        if (
-          status === 400 &&
-          Object.hasOwn(requestBody, "thinking_level") &&
-          /thinking[_ -]?level|reasoning[_ -]?effort|unknown (field|parameter)|unrecognized.*thinking/.test(message)
-        ) {
+        // Providers identify invalid request fields through structured parameter metadata.
+        if (Object.hasOwn(requestBody, "thinking_level") && reportsUnsupportedField(error, "thinking_level")) {
           delete requestBody.thinking_level;
           attempt -= 1;
           continue;
@@ -458,9 +666,8 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
         // metadata in the SSE request. Keep streaming and retry without that option.
         if (
           streaming &&
-          status === 400 &&
           Object.hasOwn(requestBody, "stream_options") &&
-          /stream[_ -]?options/.test(message)
+          reportsUnsupportedField(error, "stream_options")
         ) {
           // Some OpenAI-compatible endpoints stream correctly but reject usage
           // metadata in the SSE request. Keep streaming and retry without that option.
@@ -468,35 +675,22 @@ export class OpenAICompatibleAdapter implements LLMProviderAdapter {
           attempt -= 1;
           continue;
         }
-        if (streaming && status === 400 && /stream/.test(message)) {
+        if (streaming && status === 400 && reportsUnsupportedStreaming(error)) {
           streaming = false;
           delete requestBody.stream;
           delete requestBody.stream_options;
           attempt -= 1;
           continue;
         }
-        const retryable =
-          status === 408 ||
-          status === 429 ||
-          status >= 500 ||
-          message.includes("timeout") ||
-          message.includes("temporarily unavailable") ||
-          message.includes("connection");
-        if (!retryable || attempt === 2) {
-          classifyError(error, provider.id, diagnostic);
-        }
-        const wait =
-          Math.min(8_000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, wait);
-          if (!request.signal) return;
-          const abort = () => { clearTimeout(timer); reject(new Error("aborted")); };
-          if (request.signal.aborted) abort();
-          else request.signal.addEventListener("abort", abort, { once: true });
-        });
+        // Transient retries are owned by AgentEngine, which can preserve the current
+        // tool/turn checkpoint and report retry state. Do not stack a second retry
+        // loop inside this transport adapter. Optional request-field fallbacks
+        // above remain immediate and bounded.
+        if (request.signal?.aborted) throw new Error("aborted");
+        classifyError(error, provider.id, diagnostic, [apiKey, provider.baseUrl]);
       }
     }
-    classifyError(lastError, provider.id, diagnostic);
+    classifyError(lastError, provider.id, diagnostic, [apiKey, provider.baseUrl]);
   }
 
   clearCache(): void {

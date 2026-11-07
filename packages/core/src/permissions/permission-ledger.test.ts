@@ -17,12 +17,12 @@ test("no learned rules means every call is allowed", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("an ask rule blocks only matching inputs and explains how to proceed", () => {
+test("an ask rule creates an approval requirement only for matching inputs", () => {
   const { ledger, dir } = tempLedger();
   ledger.learn({ category: "shell", match: "model:auto", decision: "ask", note: "ask before model setup" });
   const blocked = ledger.evaluate("shell_execute", { command: "npm run model:auto -- --start" });
-  assert.equal(blocked.mode, "block");
-  assert.match(blocked.reason, /permission_grant_once/);
+  assert.equal(blocked.mode, "approval");
+  assert.match(blocked.reason, /requested approval/);
   assert.equal(ledger.evaluate("shell_execute", { command: "npm test" }).mode, "auto");
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -32,7 +32,7 @@ test("a one-time grant lets exactly one asked-about call through", () => {
   ledger.learn({ category: "shell", match: "model:auto", decision: "ask", note: "" });
   ledger.grantOnce("shell", "model:auto");
   assert.equal(ledger.evaluate("shell_execute", { command: "npm run model:auto" }).mode, "auto");
-  assert.equal(ledger.evaluate("shell_execute", { command: "npm run model:auto" }).mode, "block");
+  assert.equal(ledger.evaluate("shell_execute", { command: "npm run model:auto" }).mode, "approval");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -41,7 +41,7 @@ test("the most specific rule wins", () => {
   ledger.learn({ category: "shell", match: "", decision: "ask", note: "ask about shell" });
   ledger.learn({ category: "shell", match: "npm test", decision: "act", note: "npm test is fine" });
   assert.equal(ledger.evaluate("shell_execute", { command: "npm test" }).mode, "auto");
-  assert.equal(ledger.evaluate("shell_execute", { command: "rm -rf build" }).mode, "block");
+  assert.equal(ledger.evaluate("shell_execute", { command: "rm -rf build" }).mode, "approval");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -58,7 +58,7 @@ test("rules persist to disk and reload in a new ledger", () => {
   const { ledger, file, dir } = tempLedger();
   ledger.learn({ category: "file_delete", match: "", decision: "ask", note: "ask before deleting" });
   const reloaded = new PermissionLedger(file);
-  assert.equal(reloaded.evaluate("file_delete", { path: "a.txt" }).mode, "block");
+  assert.equal(reloaded.evaluate("file_delete", { path: "a.txt" }).mode, "approval");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -70,13 +70,26 @@ test("forget removes a learned rule", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("a corrupt ledger file is treated as empty instead of breaking the run", () => {
+test("a corrupt ledger fails closed instead of discarding learned restrictions", () => {
   const { file, dir } = tempLedger();
-  fs.writeFileSync(file, "{ not json");
-  const ledger = new PermissionLedger(file);
-  assert.equal(ledger.rules().length, 0);
-  assert.equal(ledger.evaluate("shell_execute", { command: "ls" }).mode, "auto");
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const ledger = new PermissionLedger(file);
+    ledger.learn({ category: "file_delete", decision: "block", note: "never delete" });
+    fs.writeFileSync(file, "{ not json");
+    assert.throws(() => new PermissionLedger(file), /ledger is corrupt/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a structurally invalid ledger fails closed instead of dropping invalid rules", () => {
+  const { file, dir } = tempLedger();
+  try {
+    fs.writeFileSync(file, JSON.stringify({ version: 1, rules: [{ category: "file_delete", decision: "block" }], grants: [] }));
+    assert.throws(() => new PermissionLedger(file), /invalid structure/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("tools map to stable categories", () => {
@@ -113,6 +126,6 @@ test("learned rules persist and are applied by a new ledger instance (next run)"
   ledger.learn({ category: "shell", match: "deploy", decision: "ask", note: "ask first" });
   const next = new PermissionLedger(file);
   assert.equal(next.rules().length, 1);
-  assert.equal(next.evaluate("shell_execute", { command: "deploy prod" }).mode, "block");
+  assert.equal(next.evaluate("shell_execute", { command: "deploy prod" }).mode, "approval");
   fs.rmSync(dir, { recursive: true, force: true });
 });

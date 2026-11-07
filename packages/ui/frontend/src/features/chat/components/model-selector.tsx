@@ -14,17 +14,19 @@ import {
 
 interface ModelSelectorProps {
   defaultModelName: string
+  defaultModelIndex: string
   apiKeyModels: ModelInfo[]
   oauthModels: ModelInfo[]
   localModels: ModelInfo[]
   /** Saved models that cannot run yet; listed but not selectable. */
   unavailableModels?: ModelInfo[]
-  onValueChange: (modelName: string) => void
+  onValueChange: (modelIndex: number) => void
   compact?: boolean
 }
 
 export function ModelSelector({
   defaultModelName,
+  defaultModelIndex,
   apiKeyModels,
   oauthModels,
   localModels,
@@ -32,9 +34,19 @@ export function ModelSelector({
   onValueChange,
 }: ModelSelectorProps) {
   const { t } = useTranslation()
+  const allModels = [...apiKeyModels, ...oauthModels, ...localModels, ...unavailableModels]
+  const nameCounts = new Map<string, number>()
+  for (const model of allModels) nameCounts.set(model.model_name, (nameCounts.get(model.model_name) ?? 0) + 1)
+  const labelFor = (model: ModelInfo) => {
+    if ((nameCounts.get(model.model_name) ?? 0) < 2) return model.model_name
+    const provider = model.provider || model.auth_method || "custom"
+    let endpoint = ""
+    try { endpoint = model.api_base ? new URL(model.api_base).host : "" } catch { /* endpoint label is optional */ }
+    return `${model.model_name} — ${provider}${endpoint ? ` · ${endpoint}` : ""}`
+  }
 
   return (
-    <Select value={defaultModelName} onValueChange={onValueChange}>
+    <Select value={defaultModelIndex} onValueChange={(value) => onValueChange(Number(value))}>
       <SelectTrigger
         size="sm"
         aria-label={defaultModelName || t("chat.noModel")}
@@ -48,8 +60,8 @@ export function ModelSelector({
           <SelectGroup>
             <SelectLabel>{t("chat.modelGroup.apikey")}</SelectLabel>
             {apiKeyModels.map((model) => (
-              <SelectItem key={model.index} value={model.model_name}>
-                {model.model_name}
+              <SelectItem key={model.index} value={String(model.index)}>
+                {labelFor(model)}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -63,8 +75,8 @@ export function ModelSelector({
           <SelectGroup>
             <SelectLabel>{t("chat.modelGroup.oauth")}</SelectLabel>
             {oauthModels.map((model) => (
-              <SelectItem key={model.index} value={model.model_name}>
-                {model.model_name}
+              <SelectItem key={model.index} value={String(model.index)}>
+                {labelFor(model)}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -78,8 +90,8 @@ export function ModelSelector({
           <SelectGroup>
             <SelectLabel>{t("chat.modelGroup.local")}</SelectLabel>
             {localModels.map((model) => (
-              <SelectItem key={model.index} value={model.model_name}>
-                {model.model_name}
+              <SelectItem key={model.index} value={String(model.index)}>
+                {labelFor(model)}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -99,11 +111,11 @@ export function ModelSelector({
               {unavailableModels.map((model) => (
                 <SelectItem
                   key={model.index}
-                  value={model.model_name}
+                  value={String(model.index)}
                   disabled
                   title={model.status_reason}
                 >
-                  {model.model_name}
+                  {labelFor(model)}
                 </SelectItem>
               ))}
             </SelectGroup>

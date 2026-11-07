@@ -96,17 +96,26 @@ class WriteAheadJournal {
 export type MemoryJob =
   /** Generic deferred work (e.g. the SQLite/TKG interaction log). */
   | { type: "task"; name: string; run: () => void | Promise<void> }
-  | { type: "daily_note"; text: string; source?: string }
+  | { type: "daily_note"; text: string; source?: string; provenance?: "owner" | "agent" | "untrusted" }
   | {
       type: "compaction_archive";
       sessionId: string;
       summary: string;
       archivedCount: number;
+      provenance?: "owner" | "agent" | "untrusted";
     }
-  | { type: "session_summary"; sessionId: string; turns: TurnLike[]; reason: string }
-  | { type: "flush"; sessionId: string; turns: TurnLike[] };
+  | { type: "session_summary"; sessionId: string; turns: TurnLike[]; reason: string; provenance?: "owner" | "agent" | "untrusted" }
+  | { type: "flush"; sessionId: string; turns: TurnLike[]; provenance?: "owner" | "agent" | "untrusted" };
 
 type Lane = "fast" | "slow";
+
+export type MemoryWriteProvenance = "owner" | "agent" | "untrusted";
+export type MemoryWriteObserver = (relPath: string, provenance: MemoryWriteProvenance, hadExistingContent: boolean) => void;
+
+const provenanceRank: Record<MemoryWriteProvenance, number> = { owner: 2, agent: 1, untrusted: 0 };
+function leastTrusted(a: MemoryWriteProvenance, b: MemoryWriteProvenance): MemoryWriteProvenance {
+  return provenanceRank[a] <= provenanceRank[b] ? a : b;
+}
 
 const laneOf = (job: MemoryJob): Lane =>
   job.type === "session_summary" || job.type === "flush" ? "slow" : "fast";
@@ -135,6 +144,8 @@ export class MemoryWriter {
   // Fix #12: append-only WAL for crash recovery.
   private readonly wal = new WriteAheadJournal();
   private _walJobSeq = 0;
+  private writeObserver?: MemoryWriteObserver;
+  private readonly pendingObservedWrites = new Map<string, { provenance: MemoryWriteProvenance; hadExistingContent: boolean }>();
 
   constructor(
     private readonly store: MemoryFileStore,
@@ -147,6 +158,36 @@ export class MemoryWriter {
       this.wal.init(store.paths.root);
       this._replayWAL();
     } catch { /* non-fatal */ }
+  }
+
+  /** Notify the canonical index after a durable file write has completed. */
+  setWriteObserver(observer: MemoryWriteObserver | undefined): void {
+    this.writeObserver = observer;
+    if (observer) {
+      for (const [relPath, pending] of this.pendingObservedWrites) {
+        observer(relPath, pending.provenance, pending.hadExistingContent);
+      }
+      this.pendingObservedWrites.clear();
+    }
+  }
+
+  private observe(
+    pathname: string,
+    provenance: MemoryWriteProvenance = "untrusted",
+    hadExistingContent = false,
+  ): void {
+    try {
+      const relPath = relFromRoot(this.store.paths, pathname);
+      if (!relPath) return;
+      if (this.writeObserver) this.writeObserver(relPath, provenance, hadExistingContent);
+      else {
+        const previous = this.pendingObservedWrites.get(relPath);
+        this.pendingObservedWrites.set(relPath, {
+          provenance: previous ? leastTrusted(previous.provenance, provenance) : provenance,
+          hadExistingContent: previous ? previous.hadExistingContent : hadExistingContent,
+        });
+      }
+    } catch { /* indexing is best-effort; the durable file remains authoritative */ }
   }
 
   /** Replay unfinished journal entries from a previous process run. */
@@ -167,14 +208,26 @@ export class MemoryWriter {
   private _replayJobSync(job: JournalEntry["job"], walId: string): void {
     switch (job.type) {
       case "daily_note":
-        executeOpSync(this.store.planDailyNote(job.text, job.source));
+        {
+          const op = this.store.planDailyNote(job.text, job.source);
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = executeOpSync(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         break;
       case "compaction_archive":
-        executeOpSync(this.store.planCompactionArchive(job));
+        {
+          const op = this.store.planCompactionArchive(job);
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = executeOpSync(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         break;
       case "session_summary": {
         const s = this.summarizer.heuristicSession(job.turns, 2_500);
-        executeOpSync(this.store.planSessionSummary({ sessionId: job.sessionId, title: s.title, summary: s.summary, reason: job.reason, via: "heuristic" }));
+        const op = this.store.planSessionSummary({ sessionId: job.sessionId, title: s.title, summary: s.summary, reason: job.reason, via: "heuristic" });
+        const written = executeOpSync(op);
+        if (written) this.observe(written, job.provenance, false);
         break;
       }
       case "flush":
@@ -299,10 +352,20 @@ export class MemoryWriter {
         await job.run();
         return;
       case "daily_note":
-        await executeOp(this.store.planDailyNote(job.text, job.source));
+        {
+          const op = this.store.planDailyNote(job.text, job.source);
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = await executeOp(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         return;
       case "compaction_archive":
-        await executeOp(this.store.planCompactionArchive(job));
+        {
+          const op = this.store.planCompactionArchive(job);
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = await executeOp(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         return;
       case "session_summary": {
         const s = await this.summarizer.summarizeSession(job.turns, 2_500);
@@ -315,18 +378,24 @@ export class MemoryWriter {
             via: s.via,
           }),
         );
-        if (file)
+        if (file) {
+          this.observe(file, job.provenance, false);
           this.hooks.emit("session_saved", {
             sessionId: job.sessionId,
             path: relFromRoot(this.store.paths, file),
             reason: job.reason,
           });
+        }
         return;
       }
       case "flush": {
         const r = await this.summarizer.extractFlushNotes(job.turns);
-        for (const note of r.notes)
-          await executeOp(this.store.planDailyNote(note, "flush"));
+        for (const note of r.notes) {
+          const op = this.store.planDailyNote(note, "flush");
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = await executeOp(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         this.hooks.emit("flush", {
           sessionId: job.sessionId,
           noted: r.notes.length,
@@ -346,22 +415,32 @@ export class MemoryWriter {
         return;
       }
       case "daily_note":
-        executeOpSync(this.store.planDailyNote(job.text, job.source));
+        {
+          const op = this.store.planDailyNote(job.text, job.source);
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = executeOpSync(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         return;
       case "compaction_archive":
-        executeOpSync(this.store.planCompactionArchive(job));
+        {
+          const op = this.store.planCompactionArchive(job);
+          const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
+          const written = executeOpSync(op);
+          if (written) this.observe(written, job.provenance, hadExistingContent);
+        }
         return;
       case "session_summary": {
         const s = this.summarizer.heuristicSession(job.turns, 2_500);
-        executeOpSync(
-          this.store.planSessionSummary({
+        const op = this.store.planSessionSummary({
             sessionId: job.sessionId,
             title: s.title,
             summary: s.summary,
             reason: job.reason,
             via: "heuristic",
-          }),
-        );
+          });
+        const written = executeOpSync(op);
+        if (written) this.observe(written, job.provenance, false);
         return;
       }
       case "flush":

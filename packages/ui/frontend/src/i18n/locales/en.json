@@ -60,13 +60,21 @@
     "errors": {
       "codes": {
         "provider_api_key": "The model API key was rejected. Check the key on the Models page.",
+        "provider_authorization": "The provider rejected this model's authorization. Check its permissions on the Models page.",
+        "provider_entitlement": "This provider needs billing, credits, or an active subscription. Configure the provider or a fallback model on the Models page.",
         "provider_network": "The model service could not be reached. Check the endpoint and connection, then retry.",
         "local_model_unavailable": "The local model service is unavailable. Start it or check its endpoint, then retry.",
+        "provider_rate_limit": "The provider is rate limiting requests. Wait briefly or check the provider quota.",
+        "model_not_found": "The configured model was not found by the provider. Check the model identifier on the Models page.",
+        "provider_bad_request": "The provider rejected the request format or parameters. Check model compatibility and supported request options.",
         "provider_unavailable": "The model provider returned an error. Check provider status and configuration, then retry.",
         "provider_failure": "The model request failed. Check the model configuration and try again.",
         "token_limit": "The request exceeded the model context or output limit. Shorten the request or choose a model with a larger context window.",
         "execution_limit": "The run reached an execution limit before producing a final answer. Retry with a smaller scope.",
-        "internal": "The request could not be completed. Retry it; if the problem continues, check the gateway logs."
+        "internal": "The request could not be completed. Retry it; if the problem continues, check the gateway logs.",
+        "run_timeout": "The run reached its time limit and was stopped. Your message is saved; retry it or ask Miki to continue.",
+        "run_stalled": "The run was stopped after a long period without activity. Your message is saved; check the latest status, then retry.",
+        "queue_timeout": "An earlier run in this conversation did not finish in time, so this message could not start. Your message is saved; stop the earlier run or retry."
       }
     },
     "placeholder": "Start a new message…",
@@ -251,7 +259,16 @@
     "assistantDetailMenuTitle": "Response details",
     "delivery": {
       "processing": "Miki is processing this request.",
-      "processingActivity": "Miki is working; this message will be read after the current step ({{activity}})."
+      "processingActivity": "Miki is working; this message will be read after the current step ({{activity}}).",
+      "sending": "Sending…",
+      "uncertain": "Delivery is uncertain; checking connection.",
+      "unknown": "Delivery status is unknown.",
+      "queued": "Queued",
+      "queuedPosition": "Queued · {{position}} message(s) ahead",
+      "retrying": "Retrying",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "retryActivity": "Retrying: {{activity}}"
     },
     "tools": {
       "used": "Used {{count}} tools",
@@ -610,7 +627,9 @@
       "context": "Context",
       "gpuLayers": "GPU layers",
       "autoStart": "Auto-start"
-    }
+    },
+    "defaultChangeNextRun": "New runs will use the selected model.",
+    "defaultChangeNextRunDescription": "{{count}} active run(s) will continue with their current model."
   },
   "channels": {
     "loadError": "Failed to load channels",
@@ -1486,8 +1505,8 @@
       "session_scope_global_desc": "All messages share one global context.",
       "heartbeat_enabled": "Enable Idle Decisions",
       "heartbeat_enabled_hint": "Allow autonomous model decisions while idle. Queued and scheduled goals continue when this is off.",
-      "heartbeat_interval": "Idle Decision Interval (minutes)",
-      "heartbeat_interval_hint": "Target interval between autonomous model decisions while idle. The runtime adds small scheduling jitter.",
+      "heartbeat_interval": "Quiet-Environment Observation Interval (seconds)",
+      "heartbeat_interval_hint": "Fallback interval when no meaningful event or completed goal wakes the autonomous loop. Meaningful work continues immediately.",
       "devices_enabled": "Enable Devices",
       "devices_enabled_hint": "Enable hardware-device integrations.",
       "monitor_usb": "Monitor USB",
@@ -1624,6 +1643,12 @@
     },
     "activity": {
       "title": "Activity",
+      "backgroundJobs": "Background jobs",
+      "backgroundJobsInfo": "Long-running work continues independently and is restored after a Gateway restart.",
+      "noBackgroundJobs": "No background jobs yet.",
+      "attempt": "Attempt",
+      "progress": "Progress",
+      "needsReconciliation": "An external action needs manual verification before this job can be retried.",
       "runningSummary": "{{count}} / {{max}} running",
       "paused": "Paused",
       "runningGoals": "Running goals",
@@ -1662,6 +1687,8 @@
       "statuses": {
         "unknown": "Unknown",
         "running": "Running",
+        "verifying": "Verifying",
+        "waiting_approval": "Waiting for approval",
         "retrying": "Retrying",
         "failed": "Failed",
         "paused": "Paused",
@@ -1683,7 +1710,27 @@
         "act": "Act",
         "ask": "Ask first",
         "block": "Block"
-      }
+      },
+      "idleMode": "Always-active Idle Mode",
+      "idleLoading": "Checking runtime…",
+      "idleStopped": "Supervisor stopped",
+      "idlePaused": "Paused by owner",
+      "idleRecovering": "Recovering supervisor loop",
+      "idleGoalOnly": "Goal execution only",
+      "idleBackingOff": "Waiting for provider recovery",
+      "idleDeciding": "Observing and deciding",
+      "idleWaking": "Next decision waking",
+      "idleActive": "Always active",
+      "observer": "Computer observer",
+      "quietInterval": "Quiet-environment interval",
+      "nextDecision": "Next decision",
+      "inProgress": "In progress",
+      "providerFailures": "Consecutive provider failures",
+      "lastObservation": "Last observation",
+      "lastDecision": "Last decision",
+      "never": "Not yet",
+      "restartAttempt": "Restart attempt {{count}}",
+      "idleModeInfo": "Meaningful events and completed goals wake Miki immediately. The quiet interval is used only when the environment has no new event."
     },
     "monitor": {
       "inspector": "Live activity inspector",

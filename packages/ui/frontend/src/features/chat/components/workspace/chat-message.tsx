@@ -19,7 +19,7 @@ interface ChatMessageProps {
   onSelect: (messageId: string) => void
   onEdit: (message: ChatMessageModel) => void
   onDelete: (messageId: string) => void
-  onFork: (messageId: string) => void
+  onFork?: (messageId: string) => void
   onRetry: (messageId: string) => void
   onInspectMessage: (messageId: string) => void
 }
@@ -40,6 +40,7 @@ export const ChatMessage = memo(function ChatMessage({
   return (
     <article
       data-chat-message={message.role}
+      data-chat-message-id={message.id}
       className={cn(
         "group/message-stream flex w-full",
         message.role === "user" ? "justify-end" : "justify-start",
@@ -71,7 +72,7 @@ export const ChatMessage = memo(function ChatMessage({
             onSelect={() => onSelect(message.id)}
             canRetry={canRetry}
             onDelete={() => onDelete(message.id)}
-            onFork={() => onFork(message.id)}
+            onFork={onFork ? () => onFork(message.id) : undefined}
             onRetry={() => onRetry(message.id)}
             onInspect={() => onInspectMessage(message.id)}
           />
@@ -82,12 +83,15 @@ export const ChatMessage = memo(function ChatMessage({
           content={message.content}
           attachments={message.attachments}
           timestamp={message.timestamp}
+          deliveryStatus={message.deliveryStatus}
+          deliveryDetail={message.deliveryDetail}
+          deliveryQueuePosition={message.deliveryQueuePosition}
           selected={selected}
           onSelect={() => onSelect(message.id)}
           canRetry={canRetry}
           onEdit={() => onEdit(message)}
           onDelete={() => onDelete(message.id)}
-          onFork={() => onFork(message.id)}
+          onFork={onFork ? () => onFork(message.id) : undefined}
           onRetry={() => onRetry(message.id)}
         />
       )}

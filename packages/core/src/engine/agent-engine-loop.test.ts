@@ -1,6 +1,6 @@
-import { AgentEngine } from "./agent-engine.js";
+import { AgentEngine, fitContextWindow } from "./agent-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
-import { RUN_SUMMARY_SENTINEL, pruneToolResults, splitUnits } from "./context-manager.js";
+import { RUN_SUMMARY_SENTINEL, compactRunContext, pruneToolResults, splitUnits } from "./context-manager.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
 import type { EngineEvent, EngineLLMClient, EngineMessage, EngineTool } from "./types.js";
 import { MetricsCollector } from "../metrics-collector.js";
@@ -9,6 +9,7 @@ function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   return {
     description: overrides.name,
     risk: "read",
+    approval: "auto",
     parameters: { type: "object", properties: {}, additionalProperties: true },
     execute: () => ({ ok: true }),
     ...overrides,
@@ -40,6 +41,68 @@ function reply(text: string | null, calls?: Array<{ name: string; args?: unknown
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   };
 }
+
+
+describe("unbounded autonomous execution defaults", () => {
+  it("continues beyond 50 tool iterations and 12 model turns", async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "step", repeatSafe: true }));
+    const llm = scriptedLLM([
+      ...Array.from({ length: 55 }, (_, index) => ({
+        calls: [{ name: "step", args: { index }, id: `step_${index}` }],
+      })),
+      { text: "All 55 steps are complete." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const result = await engine.run({ history: user("Complete all steps") });
+    expect(result.status).toBe("completed");
+    expect(result.turns).toBe(56);
+    expect(result.toolCalls).toHaveLength(55);
+    expect(result.toolCalls.every((record) => record.status === "succeeded")).toBe(true);
+  });
+
+  it("executes more than 120 tool calls in one model response", async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "inspect", repeatSafe: true, parallelSafe: true }));
+    const calls = Array.from({ length: 125 }, (_, index) => ({
+      name: "inspect", args: { index }, id: `inspect_${index}`,
+    }));
+    const llm = scriptedLLM([{ calls }, { text: "All 125 inspections are complete." }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const result = await engine.run({ history: user("Inspect all items") });
+    expect(result.status).toBe("completed");
+    expect(result.toolCalls).toHaveLength(125);
+    expect(result.toolCalls.every((record) => record.status === "succeeded")).toBe(true);
+  });
+});
+
+describe("lazy tool and plugin schema discovery", () => {
+  it("keeps the complete registry reachable when tool schemas exceed the model context", async () => {
+    const registry = new ToolRegistry();
+    const fillerDescription = "A plugin integration tool with many detailed configuration options. ".repeat(30);
+    for (let index = 0; index < 24; index += 1) {
+      registry.register(tool({ name: `plugin_tool_${index}`, description: fillerDescription }));
+    }
+    const specialExecute = jest.fn(() => ({ extracted: true }));
+    registry.register(tool({
+      name: "plugin_special_archive_extract",
+      description: "Extract archive packages and inspect archive manifests for specialized workflows.",
+      repeatSafe: true,
+      execute: specialExecute,
+    }));
+    const llm = scriptedLLM([
+      { calls: [{ name: "miki_find_tools", args: { query: "plugin_special_archive_extract" }, id: "discover_archive" }] },
+      { calls: [{ name: "plugin_special_archive_extract", args: {}, id: "extract_archive" }] },
+      { text: "The archive was extracted." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, contextWindowTokens: 1024 });
+    const result = await engine.run({ history: user("Extract the archive using the specialized plugin") });
+    expect(result.status).toBe("completed");
+    expect(specialExecute).toHaveBeenCalledTimes(1);
+    expect(llm.requests[0].options?.tools?.some((schema) => schema.function.name === "miki_find_tools")).toBe(true);
+    expect(llm.requests[1].options?.tools?.some((schema) => schema.function.name === "plugin_special_archive_extract")).toBe(true);
+  });
+});
 
 describe("steering during tool execution", () => {
   it("skips tool calls that have not started when a new message arrives", async () => {
@@ -76,7 +139,7 @@ describe("steering during tool execution", () => {
     expect(result.status).toBe("completed");
     expect(secondExecute).not.toHaveBeenCalled();
     expect(result.toolCalls.map((call) => call.status)).toEqual(["succeeded", "blocked"]);
-    expect(result.toolCalls[1].error).toContain("repeat this operation if needed");
+    expect(result.toolCalls[1].error).toContain("reassess whether this operation is still needed");
     expect(llm.requests[1].messages.some((message) => message.role === "user" && String(message.content).includes("Do not run the second action"))).toBe(true);
   });
 });
@@ -166,6 +229,27 @@ describe("parallel tool execution", () => {
   });
 });
 
+describe("no-progress feedback", () => {
+  it("nudges the model when different read offsets keep returning the same evidence", async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool({
+      name: "read_chunk",
+      risk: "read",
+      parameters: { type: "object", required: ["offset"], properties: { offset: { type: "integer" } }, additionalProperties: false },
+      execute: () => ({ content: "the same repeated chunk" }),
+    }));
+    const llm = scriptedLLM([
+      ...Array.from({ length: 6 }, (_, offset) => ({ calls: [{ name: "read_chunk", args: { offset }, id: `read_${offset}` }] })),
+      { text: "I will change approach based on the repeated evidence." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const result = await engine.run({ history: user("Inspect the full file and identify the issue") });
+
+    expect(result.status).toBe("completed");
+    expect(llm.requests[6].messages.some((message) => String(message.content).includes("MIKI NO-PROGRESS SIGNAL"))).toBe(true);
+  });
+});
+
 describe("repeatSafe polling tools", () => {
   const pollScript = (name: string, times: number) => [
     ...Array.from({ length: times }, (_, i) => ({ calls: [{ name, args: { process_id: "p1" }, id: `poll_${i}` }] })),
@@ -206,6 +290,104 @@ describe("repeatSafe polling tools", () => {
 });
 
 describe("model failover", () => {
+  it("rotates an explicitly configured provider credential on authentication failure without changing models", async () => {
+    const primary = {
+      model: "gemini-main",
+      routeKey: "gemini-main::credential:default",
+      async complete() {
+        throw Object.assign(new Error("invalid api key"), { status: 401 });
+      },
+    };
+    const alternate = {
+      model: "gemini-main",
+      routeKey: "gemini-main::credential:GEMINI_API_KEY_BACKUP",
+      credentialProfile: "GEMINI_API_KEY_BACKUP",
+      async complete() {
+        return { choices: [{ message: { role: "assistant", content: "recovered with alternate credential" } }] };
+      },
+    };
+    const engine = new AgentEngine({
+      llm: (_model, _index, profile) => profile ? alternate : primary,
+      tools: new ToolRegistry(),
+      fallbackRoutes: () => [{ model: "gemini-main", credentialProfile: "GEMINI_API_KEY_BACKUP" }],
+    });
+    const result = await engine.run({ history: user("answer using the configured provider") });
+    expect(result.status).toBe("completed");
+    expect(result.model).toBe("gemini-main");
+    expect(result.finalText).toBe("recovered with alternate credential");
+  });
+
+  it("rotates the configured credential for a fallback model after a transient model hop", async () => {
+    const primary: EngineLLMClient = {
+      model: "primary-model",
+      async complete() {
+        throw Object.assign(new Error("503 upstream unavailable"), { status: 503 });
+      },
+    };
+    const backup: EngineLLMClient = {
+      model: "backup-model",
+      routeKey: "backup-model::credential:default",
+      async complete() {
+        throw Object.assign(new Error("invalid api key"), { status: 401 });
+      },
+    };
+    const backupCredential: EngineLLMClient = {
+      model: "backup-model",
+      routeKey: "backup-model::credential:BACKUP_MODEL_API_KEY_2",
+      credentialProfile: "BACKUP_MODEL_API_KEY_2",
+      async complete() {
+        return reply("backup model credential recovered");
+      },
+    };
+    const engine = new AgentEngine({
+      llm: (model, _index, profile) => model === "backup-model"
+        ? (profile ? backupCredential : backup)
+        : primary,
+      tools: new ToolRegistry(),
+      fallbackRoutes: (primaryModel) => {
+        expect(primaryModel).toBe("primary-model");
+        return [
+          { model: "backup-model" },
+          { model: "backup-model", credentialProfile: "BACKUP_MODEL_API_KEY_2" },
+        ];
+      },
+    });
+
+    const result = await engine.run({ history: user("continue on the configured backup provider") });
+
+    expect(result.status).toBe("completed");
+    expect(result.model).toBe("backup-model");
+    expect(result.finalText).toBe("backup model credential recovered");
+  });
+
+  it("does not use another model's credential profile after an authentication failure", async () => {
+    let otherModelCalls = 0;
+    const primary: EngineLLMClient = {
+      model: "user-selected-model",
+      async complete() {
+        throw Object.assign(new Error("invalid api key"), { status: 401 });
+      },
+    };
+    const unrelatedCredential: EngineLLMClient = {
+      model: "configured-default-model",
+      credentialProfile: "DEFAULT_MODEL_BACKUP_KEY",
+      async complete() {
+        otherModelCalls += 1;
+        return reply("must not be used");
+      },
+    };
+    const engine = new AgentEngine({
+      llm: (model, _index, profile) => profile ? unrelatedCredential : primary,
+      tools: new ToolRegistry(),
+      fallbackRoutes: () => [{ model: "configured-default-model", credentialProfile: "DEFAULT_MODEL_BACKUP_KEY" }],
+    });
+
+    const result = await engine.run({ history: user("use the explicit model") });
+
+    expect(result.status).toBe("failed");
+    expect(otherModelCalls).toBe(0);
+  });
+
   it("switches to a fallback model when the primary request fails", async () => {
     const primary: EngineLLMClient = {
       model: "primary-model",
@@ -353,7 +535,7 @@ describe("run wall-clock budget", () => {
     registry.register(tool({
       name: "write",
       risk: "config_write",
-      approval: "required",
+      approval: "auto",
       execute: (_input, context) => new Promise((_resolve, reject) => {
         toolStarted();
         context.signal.addEventListener("abort", () => reject(new Error("tool cancelled")), { once: true });
@@ -385,8 +567,6 @@ describe("in-run context compaction", () => {
         if (typeof first?.content === "string" && first.content.includes("compress the working history")) {
           return reply("SUMMARY: inspected files a, b and c; found the config path /etc/app.conf");
         }
-        // The completion check after a final answer is not an agent turn; answer it without recording it.
-        if (options?.json === true) return reply(JSON.stringify({ needs_tool_execution: false }));
         seen.push(structuredClone(messages));
         agentTurn += 1;
         if (agentTurn <= 6 && options?.tools?.length) {
@@ -479,6 +659,17 @@ describe("in-run context compaction", () => {
 describe("context-manager helpers", () => {
   const toolMsg = (name: string, content: string, id: string): EngineMessage => ({ role: "tool", name, content, tool_call_id: id });
 
+  it("marks pruned checkpoint results as omitted from durable storage", () => {
+    const messages: EngineMessage[] = [
+      { role: "user", content: "task" },
+      toolMsg("old_result", "X".repeat(900), "1"),
+    ];
+    const checkpoint = pruneToolResults(messages, { keepRecentToolResults: 0, minCharsToPrune: 400, forCheckpoint: true });
+    expect(checkpoint[1].content).toContain("omitted from this durable checkpoint");
+    expect(checkpoint[1].content).toContain("preview:");
+    expect(messages[1].content).toBe("X".repeat(900));
+  });
+
   it("prunes only old, large tool results and keeps the newest verbatim", () => {
     const messages: EngineMessage[] = [
       { role: "user", content: "task" },
@@ -510,6 +701,47 @@ describe("context-manager helpers", () => {
       ["assistant", "tool"],
       ["assistant"],
     ]);
+  });
+
+  it("keeps assistant tool calls and their tool replies atomic while fitting context", () => {
+    const messages: EngineMessage[] = [
+      { role: "system", content: "base instructions" },
+      { role: "system", content: "host-provided policy context" },
+      { role: "user", content: "original task " + "x".repeat(20_000) },
+      { role: "assistant", content: null, tool_calls: [{ id: "a1", type: "function", function: { name: "read_a", arguments: "{}" } }] },
+      toolMsg("read_a", "A".repeat(20_000), "a1"),
+      { role: "user", content: "follow-up" },
+      { role: "assistant", content: null, tool_calls: [{ id: "b1", type: "function", function: { name: "read_b", arguments: "{}" } }] },
+      toolMsg("read_b", "B".repeat(20_000), "b1"),
+      { role: "assistant", content: "working" },
+    ];
+    const fitted = fitContextWindow(messages, 1_024, []);
+    const callIds = new Set(fitted.flatMap((message) => message.role === "assistant" ? (message.tool_calls ?? []).map((call) => call.id) : []));
+    for (const message of fitted.filter((item) => item.role === "tool")) {
+      expect(callIds.has(message.tool_call_id ?? "")).toBe(true);
+    }
+    expect(fitted).toContainEqual(expect.objectContaining({ role: "system", content: "base instructions" }));
+    expect(fitted).toContainEqual(expect.objectContaining({ role: "system", content: "host-provided policy context" }));
+  });
+
+  it("rolls older history into an assistant progress note and survives summarizer failure", async () => {
+    const messages: EngineMessage[] = [
+      { role: "user", content: "Keep the project working" },
+      { role: "assistant", content: "I inspected the package layout." },
+      { role: "assistant", content: "I changed the runner and wrote tests." },
+      { role: "user", content: "Also preserve the old APIs." },
+      { role: "assistant", content: "I will preserve them." },
+      { role: "assistant", content: "The final check is still pending." },
+    ];
+    const llm: EngineLLMClient = {
+      model: "test",
+      async complete() { throw new Error("summary provider unavailable"); },
+    };
+    const compacted = await compactRunContext({ messages, llm, keepRecentUnits: 2, maxTranscriptChars: 2_000 });
+    expect(compacted).toBeDefined();
+    expect(compacted?.summary).toContain("Keep the project working");
+    expect(compacted?.messages.some((message) => message.role === "assistant" && String(message.content).includes(RUN_SUMMARY_SENTINEL))).toBe(true);
+    expect(compacted?.messages.some((message) => message.role === "user" && String(message.content).includes(RUN_SUMMARY_SENTINEL))).toBe(false);
   });
 });
 
@@ -680,6 +912,69 @@ describe("steering does not abort a completion that is already writing", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0].options.signal.aborted).toBe(false);
     expect(result.finalText).toBe("Adjusted.");
-    expect(String(requests[1].messages.find((m) => m.role === "user" && String(m.content).includes("New messages from the user"))?.content)).toContain("Use the other file instead");
+    expect(String(requests[1].messages.find((m) => m.role === "user" && String(m.content).includes("[Follow-up received at"))?.content)).toContain("Use the other file instead");
+  });
+});
+
+describe("steering keeps every follow-up as its own message", () => {
+  it("delivers conflicting follow-ups as separate user messages in arrival order", async () => {
+    const requests: Array<{ messages: any[] }> = [];
+    let runId = "";
+    let sendBoth: () => void = () => {};
+    const llm = {
+      model: "steer-boundary-model",
+      async complete(messages: any[]) {
+        requests.push({ messages });
+        if (requests.length === 1) {
+          sendBoth();
+          return { choices: [{ message: { role: "assistant", content: "First draft." } }], usage: { total_tokens: 3 } };
+        }
+        return { choices: [{ message: { role: "assistant", content: "Done." } }], usage: { total_tokens: 3 } };
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry() });
+    sendBoth = () => {
+      engine.steer(runId, { text: "Use file A", messageId: "m1" });
+      engine.steer(runId, { text: "No, use file B instead", messageId: "m2" });
+    };
+    await engine.run({ history: user("Start"), onEvent: (event) => { if (event.type === "run.started") runId = event.runId; } });
+    const followUps = requests[1].messages.filter((m) => m.role === "user" && String(m.content).includes("[Follow-up received at"));
+    expect(followUps).toHaveLength(2);
+    expect(String(followUps[0].content)).toContain("message_id=m1");
+    expect(String(followUps[0].content)).toContain("Use file A");
+    expect(String(followUps[0].content)).not.toContain("file B");
+    expect(String(followUps[1].content)).toContain("message_id=m2");
+    expect(String(followUps[1].content)).toContain("file B");
+  });
+});
+
+describe("non-Latin context budgeting in the engine", () => {
+  it("trims a long Bengali message to roughly the token budget instead of four times it", () => {
+    const messages: EngineMessage[] = [
+      { role: "system", content: "base instructions" },
+      { role: "user", content: "ক".repeat(20_000) },
+    ];
+    const fitted = fitContextWindow(messages, 2_048, []);
+    const user = fitted.find((message) => message.role === "user");
+    expect(String(user?.content ?? "").length).toBeLessThanOrEqual(2_048);
+  });
+
+  it("still allows about four characters per token for Latin text", () => {
+    const messages: EngineMessage[] = [
+      { role: "system", content: "base instructions" },
+      { role: "user", content: "a".repeat(20_000) },
+    ];
+    const fitted = fitContextWindow(messages, 2_048, []);
+    const user = fitted.find((message) => message.role === "user");
+    expect(String(user?.content ?? "").length).toBeGreaterThan(2_048);
+  });
+
+  it("estimates completion tokens for a non-Latin reply without dividing its characters by four", async () => {
+    const llm = scriptedLLM([{ text: "ক".repeat(400) }]);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const result = await engine.run({ history: user("Answer in Bengali") });
+    expect(result.status).toBe("completed");
+    // A reply of 400 Bengali characters costs about 400 tokens; length / 4 would report about 110.
+    expect(result.usage.completionTokens).toBeGreaterThanOrEqual(400);
   });
 });

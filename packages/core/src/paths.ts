@@ -12,12 +12,12 @@ export interface RuntimePaths {
   docsDir: string;
   outputDir: string;
   /**
-   * Human-editable SOUL/AGENTS/IDENTITY/USER/TOOLS workspace-identity files
+   * Human-editable SOUL/AGENTS/USER workspace-identity files
    * (step 01 of the autonomy upgrade). Deliberately not named "workspace" —
    * that word is already taken in this codebase by workspaceDir/
    * MIKI_WORKSPACE_DIR (the install root) and by the separate
    * workspace-folders feature (user-managed project folders). See
-   * packages/core/src/identity/ and identity/README.md.
+   * packages/gateway/src/identity-prompt.ts.
    */
   identityDir: string;
   sourceDir?: string;

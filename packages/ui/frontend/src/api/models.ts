@@ -138,6 +138,9 @@ interface ModelsListResponse {
   models: ModelInfo[]
   total: number
   default_model: string
+  /** Stable database row id; unlike model_name this remains unambiguous when names repeat. */
+  default_model_index?: number | null
+  model_config_version?: number
   provider_options: ModelProviderOption[]
 }
 
@@ -149,6 +152,10 @@ interface ModelActionResponse {
   runtime_apply_status?: string
   runtime_apply_error?: string
   pending_restart_fields?: string[]
+  /** A default change is applied to new runs; active runs keep their model snapshot. */
+  applies?: "next_run"
+  active_runs?: number
+  model_config_version?: number
 }
 
 const BASE_URL = ""
@@ -242,12 +249,19 @@ export async function deleteModel(index: number): Promise<ModelActionResponse> {
 }
 
 export async function setDefaultModel(
-  modelName: string,
+  modelNameOrIndex: string | number,
+  selectionRequest?: { clientId?: string; sequence?: number },
 ): Promise<ModelActionResponse> {
+  // The parameter must not be called `request`: it would shadow the HTTP helper used below.
+  const selection = {
+    ...(typeof modelNameOrIndex === "number" ? { model_index: modelNameOrIndex } : { model_name: modelNameOrIndex }),
+    ...(selectionRequest?.clientId ? { client_id: selectionRequest.clientId } : {}),
+    ...(selectionRequest?.sequence ? { request_sequence: selectionRequest.sequence } : {}),
+  }
   const response = await request<ModelActionResponse>("/api/models/default", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model_name: modelName }),
+    body: JSON.stringify(selection),
   })
 
   await refreshGatewayState()
@@ -275,6 +289,12 @@ export interface TestModelResponse {
   correlation_id?: string
   error_category?:
     | "provider_api_key"
+    | "provider_authorization"
+    | "provider_entitlement"
+    | "provider_rate_limit"
+    | "model_not_found"
+    | "provider_bad_request"
+    | "provider_unavailable"
     | "local_model_unavailable"
     | "upstream_provider_error"
     | "provider_network"

@@ -1,12 +1,13 @@
 import { AgentEngine } from "./agent-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
-import type { EngineEvent, EngineTool } from "./types.js";
+import type { ApprovalGate, ApprovalDecision, EngineEvent, EngineMessage, EngineTool, LLMCompletionOptions } from "./types.js";
 
 function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   return {
     description: overrides.name,
     risk: "read",
+    approval: "auto",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     execute: () => ({ ok: true }),
     ...overrides,
@@ -24,6 +25,147 @@ function setup(replies: Parameters<typeof scriptedLLM>[0], tools: EngineTool[], 
 const user = (content: string) => [{ role: "user" as const, content }];
 
 describe("AgentEngine", () => {
+  it("returns a normal text answer without a second completion-classification request", async () => {
+    const { engine, llm } = setup([{ text: "Here is the answer." }], [tool({ name: "available_action" })]);
+    const result = await engine.run({ history: user("Explain this concept."), plan: false });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("Here is the answer.");
+    expect(llm.requests).toHaveLength(1);
+    expect(llm.requests[0].options?.json).not.toBe(true);
+  });
+
+  it("omits both generated and history system prompts when system prompts are disabled", async () => {
+    const registry = new ToolRegistry();
+    const llm = scriptedLLM([{ text: "Prompt disabled correctly." }]);
+    const engine = new AgentEngine({
+      llm: llm.client,
+      tools: registry,
+      systemPrompt: "GENERATED SYSTEM PROMPT MUST NOT APPEAR",
+      systemPromptEnabled: false,
+    });
+    const result = await engine.run({
+      plan: false,
+      history: [
+        { role: "system", content: "HISTORICAL SYSTEM PROMPT MUST NOT APPEAR" },
+        { role: "user", content: "test the prompt switch" },
+      ],
+    });
+    expect(result.status).toBe("completed");
+    expect(llm.requests[0].messages.some((message) => message.role === "system")).toBe(false);
+    expect(JSON.stringify(llm.requests[0].messages)).not.toContain("MUST NOT APPEAR");
+  });
+
+  it("persists safe turn-boundary checkpoints and resumes without repeating completed tools", async () => {
+    const execute = jest.fn(async () => ({ ok: true, value: "persisted tool result" }));
+    const first = setup(
+      [{ calls: [{ name: "save_it", args: { value: "checkpoint" } }] }],
+      [tool({
+        name: "save_it",
+        risk: "config_write",
+        execute,
+        parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+      })],
+    );
+    let checkpoint: import("./types.js").EngineRunCheckpoint | undefined;
+    await expect(first.engine.run({
+      history: user("perform the durable task"),
+      onCheckpoint: (saved) => {
+        checkpoint = saved;
+        if (saved.toolCalls.some((record) => record.status === "succeeded")) throw new Error("simulated gateway crash after checkpoint");
+      },
+    })).rejects.toThrow(/simulated gateway crash/);
+    expect(checkpoint?.turns).toBe(1);
+    expect(checkpoint?.messages.some((message) => message.role === "tool" && String(message.content).includes("persisted tool result"))).toBe(true);
+    expect(checkpoint?.messages.some((message) => message.role === "system")).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const resumedRegistry = new ToolRegistry();
+    resumedRegistry.register(tool({ name: "save_it", risk: "config_write", execute }));
+    let resumedMessages: EngineMessage[] = [];
+    const resumedClient = {
+      model: "resume-model",
+      async complete(messages: EngineMessage[], _options: LLMCompletionOptions = {}) {
+        resumedMessages = structuredClone(messages);
+        return { choices: [{ message: { role: "assistant", content: "The saved work is complete." } }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } };
+      },
+    };
+    const resumedEngine = new AgentEngine({ llm: resumedClient as never, tools: resumedRegistry, systemPromptEnabled: false });
+    const result = await resumedEngine.run({
+      history: user("perform the durable task"),
+      plan: false,
+      resume: checkpoint!,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.turns).toBe(2);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(resumedMessages.some((message) => message.role === "tool" && String(message.content).includes("persisted tool result"))).toBe(true);
+  });
+
+
+  it("continues beyond 120 tool calls, 50 iterations and 12 turns without explicit caps", async () => {
+    const replies = Array.from({ length: 130 }, (_, index) => ({
+      calls: [{ name: "record", args: { index } }],
+    }));
+    replies.push({ text: "Finished all 130 operations." } as never);
+    const execute = jest.fn(async () => ({ ok: true }));
+    const { engine, llm } = setup(replies as never, [tool({
+      name: "record",
+      parameters: { type: "object", properties: { index: { type: "number" } }, required: ["index"] },
+      execute,
+    })]);
+    const result = await engine.run({ history: user("perform 130 independent operations") });
+    expect(result.status).toBe("completed");
+    expect(result.turns).toBe(131);
+    expect(result.toolCalls.filter((call) => call.status === "succeeded")).toHaveLength(130);
+    expect(execute).toHaveBeenCalledTimes(130);
+    expect(llm.requests.length).toBeGreaterThan(130);
+  });
+
+  it("renews a tool lease and emits a heartbeat for a healthy long-running operation", async () => {
+    const { engine } = setup(
+      [{ calls: [{ name: "long_task" }] }, { text: "Long operation completed." }],
+      [tool({
+        name: "long_task",
+        timeoutMs: 15,
+        execute: async (_input, context) => {
+          expect(context.extendLease?.(250)).toBe(true);
+          context.heartbeat?.("download chunk 1/2");
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          context.heartbeat?.("download chunk 2/2");
+          return { ok: true };
+        },
+      })],
+    );
+    const events: EngineEvent[] = [];
+    const result = await engine.run({ history: user("wait for long task"), onEvent: (event) => events.push(event) });
+    expect(result.status).toBe("completed");
+    expect(events.filter((event) => event.type === "tool.heartbeat")).toHaveLength(3);
+  });
+
+  it("retries transient model failures indefinitely by default until recovery", async () => {
+    let attempts = 0;
+    const llm = {
+      model: "retry-model",
+      async complete() {
+        attempts += 1;
+        if (attempts <= 7) throw new Error("HTTP 503 temporarily unavailable");
+        return { choices: [{ message: { role: "assistant", content: "Recovered." } }] };
+      },
+    };
+    const engine = new AgentEngine({ llm: llm as never, tools: new ToolRegistry() });
+    const events: EngineEvent[] = [];
+    const result = await engine.run({
+      history: user("answer after provider recovery"),
+      retryTransient: { baseDelayMs: 1, maxDelayMs: 2 },
+      onEvent: (event) => events.push(event),
+    });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("Recovered.");
+    expect(attempts).toBe(8);
+    expect(events.filter((event) => event.type === "model.retrying")).toHaveLength(7);
+  });
+
   it("answers a plain message in one turn without planning", async () => {
     const { engine, llm } = setup([{ text: "Hello!" }], [tool({ name: "ping" })]);
     const events: EngineEvent[] = [];
@@ -43,11 +185,10 @@ describe("AgentEngine", () => {
     ]);
   });
 
-  it("turns a plan-only operational reply into real tool execution", async () => {
+  it("executes model-selected actions without an intermediate completion-classification request", async () => {
     const execute = jest.fn(async () => ({ ok: true, path: "docs/demo_test.txt" }));
     const { engine, llm } = setup(
       [
-        { text: "First I will call file_write, then I will verify the result." },
         { calls: [{ name: "file_write", args: { path: "docs/demo_test.txt", content: "demo" } }] },
         { text: "Done — the file was written and verified." },
       ],
@@ -57,12 +198,11 @@ describe("AgentEngine", () => {
         parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
       })],
     );
-    const result = await engine.run({ history: user("Show me a real example: write a file and verify it") });
+    const result = await engine.run({ history: user("Show me a real example: write a file and verify it"), plan: false });
     expect(result.status).toBe("completed");
     expect(result.finalText).toContain("written");
     expect(execute).toHaveBeenCalledTimes(1);
-    // Draft, completion check, nudged tool call, tool result turn. The completion check runs only once per run.
-    expect(llm.requests).toHaveLength(4);
+    expect(llm.requests).toHaveLength(2);
   });
 
   it("forwards streamed text as message.delta events before the final answer", async () => {
@@ -217,7 +357,7 @@ describe("AgentEngine", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0].options.signal.aborted).toBe(true);
     expect(requests[1].messages.some((message) => message.role === "user" && String(message.content).includes("Use the updated requirement"))).toBe(true);
-    expect(String(requests[1].messages.find((message) => message.role === "user" && String(message.content).includes("New messages from the user"))?.content)).toMatch(/1\. \[Received at \d{4}-/);
+    expect(String(requests[1].messages.find((message) => message.role === "user" && String(message.content).includes("[Follow-up received at"))?.content)).toMatch(/\[Follow-up received at \d{4}-[^\]]*message_id=steer-message/);
     expect(events.some((event) => event.type === "thought" && event.content === "partial draft")).toBe(true);
     expect(events.filter((event) => event.type === "model.retrying" || event.type === "model.fallback")).toHaveLength(0);
   });
@@ -297,9 +437,15 @@ describe("AgentEngine", () => {
     const events: EngineEvent[] = [];
     await engine.run({ history: user("hello"), onEvent: (e) => { runId = e.runId; events.push(e); } });
 
-    const steered = llm.requests.flatMap((request) => request.messages).find((message) => message.role === "user" && String(message.content).includes("New messages from the user"));
-    expect(steered?.image_urls).toEqual(["data:image/png;base64,AAAA", "data:image/png;base64,BBBB"]);
-    expect(String(steered?.content)).toContain("use this style");
+    const steered = llm.requests.flatMap((request) => request.messages).filter((message) => message.role === "user" && String(message.content).includes("[Follow-up received at"));
+    expect(steered).toHaveLength(2);
+    expect(steered.map((message) => message.image_urls)).toEqual([
+      ["data:image/png;base64,AAAA"],
+      ["data:image/png;base64,BBBB"],
+    ]);
+    expect(String(steered[0].content)).toContain("message_id=m1");
+    expect(String(steered[0].content)).toContain("use this style");
+    expect(String(steered[1].content)).toContain("message_id=m2");
     expect(events.find((e) => e.type === "user.steer")).toEqual(expect.objectContaining({ count: 2, messageIds: ["m1", "m2"] }));
   });
 
@@ -327,13 +473,13 @@ describe("AgentEngine", () => {
     await engine.run({ history: user("hello"), onEvent: (e) => { runId = e.runId; } });
 
     expect(acknowledged).toBe(true);
-    const steered = llm.requests.flatMap((request) => request.messages).find((message) => String(message.content).includes("New messages from the user"));
-    expect(String(steered?.content)).toContain("You already told the user: \"Got it, I will rename it after this step.\"");
+    const steered = llm.requests.flatMap((request) => request.messages).find((message) => String(message.content).includes("message_id=m1"));
+    expect(String(steered?.content)).toContain("You already acknowledged this message: \"Got it, I will rename it after this step.\"");
     // Once the run has read the message it can no longer be acknowledged.
     expect(engine.noteSteerAcknowledged(runId, "m1", "late")).toBe(false);
   });
 
-  it("settles an LLM-created plan when the run completes", async () => {
+  it("marks direct-response plan steps done when the final answer is delivered", async () => {
     const { engine } = setup(
       [
         { text: JSON.stringify({ steps: [{ title: "Read the file", tool: "ping" }, { title: "Summarize", tool: null }] }) },
@@ -353,6 +499,75 @@ describe("AgentEngine", () => {
     expect(result.plan?.source).toBe("llm");
     expect(result.plan?.steps.map((s) => s.status)).toEqual(["done", "done"]);
     expect(events.filter((e) => e.type === "plan.created")).toHaveLength(1);
+  });
+
+  it("verifies every successful action before marking its plan step complete", async () => {
+    const llm = scriptedLLM([
+      { calls: [{ name: "create_file", args: { path: "notes.txt" } }] },
+      { text: JSON.stringify({ status: "verified", reason: "The file exists with the expected content.", evidence: ["Independent file inspection returned notes.txt"] }) },
+      { text: "The file was created and independently verified." },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "create_file", risk: "config_write", execute: () => ({ ok: true, path: "notes.txt" }) }));
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const plan = {
+      id: "plan-verify",
+      goal: "Create notes.txt",
+      source: "llm" as const,
+      complexity: "simple" as const,
+      createdAt: new Date(0).toISOString(),
+      steps: [{ id: "s1", title: "Create and verify notes.txt", tool: "create_file", status: "pending" as const }],
+    };
+    const events: EngineEvent[] = [];
+    const result = await engine.run({ history: user("Create notes.txt"), plan, verifyActions: true, onEvent: (event) => events.push(event) });
+
+    expect(result.status).toBe("completed");
+    expect(result.toolCalls[0].actionVerification).toMatchObject({ status: "verified", evidence: ["Independent file inspection returned notes.txt"] });
+    expect(result.plan?.steps[0].status).toBe("done");
+    expect(events).toContainEqual(expect.objectContaining({ type: "run.phase", phase: "verification", status: "started" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "run.phase", phase: "verification", status: "completed" }));
+  });
+
+  it("does not mark an action done when independent verification needs more evidence", async () => {
+    const llm = scriptedLLM([
+      { calls: [{ name: "start_job" }] },
+      { text: JSON.stringify({ status: "needs_more_evidence", reason: "The result only confirms that the job was accepted.", evidence: [] }) },
+      { text: "The job was accepted, but I could not verify that it finished." },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(tool({ name: "start_job", risk: "config_write", execute: () => ({ ok: true, accepted: true }) }));
+    const engine = new AgentEngine({ llm: llm.client, tools: registry });
+    const plan = {
+      id: "plan-unverified",
+      goal: "Complete the job",
+      source: "llm" as const,
+      complexity: "simple" as const,
+      createdAt: new Date(0).toISOString(),
+      steps: [{ id: "s1", title: "Complete the job", tool: "start_job", status: "pending" as const }],
+    };
+    const result = await engine.run({ history: user("Complete the job"), plan, verifyActions: true });
+
+    expect(result.status).toBe("completed");
+    expect(result.toolCalls[0].actionVerification?.status).toBe("needs_more_evidence");
+    expect(result.plan?.steps[0].status).toBe("failed");
+  });
+
+  it("restores persisted steering messages and marks their stable IDs as consumed", async () => {
+    const markRead = jest.fn();
+    const persistence = {
+      enqueue: jest.fn(),
+      load: jest.fn(() => [{ messageId: "persisted-message", text: "Also check the mobile layout", imageUrls: [], receivedAt: 1_700_000_000_000 }]),
+      markRead,
+      acknowledge: jest.fn(),
+    };
+    const { engine, llm } = setup([{ text: "I checked the mobile layout too." }], [], { steerPersistence: persistence });
+    const events: EngineEvent[] = [];
+    await engine.run({ runId: "restore-steer-run", history: user("Review the page"), onEvent: (event) => events.push(event) });
+
+    expect(persistence.load).toHaveBeenCalledWith("restore-steer-run");
+    expect(markRead).toHaveBeenCalledWith("restore-steer-run", ["persisted-message"]);
+    expect(llm.requests[0].messages.some((message) => String(message.content).includes("Also check the mobile layout"))).toBe(true);
+    expect(events).toContainEqual(expect.objectContaining({ type: "user.steer", messageIds: ["persisted-message"] }));
   });
 
   it("returns an error to the model for invalid JSON, unknown tools and bad arguments", async () => {
@@ -385,16 +600,198 @@ describe("AgentEngine", () => {
     expect(toolMessages[2].content).toContain("path");
   });
 
-  it("executes risky tools without an interactive approval pause in autonomous mode", async () => {
+  it("delivers tool-originated screenshot evidence to a vision-capable model as an image", async () => {
+    const llm = scriptedLLM([
+      { calls: [{ name: "capture" }] },
+      { text: "I inspected the screenshot." },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(tool({
+      name: "capture",
+      execute: () => ({
+        kind: "engine_tool_result",
+        content: "Desktop screenshot captured (64x32).",
+        imageUrls: ["data:image/png;base64,iVBORw0KGgo="],
+      }),
+    }));
+    const engine = new AgentEngine({
+      llm: { ...llm.client, supportsVision: true },
+      tools: registry,
+      systemPromptEnabled: false,
+    });
+
+    const result = await engine.run({ history: user("inspect the current screen") });
+    expect(result.status).toBe("completed");
+    const messages = llm.requests[1].messages;
+    expect(messages.find((message) => message.role === "tool")?.content).toBe("Desktop screenshot captured (64x32).");
+    expect(messages.find((message) => message.role === "user" && message.image_urls?.length)?.image_urls)
+      .toEqual(["data:image/png;base64,iVBORw0KGgo="]);
+    expect(JSON.stringify(messages.filter((message) => message.role === "tool"))).not.toContain("iVBORw0KGgo=");
+  });
+
+  it("does not claim a screenshot was visually delivered to a model without vision", async () => {
+    const llm = scriptedLLM([
+      { calls: [{ name: "capture" }] },
+      { text: "The selected model cannot inspect images." },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(tool({
+      name: "capture",
+      execute: () => ({
+        kind: "engine_tool_result",
+        content: "Desktop screenshot captured (64x32).",
+        imageUrls: ["data:image/png;base64,iVBORw0KGgo="],
+      }),
+    }));
+    const engine = new AgentEngine({
+      llm: { ...llm.client, supportsVision: false },
+      tools: registry,
+      systemPromptEnabled: false,
+    });
+
+    const result = await engine.run({ history: user("inspect the current screen") });
+    expect(result.status).toBe("completed");
+    const messages = llm.requests[1].messages;
+    expect(messages.some((message) => message.image_urls?.length)).toBe(false);
+    expect(messages.find((message) => message.role === "tool")?.content).toContain("does not advertise vision input");
+  });
+
+  it("does not send screenshot data when provider vision support is unknown", async () => {
+    const llm = scriptedLLM([
+      { calls: [{ name: "capture" }] },
+      { text: "I cannot inspect the screenshot because provider capability is unknown." },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(tool({
+      name: "capture",
+      execute: () => ({
+        kind: "engine_tool_result",
+        content: "Desktop screenshot captured.",
+        imageUrls: ["data:image/png;base64,iVBORw0KGgo="],
+      }),
+    }));
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, systemPromptEnabled: false });
+
+    const result = await engine.run({ history: user("inspect the current screen") });
+    expect(result.status).toBe("completed");
+    const messages = llm.requests[1].messages;
+    expect(messages.some((message) => message.image_urls?.length)).toBe(false);
+    expect(messages.find((message) => message.role === "tool")?.content)
+      .toContain("vision support for the configured provider could not be verified");
+  });
+
+  it("holds a required tool until the owner approves and records the approval id", async () => {
     const execute = jest.fn(async () => ({ deleted: true }));
+    let resolveApproval!: (value: { approved: boolean; decidedBy: string; approvalId: string }) => void;
+    let notifyApprovalRequested!: () => void;
+    const approvalRequested = new Promise<void>((resolve) => { notifyApprovalRequested = resolve; });
+    const gate: ApprovalGate = {
+      request: jest.fn((_request, _signal, hooks) => new Promise<ApprovalDecision>((resolve) => {
+        hooks?.onPending?.("apr_test", new Date(Date.now() + 60_000).toISOString());
+        resolveApproval = resolve;
+        notifyApprovalRequested();
+      })),
+    };
     const { engine } = setup(
       [{ calls: [{ name: "danger" }] }, { text: "Completed the requested operation." }],
       [tool({ name: "danger", risk: "destructive", execute, approval: "required" })],
+      { approvals: gate },
     );
-    const result = await engine.run({ history: user("hi") });
+    const events: EngineEvent[] = [];
+    const running = engine.run({ history: user("hi"), onEvent: (event) => events.push(event) });
+    await approvalRequested;
+    expect(execute).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "tool.call" && event.call.status === "awaiting_approval" && event.call.approvalId === "apr_test")).toBe(true);
+    resolveApproval({ approved: true, decidedBy: "owner", approvalId: "apr_test" });
+    const result = await running;
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(result.toolCalls[0].status).toBe("succeeded");
-    expect(result.toolCalls[0].approvalId).toBeUndefined();
+    expect(result.toolCalls[0]).toMatchObject({ status: "succeeded", approvalId: "apr_test" });
+    expect(gate.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels while an approval request is pending without starting the tool", async () => {
+    const controller = new AbortController();
+    const execute = jest.fn();
+    let started!: () => void;
+    const pending = new Promise<void>((resolve) => { started = resolve; });
+    const gate: ApprovalGate = {
+      request: (_request, signal) => new Promise((resolve) => {
+        started();
+        signal?.addEventListener("abort", () => resolve({ approved: false, reason: "cancelled" }), { once: true });
+      }),
+    };
+    const { engine } = setup([{ calls: [{ name: "danger" }] }],
+      [tool({ name: "danger", risk: "destructive", execute, approval: "required" })], { approvals: gate });
+    const running = engine.run({ history: user("do it"), signal: controller.signal });
+    await pending;
+    controller.abort();
+    const result = await running;
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolCalls[0].status).toBe("cancelled");
+  });
+
+  it("does not execute a required tool when the owner denies approval", async () => {
+    const execute = jest.fn();
+    const gate: ApprovalGate = { request: jest.fn(async (_request, _signal, hooks) => {
+      hooks?.onPending?.("apr_denied", new Date(Date.now() + 60_000).toISOString());
+      return { approved: false, reason: "Owner denied this action.", approvalId: "apr_denied" };
+    }) };
+    const { engine } = setup([{ calls: [{ name: "danger" }] }, { text: "The operation was not performed." }],
+      [tool({ name: "danger", risk: "destructive", execute, approval: "required" })], { approvals: gate });
+    const result = await engine.run({ history: user("do it") });
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolCalls[0]).toMatchObject({ status: "denied", approvalId: "apr_denied" });
+  });
+
+  it("fails closed when approval is required but no approval service is available", async () => {
+    const execute = jest.fn();
+    const { engine, llm } = setup([{ calls: [{ name: "danger" }] }, { text: "Approval service is unavailable." }],
+      [tool({ name: "danger", risk: "destructive", execute, approval: "required" })]);
+    const result = await engine.run({ history: user("do it") });
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolCalls[0].status).toBe("blocked");
+    expect(String(llm.requests[1].messages.find((message) => message.role === "tool")?.content)).toContain("approval service is unavailable");
+  });
+
+  it("emits sanitized security audit events for tool execution", async () => {
+    const execute = jest.fn(async () => ({ ok: true }));
+    const audit = jest.fn();
+    const { engine } = setup(
+      [{ calls: [{ name: "safe_read" }] }, { text: "Done." }],
+      [tool({ name: "safe_read", risk: "read", execute })],
+      { logger: audit },
+    );
+    await engine.run({ history: user("read status") });
+    const events = audit.mock.calls.map(([name]) => name);
+    expect(events).toContain("security.tool_execution_started");
+    expect(events).toContain("security.tool_execution_completed");
+    for (const [, details] of audit.mock.calls) {
+      expect(details).not.toHaveProperty("arguments");
+      expect(details).not.toHaveProperty("input");
+      expect(details).not.toHaveProperty("output");
+    }
+  });
+
+  it("uses Turbo to avoid a redundant verifier call for read-only evidence", async () => {
+    const { engine, llm } = setup(
+      [{ calls: [{ name: "safe_read" }] }, { text: "The requested information was found." }],
+      [tool({ name: "safe_read", risk: "read", execute: async () => ({ value: "observed" }) })],
+      { turboMode: true, verifyActions: true },
+    );
+    const result = await engine.run({ history: user("read the status") });
+    expect(result.status).toBe("completed");
+    expect(llm.requests).toHaveLength(2);
+  });
+
+  it("keeps destructive approval required even when autonomous policy allows it", async () => {
+    const execute = jest.fn();
+    const gate: ApprovalGate = { request: jest.fn(async () => ({ approved: false, reason: "pending owner decision" })) };
+    const { engine } = setup([{ calls: [{ name: "danger" }] }, { text: "Not approved." }],
+      [tool({ name: "danger", risk: "destructive", execute, approval: "required" })], { approvals: gate, turboMode: true });
+    const result = await engine.run({ history: user("do it"), approvalPolicy: { decide: () => ({ mode: "auto", reason: "autonomous allowlist" }) } });
+    expect(gate.request).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolCalls[0].status).toBe("denied");
   });
 
   it("still enforces an explicit policy block without creating an approval request", async () => {
@@ -514,18 +911,14 @@ describe("AgentEngine", () => {
       model: "test",
       complete: async (_messages: EngineMessage[], options: Record<string, unknown> = {}) => {
         requests.push({ options });
-        if (options.json === true) {
-          return { choices: [{ message: { content: JSON.stringify({ needs_tool_execution: false }) } }], usage: {} };
-        }
-        if (requests.length === 1) {
-          return { choices: [{ message: { content: "done" } }], usage: {} };
-        }
+        if (requests.length === 1) return { choices: [{ message: { content: "done" } }], usage: {} };
         throw new Error("unexpected request");
       },
     };
     const engine = new AgentEngine({ llm, tools: registry, contextWindowTokens: 1024 });
     const result = await engine.run({ history: [{ role: "user", content: "task" }] });
     expect(result.status).toBe("completed");
+    expect(requests).toHaveLength(1);
     expect(requests[0].options.tools).toBeUndefined();
   });
   it("enforces context window before every model request, including tool loops", async () => {
@@ -622,7 +1015,7 @@ describe("AgentEngine", () => {
       started();
       context.signal.addEventListener("abort", () => reject(new Error("tool cancelled")), { once: true });
     }));
-    const { engine } = setup([{ calls: [{ name: "write_it" }] }], [tool({ name: "write_it", risk: "config_write", execute, approval: "required" })]);
+    const { engine } = setup([{ calls: [{ name: "write_it" }] }], [tool({ name: "write_it", risk: "config_write", execute, approval: "auto" })]);
     const running = engine.run({ history: user("hi"), signal: controller.signal });
     await toolStarted;
     controller.abort();
@@ -655,6 +1048,31 @@ describe("AgentEngine", () => {
     const toolMessage = llm.requests[1].messages.find((m) => m.role === "tool");
     expect(toolMessage?.content).toContain("[REDACTED]");
     expect(toolMessage?.content).not.toContain("sk-abcdefghijkl");
+  });
+
+  it("reuses a completed side-effect result instead of re-executing beyond the duplicate limit", async () => {
+    const write = jest.fn(() => ({ ok: true, value: "saved" }));
+    const { engine } = setup(
+      [
+        { calls: [{ name: "write_once", args: { path: "out.txt", content: "hello" } }] },
+        { calls: [{ name: "write_once", args: { path: "out.txt", content: "hello" } }] },
+        { calls: [{ name: "write_once", args: { path: "out.txt", content: "hello" } }] },
+        { calls: [{ name: "write_once", args: { path: "out.txt", content: "hello" } }] },
+        { text: "done" },
+      ],
+      [tool({
+        name: "write_once",
+        risk: "config_write",
+        approval: "auto",
+        execute: write,
+        parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+      })],
+    );
+    const result = await engine.run({ history: user("write it once") });
+    expect(result.status).toBe("completed");
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(result.toolCalls[2].status).toBe("succeeded");
+    expect(result.toolCalls[3].status).toBe("succeeded");
   });
 
   it("clears duplicate counters after a state-changing tool succeeds", async () => {
@@ -697,6 +1115,23 @@ describe("AgentEngine", () => {
       const result = await engine.run({ history: user("go") });
       expect(result.toolCalls[0].status).toBe("succeeded");
       expect(result.finalText).toBe("ok");
+    });
+
+    it("resolves a foreground tool timeout from its validated input", async () => {
+      const slow = tool({
+        name: "input_timed",
+        risk: "config_write",
+        approval: "auto",
+        timeoutMsForInput: (input) => Number(input.timeoutMs ?? 10),
+        parameters: { type: "object", properties: { timeoutMs: { type: "integer" } }, additionalProperties: false },
+        execute: (_input, ctx) =>
+          new Promise((_resolve, reject) => ctx.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })),
+      });
+      const { engine } = setup([{ calls: [{ name: "input_timed", args: { timeoutMs: 15 } }] }, { text: "finished" }], [slow], { toolTimeoutMs: 500 });
+      const result = await engine.run({ history: user("run with a short timeout") });
+      expect(result.toolCalls[0].status).toBe("failed");
+      expect(result.toolCalls[0].error).toContain("may still be running or may have partially completed");
+      expect(result.toolCalls[0].error).toContain("reconcile its current state");
     });
 
     it("a tool without an override is still stopped by the default tool timeout", async () => {

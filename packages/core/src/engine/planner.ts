@@ -68,7 +68,7 @@ function parseComplexity(text: string): AgentPlan["complexity"] | undefined {
 export function parsePlanJson(
   text: string,
   knownTools: ReadonlySet<string>,
-  maxSteps = 6,
+  maxSteps = Number.POSITIVE_INFINITY,
 ): Array<{ title: string; tool?: string; dependsOn?: number[] }> | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -129,14 +129,15 @@ export interface CreatePlanInput {
 export async function createPlan(input: CreatePlanInput): Promise<AgentPlan> {
   if (!input.llm) return fallbackPlan(input.goal);
 
-  const maxSteps = input.maxSteps ?? 6;
+  const maxSteps = input.maxSteps ?? Number.POSITIVE_INFINITY;
+  const stepRange = Number.isFinite(maxSteps) ? `up to ${Math.max(1, Math.floor(maxSteps))}` : `as many as the goal requires`;
   try {
     const response = await input.llm.complete(
       [
         {
           role: "system",
           content:
-            `You are the planning module of an autonomous agent. Understand what the user actually wants, then break the goal into 1-${maxSteps} concrete steps and identify dependencies so independent work can run in parallel. Use a single step when the request needs only one action or a direct conversational answer. ` +
+            `You are the planning module of an autonomous agent. Understand what the goal requires, then break it into ${stepRange} concrete steps and identify dependencies so independent work can run in parallel. Never omit necessary work merely to keep the plan short. Use a single step when the request needs only one action or a direct conversational answer. ` +
             `Reply with ONLY a JSON object: {"steps":[{"title":"short imperative step","tool":"tool name or null","depends_on":[1,2]}]}. ` +
             `depends_on uses 1-based step numbers and may be [] for an independent step. Do not invent dependencies; add one when the step needs another step's result. ` +
             `Available tools: ${input.toolNames.join(", ") || "none"}. Use null when no tool is needed.`,

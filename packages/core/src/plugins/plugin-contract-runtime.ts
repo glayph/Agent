@@ -62,6 +62,8 @@ export interface RuntimePluginContractsConfig {
   enabled?: boolean;
   allow_execution?: boolean;
   allow_channel_runtime?: boolean;
+  /** Permit statically detected capabilities not listed in a contract manifest inside an outer disposable VM. */
+  allow_undeclared_permissions?: boolean;
   allowed_kinds?: PluginContractKind[];
   disabled_plugins?: string[];
   disabled_contracts?: string[];
@@ -598,10 +600,12 @@ function evaluateContract(
   if (requiresPolicy.length) {
     reasons.push("Contract requires explicit plugin permission policy.");
   }
-  for (const permission of undeclaredPermissions) {
-    reasons.push(
-      `Entrypoint appears to use "${permission}" but the contract does not declare that permission.`,
-    );
+  if (policy.allow_undeclared_permissions !== true) {
+    for (const permission of undeclaredPermissions) {
+      reasons.push(
+        `Entrypoint appears to use "${permission}" but the contract does not declare that permission.`,
+      );
+    }
   }
 
   const riskLevel: RuntimePluginRiskLevel =
@@ -652,7 +656,7 @@ function evaluateContract(
     status = "unsupported_runtime";
   } else if (requiresPolicy.length) {
     status = "requires_policy";
-  } else if (undeclaredPermissions.length) {
+  } else if (undeclaredPermissions.length && policy.allow_undeclared_permissions !== true) {
     status = "requires_policy";
   } else if (!entry.contract.entrypoint) {
     status = "metadata_only";

@@ -76,6 +76,25 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 
+export async function listApprovalRequests(): Promise<{ requests: ApprovalRequest[] }> {
+  return requestJson("/api/control/approvals")
+}
+
+export async function denyApprovalRequest(
+  id: string,
+  reason = "Denied by the owner from the dashboard.",
+  decidedBy = "dashboard-operator",
+): Promise<{ request: ApprovalRequest }> {
+  return requestJson(
+    `/api/control/approvals/${encodeURIComponent(id)}/deny`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decidedBy, reason }),
+    },
+  )
+}
+
 export async function approveApprovalRequest(
   id: string,
   decidedBy = "dashboard-operator",

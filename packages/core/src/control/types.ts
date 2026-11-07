@@ -158,5 +158,7 @@ export interface AgentControlServiceOptions {
   modelAdapters?: ModelRuntimeAdapterLike[];
   hooks?: ControlRuntimeHooks;
   approvals?: ControlApprovalAdapter;
+  /** Suppress approval prompts for agent-originated control operations only. */
+  autoApproveAll?: () => boolean;
   allowedConfigPrefixes?: string[];
 }

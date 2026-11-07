@@ -56,6 +56,7 @@ export function memoryToolDefinitions(): ToolDefinition[] {
           properties: {
             text: { type: "string", description: "The fact/decision to remember, one self-contained statement." },
             scope: { type: "string", enum: ["user", "long_term", "daily"], description: "Default: long_term." },
+            supersedes: { type: "string", description: "For scope=user only: the exact active preference text in USER.md that this new preference replaces." },
           },
           required: ["text"],
         },
@@ -78,14 +79,18 @@ export async function runMemoryTool(
   service: FileMemoryService | null | undefined,
   name: (typeof MEMORY_TOOL_NAMES)[number],
   args: Record<string, unknown>,
+  authorize: () => boolean = () => false,
 ): Promise<string> {
+  if (!authorize()) return JSON.stringify({ ok: false, error: "Memory access is not authorized for this session." });
   if (!service || !service.isEnabled())
     return JSON.stringify({ ok: false, error: "File memory is disabled (agent.memory.files.enabled=false)." });
   try {
     if (name === "memory_search") {
       const query = asString(args["query"]).trim();
       if (!query) return JSON.stringify({ ok: false, error: "query is required" });
-      const results = await service.search(query, asNumber(args["limit"]) ?? 5);
+      if (query.length > 2_000) return JSON.stringify({ ok: false, error: "query must not exceed 2000 characters" });
+      const limit = Math.max(1, Math.min(20, Math.floor(asNumber(args["limit"]) ?? 5)));
+      const results = await service.search(query.normalize("NFKC"), limit);
       return JSON.stringify({ ok: true, count: results.length, results });
     }
     if (name === "memory_get") {
@@ -95,7 +100,9 @@ export async function runMemoryTool(
     const text = asString(args["text"]).trim();
     if (!text) return JSON.stringify({ ok: false, error: "text is required" });
     const scope = args["scope"] === "daily" ? "daily" : args["scope"] === "user" ? "user" : "long_term";
-    const saved = await service.note(text, scope);
+    const supersedes = asString(args["supersedes"]).trim()
+    if (supersedes && scope !== "user") return JSON.stringify({ ok: false, error: "supersedes is supported only for scope=user." })
+    const saved = await service.note(text, scope, supersedes || undefined);
     return JSON.stringify({ ok: true, scope, saved: saved.path, duplicate: saved.duplicate });
   } catch (err) {
     // A failing memory tool reports the failure; it never throws into the turn.

@@ -28,6 +28,15 @@ export interface RecoveryIncident {
   remedy: string | null
 }
 
+function safeIncidentReason(value: unknown): string {
+  const text = value instanceof Error ? `${value.name}: ${value.message}` : String(value ?? "unknown recovery failure")
+  return text
+    .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/(\b(?:api[-_]?key|token|secret|password|passwd|credential|client[-_]?secret)\b\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]")
+    .slice(0, 300)
+}
+
 export interface RecoveryManagerDeps {
   db: Database.Database
   check: () => Promise<RecoveryCheck>
@@ -79,7 +88,9 @@ export class RecoveryManager {
   get state(): RecoveryState { return this.current }
 
   start(): void {
-    this.timer = setInterval(() => { void this.tick() }, this.deps.intervalMs ?? 10_000)
+    if (this.timer) return
+    const interval = Math.max(1_000, Math.min(5 * 60_000, this.deps.intervalMs ?? 10_000))
+    this.timer = setInterval(() => { void this.tick() }, interval)
     this.timer.unref?.()
   }
 
@@ -98,7 +109,7 @@ export class RecoveryManager {
     this.busy = true
     try {
       let result: RecoveryCheck
-      try { result = await this.deps.check() } catch (error) { result = { ok: false, reason: error instanceof Error ? error.message : String(error) } }
+      try { result = await this.deps.check() } catch (error) { result = { ok: false, reason: safeIncidentReason(error) } }
       if (!result.ok) await this.noteFailure(result.reason || "a dependency is not healthy")
       else await this.noteSuccess()
     } finally { this.busy = false }
@@ -108,7 +119,7 @@ export class RecoveryManager {
   private async noteFailure(reason: string): Promise<void> {
     this.green = 0
     if (this.current === "healthy") {
-      const info = this.deps.db.prepare("INSERT INTO recovery_incidents(started_at,reason) VALUES(?,?)").run(this.now(), reason.slice(0, 300))
+      const info = this.deps.db.prepare("INSERT INTO recovery_incidents(started_at,reason) VALUES(?,?)").run(this.now(), safeIncidentReason(reason))
       this.incidentId = Number(info.lastInsertRowid)
       this.current = "disrupted"
       this.deps.log(`Recovery: disruption detected (${reason}).`)
@@ -116,7 +127,7 @@ export class RecoveryManager {
       if (incident) { try { this.deps.onDisrupted?.(incident) } catch { /* observers must not break detection */ } }
       return
     }
-    if (this.incidentId !== undefined) this.deps.db.prepare("UPDATE recovery_incidents SET checks_failed=checks_failed+1, reason=? WHERE id=?").run(reason.slice(0, 300), this.incidentId)
+    if (this.incidentId !== undefined) this.deps.db.prepare("UPDATE recovery_incidents SET checks_failed=checks_failed+1, reason=? WHERE id=?").run(safeIncidentReason(reason), this.incidentId)
     this.current = "disrupted"
   }
 
@@ -126,19 +137,24 @@ export class RecoveryManager {
     this.current = "recovering"
     if (this.green < this.greenNeeded()) return
     const id = this.incidentId
+    if (id === undefined) { this.current = "healthy"; this.green = 0; return }
+    let replayed = 0
+    try {
+      replayed = Number(await this.deps.onRecovered?.(this.incident()!)) || 0
+    } catch (error) {
+      // Keep the incident open. A later green-check window retries replay; the replay sweeper is idempotent.
+      this.current = "disrupted"
+      this.green = 0
+      this.deps.log(`Recovery: dependencies are healthy but replay did not complete; recovery will retry (${safeIncidentReason(error)}).`)
+      return
+    }
+    this.deps.db.prepare("UPDATE recovery_incidents SET ended_at=?, replayed=?, remedy=? WHERE id=?").run(this.now(), replayed, "dependencies recovered; unanswered messages replayed", id)
+    const incident = this.deps.db.prepare("SELECT * FROM recovery_incidents WHERE id=?").get(id) as RecoveryIncident
     this.incidentId = undefined
     this.green = 0
     this.current = "healthy"
-    if (id === undefined) return
-    this.deps.db.prepare("UPDATE recovery_incidents SET ended_at=? WHERE id=?").run(this.now(), id)
-    const incident = this.deps.db.prepare("SELECT * FROM recovery_incidents WHERE id=?").get(id) as RecoveryIncident
-    this.deps.log("Recovery: dependencies are healthy again; replaying unanswered messages.")
-    let replayed = 0
-    try { replayed = Number(await this.deps.onRecovered?.(incident)) || 0 } catch (error) {
-      this.deps.log(`Recovery: replay after recovery failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    this.deps.db.prepare("UPDATE recovery_incidents SET replayed=?, remedy=? WHERE id=?").run(replayed, "dependencies recovered; unanswered messages replayed", id)
-    try { this.deps.onIncidentClosed?.(this.deps.db.prepare("SELECT * FROM recovery_incidents WHERE id=?").get(id) as RecoveryIncident) } catch { /* learning must never break recovery */ }
+    this.deps.log("Recovery: dependencies are healthy again; replay completed.")
+    try { this.deps.onIncidentClosed?.(incident) } catch { /* learning must never break recovery */ }
   }
 
   private incident(): RecoveryIncident | undefined {
@@ -147,6 +163,6 @@ export class RecoveryManager {
 
   /** Writes what was done about the current incident (read by the self-learning step). */
   setRemedy(text: string): void {
-    if (this.incidentId !== undefined) this.deps.db.prepare("UPDATE recovery_incidents SET remedy=? WHERE id=?").run(text.slice(0, 300), this.incidentId)
+    if (this.incidentId !== undefined) this.deps.db.prepare("UPDATE recovery_incidents SET remedy=? WHERE id=?").run(safeIncidentReason(text), this.incidentId)
   }
 }

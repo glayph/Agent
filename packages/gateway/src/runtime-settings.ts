@@ -4,18 +4,17 @@ const budgetManager = new TokenBudgetManager();
 
 /** Runtime defaults mirrored from the Settings form so an unset config value
  * has the same effective behavior as the UI's default state. */
-export const DEFAULT_MAX_COMPLETION_TOKENS = 32768;
-export const DEFAULT_MAX_TOOL_ITERATIONS = 50;
-export const DEFAULT_MAX_WALL_TIME_MS = 300_000;
+export const DEFAULT_UNKNOWN_MODEL_CONTEXT_ESTIMATE_TOKENS = 32768;
+export const DEFAULT_MAX_TOOL_ITERATIONS = Number.POSITIVE_INFINITY;
+export const DEFAULT_MAX_WALL_TIME_MS = 0;
+export const DEFAULT_TOOL_TIMEOUT_MS = 0;
+export const DEFAULT_CHAT_QUEUE_WAIT_MS = 0;
+/** Task lifetime/inactivity limits are disabled: runs continue until completion or explicit cancellation. */
+export const DEFAULT_CHAT_INACTIVITY_TIMEOUT_MS = 0;
 
 function positiveInteger(value: unknown): number | undefined {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined;
-}
-
-function nonNegativeInteger(value: unknown): number | undefined {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : undefined;
 }
 
 /** A configured zero intentionally disables argument preview truncation. */
@@ -26,16 +25,54 @@ export function resolveToolFeedbackMaxArgsLength(value: unknown, fallback = 300)
   return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : fallback
 }
 
-export function resolveMaxToolIterations(defaults: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): number {
-  return positiveInteger(defaults.max_tool_iterations)
-    ?? positiveInteger(env.MIKI_AGENT_MAX_TURNS)
-    ?? DEFAULT_MAX_TOOL_ITERATIONS;
+export function resolveMaxToolIterations(_defaults: Record<string, unknown>, _env: NodeJS.ProcessEnv = process.env): number {
+  // Legacy iteration settings and environment variables must not reactivate an
+  // arbitrary stop condition. Resource controls remain enforced independently.
+  return Number.POSITIVE_INFINITY;
 }
 
-export function resolveMaxWallTimeMs(defaults: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): number {
-  return nonNegativeInteger(defaults.max_wall_time_ms)
-    ?? nonNegativeInteger(env.MIKI_AGENT_MAX_WALL_TIME_MS)
-    ?? DEFAULT_MAX_WALL_TIME_MS;
+export function resolveMaxWallTimeMs(_defaults: Record<string, unknown>, _env: NodeJS.ProcessEnv = process.env): number {
+  // Legacy config/environment values cannot reactivate a goal/run lifetime cap.
+  // Explicit per-tool/provider timeouts remain separate failure-detection policies.
+  return DEFAULT_MAX_WALL_TIME_MS;
+}
+
+/** No generic tool deadline. Individual tools own adaptive, renewable leases. */
+export function resolveToolTimeoutMs(_defaults: Record<string, unknown>, _env: NodeJS.ProcessEnv = process.env): number {
+  return DEFAULT_TOOL_TIMEOUT_MS;
+}
+
+/**
+ * A conversation lane remains serialized until its holder releases it. Zero means
+ * wait without an arbitrary deadline; cancellation is controlled by the caller's signal.
+ */
+export function resolveChatQueueWaitMs(
+  defaults: Record<string, unknown>,
+  _runWallTimeMs: number,
+  _env: NodeJS.ProcessEnv = process.env,
+): number {
+  // Session lanes wait until release or explicit owner cancellation; legacy timeout settings are ignored.
+  return DEFAULT_CHAT_QUEUE_WAIT_MS;
+}
+
+/**
+ * Miki's task lifetime is intentionally unbounded. Idle time is diagnostic only;
+ * it must never cancel a long-running model/tool operation. Legacy config and
+ * environment values are ignored so an old setting cannot reintroduce a stop.
+ */
+export function resolveChatInactivityTimeoutMs(
+  _defaults: Record<string, unknown>,
+  _env: NodeJS.ProcessEnv = process.env,
+): number {
+  return 0;
+}
+
+/** Background tasks follow the same unlimited-lifetime policy as foreground chat. */
+export function resolveBackgroundTaskInactivityTimeoutMs(
+  _defaults: Record<string, unknown>,
+  _env: NodeJS.ProcessEnv = process.env,
+): number {
+  return 0;
 }
 
 /** Real context window of a model, or undefined when the model is unknown. Injected so tests stay pure. */
@@ -51,7 +88,7 @@ const defaultModelContextLookup: ModelContextLookup = (model) => {
 
 /**
  * Order: explicit `context_window` (> 0), then the real window of the active model,
- * and only without a known model the legacy 4x max-completion-tokens estimate.
+ * and only without a known model an estimate derived from the configured completion-reserve hint.
  */
 export function resolveContextWindowTokens(
   defaults: Record<string, unknown>,
@@ -66,8 +103,10 @@ export function resolveContextWindowTokens(
   if (explicit !== undefined) return explicit;
   const cap = positiveInteger(defaults.context_window_cap);
   const modelName = typeof model === "string" ? model.trim() : "";
-  const maxTokens = positiveInteger(defaults.max_completion_tokens ?? defaults.max_tokens) ?? DEFAULT_MAX_COMPLETION_TOKENS;
+  const completionHintTokens = positiveInteger(defaults.max_completion_tokens ?? defaults.max_tokens) ?? DEFAULT_UNKNOWN_MODEL_CONTEXT_ESTIMATE_TOKENS;
   const real = modelName ? lookup(modelName) : undefined;
-  const resolved = real ?? maxTokens * 4;
+  // Only when the model is unknown: a window guess of 4x the completion hint. This is a token-to-token
+  // ratio, not a text conversion, so it is independent of script and is intentionally not language-aware.
+  const resolved = real ?? completionHintTokens * 4;
   return cap === undefined ? resolved : Math.min(resolved, cap);
 }

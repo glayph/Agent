@@ -236,9 +236,21 @@ export class MemoryFileStore {
       path: this.paths.userMd,
       mode: "append",
       header: "# USER.md — stable user instructions\n\n",
-      skipIfContains: clean,
-      content: `- [observed ${formatDate(now)}; status: active] ${clean}\n`,
+      // FileMemoryService performs status-aware deduplication. A superseded/review
+      // duplicate must be allowed to become active again after explicit owner reaffirmation.
+      content: `- [observed ${formatDate(now)}; status: active; source: owner_explicit; confidence: 1.0; scope: owner] [memory_id: ${randomUUID()}] ${clean}\n`,
     };
+  }
+
+  async hasActiveUserNote(text: string): Promise<boolean> {
+    const target = redactSecrets(String(text ?? "").trim()).replace(/\s+/g, " ")
+    if (!target) return false
+    const content = await this.readUserMd()
+    return content.split(/\r?\n/).some((line) => {
+      if (!/status:\s*active\b/i.test(line)) return false
+      const entry = line.replace(/^- \[[^\]]+\]\s*(?:\[memory_id: [^\]]+\]\s*)?/, "").trim()
+      return entry === target
+    })
   }
 
   async supersedeUserNote(text: string, supersedes: string, now = new Date()): Promise<void> {
@@ -256,12 +268,12 @@ export class MemoryFileStore {
     }
     const lines = original.split(/(?<=\n)/);
     const matches = lines.map((line, index) => ({ line, index })).filter(({ line }) =>
-      /status:\s*active/i.test(line) && line.includes(oldDirective),
+      /status:\s*(?:active|review)/i.test(line) && line.includes(oldDirective),
     );
     if (matches.length !== 1) throw new Error("The exact active directive must match exactly one USER.md entry.");
     const { line, index } = matches[0]!;
-    const superseded = line.replace(/\r?\n$/, "").replace(/status:\s*active/i, "status: superseded");
-    lines[index] = `${superseded}\n- [observed ${formatDate(now)}; status: active] ${clean}\n`;
+    const superseded = line.replace(/\r?\n$/, "").replace(/status:\s*(?:active|review)/i, "status: superseded");
+    lines[index] = `${superseded}\n- [observed ${formatDate(now)}; status: active; source: owner_explicit; confidence: 1.0; scope: owner] [memory_id: ${randomUUID()}] ${clean}\n`;
     const temp = `${safePath}.${process.pid}.${randomUUID()}.tmp`;
     await fs.promises.writeFile(temp, lines.join(""), { flag: "wx", mode: 0o600 });
     try {
@@ -271,6 +283,96 @@ export class MemoryFileStore {
     } catch (error) {
       await fs.promises.unlink(temp).catch(() => undefined);
       throw error;
+    }
+  }
+
+  /**
+   * Keep contradictory owner preferences visible for audit but out of active prompt context.
+   * Neither statement wins automatically; both are marked review until the owner supersedes one.
+   */
+  async recordUserPreferenceConflict(text: string, conflictsWith: string[], now = new Date()): Promise<void> {
+    const safePath = await resolveMemoryFile(this.paths, this.paths.userMd)
+    if (!safePath) throw new Error("USER.md resolves outside the memory root")
+    const clean = redactSecrets(text.trim()).replace(/\s+/g, " ")
+    if (!clean) throw new Error("Preference conflict text is empty.")
+    let original = ""
+    try { original = await fs.promises.readFile(safePath, "utf8") }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error }
+    const lines = original.split(/(?<=\n)/)
+    const needles = [...new Set([...conflictsWith.map((item) => item.trim()).filter(Boolean), clean])]
+    let currentEntryFound = false
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index]!
+      const content = line.replace(/^- \[[^\]]+\]\s*(?:\[memory_id: [^\]]+\]\s*)?/, "").trim()
+      if (!/status:\s*(?:active|review)/i.test(line) || !needles.includes(content)) continue
+      if (content === clean) currentEntryFound = true
+      lines[index] = line.replace(/status:\s*active/i, "status: review")
+    }
+    const reviewLine = currentEntryFound ? "" : `- [observed ${formatDate(now)}; status: review; source: owner_explicit; confidence: 0.5; scope: owner] [memory_id: ${randomUUID()}] ${clean}\n`
+    const next = `${lines.join("")}${lines.length && !lines.join("").endsWith("\n") ? "\n" : ""}${original ? "" : "# USER.md — stable user instructions\n\n"}${reviewLine}`
+    const temp = `${safePath}.${process.pid}.${randomUUID()}.tmp`
+    await fs.promises.writeFile(temp, next, { flag: "wx", mode: 0o600 })
+    try {
+      const latest = await fs.promises.readFile(safePath, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? "" : Promise.reject(error))
+      if (latest !== original) throw new Error("USER.md changed concurrently; retry the preference conflict update.")
+      await fs.promises.rename(temp, safePath)
+    } catch (error) {
+      await fs.promises.unlink(temp).catch(() => undefined)
+      throw error
+    }
+  }
+
+  /** Remove one exact owner memory entry without deleting unrelated notes. */
+  async forgetEntry(scope: "user" | "long_term", text: string, status?: "active" | "draft" | "review" | "superseded"): Promise<boolean> {
+    const target = redactSecrets(String(text ?? "").trim()).replace(/\s+/g, " ")
+    if (!target) throw new Error("An exact memory entry is required.")
+    const file = scope === "user" ? this.paths.userMd : this.paths.memoryMd
+    const safePath = await resolveMemoryFile(this.paths, file)
+    if (!safePath) throw new Error("Memory entry resolves outside the memory root.")
+    let original: string
+    try { original = await fs.promises.readFile(safePath, "utf8") }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error }
+    const lines = original.split(/(?<=\n)/)
+    const matches = lines.map((line, index) => ({ line, index })).filter(({ line }) => {
+      const content = line.replace(/^- \[[^\]]+\]\s*(?:\[memory_id: [^\]]+\]\s*)?/, "").trim()
+      const statusMatches = status ? new RegExp("status:\\s*" + status + "\\b", "i").test(line) : true
+      return content === target && statusMatches
+    })
+    if (matches.length === 0) return false
+    if (matches.length > 1) throw new Error("The memory text and status match multiple entries; use the memory file path to review before forgetting.")
+    lines.splice(matches[0]!.index, 1)
+    const temp = `${safePath}.${process.pid}.${randomUUID()}.tmp`
+    await fs.promises.writeFile(temp, lines.join(""), { flag: "wx", mode: 0o600 })
+    try {
+      const latest = await fs.promises.readFile(safePath, "utf8")
+      if (latest !== original) throw new Error("Memory file changed concurrently; retry the forget operation.")
+      await fs.promises.rename(temp, safePath)
+      return true
+    } catch (error) {
+      await fs.promises.unlink(temp).catch(() => undefined)
+      throw error
+    }
+  }
+
+  /** Delete one memory Markdown file after strict root/path/symlink validation. */
+  async forget(relPath: string): Promise<{ path: string; deleted: boolean }> {
+    const raw = String(relPath ?? "").trim().replace(/\\/g, "/")
+    const normalized = path.posix.normalize(raw.replace(/^\.\//, ""))
+    if (!raw || raw.length > 512 || normalized === "." || normalized.startsWith("../") || normalized.startsWith("/") || normalized !== raw.replace(/^\.\//, "")) {
+      throw new Error("A safe relative memory file path is required.")
+    }
+    if (normalized !== "USER.md" && normalized !== "MEMORY.md" && !(normalized.startsWith("memory/") && normalized.endsWith(".md"))) {
+      throw new Error("Only USER.md, MEMORY.md, and memory/**/*.md files can be forgotten.")
+    }
+    const absolute = path.resolve(this.paths.root, normalized)
+    const safePath = await resolveMemoryFile(this.paths, absolute)
+    if (!safePath) throw new Error("Memory file path is outside the memory root or uses an unsafe symlink.")
+    try {
+      await fs.promises.unlink(safePath)
+      return { path: normalized, deleted: true }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { path: normalized, deleted: false }
+      throw error
     }
   }
 

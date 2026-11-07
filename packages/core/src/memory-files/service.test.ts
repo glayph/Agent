@@ -34,10 +34,25 @@ describe("FileMemoryService (integration)", () => {
     expect(hits.length).toBeGreaterThan(0);
   });
 
+  it("notifies the canonical index only after trusted writes are durable", async () => {
+    const writes: Array<{ path: string; provenance: string }> = [];
+    service.setWriteObserver((path, provenance) => writes.push({ path, provenance }));
+    await service.note("Owner approved long-term memory", "long_term", undefined, "owner");
+    service.noteDaily("Agent progress note", "run", "agent");
+    service.noteDaily("External text copied from a webpage", "import", "untrusted");
+    expect(await service.writer.drain()).toBe(true);
+    expect(writes).toEqual([
+      { path: "MEMORY.md", provenance: "owner" },
+      expect.objectContaining({ path: expect.stringMatching(/^memory\//), provenance: "agent" }),
+      expect.objectContaining({ path: expect.stringMatching(/^memory\//), provenance: "untrusted" }),
+    ]);
+  });
+
   it("buildContextBlock reflects notes without throwing when memory is empty", async () => {
     expect(await service.buildContextBlock()).toBe("");
-    await service.note("Some durable fact");
-    expect(await service.buildContextBlock()).toContain("Some durable fact");
+    await service.note("Some durable fact", "long_term", undefined, "owner");
+    const trustedMemoryContent = await service.store.readMemoryMd();
+    expect(await service.buildContextBlock({ trustedMemory: true, trustedMemoryContent })).toContain("Some durable fact");
   });
 
   it("background() never throws even when the job itself throws", () => {

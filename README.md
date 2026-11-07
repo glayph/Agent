@@ -71,3 +71,7 @@ Credentials are stored in `data/secret-vault.json` under the runtime data root, 
 npm run test --workspace=@miki/gateway
 npm --prefix packages/ui/frontend run test
 ```
+
+## Activity Page repair
+
+The November 6, 2026 Activity Page functional repair, including schedule pagination, event-trigger controls, background-job detail/reconciliation, persisted monitor history, and browser-native live screen preview, is documented in [`docs/ACTIVITY_PAGE_REPAIR_2026-11-06.md`](docs/ACTIVITY_PAGE_REPAIR_2026-11-06.md). The screen-share preview is currently local to the Activity page; it is not yet transported into the agent/model runtime.

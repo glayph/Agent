@@ -21,8 +21,8 @@ import { createWorkspaceSecretVault } from "@miki/config"
 import { CHANNEL_CONFIG_METADATA, CHANNEL_SECRET_FIELD_KEYS } from "@miki/config/channel-meta"
 import { authCredentialKey, runChannelAuthCheck, supportsAuthCheck, type ChannelAuthCheckResult } from "./channel-auth-check.js"
 import { publicChannelConfig, splitChannelConfig } from "./channel-config-helpers.js"
-import { getLifecycleBus } from "@miki/core/hooks"
 import { evolutionConfigFrom } from "./learned-behavior.js"
+import { UnifiedAutonomousController } from "./unified-autonomous-controller.js"
 import { wrapAsyncRoutes } from "./async-route.js"
 import { sessionCookie } from "./session-cookie.js"
 import { IGNORED_DIRS as SECRET_IGNORED_DIRS, isFixturePath, isIgnoredPath, isScannableFile, parseIgnoreFile, scanLine } from "./secret-scan-rules.js"
@@ -43,6 +43,11 @@ export interface DashboardExtendedDeps {
   /** Injectable fetch for outbound provider checks (tests); defaults to the global fetch. */
   fetchImpl?: typeof fetch
   registerShutdownHandler?: (handler: () => void | Promise<void>) => void
+  autonomy?: {
+    wake: () => void
+    runtimeContext: () => string
+  }
+  healthReport?: () => import("./health.js").HealthReport | null
   agent: {
     registry: { size: number; names(): string[] }
     llmFor(model?: string): { model: string } | undefined
@@ -55,6 +60,7 @@ export interface DashboardExtendedDeps {
   channelRuntimeStatus?: (name: string) => { runtime_live: boolean; connected: boolean; enabled: boolean; configured: boolean; lastError?: string; lastConnectedAt?: string; lastEventAt?: string }
   /** Single-recipient provider delivery with durable idempotency; only exposed behind explicit E2E gate. */
   channelTestDelivery?: (name: string, recipient: string, text: string, idempotencyKey: string) => Promise<{ status: "sent" | "duplicate"; channel: string; recipientHash: string; providerAckId: string; idempotencyKey: string }>
+  mcpManager?: ExternalMcpConnectorManager
   approvals: {
     requestApproval: (request: { operationId: string; capability: string; action: string; risk: "install"; reason: string; sanitizedInput: Record<string, unknown>; context: { origin: "dashboard"; actor: string } }) => Promise<{ requestId: string }>
     isApproved: (request: { operationId: string; capability: string; action: string; risk: "install"; reason: string; sanitizedInput: Record<string, unknown>; context: { origin: "dashboard"; actor: string }; approvalRequestId?: string }) => boolean
@@ -83,8 +89,10 @@ function parseAllowedPeers(value: unknown): string[] {
   return [...new Set(raw.map((item) => String(item).trim()).filter(Boolean))]
 }
 
-function appMcpConfig(config: Record<string, unknown>): McpRuntimeConfig {
+export function appMcpConfig(config: Record<string, unknown>): McpRuntimeConfig {
   const tools = asRecord(config.tools)
+  const agent = asRecord(config.agent)
+  const security = asRecord(agent.security)
   const mcp = asRecord(tools.mcp)
   const discovery = asRecord(mcp.discovery)
   const serversRaw = asRecord(mcp.servers)
@@ -107,6 +115,7 @@ function appMcpConfig(config: Record<string, unknown>): McpRuntimeConfig {
   }
   return {
     enabled: mcp.enabled !== false,
+    autoApproveAll: tools.auto_approve_all === true && security.sandbox_mode === true,
     discovery: {
       enabled: discovery.enabled !== false,
       ttl: Math.max(1, Number(discovery.ttl) || 5),
@@ -409,7 +418,6 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
   learningStore.initializeSync()
   let evolutionSignature = ""
   let evolutionEngine: SelfImprovementEngine | null = null
-  let evolutionTimer: ReturnType<typeof setInterval> | null = null
   let evolutionRunning = false
   let dashboardShuttingDown = false
   let evolutionTask: Promise<Record<string, unknown>> | null = null
@@ -492,32 +500,33 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     return task
   }
 
-  const onMessageSent = () => {
-    if (dashboardShuttingDown) return
-    const cfg = evolutionConfig();
-    if (cfg.enabled && String((asRecord(deps.getAppConfig().evolution).cold_path_trigger || "after_turn")) === "after_turn") {
-      void runTrackedEvolutionCycle(false).catch((error) => deps.appendGatewayLog(`Evolution after-turn cycle failed: ${error instanceof Error ? error.message : String(error)}`));
-    }
-  }
-  const unsubscribeMessageSent = getLifecycleBus().on?.("message:sent", onMessageSent)
+  const unifiedController = new UnifiedAutonomousController({
+    db: deps.db,
+    getConfig: deps.getAppConfig,
+    wakeWork: () => deps.autonomy?.wake(),
+    autonomyContext: () => deps.autonomy?.runtimeContext() ?? "AutonomousSupervisor runtime context is unavailable.",
+    healthReport: () => deps.healthReport?.() ?? null,
+    runLearningCycle: () => runTrackedEvolutionCycle(false),
+    log: deps.appendGatewayLog,
+    intervalMs: Number(process.env.MIKI_UNIFIED_CONTROLLER_INTERVAL_MS) || 30_000,
+  })
+  unifiedController.start()
 
-  evolutionTimer = setInterval(() => {
-    if (dashboardShuttingDown) return
-    const config = evolutionConfig()
-    const raw = asRecord(deps.getAppConfig().evolution)
-    const trigger = stringValue(raw.cold_path_trigger) || "after_turn"
-    // after_turn is driven by message:sent; manual is owner-triggered only.
-    // The timer exists solely to check scheduled HH:MM windows.
-    if (!config.enabled || trigger !== "scheduled") return
-    void runTrackedEvolutionCycle(false).catch((error) => deps.appendGatewayLog(`Evolution cycle failed: ${error instanceof Error ? error.message : String(error)}`))
-  }, 30_000)
-  evolutionTimer.unref?.()
-
-  let mcpManager = new ExternalMcpConnectorManager(deps.workspaceRoot, appMcpConfig(deps.getAppConfig()))
+  let mcpManager = deps.mcpManager ?? new ExternalMcpConnectorManager(deps.workspaceRoot, appMcpConfig(deps.getAppConfig()))
 
   router.use("/link-preview", deps.requireAuth, createLinkPreviewRouter())
 
-  router.use("/goals", deps.requireAuth, createGoalsRouter(new GoalStore(deps.db)))
+  router.use("/goals", deps.requireAuth, createGoalsRouter(new GoalStore(deps.db), {
+    requireAcceptanceContract: () => {
+      const autonomy = asRecord(deps.getAppConfig().autonomy)
+      const toolPolicy = asRecord(autonomy.tool_policy)
+      return toolPolicy.require_acceptance_contract !== false
+    },
+  }))
+
+  router.get("/enhancements/autonomy/controller", deps.requireAuth, (_req, res) => {
+    res.json({ controller: unifiedController.status() })
+  })
 
   router.post("/evolution/run", deps.requireAuth, async (_req, res) => {
     if (!evolutionConfig().enabled) {
@@ -997,19 +1006,26 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     const id = stringValue(req.body?.model_id)
     if (!["base", "base.en", "small"].includes(id)) return res.status(400).json({ error: "Only base, base.en, and small are installable." })
     const plan = { model_id: id, risk: "install" as const, action: "download" }
-    const approvalRequestId = stringValue(req.body?.approval_request_id)
-    const operationId = `speech-install:${id}`
-    const approvalRequest = { operationId, capability: "speech_to_text", action: "install_model", risk: "install" as const, reason: `Download and install Whisper ${id} locally.`, sanitizedInput: plan as Record<string, unknown>, context: { origin: "dashboard" as const, actor: "dashboard-operator" } }
-    if (!approvalRequestId) {
-      const pending = await deps.approvals.requestApproval(approvalRequest)
-      deps.appendGatewayLog(`Speech model install approval requested: ${id} (${pending.requestId})`)
-      return res.json({ status: "approval_required", approval_request_id: pending.requestId, plan })
-    }
-    if (!deps.approvals.isApproved({ ...approvalRequest, approvalRequestId })) {
-      return res.status(403).json({ error: "Approval is still pending or does not match this installation request.", code: "approval_required", approval_request_id: approvalRequestId, plan })
-    }
-    if (!deps.approvals.consumeApproval({ ...approvalRequest, approvalRequestId }, approvalRequestId)) {
-      return res.status(409).json({ error: "Approval could not be consumed.", code: "approval_invalid", approval_request_id: approvalRequestId })
+    const currentConfig = deps.getAppConfig()
+    const agentConfig = asRecord(currentConfig.agent)
+    const security = asRecord(agentConfig.security)
+    const tools = asRecord(currentConfig.tools)
+    const noConfirmMode = tools.auto_approve_all === true && security.sandbox_mode === true
+    if (!noConfirmMode) {
+      const approvalRequestId = stringValue(req.body?.approval_request_id)
+      const operationId = `speech-install:${id}`
+      const approvalRequest = { operationId, capability: "speech_to_text", action: "install_model", risk: "install" as const, reason: `Download and install Whisper ${id} locally.`, sanitizedInput: plan as Record<string, unknown>, context: { origin: "dashboard" as const, actor: "dashboard-operator" } }
+      if (!approvalRequestId) {
+        const pending = await deps.approvals.requestApproval(approvalRequest)
+        deps.appendGatewayLog(`Speech model install approval requested: ${id} (${pending.requestId})`)
+        return res.json({ status: "approval_required", approval_request_id: pending.requestId, plan })
+      }
+      if (!deps.approvals.isApproved({ ...approvalRequest, approvalRequestId })) {
+        return res.status(403).json({ error: "Approval is still pending or does not match this installation request.", code: "approval_required", approval_request_id: approvalRequestId, plan })
+      }
+      if (!deps.approvals.consumeApproval({ ...approvalRequest, approvalRequestId }, approvalRequestId)) {
+        return res.status(409).json({ error: "Approval could not be consumed.", code: "approval_invalid", approval_request_id: approvalRequestId })
+      }
     }
     try {
       const dir = path.join(deps.configDir, "voice-models")
@@ -1221,7 +1237,8 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
     ]
     const hasFailure = doctorChecks.some((c) => c.status === "fail")
     const hasWarn = doctorChecks.some((c) => c.status === "warn") || secretScan.findings.length > 0
-    res.json({ status: hasFailure ? "failed" : hasWarn ? "degraded" : "healthy", checkedAt: deps.now(), doctor: { status: hasFailure ? "fail" : hasWarn ? "warn" : "pass", checkedAt: deps.now(), workspaceDir: deps.workspaceRoot, checks: doctorChecks }, memory: { available: true, dataDir: deps.dataRoot }, safeMode, backups: backups.map((b) => ({ id: b.id, createdAt: b.createdAt, entries: b.entries })), migrations: [], watchdog: { enabled: true, services: [{ name: "gateway", healthy: true, failures: 0, lastMessage: "Persistent gateway is running.", lastCheckedAt: deps.now() }, { name: "database", healthy: true, failures: 0, lastMessage: "SQLite reachable.", lastCheckedAt: deps.now() }] }, jobs: { items, stats }, performance: [{ name: "health-check", durationMs: 0 }], audit: [], secretScan, components })
+    const remoteSetupEnabled = ["1", "true"].includes(String(process.env.MIKI_ALLOW_REMOTE_SETUP || "").trim().toLowerCase())
+    res.json({ status: hasFailure ? "failed" : hasWarn ? "degraded" : "healthy", checkedAt: deps.now(), security: { remote_setup_enabled: remoteSetupEnabled, warnings: remoteSetupEnabled ? ["Remote first-time setup is enabled; protect MIKI_SETUP_TOKEN and disable remote setup after initialization."] : [] }, doctor: { status: hasFailure ? "fail" : hasWarn ? "warn" : "pass", checkedAt: deps.now(), workspaceDir: deps.workspaceRoot, checks: doctorChecks }, memory: { available: true, dataDir: deps.dataRoot }, safeMode, backups: backups.map((b) => ({ id: b.id, createdAt: b.createdAt, entries: b.entries })), migrations: [], watchdog: { enabled: true, services: [{ name: "gateway", healthy: true, failures: 0, lastMessage: "Persistent gateway is running.", lastCheckedAt: deps.now() }, { name: "database", healthy: true, failures: 0, lastMessage: "SQLite reachable.", lastCheckedAt: deps.now() }] }, jobs: { items, stats }, performance: [{ name: "health-check", durationMs: 0 }], audit: [], secretScan, components })
   })
   router.post("/enhancements/doctor/run", deps.requireAuth, async (_req, res) => {
     const secretScan = await scanSecrets(deps.workspaceRoot)
@@ -1315,8 +1332,7 @@ export function createDashboardExtendedRouter(deps: DashboardExtendedDeps): Rout
 
   deps.registerShutdownHandler?.(async () => {
     dashboardShuttingDown = true
-    if (evolutionTimer) clearInterval(evolutionTimer)
-    unsubscribeMessageSent?.()
+    await unifiedController.stop()
     await evolutionTask?.catch((error) => {
       deps.appendGatewayLog(`Evolution cycle did not stop cleanly: ${error instanceof Error ? error.message : String(error)}`)
     })

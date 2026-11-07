@@ -5,6 +5,19 @@
  */
 
 const WORD_RE = /[\p{L}\p{M}\p{N}]+/gu;
+const ENGLISH_STOP_WORDS = new Set((
+  "a an the and or but if then so of to in on at by for with from as into about is are was were be been being am " +
+  "do does did doing have has had will would can could should may might must it its this that these those " +
+  "there here than too very just also please tell give show let"
+).split(" "));
+// Conservative Bengali function words only. Possessives, pronouns, demonstratives,
+// question words, negation (না/নেই), and quantifiers stay searchable.
+const BENGALI_STOP_WORDS = new Set([
+  "এবং", "বা", "কিন্তু", "যে", "যদি", "তাহলে", "জন্য", "থেকে", "মধ্যে", "সাথে", "সঙ্গে",
+  "করো", "করুন", "করা", "করে", "করি", "করবো", "করতে", "হবে", "হয়", "হয়ে", "হচ্ছে", "আছে",
+  "এর", "ওর", "তার", "তাদের", "তাকে",
+]);
+const BENGALI_SUFFIXES = ["গুলোকে", "গুলিকে", "গুলোর", "গুলির", "দেরকে", "গুলো", "গুলি", "টিকে", "টির", "টার", "দের", "েরা", "য়ের", "ের", "কে", "তে", "রা", "টা", "টি"].sort((a, b) => b.length - a.length);
 const DEFAULT_TARGET_TOKENS = 400;
 const DEFAULT_OVERLAP_TOKENS = 80;
 const DEFAULT_RECENCY_HALF_LIFE_DAYS = 30;
@@ -30,10 +43,26 @@ interface LocatedToken {
 }
 
 /** Unicode-property tokenization keeps combining marks and Bengali words intact. */
+export function normalizeSearchText(text: string): string {
+  return text.normalize("NFKC").replace(/[\u200c\u200d\ufeff]/g, "")
+    .replace(/\u09df/g, "\u09af\u09bc").replace(/\u09dc/g, "\u09a1\u09bc")
+    .replace(/\u09dd/g, "\u09a2\u09bc").toLocaleLowerCase();
+}
+
 export function tokenizeSearchText(text: string): string[] {
-  return [...text.normalize("NFKC").toLocaleLowerCase().matchAll(WORD_RE)].map(
-    (match) => match[0],
-  );
+  const tokens = [...normalizeSearchText(text).matchAll(WORD_RE)].map((match) => {
+    let token = match[0];
+    if (/[\u0980-\u09ff]/u.test(token)) {
+      const suffix = BENGALI_SUFFIXES.find((ending) => token.length - ending.length >= 3 && token.endsWith(ending));
+      if (suffix) token = token.slice(0, -suffix.length);
+    }
+    if (token === "কী" || token === "কি") return "কি";
+    if (token === "কীভাবে" || token === "কিভাবে") return "কিভাবে";
+    if (token === "মেমরি") return "মেমোরি";
+    if (token === "ইন্সটল") return "ইনস্টল";
+    return token;
+  });
+  return tokens.filter((token) => token.length > 1 && !ENGLISH_STOP_WORDS.has(token) && !BENGALI_STOP_WORDS.has(token));
 }
 
 /**

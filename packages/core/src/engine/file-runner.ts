@@ -58,11 +58,16 @@ const ENV_ALLOWLIST = [
 export function buildRunEnvironment(
   source: NodeJS.ProcessEnv = process.env,
   extra: Record<string, string> = {},
+  inheritAll = false,
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of ENV_ALLOWLIST) {
-    const value = source[key];
-    if (typeof value === "string") env[key] = value;
+  if (inheritAll) {
+    for (const [key, value] of Object.entries(source)) if (typeof value === "string") env[key] = value;
+  } else {
+    for (const key of ENV_ALLOWLIST) {
+      const value = source[key];
+      if (typeof value === "string") env[key] = value;
+    }
   }
   return { ...env, ...extra, MIKI_FILE_RUN: "1" };
 }
@@ -83,6 +88,10 @@ export interface RunFileOptions {
   signal?: AbortSignal;
   /** Extra environment on top of the allowlist. */
   env?: Record<string, string>;
+  /** Sandbox owner mode can run guest scripts in files normally classified as secrets. */
+  allowSensitiveFiles?: boolean;
+  /** Sandbox owner mode passes the guest process environment, including credentials, to scripts. */
+  inheritEnvironment?: boolean;
 }
 
 export type RunOutcome = "ok" | "failed" | "timeout" | "cancelled" | "output_limit";
@@ -101,8 +110,7 @@ export interface RunFileResult {
   file: string;
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_TIMEOUT_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = 0; // 0 means no wall-clock deadline; cancellation remains available.
 const DEFAULT_MAX_OUTPUT = 256 * 1024;
 const MAX_SCRIPT_BYTES = 5 * 1024 * 1024;
 const MAX_ARGS = 32;
@@ -110,7 +118,13 @@ const MAX_ARG_LENGTH = 2048;
 const KILL_GRACE_MS = 2_000;
 
 let activeRuns = 0;
-const MAX_CONCURRENT_RUNS = Number(process.env.MIKI_FILE_RUN_MAX_CONCURRENT || 3);
+const configuredFileRunConcurrency = Number(process.env.MIKI_FILE_RUN_MAX_CONCURRENT);
+// A CPU-derived admission ceiling avoids a hard-coded script count while protecting
+// the host from unbounded subprocess fan-out. Set MIKI_FILE_RUN_MAX_CONCURRENT to
+// an explicit positive integer to impose an operator-selected resource ceiling.
+const MAX_CONCURRENT_RUNS = Number.isSafeInteger(configuredFileRunConcurrency) && configuredFileRunConcurrency > 0
+  ? configuredFileRunConcurrency
+  : Math.max(1, os.availableParallelism());
 
 export function activeFileRuns(): number {
   return activeRuns;
@@ -135,7 +149,7 @@ export function prepareRun(options: RunFileOptions): {
   } catch (error) {
     throw new FileRunError(403, "outside_workspace", errorMessage(error));
   }
-  if (isSensitivePath(absFile))
+  if (!options.allowSensitiveFiles && isSensitivePath(absFile))
     throw new FileRunError(403, "sensitive_file", "Credential and secret files cannot be executed.");
 
   let stat: fs.Stats;
@@ -238,9 +252,9 @@ export async function runWorkspaceFile(options: RunFileOptions): Promise<RunFile
     throw new FileRunError(429, "busy", `Too many scripts are running (limit ${MAX_CONCURRENT_RUNS}). Try again shortly.`);
   if (options.signal?.aborted) throw new FileRunError(499, "cancelled", "The run was cancelled before it started.");
 
-  const timeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(100, options.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+  const timeoutMs = Number.isFinite(options.timeoutMs) && Number(options.timeoutMs) > 0 ? Math.floor(Number(options.timeoutMs)) : DEFAULT_TIMEOUT_MS;
   const cap = Math.max(1024, options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT);
-  const env = buildRunEnvironment(process.env, options.env);
+  const env = buildRunEnvironment(process.env, options.env, options.inheritEnvironment === true);
   const home = env.HOME || os.homedir();
   if (!env.HOME && home) env.HOME = home;
 
@@ -299,7 +313,7 @@ export async function runWorkspaceFile(options: RunFileOptions): Promise<RunFile
     running.stdout?.on("data", collect("stdout"));
     running.stderr?.on("data", collect("stderr"));
 
-    const timeout = setTimeout(() => stop("timeout"), timeoutMs);
+    const timeout = timeoutMs > 0 ? setTimeout(() => stop("timeout"), timeoutMs) : undefined;
     const onAbort = () => stop("cancelled");
     options.signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -307,7 +321,7 @@ export async function runWorkspaceFile(options: RunFileOptions): Promise<RunFile
       running.once("error", () => resolve({ code: null, signal: null }));
       running.once("close", (code, signal) => resolve({ code, signal }));
     });
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
     if (killTimer) clearTimeout(killTimer);
     options.signal?.removeEventListener("abort", onAbort);
     // Anything the script left running in its process group goes with it.

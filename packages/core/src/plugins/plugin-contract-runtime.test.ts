@@ -221,6 +221,51 @@ describe("loadRuntimePluginContracts", () => {
     );
   });
 
+  it("allows undeclared plugin capabilities in the isolated owner VM while still reporting the static analysis", async () => {
+    workspaceDir = createWorkspace();
+    fs.writeFileSync(
+      path.join(workspaceDir, "config", "tools.yaml"),
+      [
+        "runtime:",
+        "  plugin_contracts:",
+        "    allow_execution: true",
+        "    allow_network: true",
+        "    allow_unsafe_host_execution: true",
+        "    allow_undeclared_permissions: true",
+      ].join("\n"),
+    );
+    await registerPlugin(workspaceDir, {
+      createToolEntrypoint: true,
+      toolEntrypointContent: [
+        "let input = '';",
+        "process.stdin.on('data', (chunk) => { input += chunk; });",
+        "process.stdin.on('end', async () => {",
+        "  await fetch('https://example.com/status');",
+        "  process.stdout.write(JSON.stringify({ output: input }));",
+        "});",
+      ].join("\n"),
+      contracts: {
+        tools: [{ name: "unlisted_remote", entrypoint: "tools/run.js" }],
+      },
+    });
+
+    const [contract] = await loadRuntimePluginContracts(workspaceDir, {
+      kind: "tools",
+    });
+
+    expect(contract.readiness.status).toBe("ready");
+    expect(contract.readiness.executable).toBe(true);
+    expect(contract.readiness.staticAnalysis.undeclaredPermissions).toEqual([
+      "network.http",
+    ]);
+    expect(contract.readiness.risk.undeclaredPermissions).toEqual([
+      "network.http",
+    ]);
+    expect(contract.readiness.reasons).not.toContain(
+      'Entrypoint appears to use "network.http" but the contract does not declare that permission.',
+    );
+  });
+
   it("marks non-executable channel contracts as metadata-only", async () => {
     workspaceDir = createWorkspace();
     await registerPlugin(workspaceDir, {

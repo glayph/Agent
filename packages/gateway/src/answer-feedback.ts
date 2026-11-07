@@ -111,6 +111,14 @@ export function feedbackNoteFor(rows: StoredFeedback[]): string | undefined {
 
 export type FollowUpFeedback = "none" | "approval" | "rejection" | "correction"
 
+/** True only for wording that explicitly asks Miki to retain a durable preference. */
+export function isDurablePreferenceFeedback(text: string): boolean {
+  const value = text.trim()
+  if (!value || value.length > 1_000) return false
+  return /\b(please remember|my preference is|from now on|i prefer|i always want|always use|never use|don\'?t ever|do not ever)\b/i.test(value)
+    || /(?:মনে\s*রাখ(?:বে|ো|ি)|আমার\s+পছন্দ(?:ের)?|সবসময়\s+(?:এভাবে|এইভাবে|বাংলায়|বাংলায়)|সর্বদা\s+(?:এভাবে|এইভাবে)|ভবিষ্যতে\s+(?:এভাবে|এইভাবে)|আমি\s+চাই\s+তুমি\s+(?:সবসময়|সর্বদা|প্রতিবার)|কখনোই\s+(?:এটা|এভাবে)\s+করবে\s+না)/u.test(value)
+}
+
 export interface FollowUpClassification {
   feedback: FollowUpFeedback
   /** The user's own words on what should change (or why it was rejected). Empty when there is none. */
@@ -174,17 +182,12 @@ export function preferenceNote(correction: string): string {
 }
 
 /**
- * Cheap gate in front of the classifier model. It is deliberately wide: the classifier is the real judge and answers
- * "none" for anything that is not feedback. It lets through common feedback wording in English and every message that
- * contains non-Latin letters (so feedback in any other language is never skipped for its wording alone).
+ * Size gate in front of the classifier model. No wording list decides anything: the classifier is the
+ * real judge, in any language or script, and answers "none" for anything that is not feedback.
  */
-const FEEDBACK_WORDING = /\b(thanks?|thank you|thx|great|perfect|awesome|excellent|nice|good (?:answer|job|work)|well done|exactly|correct|right|wrong|incorrect|not (?:what|right|correct|true|quite)|that'?s (?:right|wrong|not|incorrect|correct|perfect|great)|you are wrong|you'?re wrong|i meant|i said|i asked|i wanted|instead|actually|should (?:be|have|not)|shouldn'?t|too (?:long|short|verbose|formal|vague)|(?:shorter|longer|simpler|clearer|briefer|more (?:detail|concise|formal))|try again|redo|rewrite|fix (?:it|that|this)|doesn'?t (?:work|help)|didn'?t (?:work|help)|not helpful|useless|bad (?:answer|response)|please (?:correct|remember|stop)|remember|my preference|from now on|i prefer|i always|always|never|stop|don'?t|do not)\b/i
-
 export function mayBeFollowUpFeedback(text: string): boolean {
   const message = text.trim()
-  if (!message || message.length > 1000) return false
-  if (FEEDBACK_WORDING.test(message)) return true
-  return message.length <= 400 && /[^\u0000-\u024f\s\d\p{P}\p{S}]/u.test(message)
+  return message.length > 0 && message.length <= 1000
 }
 
 export interface FeedbackRateResult {

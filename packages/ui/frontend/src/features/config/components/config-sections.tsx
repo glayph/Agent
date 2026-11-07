@@ -1282,9 +1282,9 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
         >
           <Input
             type="number"
-            min={0.25}
-            max={1440}
-            step={0.25}
+            min={5}
+            max={86400}
+            step={1}
             value={form.heartbeatInterval}
             onChange={(e) => onFieldChange("heartbeatInterval", e.target.value)}
           />

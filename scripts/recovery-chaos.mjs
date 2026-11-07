@@ -259,7 +259,40 @@ const scenarios = {
   // 7. Model server down / loading: the health script never restarts a loading server, and restarts a dead one only after repeated failures.
   async model() { runNode([path.join(root, "scripts", "healthcheck-dryrun.mjs")], "health script dry run (model loading vs model dead)"); },
 
-  // 8. Damaged database: restored from the newest backup, and the incident is on record.
+  // 8. Recovery replay itself fails transiently: the incident stays open and replay is retried after stable green checks.
+  async recoveryReplay() {
+    const { RecoveryManager } = await import(path.join(buildDir, "recovery-manager.js"));
+    const Database = require("better-sqlite3");
+    const db = new Database(":memory:");
+    let healthy = false; let attempts = 0;
+    const recovery = new RecoveryManager({
+      db, intervalMs: 100, requiredGreen: 2, log: () => {},
+      check: async () => ({ ok: healthy, reason: "synthetic network outage" }),
+      onRecovered: async () => { attempts += 1; if (attempts === 1) throw new Error("synthetic replay failure"); return 2; },
+    });
+    try {
+      await recovery.tick(); healthy = true; await recovery.tick(); await recovery.tick();
+      if (recovery.state !== "disrupted" || db.prepare("SELECT ended_at FROM recovery_incidents").get().ended_at !== null) throw new Error("failed replay incorrectly closed the incident");
+      await recovery.tick(); await recovery.tick();
+      if (recovery.state !== "healthy" || attempts !== 2 || db.prepare("SELECT replayed FROM recovery_incidents").get().replayed !== 2) throw new Error("replay was not retried and recorded");
+    } finally { recovery.stop(); db.close(); }
+  },
+
+  // 9. Two backups in one timestamp slot must not overwrite one another.
+  async backupCollision() {
+    const { DatabaseBackups, listBackups } = await import(path.join(buildDir, "process-safety.js"));
+    const Database = require("better-sqlite3");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-backup-collision-"));
+    const db = new Database(path.join(dir, "runtime.sqlite"));
+    try {
+      db.exec("CREATE TABLE t(v TEXT)"); db.prepare("INSERT INTO t VALUES('kept')").run();
+      const backups = new DatabaseBackups(db, path.join(dir, "backups"), () => {}, { now: () => new Date("2026-11-01T00:00:00.000Z") });
+      const first = await backups.backupNow(); const second = await backups.backupNow();
+      if (!first || !second || first === second || listBackups(path.join(dir, "backups")).length !== 2) throw new Error("backup collision overwrote a prior backup");
+    } finally { db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+  },
+
+  // 10. Damaged database: restored from the newest backup, and the incident is on record.
   async db() {
     const { ensureHealthyDatabase, DatabaseBackups, recordDatabaseIncident } = await import(path.join(buildDir, "process-safety.js"));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-chaos-db-"));

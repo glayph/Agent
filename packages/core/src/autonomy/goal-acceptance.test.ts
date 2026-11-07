@@ -28,13 +28,13 @@ describe("Goal Acceptance Contract", () => {
     expect(result.passed).toBe(false);
     expect(result.reason).toMatch(/No deterministic Goal Acceptance Contract/);
   });
-  it("stops acceptance evaluation when the total verification budget is exhausted", async () => {
+  it("evaluates every acceptance check without an aggregate wall-clock budget", async () => {
     const result = await verifyGoalAcceptance({ checks: [
       { type: "file_exists", path: "missing.txt" },
       { type: "final_text_contains", text: "complete" },
     ] }, { finalText: "complete", workspaceRoot: process.cwd() }, 0);
-    expect(result.checks.length).toBeGreaterThanOrEqual(1);
-    expect(result.checks.some((check) => check.type === "budget_exhausted")).toBe(true);
+    expect(result.checks).toHaveLength(2);
+    expect(result.checks.map((check) => check.type)).toEqual(["file_exists", "final_text_contains"]);
     expect(result.passed).toBe(false);
   });
 

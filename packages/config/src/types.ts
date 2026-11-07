@@ -89,6 +89,7 @@ export interface AgentConfig {
     identity?: { path?: string };
     language: string;
     timezone: string;
+    verify_actions?: boolean;
     memory: {
       short_term_limit: number;
       long_term_enabled: boolean;
@@ -112,9 +113,7 @@ export interface AgentConfig {
         scheduled_tasks: boolean;
         memory_consolidation: boolean;
       };
-      auto_actions: { enabled: boolean; max_actions_per_cycle: number };
       resource_limits: {
-        max_tokens_per_cycle: number;
         max_idle_minutes: number;
       };
     };
@@ -169,6 +168,8 @@ export interface LLMChoiceMessage {
   role?: string;
   content?: string | null;
   tool_calls?: ToolCall[];
+  /** Provider-native assistant metadata that must round-trip unchanged. */
+  extra_content?: Record<string, unknown>;
 }
 
 export interface LLMChoice {

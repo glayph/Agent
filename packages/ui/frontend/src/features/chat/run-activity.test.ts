@@ -33,10 +33,30 @@ describe("describeRunActivity", () => {
     expect(result.text).toContain("1m 35s")
     expect(result.text).toContain("Stop")
   })
-  it("never calls a running command slow, and says it is not stopped automatically", () => {
+  it("warns that a quiet tool may be stalled and that the watchdog will stop it at its limit", () => {
     const result = describeRunActivity(activity({ activity: "tool", label: "terminal_run" }), 600)
+    expect(result.slow).toBe(true)
+    expect(result.text).toContain("may be stalled")
+    expect(result.text).toContain("inactivity watchdog will stop it")
+  })
+  it("does not call a command stalled before the warning threshold", () => {
+    const result = describeRunActivity(activity({ activity: "tool", label: "terminal_run" }), 120)
     expect(result.slow).toBe(false)
-    expect(result.text).toContain("never stopped automatically")
+    expect(result.text).toContain("Running a command")
+  })
+
+  it("reports when the gateway has reached the actual inactivity timeout", () => {
+    const result = describeRunActivity(activity({ inactivityTimeoutReached: true }), 1800)
+    expect(result.slow).toBe(true)
+    expect(result.text).toContain("inactivity limit has been reached")
+    expect(result.text).toContain("stopping this run")
+  })
+
+  it("shows model verification phases as live activity", () => {
+    expect(describeRunActivity(activity({ label: "verifying the answer" }), 10)).toEqual({
+      text: "verifying the answer",
+      slow: false,
+    })
   })
   it("names other tools, approvals and writing", () => {
     expect(describeRunActivity(activity({ activity: "tool", label: "web_search" }), 3).text).toBe("Using web_search")

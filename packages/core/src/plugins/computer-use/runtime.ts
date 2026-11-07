@@ -1798,6 +1798,10 @@ export class ComputerAgent {
 
   async observe(args: Record<string, unknown>): Promise<string> {
     try {
+      // A fresh observation is a reconciliation boundary: cached element IDs
+      // are tied to the prior UI tree and must not survive a desktop restart,
+      // window replacement or new Accessibility/DOM snapshot.
+      this.elementCache.clear();
       const options: ComputerObserveOptions = {
         ...getWindowTarget(args),
         activeOnly: Boolean(args["active_only"] ?? args["activeOnly"]),
@@ -1818,6 +1822,24 @@ export class ComputerAgent {
       return this.formatResult(result);
     } catch (err) {
       return this.formatError("observe", err);
+    }
+  }
+
+  /** Refreshes the native desktop window/UI tree after a computer-session interruption. */
+  async reconcileAfterCrash(): Promise<string> {
+    const observed = await this.observe({ active_only: true, max_elements: 120 });
+    try {
+      const parsed = JSON.parse(observed) as Record<string, unknown>;
+      return JSON.stringify({
+        ...parsed,
+        action: "reconcile",
+        reconciledAt: new Date().toISOString(),
+        message: typeof parsed.message === "string"
+          ? parsed.message
+          : "Desktop windows and accessible elements were re-enumerated; old element IDs were invalidated.",
+      }, null, 2);
+    } catch {
+      return observed;
     }
   }
 
@@ -2057,6 +2079,90 @@ export class ComputerAgent {
     } catch (err) {
       return this.formatError("get_system_info", err);
     }
+  }
+
+  /** Reports runtime-derived desktop capabilities; unsupported actions are explicit. */
+  async getCapabilities(_args: Record<string, unknown> = {}): Promise<string> {
+    const platform = process.platform
+    if (platform === "win32") {
+      return this.formatResult({
+        ok: true,
+        action: "capabilities",
+        data: {
+          platform,
+          backend: "windows-ui-automation",
+          semanticUiAutomation: true,
+          actions: {
+            listWindows: true, observe: true, focus: true, screenshot: true,
+            invoke: true, setText: true, hotkey: true, clipboard: true, launch: true,
+            verify: true, clickAt: true, drag: true, scroll: true, listDisplays: true,
+            listProcesses: true, getSystemInfo: true, terminateApp: true,
+          },
+          limitations: [],
+        },
+        message: "Windows UI Automation backend is available in this runtime build; OS permission and desktop-session availability are still enforced when each action runs.",
+      })
+    }
+    if (platform === "darwin") {
+      return this.formatResult({
+        ok: true,
+        action: "capabilities",
+        data: {
+          platform,
+          backend: "partial-macos-window-enumeration",
+          semanticUiAutomation: false,
+          actions: {
+            listWindows: true, observe: false, focus: false, screenshot: false,
+            invoke: false, setText: false, hotkey: false, clipboard: false, launch: false,
+            verify: false, clickAt: false, drag: false, scroll: false, listDisplays: false,
+            listProcesses: false, getSystemInfo: false, terminateApp: false,
+          },
+          limitations: ["The current ComputerAgent has an AppleScript window-listing path only; other desktop actions are not implemented for macOS."],
+        },
+        message: "Capability report reflects the current source backend, not inferred macOS capabilities.",
+      })
+    }
+    if (platform !== "linux") {
+      return this.formatResult({ ok: true, action: "capabilities", data: { platform, backend: "unsupported", actions: {}, limitations: ["No ComputerAgent desktop backend is implemented for this platform."] } })
+    }
+
+    const displayReason = linuxX11UnavailableReason()
+    const commandAvailable = async (command: string): Promise<boolean> => {
+      if (displayReason) return false
+      try {
+        const result = await execFileText("which", [command], { timeout: 1_500, maxBuffer: 4_096 })
+        return result.stdout.trim().length > 0
+      } catch { return false }
+    }
+    const [xdotool, xclip, imagemagick, ffmpeg, xrandr, ps, pgrep] = await Promise.all([
+      commandAvailable("xdotool"), commandAvailable("xclip"), commandAvailable("import"),
+      commandAvailable("ffmpeg"), commandAvailable("xrandr"), commandAvailable("ps"),
+      commandAvailable("pgrep"),
+    ])
+    const gui = !displayReason && xdotool
+    const screenshot = gui && (imagemagick || ffmpeg)
+    const actions = {
+      listWindows: gui, observe: gui, focus: gui, screenshot,
+      invoke: false, setText: false, hotkey: gui, clipboard: gui && xclip, launch: false,
+      verify: false, clickAt: gui, drag: gui, scroll: gui, listDisplays: gui && xrandr,
+      listProcesses: ps, getSystemInfo: true, terminateApp: ps && pgrep,
+    }
+    const limitations = [
+      ...(displayReason ? [displayReason] : []),
+      ...(!displayReason && !xdotool ? ["xdotool is unavailable; X11 window and pointer/keyboard operations cannot run."] : []),
+      ...(!xclip ? ["xclip is unavailable; clipboard actions cannot run."] : []),
+      ...(!imagemagick && !ffmpeg ? ["Neither ImageMagick import nor ffmpeg is available; screenshot capture cannot run."] : []),
+      ...(!ps ? ["ps is unavailable; process listing and process-name resolution cannot run."] : []),
+      ...(!pgrep ? ["pgrep is unavailable; process-name termination cannot run."] : []),
+      "Linux X11 exposes window metadata only; semantic control discovery, element invoke, text entry and UI-content verification are not implemented.",
+      "Linux Wayland-only sessions are unsupported by the current backend.",
+    ]
+    return this.formatResult({
+      ok: true,
+      action: "capabilities",
+      data: { platform, backend: "linux-x11-coordinate-window-metadata", displayAvailable: !displayReason, commands: { xdotool, xclip, imagemagick, ffmpeg, xrandr, ps, pgrep }, semanticUiAutomation: false, actions, limitations },
+      message: "Linux capabilities are derived from the current display and installed helper commands. Each action still performs its own runtime preflight.",
+    })
   }
 
   async listDisplays(_args: Record<string, unknown>): Promise<string> {

@@ -4,6 +4,9 @@ import path from "node:path";
 import {
   MAX_ATTACHMENTS_PER_RUN,
   MEDIA_ROUTE,
+  OUTBOX_DIR,
+  sentPathsFromToolCall,
+  stageChatFile,
   candidatePathsFromToolCall,
   createAttachmentCollector,
   describeFile,
@@ -133,5 +136,96 @@ describe("chat attachments", () => {
     fs.mkdirSync(path.join(workspace, "dir.png"));
     expect(resolveMediaPath("nope.png", ctx())).toBeNull();
     expect(resolveMediaPath("dir.png", ctx())).toBeNull();
+  });
+
+  describe("explicit delivery (chat_send_file)", () => {
+    it("references a known file inside the workspace in place", async () => {
+      fs.writeFileSync(path.join(workspace, "clip.mp4"), "video-bytes");
+      const staged = await stageChatFile("clip.mp4", ctx());
+      expect(staged.copied).toBe(false);
+      expect(staged.attachment).toMatchObject({ type: "video", filename: "clip.mp4", content_type: "video/mp4" });
+      expect(decodeURIComponent(staged.attachment.url.split("path=")[1])).toBe(fs.realpathSync(path.join(workspace, "clip.mp4")));
+    });
+
+    it("copies files from outside the workspace into the outbox once and serves the copy", async () => {
+      const source = path.join(outside, "report.pdf");
+      fs.writeFileSync(source, "pdf-bytes");
+      const first = await stageChatFile(source, ctx(), { allowOutsideWorkspace: true });
+      const second = await stageChatFile(source, ctx(), { allowOutsideWorkspace: true });
+      expect(first.copied).toBe(true);
+      expect(first.attachment).toMatchObject({ type: "file", filename: "report.pdf", content_type: "application/pdf" });
+      expect(second.attachment.url).toBe(first.attachment.url);
+      const served = resolveMediaPath(decodeURIComponent(first.attachment.url.split("path=")[1]), ctx());
+      expect(served).not.toBeNull();
+      expect(served!.includes(OUTBOX_DIR)).toBe(true);
+      expect(fs.readFileSync(served!, "utf8")).toBe("pdf-bytes");
+      expect(fs.readdirSync(path.join(workspace, OUTBOX_DIR))).toHaveLength(1);
+    });
+
+    it("serves unknown file types only from the outbox, as generic downloads", async () => {
+      const source = path.join(outside, "app.apk");
+      fs.writeFileSync(source, "apk");
+      const staged = await stageChatFile(source, ctx(), { allowOutsideWorkspace: true });
+      expect(staged.attachment).toMatchObject({ type: "file", filename: "app.apk", content_type: "application/octet-stream" });
+      expect(resolveMediaPath(decodeURIComponent(staged.attachment.url.split("path=")[1]), ctx())).not.toBeNull();
+      // The same type directly in the workspace stays refused by the media route.
+      fs.writeFileSync(path.join(workspace, "direct.apk"), "apk");
+      expect(resolveMediaPath("direct.apk", ctx())).toBeNull();
+    });
+
+    it("keeps non-ASCII file names", async () => {
+      fs.writeFileSync(path.join(workspace, "রিপোর্ট.pdf"), "pdf");
+      const staged = await stageChatFile("রিপোর্ট.pdf", ctx());
+      expect(staged.attachment.filename).toBe("রিপোর্ট.pdf");
+    });
+
+    it("refuses outside files when the workspace is enforced, but allows the agent's own working folder", async () => {
+      const source = path.join(outside, "photo.png");
+      fs.writeFileSync(source, "png");
+      await expect(stageChatFile(source, ctx(), {})).rejects.toThrow(/outside the workspace/);
+      const staged = await stageChatFile("photo.png", ctx(), { baseDir: outside, extraAllowedRoots: [outside] });
+      expect(staged.copied).toBe(true);
+      expect(staged.attachment.type).toBe("image");
+    });
+
+    it("never sends secrets, databases, directories, empty or missing files", async () => {
+      fs.writeFileSync(path.join(workspace, ".env"), "KEY=1");
+      fs.writeFileSync(path.join(outside, "id_rsa"), "key");
+      fs.writeFileSync(path.join(workspace, "empty.png"), "");
+      fs.mkdirSync(path.join(workspace, "folder"));
+      await expect(stageChatFile(".env", ctx())).rejects.toThrow(/never sent/);
+      await expect(stageChatFile(path.join(outside, "id_rsa"), ctx(), { allowOutsideWorkspace: true })).rejects.toThrow(/never sent/);
+      await expect(stageChatFile("empty.png", ctx())).rejects.toThrow(/empty/);
+      await expect(stageChatFile("folder", ctx())).rejects.toThrow(/directory/);
+      await expect(stageChatFile("missing.png", ctx())).rejects.toThrow(/not found/i);
+      await expect(stageChatFile("", ctx())).rejects.toThrow(/required/);
+    });
+
+    it("does not follow a symlink to a secret", async () => {
+      fs.writeFileSync(path.join(outside, "token.key"), "secret");
+      fs.symlinkSync(path.join(outside, "token.key"), path.join(workspace, "innocent.png"));
+      await expect(stageChatFile("innocent.png", ctx(), { allowOutsideWorkspace: true })).rejects.toThrow(/never sent/);
+    });
+
+    it("reads delivered paths from a succeeded call and the collector skips them", () => {
+      expect(sentPathsFromToolCall({ name: "chat_send_file", status: "succeeded", arguments: JSON.stringify({ path: "a.png", paths: ["b.png"] }) })).toEqual(["a.png", "b.png"]);
+      expect(sentPathsFromToolCall({ name: "chat_send_file", status: "failed", arguments: '{"path":"a.png"}' })).toEqual([]);
+      fs.writeFileSync(path.join(workspace, "chart.svg"), "<svg></svg>");
+      const collector = createAttachmentCollector(ctx);
+      collector.observe({ name: "file_write", status: "succeeded", arguments: JSON.stringify({ path: "chart.svg" }) });
+      expect(collector.list()).toHaveLength(1);
+      collector.observe({ name: "chat_send_file", status: "succeeded", arguments: JSON.stringify({ path: "chart.svg" }) });
+      expect(collector.list()).toHaveLength(0);
+      collector.observe({ name: "file_write", status: "succeeded", arguments: JSON.stringify({ path: "chart.svg" }) });
+      expect(collector.list()).toHaveLength(0);
+    });
+
+    it("does not auto-attach source or config files written during a task", () => {
+      expect(candidatePathsFromToolCall({ name: "file_write", status: "succeeded", arguments: '{"path":"src/app.py"}' })).toEqual([]);
+      expect(candidatePathsFromToolCall({ name: "file_write", status: "succeeded", arguments: '{"path":"config.json"}' })).toEqual([]);
+      expect(candidatePathsFromToolCall({ name: "file_write", status: "succeeded", arguments: '{"path":"notes.md"}' })).toEqual(["notes.md"]);
+      expect(describeFile("x.unknownext")).toBeNull();
+      expect(describeFile("x.unknownext", { fallback: true })).toEqual({ type: "file", contentType: "application/octet-stream" });
+    });
   });
 });

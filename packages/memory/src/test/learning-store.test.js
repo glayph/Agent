@@ -100,6 +100,33 @@ async function main() {
     "pending_approval",
   );
 
+
+  const appliedProposal = store.createProposal({
+    scope: makeScope(),
+    kind: "reflection",
+    payload: { finding: "old applied note" },
+    evidenceIds: [first.row.id],
+    status: "applied",
+    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+  });
+  const oldPendingProposal = store.createProposal({
+    scope: makeScope(),
+    kind: "policy",
+    payload: { recommendedAction: "pending review" },
+    evidenceIds: [first.row.id],
+    status: "pending_approval",
+    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+  });
+  db.prepare("UPDATE learning_experiences SET created_at=? WHERE id=?").run(new Date(Date.now() - 30 * 86400000).toISOString(), first.row.id);
+  db.prepare("UPDATE improvement_cycles SET completed_at=? WHERE id=?").run(new Date(Date.now() - 30 * 86400000).toISOString(), cycle.id);
+  const pruned = store.pruneLearningData(makeScope(), 7);
+  assert.strictEqual(pruned.experiences, 1);
+  assert.strictEqual(pruned.cycles, 1);
+  assert.strictEqual(pruned.proposals, 1);
+  assert.strictEqual(store.getProposal(makeScope(), appliedProposal.id), null);
+  assert.strictEqual(store.getProposal(makeScope(), oldPendingProposal.id).status, "pending_approval", "pending owner review must never be pruned");
+  assert.strictEqual(store.listExperiences(makeScope()).length, 0);
+
   db.close();
 
   const tkgPath = path.join(dir, "tkg.db");

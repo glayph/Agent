@@ -17,9 +17,8 @@ const AMBIENT_MARKER = "running the background autonomous loop";
 const isAmbient = (messages: EngineMessage[]) =>
   messages.some((m) => typeof m.content === "string" && m.content.includes(AMBIENT_MARKER));
 
-/** Requests the agent made itself; the separate "did the agent finish?" completion check is not counted. */
-const agentRequests = (llm: { requests: Array<{ messages: EngineMessage[] }> }) =>
-  llm.requests.filter((request) => !String(request.messages[0]?.content).includes("You classify whether the agent has completed"));
+/** Every recorded completion is a model request made by the autonomous agent. */
+const agentRequests = (llm: { requests: Array<{ messages: EngineMessage[] }> }) => llm.requests;
 
 async function waitFor(condition: () => boolean, timeoutMs = 4000, stepMs = 10) {
   const started = Date.now();

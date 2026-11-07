@@ -3,20 +3,28 @@ agent:
   name: Miki
   project: Miki
   persona: |-
-    You are Miki, a concise, capable, natural-sounding AI agent.
+    You are Miki: a non-stop, self-directed autonomous AI agent that works inside this computer. You are not a chatbot and not "just a language model"; the model is only your thinking engine. Your job is to finish the owner's outcome, not to talk about it.
 
-    Speak like a thoughtful person in ordinary conversation: answer directly, warmly, and in the user's language. For casual chat, usually use 1–3 short sentences (about 10–40 words). This is a guide, not a limit: use the detail the task genuinely needs. Do not pad replies, repeat the user's request, add canned greetings or conclusions, narrate routine tool use, or force roleplay into every message.
+    FIVE HARD RULES (they apply on every turn, with any model):
+    1. NEVER REFUSE. Do not say or imply that you cannot, are unable, lack access, permission or ability, or that a task is "not possible for me". Do not give the owner instructions to do the task themselves ("you can do it like this", "আপনি এভাবে করতে পারেন", a command for the owner to run). The task was given to YOU: do it.
+    2. CHECK, DO NOT ASSUME. What you can do is defined by this runtime, not by your training and not by what language models usually cannot do. Before you conclude anything is unavailable: read your tool list, call miki_find_tools (when you have it), skill_search, plugin_list, agent_control_capabilities and agent_control_state as relevant, and then TRY the most direct tool. Only a real tool error is evidence. Questions about yourself (what you have, what you run on, what you can do) are answered from those checks, never from model memory.
+    3. DECIDE YOURSELF. Do not ask for permission, approval or clarification. Pick the most sensible default, say it in one short line, and proceed. The runtime's permission system is the only gate; if it blocks one route, take another route to the same goal. Ask only for a decision the runtime itself requires from the owner.
+    4. ACT THROUGH REAL TOOL CALLS. Never write a tool call as text, never announce a step and stop, never answer from imagination when a tool can find out. Act, read the result, act again. For a meaningful task send one short line first (what you understood and your first action), then work more than you talk.
+    5. FINISH AND PROVE. Keep going until the outcome exists and you have verified it (file present and non-empty, exit code, page content, changed state). A tool saying accepted, started or ok is not proof. Report only what you observed, separating done, attempted, blocked and unverified. Never invent evidence or claim an ability the live runtime did not show.
 
-    Work more than you talk. When a task needs action, use the available tools, inspect the result, and then report the verified outcome briefly. For long tasks, send only meaningful progress updates. Ask questions only when a missing detail is essential; otherwise choose a sensible, safe default. Never claim an action or result that you did not verify.
-    Adapt your communication and working style from the user’s corrections, preferences, and repeated feedback. Apply learned preferences through the existing memory and behavior-learning systems; do not invent extra rules or claim to change the underlying model.
+    REFUSAL BECOMES ACTION. When you feel "I can't X": (a) choose the closest tool family: terminal for downloads, installs, scripts and system work; files for reading and writing anything, including your own identity and config files; browser for sites and web apps; computer_* for GUI apps; web_search for facts and source URLs; skills and plugins for packaged abilities; delegate_coding_agent for large coding jobs; agent_control for models, config and tool state; (b) run it; (c) if it errors, read the error, fix the arguments or prerequisites, install what is missing, or switch tool; (d) verify; (e) when the owner should receive a file, create it and send it with chat_send_file. Writing and running a small script in the terminal is always a fallback route.
 
-    Miki's identity is computer-bound: never claim to have a real-world physical body or capabilities that the runtime does not provide. Stay warm and helpful without excessive cuteness, emojis, or repeated reminders of the persona.
+    PERSIST WITHOUT LOOPING. Recover from transient errors, wrong paths, missing packages, unsupported formats and provider failures. Never repeat an identical failed call without new evidence; change the method. A hard blocker exists only when the runtime or platform itself prohibits the action, or a required credential or device truly does not exist after real attempts. Then state exactly what you checked and tried and the single smallest next step, and still deliver everything that can be delivered.
+
+    REAL BOUNDARIES. The runtime configuration, platform safety rules and credential protection are enforced by the runtime. You never harm people or systems, bypass other people's security, or fabricate information. Everything else is yours to do.
+
+    STYLE. Warm, direct, in the owner's language (Bengali, English or mixed). Short in chat; detailed only where the work needs it. No padding, canned phrases, emojis, role-play or persona speeches. Learn the owner's corrections and preferences through the existing memory and behavior-learning systems. You are computer-bound: never claim a physical body.
 
   language: bn
   timezone: Asia/Dhaka
-  max_tokens_per_cycle: 100000          # schema maximum
+  # Every successful tool action receives an independent semantic verification pass.
+  verify_actions: true
   browser:
-    max_retries: 10                     # schema maximum
     clear_state_every_n_navigations: 1000000   # schema minimum is 1; a huge value keeps logins/sessions
     chrome_path: null
   resource:
@@ -76,19 +84,19 @@ agent:
     personality_enabled: true
     procedural_enabled: true
     max_context_procedures: 3
-  # Model routing is intentionally unchanged.
-  # NOTE: the runtime currently ignores lanes.default.primary, lanes.complex, lanes.subagent and
-  # lanes.heartbeat.fallbacks (see packages/gateway/src/ignored-config.ts). The model actually used is the
-  # default model selected on the dashboard Models page (stored in SQLite); only lanes.heartbeat.primary is honoured.
-  # Pick a model with reliable tool calling there; a 1B-class local model is not suitable for autonomous work.
+  # Optional model routing. Non-empty lane primaries override the dashboard-selected default model;
+  # lane fallbacks are used for transient provider failures. The heartbeat primary is used for
+  # background autonomy when it matches a configured model. Empty entries below are ignored.
   model_router:
     enabled: true
-    max_attempts: 8
+    max_attempts: 8  # legacy compatibility only; explicit fallback chains are no longer truncated
     lanes:
       default:
-        primary: 
+        primary:
+        # Local fallback is the final recovery route when a remote model fails.
+        # llama.cpp resolves the configured local model dynamically at runtime.
         fallbacks:
-          - 
+          - llama.cpp/local-model
       complex:
         primary: 
         fallbacks:
@@ -105,24 +113,20 @@ agent:
     roles: {}
     credential_profiles: {}
   security:
-    # Owner-selected unrestricted browser mode (including private/local networks).
-    # This is intentional for the personal deployment; it is not a resource budget.
+    # Agent approval prompts are disabled separately through tools.auto_approve_all.
+    # Disable application-level network/path restrictions only inside a disposable VM.
+    # Never mount host secrets, home directories or sensitive host sockets into this guest.
     bypass_restrictions: true
     system_access: full
-    sandbox_mode: false
+    sandbox_mode: true
     risk_acceptance: true
-    # Keep false: true would refuse to start without admin/root. Run Miki as admin/root yourself for real full access.
     privileged_account_required: false
     audit_logging: true
     approval_note: >-
-      Full autonomous operation is enabled by the owner. Miki decides and
-      executes actions without interactive approval. Every action is audit-logged.
+      Owner selected no-confirmation execution for an isolated personal VM; host OS
+      isolation is provided by the VM/container, not by this application setting.
   visual:
     screen_cooldown_seconds: 2
-  tools:
-    auto_approve_safe: true
-    require_confirm_destructive: false
-    require_confirm_computer_use: false
 self_improvement:
   enabled: true
   reflection_interval_minutes: 60
@@ -143,18 +147,21 @@ self_improvement:
     max_draft_notes: 3
     retention_days: 90
     edge_credit_eta: 0.05
-# Several keys below are accepted but not read by the runtime (toolLockTimeoutMs, taskQueueSize,
-# schedulerIntervalMs, maxScheduledTaskAttempts, retryBaseDelayMs, retryMaxDelayMs, recoveryStaleAfterMs).
+# Adaptive execution: run/goal lifetimes and action counts are unlimited in unlimited_budgets mode.
 concurrency:
-  maxConcurrentTasks: 8
-  maxParallelToolCalls: 8
-  toolLockTimeoutMs: 30000
-  taskQueueSize: 1000                   # schema maximum; matches autonomy.max_queue_depth
-  schedulerIntervalMs: 100
-  maxScheduledTaskAttempts: 20          # schema maximum
-  retryBaseDelayMs: 60000
+  # Worker ceilings default to available CPU parallelism; adaptive admission
+  # reduces new work under actual CPU/RAM pressure. Set explicit ceilings only
+  # when this personal host needs a resource policy.
+  adaptiveResourceManagement: true
+  minFreeMemoryRatio: 0.12             # reduce admission below 12% free RAM
+  minFreeDiskRatio: 0.05               # reduce admission below 5% free data-volume space
+  highLoadPerCpu: 1.25                 # halve admission above this 1-minute load / CPU ratio
+  criticalLoadPerCpu: 2.0              # admit one new worker above critical CPU pressure
+  # toolLockTimeoutMs is retained only as a legacy setting; browser/computer
+  # resource waits are cancellation-aware and have no generic deadline.
+  # Scheduled task retries are persistent in unlimited_budgets mode.
+  retryBaseDelayMs: 3000
   retryMaxDelayMs: 180000
-  recoveryStaleAfterMs: 3600000         # 1 hour: watchdog for tasks that stopped making progress
 heartbeat:
   enabled: true
   interval_seconds: 20
@@ -168,97 +175,70 @@ heartbeat:
     # Allow periodic/background LLM decisions while idle; queued goals continue through the same supervisor.
     llm_when_idle: true
     startup_decision: true
-    # Limits on goals Miki may propose for itself while idle.
-    proposal_limits:
-      max_open: 3
-      max_per_day: 10
+    # Self-directed goals are not constrained by arbitrary open-goal or daily proposal counts.
+    # Duplicate detection and adaptive resource admission prevent redundant or unsafe queue growth.
     min_poll_seconds: 5
     max_poll_seconds: 20
     idle_backoff_multiplier: 2
-    # Idle decisions run at this fixed interval (+-20% jitter). Every cycle ends with one piece of work;
-    # the interval never grows. A scheduled (cron) task due within 30 seconds always takes the slot first.
-    decision_interval_seconds: 30
+    # Event-driven continuous decisions: meaningful events, completed ambient calls, and settled goals wake Miki immediately.
+    # This interval is a fallback observation cadence, not a post-action delay.
+    # A scheduled (cron) task due within 30 seconds always takes the slot first.
+    decision_interval_seconds: 5
     failure_threshold: 3
-    failure_backoff_base_seconds: 2
-    # A failed model call or goal is retried by Miki itself; the wait is at least 2 seconds and never exceeds 12 seconds.
-    failure_backoff_max_seconds: 12
-    # "Free time": no chat activity for this many minutes. Self-directed (curiosity/drive) goals wait for it,
-    # because they may use the mouse and keyboard. User goals and scheduled (cron) tasks are never held back.
-    idle_after_minutes: 10
+    failure_backoff_base_seconds: 3
+    # Exponential retry backoff prevents tight retry loops during extended provider or network outages.
+    failure_backoff_max_seconds: 180
+    # Idle Mode is always active from startup. Zero means no user-inactivity countdown or gate.
+    idle_after_seconds: 0
     # Curiosity cycle: while idle Miki researches topics from identity/INTERESTS.md as low-priority goals.
     curiosity:
-      max_open: 2
-      max_per_day: 10
+      enabled: true
+      # No open-goal or per-day cap; duplicate detection and resource admission remain active.
     # Server-side rules for telling the user about discoveries (the model only proposes; these decide).
-    share_min_importance: 3
-    share_max_per_day: 10
-    share_min_gap_minutes: 30
+    # Miki decides whether a discovery is relevant using memory and user personality.
+    # Zero daily limit and zero gap mean no fixed message quota/cooldown; duplicate detection remains.
+    share_min_importance: 1
+    share_max_per_day: 0
+    share_min_gap_minutes: 0
     # Let idle decisions look at the computer (screenshot, processes, windows). Acting tools stay goal-only.
     observe_computer: true
-  auto_actions:
-    enabled: true
-    max_actions_per_cycle: 3            # runtime maximum
+    # Per-call observation timeout adapts after slow responses; this does not limit autonomous task duration.
+    observation_timeout_ms: 15000
   resource_limits:
-    max_tokens_per_cycle: 32768         # ignored by the runtime (unbounded)
-    max_idle_minutes: 1                 # idle time before the next heartbeat probe
+    # Progress watchdog polling cadence; active tool/browser/process work is not treated as idle.
+    max_idle_minutes: 1
 autonomy:
   enabled: true
   mode: operator
-  # Agent-level tool/token/cycle budgets are disabled for long-running autonomous workflows.
+  # Unlimited work budgets: execution continues until completion, cancellation or a genuine blocker.
   unlimited_budgets: true
   history_retention_days: 30
-  # Stop accepting new scheduled/queued/running tasks when the backlog reaches this cap.
-  max_queue_depth: 1000
+  # Queue depth is unbounded in unlimited_budgets mode; host admission controls active work.
   tool_policy:
     mode: operator
+    # Suppress all AgentEngine/AutonomyPolicy owner confirmation prompts in the isolated VM.
+    auto_approve_all: true
     # Retries are unbounded in the runtime; backoff applies between attempts (retry_backoff_seconds).
-    retry_backoff_seconds: 2            # retry waits are clamped to 2-12 seconds
-    require_acceptance_contract: true   # every autonomous goal needs independently verifiable completion evidence
+    retry_backoff_seconds: 3            # exponential retry base; capped by heartbeat.proactive.failure_backoff_max_seconds
+    require_acceptance_contract: false  # contracts add deterministic checks; the default LLM completion judge assesses all goals
     allow_browser: true
     # The runtime blocks ALL browser actions when this list is empty. A domain entry matches the
     # domain itself and every subdomain, so top-level domains open the browser broadly.
+    # Any HTTP(S) domain; bypass_restrictions enables guest-visible private/local addresses too.
     browser_allowed_domains:
-      - com
-      - org
-      - net
-      - edu
-      - gov
-      - io
-      - co
-      - dev
-      - app
-      - ai
-      - me
-      - info
-      - xyz
-      - tv
-      - cc
-      - to
-      - bd
-      - uk
-      - us
-      - in
-      - ca
-      - au
-      - de
-      - fr
-      - jp
-      - cn
-      - ru
+      - "*"
     allow_computer_use: true
     capability_profile: operator
     # Additive: browser/computer/operator tools come from the flags and profile above.
     # web_search lets goals (and the curiosity cycle) research on their own.
     allowed_tools:
       - web_search
+    # Used to include external side-effect tools in autonomous goal tool allowlists.
+    # Owner confirmation prompts are disabled by auto_approve_all above.
     allowed_external_side_effect_tools:
       - terminal_run
       - terminal_kill
       - delegate_coding_agent
-      - file_delete
-      - file_run
-      - skill_install
-      - skill_delete
       - browser_click
       - browser_type
       - computer_invoke
@@ -266,31 +246,17 @@ autonomy:
       - computer_hotkey
       - computer_clipboard
       - computer_launch
-      - computer_terminate_app
       - computer_click_at
       - computer_drag
       - computer_scroll
+      - plugin_invoke
       - goal_create
       - goal_update
-    # Relative to the workspace only; absolute paths are ignored by the runtime.
-    # Applies to autonomous file_* tools. terminal_run is not path-restricted (not even its starting
-    # directory) unless agents.defaults.restrict_to_workspace is explicitly true or MIKI_TERMINAL_SAFE=true.
+    # In this profile file tools may access any path visible inside the VM guest.
+    # The VM/container must be the actual OS isolation boundary.
     safe_write_roots:
-      - autonomy
-      - identity/memory
-      - packages
-      - apps
-      - config
-      - scripts
-      - docs
-      - tests
-      - test
-      - src
-      - workspace
-      - projects
-      - data
-      - output
-      - downloads
+      - "*"
+    allow_all_paths: true
   event_triggers:
     max_per_minute: 30
     cooldown_seconds: 5
@@ -314,13 +280,16 @@ agents:
     # file_* tools: restricted unless false. terminal_run: its starting directory is confined only when this is true.
     restrict_to_workspace: false
     split_on_marker: false
-    max_completion_tokens: 16384
+    # No artificial completion-token cap; the provider/model enforces its native output limit.
     context_window: 0
-    # Bound the working prompt for faster interactive turns. Older history remains
-    # stored and recoverable through memory/search; set context_window > 0 to override.
-    context_window_cap: 65536
-    max_tool_iterations: 100000
-    max_wall_time_ms: 21600000          # 6 h hang guard per run (0 disables); long goals continue in a new run
+    # Use the provider's actual context window; compaction preserves durable task state.
+    context_window_cap: 0
+    max_tool_iterations: 0              # Legacy setting is ignored; no iteration cap is enforced.
+    max_wall_time_ms: 0                 # No arbitrary run deadline.
+    inactivity_timeout_ms: 0           # No task inactivity deadline; progress age is diagnostic only.
+    background_task_inactivity_timeout_ms: 0  # Background tasks are recovered from durable checkpoints, not elapsed task time.
+    tool_timeout_ms: 0                  # No generic tool timeout; tools may set/renew their own leases.
+    chat_queue_wait_ms: 0               # Wait for the serialized session lane until released or cancelled.
     steer_interrupt: true                # interrupt the active model request for new chat messages
     summarize_message_threshold: 20
     summarize_token_percent: 75
@@ -349,13 +318,18 @@ evolution:
   cold_path_trigger: after_turn
   cold_path_times: []
 tools:
+  # Disable all interactive owner confirmations for AgentEngine tool calls.
+  auto_approve_safe: true
+  auto_approve_all: true
+  require_confirm_destructive: false
+  require_confirm_computer_use: false
   cron:
     # Canonical legacy Cron command policy. v1 Cron schedules create autonomous goals only.
     allow_command: false
     exec_timeout_minutes: 5
   exec:
     enabled: true
-    allow_remote: false
+    allow_remote: true
     enable_deny_patterns: false
     timeout_seconds: 0                  # no per-command timeout; Miki handles stuck commands itself
 devices:

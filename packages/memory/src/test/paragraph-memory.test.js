@@ -18,6 +18,10 @@ function makeEngine() {
   const db = new Database(path.join(dir, 'm.db'));
   const engine = new SelectiveMemoryEngine(db, { maxTokens: 600, maxSelected: 8 });
   engine.initializeSync();
+  const ingest = engine.ingest.bind(engine);
+  engine.ingest = (input = {}) => ingest({ provenance: 'owner', ...input });
+  const ingestParagraphs = engine.ingestParagraphs.bind(engine);
+  engine.ingestParagraphs = (input = {}) => ingestParagraphs({ provenance: 'owner', ...input });
   return { engine, db, dir };
 }
 let failed = 0;

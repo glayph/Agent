@@ -95,6 +95,11 @@ function main() {
     fatal("Dependencies are not installed. Run `npm ci` from a clean checkout before production verification.");
   }
 
+  run(process.execPath, [path.join(root, "scripts", "platform-qualification.mjs")], { cwd: root });
+  run(process.execPath, [path.join(root, "scripts", "p1-runtime-contract.test.mjs")], { cwd: root });
+  run(process.execPath, [path.join(root, "scripts", "p2-settings-semantic.test.mjs")], { cwd: root });
+  run(process.execPath, [path.join(root, "scripts", "static-architecture-audit.mjs")], { cwd: root });
+
   // Step 1: TypeScript lint
   if (skipLint) {
     log("Step 1/6: Skipping lint because MIKI_VERIFY_SKIP_LINT=1.");

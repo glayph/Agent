@@ -643,7 +643,7 @@ describe("chat protocol flow", () => {
     })
   })
 
-  it("handles typing and error messages by clearing pending request state", () => {
+  it("marks a rejected outgoing message as failed without losing its text", () => {
     updateChatStore({
       messages: [
         {
@@ -678,7 +678,40 @@ describe("chat protocol flow", () => {
       expect.objectContaining({ id: "chat:error:Gateway disconnected", closeButton: true }),
     )
     expect(getChatState().isTyping).toBe(false)
-    expect(getChatState().messages).toEqual([])
+    expect(getChatState().messages).toHaveLength(1)
+    expect(getChatState().messages[0]).toMatchObject({
+      id: "request-1",
+      role: "user",
+      content: "send",
+      deliveryStatus: "failed",
+      deliveryDetail: "Gateway disconnected",
+    })
+  })
+
+  it("handles a rejected follow-up while another run is active", () => {
+    updateChatStore({
+      activeRunId: "run-active",
+      runStatus: "running",
+      runningRunIds: ["run-active"],
+      isTyping: true,
+      messages: [
+        { id: "request-followup", role: "user", content: "bad attachment", timestamp: 1, deliveryStatus: "sending" },
+      ],
+    })
+
+    handlemikiMessage({
+      type: "error",
+      session_id: "session-1",
+      payload: { request_id: "request-followup", message: "Invalid attachment payload" },
+    }, "session-1")
+
+    expect(getChatState().messages[0]).toMatchObject({
+      id: "request-followup",
+      deliveryStatus: "failed",
+      deliveryDetail: "Invalid attachment payload",
+    })
+    expect(getChatState().isTyping).toBe(true)
+    expect(getChatState().runningRunIds).toEqual(["run-active"])
   })
 
   it("tracks delivery status on the user's own message (queued, retrying, failed, completed)", () => {
@@ -691,8 +724,14 @@ describe("chat protocol flow", () => {
     send("message.accepted", { message_id: "req-1", client_message_id: "req-1" })
     expect(getChatState().messages[0].deliveryStatus).toBe("queued")
 
-    send("message.status", { message_id: "req-1", status: "retrying" })
-    expect(getChatState().messages[0].deliveryStatus).toBe("retrying")
+    send("message.status", { message_id: "req-1", status: "queued", queue_position: 2 })
+    expect(getChatState().messages[0].deliveryQueuePosition).toBe(2)
+
+    send("message.status", { message_id: "req-1", status: "retrying", detail: "Retry 1/5 in 2s: Provider timed out" })
+    expect(getChatState().messages[0]).toMatchObject({
+      deliveryStatus: "retrying",
+      deliveryDetail: "Retry 1/5 in 2s: Provider timed out",
+    })
 
     send("message.status", { message_id: "req-1", status: "failed", detail: "Provider timed out" })
     expect(getChatState().messages[0]).toMatchObject({
@@ -767,7 +806,7 @@ describe("chat protocol flow", () => {
     beat({ run_id: "run-9", activity: "nonsense" })
     expect(getChatState().runActivity?.activity).toBe("model")
 
-    beat({ run_id: "run-9", elapsed_seconds: 80, idle_seconds: 0, activity: "tool", label: "terminal_run" })
-    expect(getChatState().runActivity).toMatchObject({ activity: "tool", label: "terminal_run" })
+    beat({ run_id: "run-9", elapsed_seconds: 80, idle_seconds: 0, activity: "tool", label: "terminal_run", inactivity_timeout_reached: true })
+    expect(getChatState().runActivity).toMatchObject({ activity: "tool", label: "terminal_run", inactivityTimeoutReached: true })
   })
 })

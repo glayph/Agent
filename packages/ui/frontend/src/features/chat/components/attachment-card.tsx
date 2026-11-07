@@ -101,3 +101,52 @@ export function AttachmentCard({
     </a>
   )
 }
+
+interface MediaPlayerAttachmentProps {
+  attachment: ChatAttachment
+  downloadLabel?: string
+}
+
+/** Inline player for video and audio, with a download link underneath. */
+export function MediaPlayerAttachment({
+  attachment,
+  downloadLabel = "Download attachment",
+}: MediaPlayerAttachmentProps) {
+  const filename = attachment.filename || "Untitled file"
+  return (
+    <div className="bg-card/90 border-border/50 flex max-w-full min-w-0 flex-col gap-1.5 rounded-xl border p-2 shadow-xs">
+      {attachment.type === "video" ? (
+        <video
+          controls
+          playsInline
+          preload="metadata"
+          src={attachment.url}
+          aria-label={filename}
+          className="max-h-80 w-full max-w-[420px] rounded-lg bg-black"
+        />
+      ) : (
+        <audio
+          controls
+          preload="metadata"
+          src={attachment.url}
+          aria-label={filename}
+          className="w-full max-w-[420px] min-w-[240px]"
+        />
+      )}
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="text-foreground truncate text-[12px] leading-5 font-medium">
+          {filename}
+        </span>
+        <a
+          href={attachment.url}
+          download={filename}
+          className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
+          aria-label={`${downloadLabel}: ${filename}`}
+          title={downloadLabel}
+        >
+          <IconDownload className="size-4" aria-hidden="true" />
+        </a>
+      </div>
+    </div>
+  )
+}

@@ -227,7 +227,11 @@ describe("external channel runtime", () => {
     const manager = new ChannelRuntimeManager({ db: {} as never, chatTurns: {} as never, getAppConfig: () => config, log: (message) => logged.push(message), fetchImpl });
     await expect(manager.sendProactiveNotice("Do not log this text.")).resolves.toBeUndefined();
     expect(attempted).toEqual(["first", "second"]);
-    expect(logged).toEqual(["telegram proactive notice delivery failed; channel request was unsuccessful."]);
+    // The failed recipient is logged as failed; only the recipient that really succeeded is logged as delivered.
+    expect(logged).toEqual([
+      "telegram proactive notice delivery failed; channel request was unsuccessful.",
+      "telegram proactive notice delivered.",
+    ]);
     expect(logged.join(" ")).not.toContain("telegram-secret");
     expect(logged.join(" ")).not.toContain("Do not log this text.");
     await manager.close();

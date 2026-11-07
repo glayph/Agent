@@ -6,6 +6,7 @@ import {
   LLMRateLimitError,
   LLMTimeoutError,
   LLMMissingCredentialError,
+  LLMAuthorizationError,
 } from "./errors.js";
 import type { ProviderTransportConfig } from "./transport.js";
 import { classifyError } from "./openai-compatible-adapter.js";
@@ -44,10 +45,12 @@ export interface CompletionHealthInput {
 type ProviderFailure = {
   status?: number;
   message: string;
+  body?: unknown;
 };
 
 function statusForError(error: unknown): CompletionHealthStatus {
   if (error instanceof LLMMissingCredentialError) return "invalid";
+  if (error instanceof LLMAuthorizationError) return "invalid";
   if (error instanceof LLMEntitlementError) return "entitlement_blocked";
   if (error instanceof LLMRateLimitError) return "rate_limited";
   if (error instanceof LLMTimeoutError) return "unreachable";
@@ -161,6 +164,7 @@ export async function probeProviderCompletion(
       const failure: ProviderFailure = {
         status: response.status,
         message: bodyMessage(body),
+        body,
       };
       throw failure;
     }

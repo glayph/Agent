@@ -29,9 +29,11 @@ function FlowEdgeInner({
     targetPosition,
   })
 
+  // The monitor canvas is frequently viewed on small screens at reduced zoom.
+  // Keep idle dependency lines bright enough to remain visible against dark themes.
   const color = animated
     ? "var(--primary)"
-    : "color-mix(in srgb, var(--foreground) 18%, transparent)"
+    : "color-mix(in srgb, var(--foreground) 58%, transparent)"
 
   return (
     <>
@@ -40,7 +42,7 @@ function FlowEdgeInner({
         path={edgePath}
         style={{
           stroke: color,
-          strokeWidth: animated ? 2.25 : 1.5,
+          strokeWidth: animated ? 3 : 2.25,
           filter: animated
             ? "drop-shadow(0 0 4px color-mix(in srgb, var(--primary) 65%, transparent))"
             : undefined,

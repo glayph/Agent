@@ -8,6 +8,19 @@ export type EngineRisk = ControlRisk;
 // Chat / LLM contracts
 // ---------------------------------------------------------------------------
 
+export type ToolMonitorCategory =
+  | "tool" | "browser" | "computer" | "terminal" | "file" | "memory"
+  | "skill" | "plugin" | "mcp" | "search" | "goal" | "workflow" | "system";
+
+/** Trusted, local presentation metadata for the live execution graph. */
+export interface ToolMonitorPresentation {
+  category: ToolMonitorCategory;
+  iconKey: string;
+  displayName?: string;
+  pluginId?: string;
+  providerId?: string;
+}
+
 export interface EngineToolCall {
   id: string;
   type: "function";
@@ -20,10 +33,20 @@ export interface EngineMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | null;
   tool_calls?: EngineToolCall[];
+  /** Provider-specific message metadata required when continuing a provider turn. */
+  extra_content?: Record<string, unknown>;
   tool_call_id?: string;
   name?: string;
   /** Images attached to this message (URLs or data URLs); the provider adapter turns them into image parts. */
   image_urls?: string[];
+}
+
+/** A typed tool result that carries bounded media separately from ordinary tool text. */
+export interface EngineToolResult {
+  kind: "engine_tool_result";
+  content: string;
+  /** Image URLs/data URLs to attach to a follow-up user evidence message. */
+  imageUrls?: string[];
 }
 
 /** A user message handed to a run that is still working. */
@@ -63,6 +86,8 @@ export interface LLMCompletionOptions {
   json?: boolean;
   /** Optional provider-neutral controls for short routing/chat completions. */
   temperature?: number;
+  /** Optional provider request timeout. Omitted by the agent engine so calls can finish naturally. */
+  timeoutMs?: number;
   maxCompletionTokens?: number;
   /** Optional provider-compatible thinking level, e.g. off/low/medium/high. */
   thinkingLevel?: string;
@@ -77,6 +102,13 @@ export interface LLMCompletionOptions {
 /** Minimal port the engine needs from any LLM backend. */
 export interface EngineLLMClient {
   readonly model: string;
+  readonly providerId?: string;
+  /** Stable identity for same-model provider/credential routes within a run. */
+  readonly routeKey?: string;
+  /** True for an explicitly selected alternate provider credential profile. */
+  readonly credentialProfile?: string;
+  /** True only when the configured provider integration advertises image input; undefined means unverified. */
+  readonly supportsVision?: boolean;
   complete(
     messages: EngineMessage[],
     options?: LLMCompletionOptions,
@@ -92,10 +124,16 @@ export interface ToolExecutionContext {
   sessionId?: string;
   callId: string;
   signal: AbortSignal;
+  /** Report a meaningful heartbeat while a long operation is actively progressing or waiting. */
+  heartbeat?: (detail?: string) => void;
+  /** Renew this call's tool execution lease; returns false after cancellation. */
+  extendLease?: (durationMs?: number) => boolean;
 }
 
 export interface EngineTool {
   name: string;
+  /** Safe, local icon/category metadata used by Monitoring; never executable markup or a URL. */
+  monitor?: ToolMonitorPresentation;
   description: string;
   risk: EngineRisk;
   /** JSON-schema object describing the arguments. */
@@ -119,6 +157,8 @@ export interface EngineTool {
    * waited on in bounded slices instead of being killed by the default tool timeout.
    */
   timeoutMs?: number;
+  /** Resolve a timeout from validated per-call input (e.g. file_run.timeoutSeconds). */
+  timeoutMsForInput?: (input: Record<string, unknown>) => number;
   execute(
     input: Record<string, unknown>,
     context: ToolExecutionContext,
@@ -201,6 +241,12 @@ export type ToolCallStatus =
   | "cancelled";
 
 export interface ToolCallRecord {
+  /** Stable current-plan step that owns this tool action, when known. */
+  planStepId?: string;
+  /** The current plan sub-goal this individual tool action is intended to advance. */
+  actionGoal?: string;
+  /** Independent semantic check of whether this action achieved its intended result. */
+  actionVerification?: { status: "verified" | "needs_more_evidence" | "failed"; reason: string; evidence: string[] };
   id: string;
   name: string;
   /** Raw JSON arguments as sent by the model. */
@@ -211,6 +257,13 @@ export interface ToolCallRecord {
   startedAt: string;
   durationMs?: number;
   resultPreview?: string;
+  /** What the tool's structured result said about its own effect (see tool-effect.ts); undefined when it said nothing. */
+  effectConfirmed?: boolean;
+  /**
+   * Longer, already-redacted result text (up to 1,500 characters) kept only so the gateway can store
+   * a compact tool-activity record for later turns. It is never sent to the UI; `resultPreview` stays 300.
+   */
+  traceResult?: string;
   error?: string;
   approvalId?: string;
   /** Set on a blocked call that stopped at an approval gate (a learned "ask" rule or a hard policy). */
@@ -225,17 +278,43 @@ export interface RunUsage {
   totalTokens: number;
 }
 
+/** A safe, turn-boundary snapshot for durable continuation after a process restart. */
+export interface EngineRunCheckpoint {
+  schemaVersion: 1;
+  messages: EngineMessage[];
+  toolCalls: ToolCallRecord[];
+  plan?: AgentPlan;
+  usage: RunUsage;
+  turns: number;
+  toolIterations: number;
+  turnCap?: number;
+  iterationCap?: number;
+  callCap?: number;
+  extensions: number;
+  blockedStreak: number;
+  loopDetected: boolean;
+  /** Internal loop guards persisted so a restart does not repeat nudges or verification attempts. */
+  nudged?: boolean;
+  /** Legacy checkpoint marker from the removed extra completion-classifier pass. */
+  planOnlyNudged?: boolean;
+  revisions?: number;
+  preActionNoticeAttempted?: boolean;
+  limitReason?: string;
+}
+
 export type EngineEvent =
   | {
       type: "run.started";
       runId: string;
       sessionId?: string;
+      userMessageId?: string;
+      providerId?: string;
       model: string;
       goal: string;
       at: string;
     }
-  | { type: "plan.created"; runId: string; plan: AgentPlan }
-  | { type: "plan.updated"; runId: string; plan: AgentPlan }
+  | { type: "plan.created"; runId: string; plan: AgentPlan; sessionId?: string; userMessageId?: string; goal?: string; model?: string; providerId?: string }
+  | { type: "plan.updated"; runId: string; plan: AgentPlan; sessionId?: string; userMessageId?: string; goal?: string; model?: string; providerId?: string }
   | { type: "turn.started"; runId: string; turn: number }
   | { type: "system.notice"; runId: string; turn: number; count: number }
   /**
@@ -246,8 +325,10 @@ export type EngineEvent =
   | { type: "thought"; runId: string; turn: number; content: string; interim?: boolean }
   | { type: "message.delta"; runId: string; turn: number; delta: string }
   | { type: "tool.call"; runId: string; turn: number; call: ToolCallRecord }
+  | { type: "tool.heartbeat"; runId: string; turn: number; callId: string; tool: string; at: string; detail?: string }
   | { type: "message.final"; runId: string; content: string }
-  | { type: "user.steer"; runId: string; turn: number; count: number; messageIds?: string[] }
+  | { type: "run.phase"; runId: string; turn: number; phase: "verification" | "revision"; status: "started" | "completed" | "unavailable"; detail?: string }
+  | { type: "user.steer"; runId: string; turn: number; count: number; messageIds?: string[]; items?: Array<{ messageId?: string; receivedAt: string; text: string; imageCount: number }> }
   | {
       type: "context.compacted";
       runId: string;
@@ -263,12 +344,18 @@ export type EngineEvent =
       outcome: RunStatus;
     }
   | { type: "model.fallback"; runId: string; turn: number; from: string; to: string; reason: string }
-  | { type: "model.retrying"; runId: string; turn: number; retry: number; delayMs: number; reason: string }
+  | { type: "model.retrying"; runId: string; turn: number; retry: number; delayMs: number; reason: string; failureKind?: ModelFailureKind }
   | { type: "model.resumed"; runId: string; turn: number; retries: number }
+  | { type: "model.retry_exhausted"; runId: string; turn: number; retries: number; reason: string }
   | { type: "model.steer_interrupt"; runId: string; turn: number }
   | {
       type: "run.finished";
       runId: string;
+      sessionId?: string;
+      userMessageId?: string;
+      goal?: string;
+      model?: string;
+      providerId?: string;
       status: RunStatus;
       turns: number;
       toolCalls: number;
@@ -283,8 +370,12 @@ export interface RunRequest {
   history: EngineMessage[];
   /** Overrides the goal derived from the last user message. */
   goal?: string;
+  /** Persisted identity of the interactive user message that owns this run. */
+  userMessageId?: string;
   /** Model name forwarded to the LLM resolver. */
   model?: string;
+  /** Optional stable stored-model row ID, used when model names are duplicated. */
+  modelIndex?: number;
   /** `false` disables planning, an existing plan is reused as-is. */
   plan?: AgentPlan | false;
   /** `false` runs a plain chat completion without tools. */
@@ -296,11 +387,19 @@ export interface RunRequest {
   /** Optional per-run tool registry, useful for scoped foreground/background execution. */
   tools?: ToolRegistry;
   /**
-   * Keep retrying a transient model failure (network, timeout, 429, 5xx) in place, with
-   * exponential backoff (default 2s minimum, 12s maximum; `baseDelayMs`/`maxDelayMs` override), until the call succeeds or `signal` aborts.
-   * The run continues from the exact step that failed instead of starting over.
+   * Retry transient model failures in place. When `maxRetries` is omitted, retries continue
+   * until success or cancellation. An explicit finite `maxRetries` remains available for
+   * callers that deliberately want a bounded attempt. Backoff is capped to avoid retry storms.
    */
-  retryTransient?: boolean | { baseDelayMs?: number; maxDelayMs?: number };
+  retryTransient?: boolean | {
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    maxRetries?: number;
+    /** Fixed cadence used after the bounded exponential retry burst. */
+    continueRetryingEveryMs?: number;
+    /** Disable jitter when a caller requires exact retry intervals. Defaults to enabled. */
+    jitter?: boolean;
+  };
   /**
    * Never switch to a fallback model during this run. A transient failure is then handled by
    * `retryTransient` (wait for the same model and resume) or fails the run.
@@ -308,26 +407,44 @@ export interface RunRequest {
   disableModelFallback?: boolean;
   /** Optional per-run tool-call budget override. */
   maxToolCalls?: number;
+  /** Override the runtime's independent per-action verification setting. */
+  verifyActions?: boolean;
   /** Optional per-completion output-token cap. */
   maxCompletionTokens?: number;
   /** Optional cumulative per-run token budget (prompt + completion tokens). */
   maxTotalTokens?: number;
   /** Optional per-run wall-clock budget override in ms. Zero disables the deadline. */
   maxWallTimeMs?: number;
+  /** Restore a previously saved turn-boundary checkpoint. System messages are rebuilt on resume. */
+  resume?: EngineRunCheckpoint;
+  /** Persist a safe checkpoint after prompt setup and every completed tool turn. */
+  onCheckpoint?: (checkpoint: EngineRunCheckpoint) => void | Promise<void>;
   signal?: AbortSignal;
   /** Optional per-run approval policy (used by bounded autonomous execution). */
   approvalPolicy?: ToolApprovalPolicy;
   onEvent?: (event: EngineEvent) => void;
 }
 
+/**
+ * Why a run ended because of the model/provider, decided from the original error object (status, code,
+ * error class) at the place it was caught, so consumers never have to guess it back from message text.
+ * `auth`: credentials rejected. `entitlement`: billing/quota block. `transient`: outage worth retrying.
+ * `no_model`: no usable model or credentials are configured.
+ */
+export type ModelFailureKind = "auth" | "authorization" | "entitlement" | "transient" | "no_model" | "rate_limit" | "network" | "model_not_found" | "invalid_request" | "provider_unavailable";
+
 export interface RunResult {
   runId: string;
   sessionId?: string;
+  userMessageId?: string;
+  providerId?: string;
   status: RunStatus;
   model: string;
   goal: string;
   finalText: string;
   error?: string;
+  /** Set when the run ended because of a model/provider failure; absent for every other outcome. */
+  failureKind?: ModelFailureKind;
   turns: number;
   toolCalls: ToolCallRecord[];
   plan?: AgentPlan;
@@ -335,3 +452,4 @@ export interface RunResult {
   startedAt: string;
   finishedAt: string;
 }
+

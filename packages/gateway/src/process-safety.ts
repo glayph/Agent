@@ -14,8 +14,12 @@ import { ensureRecoverySchema } from "./recovery-manager.js"
 
 type Log = (message: string) => void
 
+export function recoveryV2Enabled(value: string | undefined = process.env.MIKI_RECOVERY_V2): boolean {
+  return !/^(0|false|off|no)$/i.test((value ?? "1").trim())
+}
+
 export interface DatabaseCheckResult {
-  status: "absent" | "ok" | "restored" | "fresh"
+  status: "absent" | "ok" | "restored" | "fresh" | "blocked"
   restoredFrom?: string
   corruptMovedTo?: string
   reason?: string
@@ -43,7 +47,25 @@ export function listBackups(backupDir: string): string[] {
 
 /** Run BEFORE the database is opened. Never throws. */
 export function ensureHealthyDatabase(dbPath: string, backupDir: string, log: Log, now: () => Date = () => new Date()): DatabaseCheckResult {
-  if (!fs.existsSync(dbPath)) return { status: "absent" }
+  const exists = fs.existsSync(dbPath)
+  if (!exists) {
+    for (const backup of listBackups(backupDir)) {
+      if (!quickCheck(backup).ok) continue
+      const restoreTemp = `${dbPath}.restore-${process.pid}-${Math.random().toString(16).slice(2)}`
+      try {
+        fs.copyFileSync(backup, restoreTemp, fs.constants.COPYFILE_EXCL)
+        const copiedCheck = quickCheck(restoreTemp)
+        if (!copiedCheck.ok) { fs.rmSync(restoreTemp, { force: true }); continue }
+        fs.renameSync(restoreTemp, dbPath)
+        log(`Runtime database was missing; restored it from verified backup ${path.basename(backup)}.`)
+        return { status: "restored", restoredFrom: backup, reason: "database file missing" }
+      } catch (error) {
+        try { fs.rmSync(restoreTemp, { force: true }) } catch { /* best effort cleanup */ }
+        log(`Could not restore missing database from ${path.basename(backup)}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return { status: "absent" }
+  }
   const check = quickCheck(dbPath)
   if (check.ok) return { status: "ok" }
   const stamp = now().toISOString().replace(/[:.]/g, "-")
@@ -53,16 +75,26 @@ export function ensureHealthyDatabase(dbPath: string, backupDir: string, log: Lo
     fs.renameSync(dbPath, aside)
     for (const suffix of ["-wal", "-shm"]) if (fs.existsSync(dbPath + suffix)) fs.renameSync(dbPath + suffix, aside + suffix)
   } catch (error) {
-    log(`Could not move the damaged database aside: ${error instanceof Error ? error.message : String(error)}`)
-    return { status: "ok", reason: "damaged database could not be moved; continuing with it" }
+    const reason = `damaged database could not be safely quarantined: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300)
+    log(reason)
+    return { status: "blocked", reason }
   }
   for (const backup of listBackups(backupDir)) {
     if (!quickCheck(backup).ok) continue
+    const restoreTemp = `${dbPath}.restore-${process.pid}-${Math.random().toString(16).slice(2)}`
     try {
-      fs.copyFileSync(backup, dbPath)
-      log(`Restored the database from backup ${path.basename(backup)}.`)
+      fs.copyFileSync(backup, restoreTemp, fs.constants.COPYFILE_EXCL)
+      const copiedCheck = quickCheck(restoreTemp)
+      if (!copiedCheck.ok) {
+        fs.rmSync(restoreTemp, { force: true })
+        log(`Restored copy from ${path.basename(backup)} failed integrity verification; trying the next backup.`)
+        continue
+      }
+      fs.renameSync(restoreTemp, dbPath)
+      log(`Restored the database from verified backup ${path.basename(backup)}.`)
       return { status: "restored", restoredFrom: backup, corruptMovedTo: aside, reason: check.reason }
     } catch (error) {
+      try { fs.rmSync(restoreTemp, { force: true }) } catch { /* best effort cleanup */ }
       log(`Could not restore ${path.basename(backup)}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
@@ -72,29 +104,44 @@ export function ensureHealthyDatabase(dbPath: string, backupDir: string, log: Lo
 
 export class DatabaseBackups {
   private timer: NodeJS.Timeout | undefined
+  private backupInFlight: Promise<string | undefined> | undefined
+  private sequence = 0
   constructor(private readonly db: Database.Database, private readonly dir: string, private readonly log: Log, private readonly options: { keep?: number; intervalMs?: number; now?: () => Date } = {}) {}
 
   start(): void {
+    if (this.timer) return
     const hours = Number(process.env.MIKI_DB_BACKUP_HOURS)
-    const interval = this.options.intervalMs ?? (Number.isFinite(hours) && hours > 0 ? hours * 3_600_000 : 6 * 3_600_000)
+    const requested = this.options.intervalMs ?? (Number.isFinite(hours) && hours > 0 ? hours * 3_600_000 : 6 * 3_600_000)
+    const interval = Math.max(60_000, Math.min(7 * 86_400_000, Number.isFinite(requested) ? requested : 6 * 3_600_000))
     this.timer = setInterval(() => { void this.backupNow().catch(() => undefined) }, interval)
     this.timer.unref?.()
   }
 
   stop(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined }
 
-  async backupNow(): Promise<string | undefined> {
-    fs.mkdirSync(this.dir, { recursive: true })
-    const stamp = (this.options.now?.() ?? new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "")
-    const target = path.join(this.dir, `miki-runtime-${stamp}.sqlite`)
+  backupNow(): Promise<string | undefined> {
+    if (this.backupInFlight) return this.backupInFlight
+    const operation = this.createBackup()
+    this.backupInFlight = operation
+    return operation.finally(() => { if (this.backupInFlight === operation) this.backupInFlight = undefined })
+  }
+
+  private async createBackup(): Promise<string | undefined> {
+    fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 })
+    try { fs.chmodSync(this.dir, 0o700) } catch { /* Windows/managed filesystems may not expose POSIX modes. */ }
+    const date = this.options.now?.() ?? new Date()
+    const stamp = date.toISOString().replace(/[-:]/g, "").replace(/\.(\d{3})Z$/, "_$1Z")
+    const target = path.join(this.dir, `miki-runtime-${stamp}-${process.pid}-${++this.sequence}.sqlite`)
     try {
       await this.db.backup(target)
       if (!quickCheck(target).ok) { fs.rmSync(target, { force: true }); this.log("A database backup failed its integrity check and was discarded."); return undefined }
+      try { fs.chmodSync(target, 0o600) } catch { /* Windows/managed filesystems may not expose POSIX modes. */ }
     } catch (error) {
+      fs.rmSync(target, { force: true })
       this.log(`Database backup failed: ${error instanceof Error ? error.message : String(error)}`)
       return undefined
     }
-    const keep = Math.max(1, this.options.keep ?? (Number(process.env.MIKI_DB_BACKUP_KEEP) || 5))
+    const keep = Math.max(1, Math.min(100, this.options.keep ?? (Number(process.env.MIKI_DB_BACKUP_KEEP) || 5)))
     for (const old of listBackups(this.dir).slice(keep)) fs.rmSync(old, { force: true })
     return target
   }
@@ -243,5 +290,6 @@ export function recordDatabaseIncident(db: Database.Database, result: DatabaseCh
   if (result.status !== "restored" && result.status !== "fresh") return
   ensureRecoverySchema(db)
   const remedy = result.status === "restored" ? `restored from backup ${path.basename(result.restoredFrom ?? "")}; damaged file kept` : "started a new database; damaged file kept"
-  db.prepare("INSERT INTO recovery_incidents(started_at,ended_at,reason,remedy) VALUES(?,?,?,?)").run(at, at, `database: integrity check failed (${result.reason ?? "unknown"})`.slice(0, 300), remedy)
+  const issue = result.reason === "database file missing" ? "runtime database file missing" : `integrity check failed (${result.reason ?? "unknown"})`
+  db.prepare("INSERT INTO recovery_incidents(started_at,ended_at,reason,remedy) VALUES(?,?,?,?)").run(at, at, `database: ${issue}`.slice(0, 300), remedy)
 }

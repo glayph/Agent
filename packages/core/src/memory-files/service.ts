@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import type { ChatMessage } from "@miki/config";
 import type { MemoryFilesConfig, MemoryPaths, TurnLike } from "./types.js";
 import { resolveMemoryFilesConfig } from "./config.js";
@@ -5,7 +6,7 @@ import { resolveMemoryPaths, relFromRoot } from "./paths.js";
 import { MemoryFileStore, executeOp } from "./store.js";
 import { MemoryHooks } from "./hooks.js";
 import { Summarizer, type LlmComplete } from "./summarizer.js";
-import { MemoryWriter } from "./writer.js";
+import { MemoryWriter, type MemoryWriteObserver } from "./writer.js";
 import { CompactionManager } from "./compaction.js";
 import { MemoryContextBuilder } from "./context.js";
 import { MemorySearchIndex, readMemoryRange, type GetResult, type SearchHit } from "./search.js";
@@ -74,7 +75,7 @@ export class FileMemoryService {
   private readonly summarized = new Map<string, string>();
   private readonly swept = new Map<string, number>();
   private searchBackend?: MemorySearchBackend;
-  private writeObserver?: (relPath: string, provenance: "owner" | "agent") => void;
+  private writeObserver?: MemoryWriteObserver;
   private sweeper?: NodeJS.Timeout;
   private sweepSource?: SessionSource;
 
@@ -116,9 +117,26 @@ export class FileMemoryService {
   // ---- prompt context ----------------------------------------------------
 
   /** Memory block for the system prompt. Never throws; "" when there is nothing. */
-  async buildContextBlock(opts: { compact?: boolean; trustedUser?: boolean; trustedMemory?: boolean } = {}): Promise<string> {
+  async buildContextBlock(opts: {
+    compact?: boolean;
+    trustedUser?: boolean;
+    trustedMemory?: boolean;
+    trustedPaths?: readonly string[];
+    trustedUserContent?: string;
+    trustedMemoryContent?: string;
+    trustedFileContents?: readonly { path: string; text: string }[];
+  } = {}): Promise<string> {
     try {
-      return await this.contextBuilder.build(opts);
+      // Production prompt construction must consume the exact immutable byte
+      // snapshots whose provenance/hash was verified by SqliteMemoryIndex.
+      // Caller-provided booleans or paths are not sufficient authorization.
+      return await this.contextBuilder.build({
+        ...opts,
+        trustedUser: opts.trustedUser === true && typeof opts.trustedUserContent === "string",
+        trustedMemory: opts.trustedMemory === true && typeof opts.trustedMemoryContent === "string",
+        trustedPaths: opts.trustedFileContents?.map((file) => file.path) ?? [],
+        trustedFileContents: opts.trustedFileContents ?? [],
+      });
     } catch (err) {
       console.warn(`[memory] context block skipped: ${(err as Error).message}`);
       return "";
@@ -137,12 +155,18 @@ export class FileMemoryService {
     this.searchBackend = backend;
   }
 
-  setWriteObserver(observer: ((relPath: string, provenance: "owner" | "agent") => void) | undefined): void {
+  setWriteObserver(observer: MemoryWriteObserver | undefined): void {
     this.writeObserver = observer;
+    this.writer.setWriteObserver(observer);
   }
 
   get(relPath: string, from?: number, lines?: number): Promise<GetResult> {
     return readMemoryRange(this.paths, relPath, from, lines);
+  }
+
+  /** Full, path- and symlink-checked file read for hash verification by the canonical index. */
+  getFull(relPath: string): Promise<GetResult> {
+    return readMemoryRange(this.paths, relPath, undefined, undefined, Number.MAX_SAFE_INTEGER);
   }
 
   /** Explicit "remember this" — awaited because it is the tool's own result. */
@@ -150,24 +174,47 @@ export class FileMemoryService {
     text: string,
     scope: "long_term" | "daily" | "user",
     supersedes?: string,
+    provenance: "owner" | "agent" | "untrusted" = "agent",
   ): Promise<{ path: string; duplicate: boolean }> {
     const clean = text.trim().slice(0, MAX_NOTE_CHARS);
     if (!clean) throw new Error("text is empty");
     if (scope === "user" && supersedes) {
+      const hadExistingContent = fs.existsSync(this.paths.userMd);
       await this.store.supersedeUserNote(clean, supersedes);
       const relPath = relFromRoot(this.paths, this.paths.userMd);
-      this.writeObserver?.(relPath, "owner");
+      this.writeObserver?.(relPath, "owner", hadExistingContent);
       return { path: relPath, duplicate: false };
+    }
+    if (scope === "user" && await this.store.hasActiveUserNote(clean)) {
+      return { path: relFromRoot(this.paths, this.paths.userMd), duplicate: true }
     }
     const op = scope === "daily"
       ? this.store.planDailyNote(clean, "agent")
       : scope === "user"
         ? this.store.planUserNote(clean)
         : this.store.planLongTermNote(clean);
+    const hadExistingContent = op.mode === "append" && fs.existsSync(op.path);
     const written = await executeOp(op);
     const relPath = relFromRoot(this.paths, op.path);
-    this.writeObserver?.(relPath, scope === "user" ? "owner" : "agent");
+    if (written) this.writeObserver?.(relPath, scope === "user" ? "owner" : provenance, hadExistingContent);
     return { path: relPath, duplicate: written === null };
+  }
+
+  async recordUserPreferenceConflict(text: string, conflictsWith: string[]): Promise<void> {
+    const hadExistingContent = fs.existsSync(this.paths.userMd)
+    await this.store.recordUserPreferenceConflict(text, conflictsWith)
+    this.writeObserver?.(relFromRoot(this.paths, this.paths.userMd), "owner", hadExistingContent)
+  }
+
+  async forget(relPath: string): Promise<{ path: string; deleted: boolean }> {
+    const result = await this.store.forget(relPath)
+    return result
+  }
+
+  async forgetEntry(scope: "user" | "long_term", text: string, status?: "active" | "draft" | "review" | "superseded"): Promise<boolean> {
+    const removed = await this.store.forgetEntry(scope, text, status)
+    if (removed) this.writeObserver?.(scope === "user" ? "USER.md" : "MEMORY.md", "owner", true)
+    return removed
   }
 
   // ---- background work ---------------------------------------------------
@@ -188,9 +235,9 @@ export class FileMemoryService {
     }
   }
 
-  noteDaily(text: string, source = "agent"): void {
+  noteDaily(text: string, source = "agent", provenance: "owner" | "agent" | "untrusted" = "untrusted"): void {
     if (!this.cfg.enabled) return;
-    this.writer.enqueue({ type: "daily_note", text, source });
+    this.writer.enqueue({ type: "daily_note", text, source, provenance });
   }
 
   // ---- session lifecycle -------------------------------------------------
@@ -200,7 +247,7 @@ export class FileMemoryService {
    * hook: runs when a session ends). Returns immediately. Idempotent per
    * unchanged conversation.
    */
-  onSessionEnd(sessionId: string, messages: readonly ChatMessage[], reason: string): boolean {
+  onSessionEnd(sessionId: string, messages: readonly ChatMessage[], reason: string, provenance: "owner" | "agent" | "untrusted" = "untrusted"): boolean {
     try {
       if (!this.cfg.enabled) return false;
       const dialog = messages.filter(
@@ -217,7 +264,7 @@ export class FileMemoryService {
       const firstKept = dialog[Math.max(0, dialog.length - this.cfg.summaryTurns)]!;
       const startIdx = Math.max(0, messages.indexOf(firstKept));
       const turns = messages.slice(startIdx).map(toTurn);
-      const queued = this.writer.enqueue({ type: "session_summary", sessionId, turns, reason });
+      const queued = this.writer.enqueue({ type: "session_summary", sessionId, turns, reason, provenance });
       if (queued) {
         this.summarized.set(sessionId, sig);
         if (this.summarized.size > 1_000) {

@@ -1,3 +1,4 @@
+import { IconArrowDown } from "@tabler/icons-react"
 import type { RefObject, UIEvent } from "react"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -23,36 +24,38 @@ import { ChatMessage as WorkspaceChatMessage } from "./chat-message"
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
+  sessionId: string
   isTyping: boolean
   hasHydratedActiveSession: boolean
   isGatewayRunning: boolean
   hasAvailableModels: boolean
   defaultModelName: string
-  connectionState: string
   retryableMessageIds: Set<string>
   scrollRef: RefObject<HTMLDivElement | null>
   onScroll: (event: UIEvent<HTMLDivElement>) => void
+  isFollowingLatest: boolean
+  onJumpToLatest: () => void
   onEditMessage: (message: ChatMessage) => void
   onDeleteMessage: (messageId: string) => void
-  onForkMessage: (messageId: string) => void
   onRetryMessage: (messageId: string) => void
   onInspectMessage: (messageId: string) => void
 }
 
 export function ChatMessageList({
   messages,
+  sessionId,
   isTyping,
   hasHydratedActiveSession,
   isGatewayRunning,
   hasAvailableModels,
   defaultModelName,
-  connectionState,
   retryableMessageIds,
   scrollRef,
   onScroll,
+  isFollowingLatest,
+  onJumpToLatest,
   onEditMessage,
   onDeleteMessage,
-  onForkMessage,
   onRetryMessage,
   onInspectMessage,
 }: ChatMessageListProps) {
@@ -83,7 +86,9 @@ export function ChatMessageList({
     initialCount: 40,
     step: 40,
     fromEnd: true,
-    resetKey: messages[0]?.id ?? "empty",
+    // Only a session switch resets the collapsed history window. A prepended
+    // older page must not silently reset the user's current reading position.
+    resetKey: sessionId || "empty",
   })
   let streamingMessageId: string | undefined
   if (isTyping) {
@@ -95,68 +100,85 @@ export function ChatMessageList({
       }
     }
   }
+
   return (
-    <div
-      ref={scrollRef}
-      onScroll={onScroll}
-      onClick={(event) => {
-        const target = event.target
-        if (
-          !(target instanceof Element) ||
-          !target.closest("[data-chat-bubble]")
-        ) {
-          setSelectedMessageId(null)
-        }
-      }}
-      data-chat-scroll="true"
-      className="h-full min-h-0 overflow-y-auto px-4 py-4 [background:var(--chat-surface)] sm:px-6 sm:py-7 lg:px-8"
-    >
-      <div className="mx-auto flex w-full max-w-[var(--chat-content-width)] flex-col gap-6 pb-8 sm:gap-7 sm:pb-10">
-        {!hasHydratedActiveSession && (
-          <div className="text-muted-foreground flex items-center justify-center py-12 text-sm">
-            {t("chat.loading", { defaultValue: "Loading conversation…" })}
-          </div>
-        )}
+    <div className="relative h-full min-h-0">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onClick={(event) => {
+          const target = event.target
+          if (
+            !(target instanceof Element) ||
+            !target.closest("[data-chat-bubble]")
+          ) {
+            setSelectedMessageId(null)
+          }
+        }}
+        data-chat-scroll="true"
+        className="h-full min-h-0 overflow-y-auto px-4 py-4 [background:var(--chat-surface)] [overflow-anchor:none] sm:px-6 sm:py-7 lg:px-8"
+      >
+        <div className="mx-auto flex w-full max-w-[var(--chat-content-width)] flex-col gap-6 pb-8 sm:gap-7 sm:pb-10">
+          {!hasHydratedActiveSession && (
+            <div className="text-muted-foreground flex items-center justify-center py-12 text-sm">
+              {t("chat.loading", { defaultValue: "Loading conversation…" })}
+            </div>
+          )}
 
-        {hasHydratedActiveSession && messages.length === 0 && !isTyping && (
-          <div className="border-0 bg-transparent py-4 sm:py-8">
-            <ChatEmptyState
-              hasAvailableModels={hasAvailableModels}
-              defaultModelName={defaultModelName}
-              isConnected={isGatewayRunning}
+          {hasHydratedActiveSession && messages.length === 0 && !isTyping && (
+            <div className="border-0 bg-transparent py-4 sm:py-8">
+              <ChatEmptyState
+                hasAvailableModels={hasAvailableModels}
+                defaultModelName={defaultModelName}
+                isConnected={isGatewayRunning}
+              />
+            </div>
+          )}
+
+          {hiddenCount > 0 && (
+            <div className="flex justify-center py-1">
+              <Button variant="ghost" size="sm" onClick={showMore}>
+                {t("common.showOlder", { count: hiddenCount })}
+              </Button>
+            </div>
+          )}
+
+          {visibleMessages.map((message) => (
+            <WorkspaceChatMessage
+              key={message.id}
+              message={message}
+              isStreaming={message.id === streamingMessageId}
+              selected={selectedMessageId === message.id}
+              subtleActions={
+                message.role === "assistant" &&
+                message.id === latestAssistantMessageId
+              }
+              onSelect={setSelectedMessageId}
+              canRetry={
+                isGatewayRunning &&
+                !isTyping &&
+                retryableMessageIds.has(message.id)
+              }
+              onEdit={onEditMessage}
+              onDelete={setPendingDeleteMessageId}
+              onRetry={onRetryMessage}
+              onInspectMessage={onInspectMessage}
             />
-          </div>
-        )}
-
-        {hiddenCount > 0 && (
-          <div className="flex justify-center py-1">
-            <Button variant="ghost" size="sm" onClick={showMore}>
-              {t("common.showOlder", { count: hiddenCount })}
-            </Button>
-          </div>
-        )}
-
-        {visibleMessages.map((message) => (
-          <WorkspaceChatMessage
-            key={message.id}
-            message={message}
-            isStreaming={message.id === streamingMessageId}
-            selected={selectedMessageId === message.id}
-            subtleActions={message.role === "assistant" && message.id === latestAssistantMessageId}
-            onSelect={setSelectedMessageId}
-            canRetry={
-              connectionState === "connected" &&
-              !isTyping &&
-              retryableMessageIds.has(message.id)
-            }
-            onEdit={onEditMessage}
-            onDelete={setPendingDeleteMessageId}
-            onFork={onForkMessage}
-            onRetry={onRetryMessage}
-            onInspectMessage={onInspectMessage}
-          />
-        ))}
+          ))}
+        </div>
       </div>
+      {!isFollowingLatest && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center">
+          <Button
+            className="pointer-events-auto shadow-lg"
+            size="sm"
+            onClick={onJumpToLatest}
+          >
+            <IconArrowDown size={16} />
+            {t("chat.jumpToLatest", { defaultValue: "Jump to latest" })}
+          </Button>
+        </div>
+      )}
       <AlertDialog
         open={pendingDeleteMessageId !== null}
         onOpenChange={(open) => !open && setPendingDeleteMessageId(null)}

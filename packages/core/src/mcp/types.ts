@@ -30,6 +30,8 @@ export interface McpServerConfig {
 export interface McpRuntimeConfig {
   enabled: boolean;
   discovery: McpDiscoveryConfig;
+  /** Enables configured MCP server tools without per-tool side-effect opt-ins in sandbox owner mode. */
+  autoApproveAll?: boolean;
   servers: Record<string, McpServerConfig>;
 }
 

@@ -19,6 +19,8 @@ export interface PluginManifest {
   description: string;
   author?: string;
   license?: string;
+  /** Bundled Monitoring icon key; arbitrary URLs or markup are not supported. */
+  monitorIconKey?: string;
   main?: string;
   permissions?: string[];
   contracts?: PluginContracts;
@@ -85,6 +87,8 @@ export interface InstallResult {
   description?: string;
   author?: string;
   license?: string;
+  /** Bundled Monitoring icon key for tool nodes created by this plugin. */
+  monitorIconKey?: string;
   permissions?: string[];
   contracts?: PluginContracts;
   plugin?: PluginManifest["plugin"];
@@ -110,6 +114,7 @@ export interface InstalledSkill {
   assetsPath?: string;
   author?: string;
   license?: string;
+  monitorIconKey?: string;
   permissions?: string[];
   contracts?: PluginContracts;
   plugin?: PluginManifest["plugin"];
@@ -125,6 +130,7 @@ export interface PluginContractCatalogEntry {
     path: string;
     entrypoint: string;
     assetsPath?: string;
+    monitorIconKey?: string;
   };
   kind: PluginContractKind;
   contract: PluginContract;

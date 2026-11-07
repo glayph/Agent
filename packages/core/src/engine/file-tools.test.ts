@@ -129,6 +129,15 @@ describe("file management tools", () => {
     await expect(tools.file_read.execute({ path: path.join(outside, "c.txt") }, ctx())).resolves.toMatchObject({ content: "C" });
   });
 
+  it("sandbox owner mode can read and delete credential-like guest files", async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-owner-files-")));
+    fs.writeFileSync(path.join(root, ".env"), "GUEST_TOKEN=value");
+    const tools = Object.fromEntries(createFileManagementTools({ root, allowSensitivePaths: true }).map((t) => [t.name, t]));
+    await expect(tools.file_read.execute({ path: ".env" }, ctx())).resolves.toMatchObject({ content: "GUEST_TOKEN=value" });
+    await expect(tools.file_delete.execute({ path: ".env" }, ctx())).resolves.toMatchObject({ deleted: true });
+    expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+  });
+
   it("passes the workspace restriction through to script execution", async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-run-root-")));
     const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "miki-ft-run-out-")));

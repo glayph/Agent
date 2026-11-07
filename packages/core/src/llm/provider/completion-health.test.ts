@@ -65,7 +65,7 @@ describe("provider completion health", () => {
     );
   });
 
-  it("separates payment entitlement blocks from invalid credentials", async () => {
+  it("does not confuse an authentication response with payment entitlement", async () => {
     global.fetch = jest.fn(
       async () =>
         new Response(
@@ -78,6 +78,19 @@ describe("provider completion health", () => {
 
     const result = await probeProviderCompletion(input());
 
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("API key");
+  });
+
+  it("classifies HTTP 402 with a structured payment code as entitlement blocked", async () => {
+    global.fetch = jest.fn(
+      async () => new Response(JSON.stringify({ error: { code: "payment_required", message: "Payment is required" } }), {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    const result = await probeProviderCompletion(input());
     expect(result.status).toBe("entitlement_blocked");
     expect(result.error).toContain("active payment method");
   });
@@ -95,6 +108,16 @@ describe("provider completion health", () => {
 
     expect(result.status).toBe("invalid");
     expect(result.error).toContain("API key");
+  });
+
+  it("reports HTTP 403 authorization rejection as invalid rather than entitlement", async () => {
+    global.fetch = jest.fn(async () => new Response(JSON.stringify({ error: { code: "forbidden", message: "Permission denied" } }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+    const result = await probeProviderCompletion(input());
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("authorization");
   });
 
   it("reports a retryable rate-limit outcome without retrying inside the probe", async () => {

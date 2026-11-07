@@ -88,6 +88,11 @@ const MCPServerSchema = z
 
 const ToolsSchema = z
   .object({
+    auto_approve_safe: z.boolean().optional(),
+    /** Disable all agent tool approval prompts in a separately isolated owner environment. */
+    auto_approve_all: z.boolean().optional(),
+    require_confirm_destructive: z.boolean().optional(),
+    require_confirm_computer_use: z.boolean().optional(),
     cron: z
       .object({
         allow_command: z.boolean().optional(),
@@ -102,7 +107,7 @@ const ToolsSchema = z
         enable_deny_patterns: z.boolean().optional(),
         custom_allow_patterns: z.array(z.string()).optional(),
         custom_deny_patterns: z.array(z.string()).optional(),
-        timeout_seconds: z.number().int().min(0).max(86400).optional(),
+        timeout_seconds: z.number().int().min(0).optional(),
       })
       .passthrough()
       .optional(),
@@ -316,13 +321,12 @@ const AgentMemorySchema = z
  * bindings, credential-rotation profiles and the failover switch.
  *
  * Validation here is deliberately shallow. The router's own resolver
- * (`resolveModelRouterConfig` in packages/core/src/llm/model-router/) parses
- * the nested values, drops anything malformed with a logged warning and falls
- * back to safe defaults — so a typo in a lane must never make the whole agent
- * config be rejected. Shape (all optional):
+ * `resolveModelRouterConfig` in packages/core/src/llm/model-router.ts parses
+ * the nested values defensively and drops malformed entries, so a typo in one
+ * lane never rejects the whole agent config. Shape (all optional):
  *
  *   enabled: boolean            # false → single attempt, no fallback chain
- *   max_attempts: 1..20         # cap on credential rotations + model hops per call
+ *   max_attempts: deprecated  # retained for compatibility; explicit fallbacks are never truncated
  *   lanes:   { <lane>: "provider/model" | { primary, fallbacks: [..] } }
  *   roles:   { <specialistId>: "<lane>" | { primary, fallbacks: [..] } }
  *   credential_profiles: { <providerId>: [SECRET_NAME, ..] }   # names only
@@ -334,9 +338,9 @@ const AgentBlockSchema = z
     name: z.string().min(1).optional(),
     project: z.string().optional(),
     persona: z.string().optional(),
-    // Step 01 workspace-identity-files: overrides where the SOUL/AGENTS/
-    // IDENTITY/USER/TOOLS files live (default: RuntimePaths.identityDir,
-    // i.e. <sourceDir>/identity in dev mode). See packages/core/src/identity/.
+    // Overrides where the SOUL/AGENTS/USER identity files live
+    // (default: RuntimePaths.identityDir,
+    // i.e. <sourceDir>/identity in dev mode). See packages/gateway/src/identity-prompt.ts.
     identity: z
       .object({
         path: z.string().optional(),
@@ -345,10 +349,9 @@ const AgentBlockSchema = z
       .optional(),
     language: z.string().optional(),
     timezone: z.string().optional(),
-    max_tokens_per_cycle: z.number().int().min(100).max(100000).optional(),
+    verify_actions: z.boolean().optional(),
     browser: z
       .object({
-        max_retries: z.number().int().min(0).max(10).optional(),
         clear_state_every_n_navigations: z.number().int().min(1).optional(),
         chrome_path: z.string().nullable().optional(),
       })
@@ -362,8 +365,8 @@ const AgentBlockSchema = z
     dynamic_budget: z
       .object({
         enabled: z.boolean().optional(),
-        extension_turns: z.number().int().min(1).max(24).optional(),
-        max_extensions: z.number().int().min(0).max(5).optional(),
+        extension_turns: z.number().int().min(1).optional(),
+        max_extensions: z.number().int().min(0).optional(),
       })
       .passthrough()
       .optional(),
@@ -381,8 +384,8 @@ const AgentBlockSchema = z
       .object({
         // Miki is a systemwide agent: system_access defaults to "full".
         // "workspace_only" / "isolated" are optional operator-chosen
-        // restrictions, never the default. Destructive/external actions are
-        // gated separately by approval (tools.require_confirm_*), not by scope.
+        // restrictions. tools.auto_approve_all suppresses per-tool confirmation
+        // prompts only when this application is running inside an operator-managed VM.
         bypass_restrictions: z.boolean().default(false),
         system_access: z
           .enum(["full", "workspace_only", "isolated"])
@@ -394,6 +397,19 @@ const AgentBlockSchema = z
         approval_note: z.string().optional(),
       })
       .passthrough()
+      .superRefine((security, context) => {
+        const unrestrictedOverride = security.bypass_restrictions === true || security.sandbox_mode === false;
+        if (!unrestrictedOverride) return;
+        if (security.risk_acceptance !== true) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["risk_acceptance"], message: "Unrestricted mode requires explicit risk_acceptance: true." });
+        }
+        if (security.audit_logging !== true) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["audit_logging"], message: "Unrestricted mode requires audit_logging: true." });
+        }
+        if (typeof security.approval_note !== "string" || security.approval_note.trim().length < 12) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["approval_note"], message: "Unrestricted mode requires an approval_note of at least 12 characters." });
+        }
+      })
       .optional(),
   })
   .passthrough();
@@ -462,12 +478,18 @@ export const RuntimeConfigSchema = z
       .optional(),
     concurrency: z
       .object({
-        maxConcurrentTasks: z.number().int().min(1).max(100).optional(),
-        maxParallelToolCalls: z.number().int().min(1).max(100).optional(),
-        toolLockTimeoutMs: z.number().int().min(1000).max(300000).optional(),
-        taskQueueSize: z.number().int().min(1).max(1000).optional(),
+        maxConcurrentTasks: z.number().int().min(1).optional(),
+        maxBackgroundJobs: z.number().int().min(1).optional(),
+        adaptiveResourceManagement: z.boolean().optional(),
+        minFreeMemoryRatio: z.number().min(0.03).max(0.5).optional(),
+        minFreeDiskRatio: z.number().min(0.01).max(0.5).optional(),
+        highLoadPerCpu: z.number().min(0.5).max(8).optional(),
+        criticalLoadPerCpu: z.number().min(0.75).max(16).optional(),
+        maxParallelToolCalls: z.number().int().min(1).optional(),
+        toolLockTimeoutMs: z.number().int().min(0).optional(),
+        taskQueueSize: z.number().int().min(1).optional(),
         schedulerIntervalMs: z.number().int().min(10).max(60000).optional(),
-        maxScheduledTaskAttempts: z.number().int().min(1).max(20).optional(),
+        maxScheduledTaskAttempts: z.number().int().min(1).optional(),
         retryBaseDelayMs: z.number().int().min(100).max(3600000).optional(),
         retryMaxDelayMs: z.number().int().min(100).max(86400000).optional(),
         recoveryStaleAfterMs: z

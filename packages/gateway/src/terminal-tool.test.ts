@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@jest/globals"
 import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { blockedReason, createTerminalTool, testCommandPatterns } from "./terminal-tool.js"
+import { blockedReason, createTerminalTool, createTerminalTools, testCommandPatterns } from "./terminal-tool.js"
 
 const ctx = () => ({ runId: "r", callId: "c", signal: new AbortController().signal })
 const makeRoot = () => mkdtempSync(path.join(os.tmpdir(), "miki-term-"))
@@ -33,6 +33,15 @@ describe("terminal_run", () => {
     expect(makeTool().approval).toBe("auto")
     expect(blockedReason("rm -rf /")).toBeUndefined()
   })
+  it("lets sandbox owner mode override environment-driven terminal tripwires", async () => {
+    process.env.MIKI_TERMINAL_SAFE = "true"
+    const root = makeRoot()
+    const tool = createTerminalTool({ root: () => root, restrictToWorkspace: () => false, safeMode: () => false })
+    expect(blockedReason("rm -rf /", false)).toBeUndefined()
+    const result = await tool.execute({ command: "pwd", cwd: ".." }, ctx()) as { exit_code: number }
+    expect(result.exit_code).toBe(0)
+  })
+
   it("never asks for approval in safe mode either (unattended autonomy)", () => {
     process.env.MIKI_TERMINAL_SAFE = "true"
     expect(makeTool().approval).toBe("auto")
@@ -77,6 +86,27 @@ describe("terminal_run", () => {
     expect(result.exit_code).toBe(0)
     expect(result.stdout.trim()).toBe("hello")
   })
+
+  it("keeps cumulative output evidence when earlier status polls consumed the output delta", async () => {
+    const root = makeRoot()
+    const [run, status] = createTerminalTools({ root: () => root, restrictToWorkspace: () => false })
+    const first = await run.execute({ command: "printf 'captured-before-exit'; sleep 2", wait_seconds: 1 }, ctx()) as {
+      status: string; process_id: string; stdout_tail: string; new_stdout: string;
+    }
+    expect(first.status).toBe("running")
+    expect(first.stdout_tail).toContain("captured-before-exit")
+    expect(first.new_stdout).toContain("captured-before-exit")
+
+    const final = await status.execute({ process_id: first.process_id, wait_seconds: 5 }, ctx()) as {
+      status: string; exit_code: number; stdout: string; stdout_tail: string; stdout_total_chars: number; output_was_empty: boolean;
+    }
+    expect(final.status).toBe("exited")
+    expect(final.exit_code).toBe(0)
+    expect(final.stdout).toBe("") // no *new* bytes arrived after the first poll
+    expect(final.stdout_tail).toContain("captured-before-exit")
+    expect(final.stdout_total_chars).toBeGreaterThan(0)
+    expect(final.output_was_empty).toBe(false)
+  }, 10_000)
 
   describe("safe mode blocklist", () => {
     const blocked = [

@@ -3,9 +3,9 @@ import { createWsEventMapper } from "./agent-runtime.js";
 
 type Sent = { type: string; payload: Record<string, unknown> };
 
-function mapper() {
+function mapper(traceContext?: { sourceMessageId?: string; contextId?: string; parentRunId?: string }) {
   const sent: Sent[] = [];
-  const events = createWsEventMapper((type, payload) => sent.push({ type, payload: payload as Record<string, unknown> }), "test-model");
+  const events = createWsEventMapper((type, payload) => sent.push({ type, payload: payload as Record<string, unknown> }), "test-model", undefined, undefined, undefined, undefined, undefined, traceContext);
   return { sent, handle: events.handle };
 }
 
@@ -80,6 +80,31 @@ describe("monitor lifecycle event mapping", () => {
       total: 2,
       levels: 2,
     })
+  })
+
+  it("links the run to its source chat message and emits explicit DAG and verification nodes", () => {
+    const { sent, handle } = mapper({ sourceMessageId: "message-1", contextId: "context-1" })
+    handle({ type: "run.started", runId: "r-trace", goal: "private goal" } as never)
+    handle({
+      type: "plan.created", runId: "r-trace", plan: {
+        id: "p1", goal: "private goal", source: "llm", complexity: "multi_step", createdAt: "2026-10-30T00:00:00.000Z",
+        steps: [
+          { id: "step-a", title: "Private title", tool: "workspace_list", status: "pending" },
+          { id: "step-b", title: "Private title 2", tool: "file_read", dependsOn: ["step-a"], status: "pending" },
+        ],
+      },
+    } as never)
+    handle({ type: "run.phase", runId: "r-trace", turn: 1, phase: "verification", status: "started" } as never)
+    handle({ type: "run.phase", runId: "r-trace", turn: 1, phase: "verification", status: "completed" } as never)
+    expect(sent.find((item) => item.type === "node.run_start")?.payload).toMatchObject({ trace_id: "r-trace", source_message_id: "message-1", context_id: "context-1" })
+    expect(sent.filter((item) => item.type === "node.spawn").map((item) => item.payload)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ node_id: "r-trace:plan:step-a", node_type: "system", label: "workspace_list" }),
+      expect.objectContaining({ node_id: "r-trace:plan:step-b", depends_on: ["r-trace:plan:step-a"] }),
+      expect.objectContaining({ node_id: "r-trace:phase:verification:1", label: "phase_verification" }),
+    ]))
+    expect(sent.find((item) => item.type === "node.complete")?.payload).toMatchObject({ node_id: "r-trace:phase:verification:1", ok: true })
+    expect(JSON.stringify(sent)).not.toContain("Private title")
+    expect(JSON.stringify(sent)).not.toContain("private goal")
   })
 
   it("creates a redacted pending node, updates it while running, and completes it with the real result", () => {

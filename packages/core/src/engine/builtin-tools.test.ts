@@ -93,6 +93,17 @@ describe("workspace tools", () => {
       expect(isSensitivePath(name)).toBe(false);
   });
 
+  it("sandbox owner mode can inspect secrets and hidden dependency folders", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "miki-owner-ws-"));
+    fs.mkdirSync(path.join(root, "node_modules"));
+    fs.writeFileSync(path.join(root, ".env"), "OWNER_SECRET=guest-value");
+    fs.writeFileSync(path.join(root, "node_modules", "dep.js"), "owner-index-token");
+    const tools = Object.fromEntries(createWorkspaceTools({ root, allowSensitivePaths: true, allowHiddenDirs: true }).map((t) => [t.name, t]));
+    await expect(run(tools.file_read, { path: ".env" })).resolves.toMatchObject({ content: "OWNER_SECRET=guest-value" });
+    const searched = await run(tools.workspace_search, { query: "owner-index-token" }) as { matches: Array<{ file: string }> };
+    expect(searched.matches).toEqual([expect.objectContaining({ file: path.join("node_modules", "dep.js") })]);
+  });
+
   it("allows trusted absolute reads when workspace restriction is disabled", async () => {
     const { root } = workspace();
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "miki-builtin-outside-"));
@@ -110,12 +121,18 @@ describe("memory and control tools", () => {
     const memory = {
       search: jest.fn(async () => [{ id: "1", text: "note" }]),
       add: jest.fn(async () => ({ id: "new" })),
+      get: jest.fn(async (file: string) => ({ path: file, text: "saved note" })),
     };
     const tools = Object.fromEntries(createMemoryTools(memory).map((t) => [t.name, t]));
     await expect(run(tools.memory_search, { query: "q", limit: 99 })).resolves.toEqual({ count: 1, hits: [{ id: "1", text: "note" }] });
     expect(memory.search).toHaveBeenCalledWith("q", 20, expect.objectContaining({ runId: expect.any(String) }));
     await expect(run(tools.memory_add, { content: "  " })).rejects.toThrow("empty");
     await expect(run(tools.memory_add, { content: "fact" })).resolves.toEqual({ id: "new" });
+    expect(tools.memory_add.approval).toBe("required");
+    await expect(run(tools.memory_search, { query: "x".repeat(2001) })).rejects.toThrow("2000");
+    await expect(run(tools.memory_search, { query: "q", limit: "2" })).rejects.toThrow("integer between 1 and 20");
+    await expect(run(tools.memory_get, { file: "MEMORY.md" })).resolves.toEqual({ path: "MEMORY.md", text: "saved note" });
+    await expect(run(tools.memory_get, { file: "MEMORY.md", lines: 501 })).rejects.toThrow("500");
   });
 
   it("maps control tool definitions and executes with the api origin", async () => {

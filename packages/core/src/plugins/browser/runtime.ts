@@ -15,6 +15,16 @@ export interface BrowserConfig {
   allowPrivateNetworks?: boolean;
 }
 
+export interface BrowserReconciliationSnapshot {
+  browserAvailable: boolean;
+  pageCount: number;
+  activeUrl: string;
+  title: string;
+  readyState: string;
+  reconciledAt: string;
+  restoredFromCheckpoint: boolean;
+}
+
 export interface BrowserSemanticTarget {
   selector?: string;
   role?: string;
@@ -89,6 +99,31 @@ const DELAY_SHORT: [number, number] = [100, 500]; // Reduced for speed
 const DELAY_MEDIUM: [number, number] = [200, 800]; // Reduced for speed
 const DELAY_LONG: [number, number] = [500, 1200]; // Reduced for speed
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  throw reason instanceof Error ? reason : new Error("Browser operation was cancelled.");
+}
+
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      const reason = signal.reason;
+      reject(reason instanceof Error ? reason : new Error("Browser operation was cancelled."));
+    };
+    function done() {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 interface VirtualCursorElement {
   id: string;
   style: Record<string, string>;
@@ -148,7 +183,12 @@ export class BrowserTool {
   private navCount: number = 0;
   private profileManager: ProfileManager | null = null;
   private profileDir: string = "";
-  private _maxRetries: number = 3;
+  private readonly sessionStatePath: string;
+  private lastKnownPageUrl = "";
+  private readonly observedPages = new WeakSet<Page>();
+  // Browser navigation is a recoverable tool operation: retry transient browser/network
+  // failures until the caller cancels or the failure is classified as permanent.
+  private _maxRetries: number = Number.POSITIVE_INFINITY;
   private _chromePath: string | null = null;
   private _allowMedia = true;
   // Safe baseline: loopback, private and cloud-metadata addresses are blocked unless restrictions are bypassed.
@@ -167,6 +207,11 @@ export class BrowserTool {
   ) {
     this.headless = headless;
     this.screenshotDir = path.resolve(dataDir, "screenshots");
+    this.sessionStatePath = path.resolve(dataDir, "browser-session-state.json");
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.sessionStatePath, "utf8")) as { url?: unknown };
+      if (typeof saved.url === "string" && /^https?:\/\//i.test(saved.url)) this.lastKnownPageUrl = saved.url;
+    } catch { /* A missing or malformed browser checkpoint is treated as an empty session. */ }
     this.userAgent =
       USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
     this.viewport = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
@@ -398,24 +443,23 @@ export class BrowserTool {
   }
 
   private async _ensureLaunchedImpl(): Promise<void> {
-    if (this.page !== null) {
+    if (this.context !== null) {
       try {
-        const closed = this.page.isClosed();
-        if (!closed) {
-          // Check if page is responsive
-          await Promise.race([
-            this.activePage.title(),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("Page unresponsive")), 5000),
-            ),
-          ]);
-          return;
+        if (!this.page || this.page.isClosed()) {
+          const replacement = this.context.pages().find((candidate) => !candidate.isClosed());
+          // Page interception/observation is installed by reconcilePageState;
+          // do not mark a replacement as observed before security routes exist.
+          this.page = replacement ?? await this.context.newPage();
         }
+        await Promise.race([
+          this.activePage.title(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Page unresponsive")), 5000)),
+        ]);
+        await this.reconcilePageState();
+        return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[BrowserTool] Existing page check failed: ${msg}. Re-launching...`,
-        );
+        console.warn(`[BrowserTool] Browser state reconciliation failed: ${msg}. Re-launching persistent context...`);
         await this.close();
       }
     }
@@ -433,17 +477,112 @@ export class BrowserTool {
     this.context = await this._launchPlaywright();
     this.browser = this.context; // Store it as browser for compatibility with close()
 
-    const pages = this.context.pages();
-    if (pages.length > 0) {
-      this.page = pages[0];
-    } else {
-      this.page = await this.context.newPage();
-    }
+    const pages = this.context.pages().filter((candidate) => !candidate.isClosed());
+    this.page = pages.find((candidate) => this.lastKnownPageUrl && candidate.url() === this.lastKnownPageUrl)
+      ?? pages.find((candidate) => candidate.url() !== "about:blank")
+      ?? pages[0]
+      ?? await this.context.newPage();
+    this.observePage(this.page);
     await this._setupRequestInterception(this.page);
+    await this.restoreSavedPageIfBlank();
 
     if (this.profileManager) {
       this.profileManager.register("default", this.profileDir);
     }
+  }
+
+  private observePage(page: Page): void {
+    if (this.observedPages.has(page)) return;
+    this.observedPages.add(page);
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      this.lastKnownPageUrl = page.url();
+      this.persistSessionCheckpoint();
+    });
+    page.on("close", () => {
+      if (this.page === page && this.context) {
+        try {
+          const replacement = this.context.pages().find((candidate) => !candidate.isClosed());
+          // The next ensureLaunched/reconcile pass installs routes before use.
+          this.page = replacement ?? null;
+        } catch {
+          this.page = null;
+        }
+      }
+    });
+  }
+
+  private persistSessionCheckpoint(): void {
+    const url = this.page?.url() ?? this.lastKnownPageUrl;
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    try {
+      fs.mkdirSync(path.dirname(this.sessionStatePath), { recursive: true });
+      const temporary = `${this.sessionStatePath}.${process.pid}.tmp`;
+      fs.writeFileSync(temporary, JSON.stringify({ url, savedAt: new Date().toISOString() }), { mode: 0o600 });
+      fs.renameSync(temporary, this.sessionStatePath);
+    } catch (error) {
+      console.warn(`[BrowserTool] Could not persist page checkpoint: ${getErrorMessage(error)}`);
+    }
+  }
+
+  private async restoreSavedPageIfBlank(): Promise<void> {
+    if (!this.page || !this.lastKnownPageUrl || this.page.url() !== "about:blank") return;
+    try {
+      const safeUrl = await validateNetworkUrl(this.lastKnownPageUrl, {
+        allowedDomains: this._allowedDomains,
+        allowPrivateNetworks: this._allowPrivateNetworks,
+      });
+      await this.page.goto(safeUrl.toString(), { waitUntil: "domcontentloaded", timeout: Math.min(NAVIGATION_TIMEOUT, 20_000) });
+    } catch (error) {
+      // Do not clear cookies or profile data when a page cannot be restored.
+      console.warn(`[BrowserTool] Saved page was not restored: ${getErrorMessage(error)}`);
+    }
+  }
+
+  private async reconcilePageState(): Promise<BrowserReconciliationSnapshot> {
+    if (!this.context) throw new Error("Browser context is unavailable during reconciliation.");
+    const pages = this.context.pages().filter((candidate) => !candidate.isClosed());
+    const selected = pages.find((candidate) => this.lastKnownPageUrl && candidate.url() === this.lastKnownPageUrl)
+      ?? (this.page && !this.page.isClosed() ? this.page : undefined)
+      ?? pages.find((candidate) => candidate.url() !== "about:blank")
+      ?? pages[0]
+      ?? await this.context.newPage();
+    const savedUrl = this.lastKnownPageUrl;
+    const matchedCheckpoint = Boolean(savedUrl && selected.url() === savedUrl);
+    const needsRequestInterception = !this.observedPages.has(selected);
+    this.page = selected;
+    this.observePage(selected);
+    if (needsRequestInterception) await this._setupRequestInterception(selected);
+    await this.restoreSavedPageIfBlank();
+    const dom = await selected.evaluate(() => {
+      // This callback runs in the browser page; the core package compiles with Node-only DOM typings.
+      const pageGlobal = globalThis as unknown as {
+        document: { title: string; readyState: string };
+        location: { href: string };
+      };
+      return {
+        title: pageGlobal.document.title || "",
+        readyState: pageGlobal.document.readyState || "unknown",
+        url: pageGlobal.location.href,
+      };
+    });
+    this.lastKnownPageUrl = dom.url;
+    this.persistSessionCheckpoint();
+    return {
+      browserAvailable: true,
+      pageCount: Math.max(1, pages.length),
+      activeUrl: dom.url,
+      title: dom.title,
+      readyState: dom.readyState,
+      reconciledAt: new Date().toISOString(),
+      restoredFromCheckpoint: matchedCheckpoint || Boolean(savedUrl && dom.url === savedUrl),
+    };
+  }
+
+  /** Reconcile Playwright context, live pages, DOM readiness and the last safe URL checkpoint. */
+  public async reconcileAfterCrash(): Promise<BrowserReconciliationSnapshot> {
+    await this.ensureLaunched();
+    return this.reconcilePageState();
   }
 
   private async _ensureWorkspacePreviewServer(): Promise<void> {
@@ -599,96 +738,115 @@ export class BrowserTool {
     }
   }
 
-  public async navigate(url: string, retries?: number): Promise<string> {
+  public async navigate(
+    url: string,
+    retries?: number,
+    signal?: AbortSignal,
+    heartbeat?: (detail?: string) => void,
+  ): Promise<string> {
+    throwIfAborted(signal);
     await this.ensureLaunched();
-
+    throwIfAborted(signal);
     url = normalizeBrowserUrl(url);
     await this.assertAutonomousDomain(url);
     const parsedUrl = new URL(url);
     if (
-      (parsedUrl.hostname === "127.0.0.1" ||
-        parsedUrl.hostname === "localhost") &&
+      (parsedUrl.hostname === "127.0.0.1" || parsedUrl.hostname === "localhost") &&
       parsedUrl.port === "8765"
     ) {
       await this._ensureWorkspacePreviewServer();
-      if (this.workspacePreviewPort) {
-        url = rewriteWorkspacePreviewUrl(url, this.workspacePreviewPort);
-      }
+      if (this.workspacePreviewPort) url = rewriteWorkspacePreviewUrl(url, this.workspacePreviewPort);
     }
 
-    const maxAttempts = retries ?? this._maxRetries;
+    const abortPage = () => {
+      const active = this.page;
+      this.page = null;
+      if (active && !active.isClosed()) void active.close().catch(() => undefined);
+    };
+    signal?.addEventListener("abort", abortPage, { once: true });
+    const heartbeatTimer = heartbeat
+      ? setInterval(() => heartbeat("Browser navigation is waiting for page load"), 10_000)
+      : undefined;
+    const maxAttempts = retries === undefined ? this._maxRetries : Math.max(0, Math.floor(retries));
     let lastError: string | null = null;
-    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-      try {
-        const page = this.activePage;
-        const response = await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: NAVIGATION_TIMEOUT,
-        });
 
-        if (response && response.status() >= 400) {
-          throw new Error(
-            `HTTP ${response.status()}: ${response.statusText()}`,
-          );
-        }
-
+    try {
+      for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+        throwIfAborted(signal);
+        heartbeat?.(`Browser navigation attempt ${attempt + 1}`);
         try {
-          await page.waitForLoadState("networkidle", {
-            timeout: NETWORK_IDLE_TIMEOUT,
+          const page = this.activePage;
+          const response = await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: NAVIGATION_TIMEOUT,
           });
-        } catch (err) {
-          console.warn(`[BrowserTool] networkidle timeout:`, err);
-        }
+          if (response && response.status() >= 400) {
+            throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+          }
 
-        // Human-like post-navigation behavior
-        await this.randomDelay(DELAY_MEDIUM[0], DELAY_MEDIUM[1]);
-        await this.randomScroll();
-        await this.randomDelay(500, 1200);
-
-        const title: string = await this.activePage.title();
-        const currentUrl: string = this.activePage.url();
-        await this.assertAutonomousDomain(currentUrl);
-
-        this.navCount++;
-        if (this.navCount % this.maxNavigationsBeforeClear === 0) {
-          await this.rotateIdentity();
-          this.navCount = 0;
-        }
-
-        return `Successfully navigated to: ${currentUrl}\nTitle: ${title}`;
-      } catch (e: unknown) {
-        lastError = getErrorMessage(e);
-        console.warn(
-          `[BrowserTool] Navigation attempt ${attempt + 1} failed: ${lastError}`,
-        );
-
-        if (attempt < maxAttempts) {
-          // Close stale page before retry to prevent memory leaks
           try {
-            if (this.page && !this.page.isClosed()) {
-              await this.page.close();
+            await page.waitForLoadState("networkidle", { timeout: NETWORK_IDLE_TIMEOUT });
+          } catch (err) {
+            console.warn(`[BrowserTool] networkidle timeout:`, err);
+          }
+          throwIfAborted(signal);
+
+          // Human-like post-navigation behavior
+          await delayWithSignal(
+            Math.floor(Math.random() * (DELAY_MEDIUM[1] - DELAY_MEDIUM[0] + 1)) + DELAY_MEDIUM[0],
+            signal,
+          );
+          await this.randomScroll();
+          await delayWithSignal(Math.floor(Math.random() * 701) + 500, signal);
+
+          const title = await this.activePage.title();
+          const currentUrl = this.activePage.url();
+          await this.assertAutonomousDomain(currentUrl);
+          this.navCount++;
+          if (this.navCount % this.maxNavigationsBeforeClear === 0) {
+            await this.rotatePresentation();
+            this.navCount = 0;
+          }
+          return `Successfully navigated to: ${currentUrl}\nTitle: ${title}`;
+        } catch (error: unknown) {
+          throwIfAborted(signal);
+          lastError = getErrorMessage(error);
+          console.warn(`[BrowserTool] Navigation attempt ${attempt + 1} failed: ${lastError}`);
+
+          const httpStatus = Number(lastError.match(/^HTTP (\d{3}):/)?.[1]);
+          const permanentHttpFailure = Number.isFinite(httpStatus)
+            && httpStatus > 0
+            && httpStatus < 500
+            && ![408, 425, 429].includes(httpStatus);
+          if (permanentHttpFailure || attempt >= maxAttempts) {
+            // Permanent HTTP responses (for example 401/403/404/422) are not transient.
+            try {
+              const currentUrl = this.activePage.url();
+              const title = await this.activePage.title();
+              return `Navigation failed after ${attempt + 1} attempts. Current URL: ${currentUrl}, Title: ${title}. Last Error: ${lastError}`;
+            } catch {
+              return `Navigation failed after ${attempt + 1} attempts. Last Error: ${lastError}`;
             }
+          }
+
+          // Close stale page before retry to prevent memory leaks.
+          try {
+            if (this.page && !this.page.isClosed()) await this.page.close();
           } catch {
-            // Best-effort close
+            // Best-effort close.
           }
           this.page = null;
-
-          await this.rotateIdentity();
-          const backoff = Math.pow(2, attempt) * 2000;
-          await this.randomDelay(backoff, backoff + 1000);
-        } else {
-          // Final attempt failed, try to return whatever we have
-          try {
-            const currentUrl = this.activePage.url();
-            const title = await this.activePage.title();
-            return `Navigation partially failed after ${maxAttempts + 1} attempts. Current URL: ${currentUrl}, Title: ${title}. Last Error: ${lastError}`;
-          } catch {
-            return `Navigation failed after ${maxAttempts + 1} attempts. Last Error: ${lastError}`;
-          }
+          await this.rotatePresentation();
+          // Exponential backoff with a bounded delay and jitter; retry count is not a goal limit.
+          const backoff = Math.min(60_000, 2_000 * (2 ** Math.min(attempt, 5)));
+          await delayWithSignal(backoff + Math.floor(Math.random() * Math.max(1_000, backoff * 0.25)), signal);
         }
       }
+      return `Error: Navigation to ${url} failed${lastError ? `: ${lastError}` : "."}`;
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      signal?.removeEventListener("abort", abortPage);
     }
-    return `Error: Navigation to ${url} failed.`;
   }
 
   public async click(selector: string): Promise<string> {
@@ -1143,26 +1301,23 @@ export class BrowserTool {
     return "Scrolled to bottom of page.";
   }
 
-  public async rotateIdentity(): Promise<void> {
-    this.userAgent =
-      USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  /**
+   * Varies presentation without destroying the persistent browser profile.
+   * Cookies, local storage and authenticated sessions are never cleared by
+   * routine navigation or recovery. The user-agent change applies on the next
+   * cold launch; viewport changes are applied to current live pages.
+   */
+  public async rotatePresentation(): Promise<void> {
+    this.userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
     this.viewport = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
     if (this.context) {
-      try {
-        await this.context.clearCookies();
-      } catch (err) {
-        console.warn(`[BrowserTool] clearCookies error:`, err);
+      for (const page of this.context.pages()) {
+        if (page.isClosed()) continue;
+        try { await page.setViewportSize(this.viewport); }
+        catch (error) { console.warn(`[BrowserTool] viewport update failed: ${getErrorMessage(error)}`); }
       }
-      try {
-        await this.context.close();
-      } catch (err) {
-        console.warn(`[BrowserTool] context close error:`, err);
-      }
-      this.context = null;
-      this.page = null;
     }
-    this.browser = null;
-    await this.launchBrowser();
+    this.persistSessionCheckpoint();
   }
 
   public toPlaywrightSelector(selector: string): string {

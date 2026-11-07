@@ -55,6 +55,35 @@ describe("recovery self-learning", () => {
     expect(learning.requiredGreen()).toBe(3)
   })
 
+  it("keeps an incident open and retries replay after a transient replay failure", async () => {
+    const { db } = build()
+    let ok = false
+    let attempts = 0
+    const manager = new RecoveryManager({
+      db, check: async () => ({ ok, reason: "network unavailable" }), requiredGreen: 2,
+      onRecovered: async () => { attempts += 1; if (attempts === 1) throw new Error("temporary replay failure"); return 3 },
+      log: () => undefined,
+    })
+    await manager.tick()
+    ok = true
+    await manager.tick(); await manager.tick()
+    expect(manager.state).toBe("disrupted")
+    expect((db.prepare("SELECT ended_at FROM recovery_incidents").get() as { ended_at: string | null }).ended_at).toBeNull()
+    await manager.tick(); await manager.tick()
+    expect(manager.state).toBe("healthy")
+    expect(attempts).toBe(2)
+    expect(db.prepare("SELECT replayed,remedy FROM recovery_incidents").get()).toMatchObject({ replayed: 3, remedy: "dependencies recovered; unanswered messages replayed" })
+  })
+
+  it("redacts secrets from persisted recovery incident reasons", async () => {
+    const { db } = build()
+    const manager = new RecoveryManager({ db, check: async () => ({ ok: false, reason: "provider error api_key=sk-super-secret-token" }), log: () => undefined })
+    await manager.tick()
+    const row = db.prepare("SELECT reason FROM recovery_incidents").get() as { reason: string }
+    expect(row.reason).toContain("[REDACTED]")
+    expect(row.reason).not.toContain("sk-super-secret-token")
+  })
+
   it("the recovery manager uses the tuned number of green checks", async () => {
     const { db, learning } = build()
     let ok = false

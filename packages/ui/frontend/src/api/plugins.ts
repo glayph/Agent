@@ -28,6 +28,8 @@ export interface PluginManifest {
   capabilities: string[]
   runtimeStatus: PluginRuntimeStatus
   description?: string
+  /** Optional local icon registry key used by the live Monitoring graph. */
+  monitorIconKey?: string
   configKey?: string
   requiredConfig?: string[]
   secretFields?: string[]

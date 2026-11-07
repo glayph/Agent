@@ -17,6 +17,7 @@ export const LIFECYCLE_EVENTS = [
   // Messages (after Step 06 normalize)
   "message:received",
   "message:sent",
+  "learning:feedback",
   // Tools (Step 04 gate seam)
   "tool:before_call",
   "tool:after_call",
@@ -94,6 +95,7 @@ export type LifecyclePayloadMap = {
   "gateway:shutdown": GatewayEventPayload;
   "message:received": MessageEventPayload;
   "message:sent": MessageEventPayload;
+  "learning:feedback": Record<string, unknown>;
   "tool:before_call": ToolEventPayload;
   "tool:after_call": ToolEventPayload;
   "subagent:spawned": SubagentEventPayload;

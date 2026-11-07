@@ -11,7 +11,7 @@
  * Behaviour is intentionally identical to the previous in-handler implementation:
  *  - events are buffered (last 500) and sequenced so a reconnecting client can `resume`;
  *  - live-only events (heartbeats) are never buffered or sequenced;
- *  - a run whose last socket disconnected is kept for a grace period, a finished run for 10s;
+ *  - unfinished runs remain available until their owner finishes; finished runs are retained for 10s;
  *  - `resume` takes the stream over for the resuming socket (the previous subscriber is dropped).
  */
 import type { WebSocket } from "ws"
@@ -34,7 +34,7 @@ export interface RunStream {
 }
 
 export interface StreamHubOptions {
-  /** How long an unfinished run is kept after its last socket disconnected. */
+  /** @deprecated Active runs are now retained until completion; kept for config compatibility. */
   resumeGraceMs?: number
   /** How long a finished run stays resumable. */
   finishedRetentionMs?: number
@@ -57,13 +57,17 @@ export function sendSocketEvent(socket: WebSocket, type: string, sessionId: stri
   const message: Record<string, unknown> = { type, session_id: sessionId, timestamp: Date.now(), payload }
   if (typeof payload.checkpoint_id === "string") message.checkpoint_id = payload.checkpoint_id
   if (typeof payload.sequence === "number") message.sequence = payload.sequence
-  socket.send(JSON.stringify(message))
+  try {
+    socket.send(JSON.stringify(message))
+  } catch {
+    // A WebSocket can close between the readyState check and send(). A lost
+    // live-only notification must never interrupt the agent run.
+  }
 }
 
 export class StreamHub {
   private readonly runs = new Map<string, RunStream>()
   private readonly sessionSockets = new Map<string, Set<WebSocket>>()
-  private readonly resumeGraceMs: number
   private readonly finishedRetentionMs: number
   private readonly maxBufferedEvents: number
   private readonly clock: () => number
@@ -71,7 +75,6 @@ export class StreamHub {
   private sweepTimer: ReturnType<typeof setInterval> | undefined
 
   constructor(options: StreamHubOptions = {}) {
-    this.resumeGraceMs = options.resumeGraceMs ?? 30_000
     this.finishedRetentionMs = options.finishedRetentionMs ?? 10_000
     this.maxBufferedEvents = options.maxBufferedEvents ?? 500
     this.clock = options.clock ?? Date.now
@@ -97,7 +100,7 @@ export class StreamHub {
     }
     for (const run of this.runs.values()) {
       if (!run.subscribers.delete(socket)) continue
-      if (!run.done && run.subscribers.size === 0) run.expiresAt = this.clock() + this.resumeGraceMs
+      if (!run.done && run.subscribers.size === 0) run.expiresAt = Number.POSITIVE_INFINITY
     }
   }
 
@@ -120,7 +123,9 @@ export class StreamHub {
       events: [],
       subscribers,
       done: false,
-      expiresAt: this.clock() + this.resumeGraceMs,
+      // Active runs must survive arbitrary browser disconnects/reloads. Their
+      // lifetime is bounded by the run's own execution deadline/cancellation.
+      expiresAt: Number.POSITIVE_INFINITY,
     }
     this.runs.set(run.runId, run)
     return run
@@ -163,14 +168,14 @@ export class StreamHub {
     })
     run.events.push(message)
     if (run.events.length > this.maxBufferedEvents) run.events.splice(0, run.events.length - this.maxBufferedEvents)
-    for (const socket of run.subscribers) if (isOpen(socket)) socket.send(message)
+    for (const socket of run.subscribers) this.sendSafely(socket, message)
   }
 
   /** Live-only event (heartbeats): sent to open subscribers, never buffered or sequenced. */
   publishLive(run: RunStream, type: string, payload: Record<string, unknown> = {}): void {
     if (run.subscribers.size === 0) return
     const message = JSON.stringify({ type, session_id: run.sessionId, timestamp: Date.now(), payload: { ...payload, run_id: run.runId, ...(run.replyToMessageId ? { reply_to_message_id: run.replyToMessageId } : {}) } })
-    for (const socket of run.subscribers) if (isOpen(socket)) socket.send(message)
+    for (const socket of run.subscribers) this.sendSafely(socket, message)
   }
 
   /** Terminal event. Idempotent: the first caller wins (cancel and normal completion can race). */
@@ -185,15 +190,56 @@ export class StreamHub {
     ;(timer as { unref?: () => void }).unref?.()
   }
 
+  /** Reattach every still-running stream for this session after a full page reload. */
+  resumeActiveForSession(sessionId: string, socket: WebSocket): void {
+    for (const run of this.runs.values()) {
+      if (run.sessionId !== sessionId || run.done) continue
+      run.subscribers = new Set([socket])
+      this.announce(run)
+      this.resume(run, socket, 0)
+    }
+  }
+
   /** A reconnecting client takes the stream over and replays everything after `lastSequence`. */
   resume(run: RunStream, socket: WebSocket, lastSequence: number): void {
     run.subscribers = new Set([socket])
-    run.expiresAt = this.clock() + (run.done ? this.finishedRetentionMs : this.resumeGraceMs)
+    run.expiresAt = run.done ? this.clock() + this.finishedRetentionMs : Number.POSITIVE_INFINITY
+    let oldestBufferedSequence = run.sequence + 1
+    if (run.events.length > 0) {
+      try {
+        const first = JSON.parse(run.events[0]) as { sequence?: number }
+        oldestBufferedSequence = Number(first.sequence) || oldestBufferedSequence
+      } catch { /* a malformed first event is handled as a possible replay gap */ }
+    }
+    if (lastSequence < oldestBufferedSequence - 1) {
+      sendSocketEvent(socket, "stream_gap", run.sessionId, {
+        checkpoint_id: run.checkpointId,
+        run_id: run.runId,
+        requested_sequence: lastSequence,
+        oldest_buffered_sequence: oldestBufferedSequence,
+        latest_sequence: run.sequence,
+      })
+    }
     for (const serialized of run.events) {
       try {
         const candidate = JSON.parse(serialized) as { sequence?: number }
-        if (Number(candidate.sequence) > lastSequence && isOpen(socket)) socket.send(serialized)
+        if (Number(candidate.sequence) > lastSequence && isOpen(socket) && !this.sendSafely(socket, serialized)) break
       } catch { /* a malformed buffered event must never break resume */ }
+    }
+  }
+
+  /** Send best-effort to a subscriber. Stale sockets are detached rather than allowed to abort a run. */
+  private sendSafely(socket: WebSocket, serialized: string): boolean {
+    if (!isOpen(socket)) {
+      this.detach(socket)
+      return false
+    }
+    try {
+      socket.send(serialized)
+      return true
+    } catch {
+      this.detach(socket)
+      return false
     }
   }
 
@@ -214,6 +260,6 @@ export class StreamHub {
 
   private sweep(): void {
     const cutoff = this.clock()
-    for (const [runId, run] of this.runs) if (run.expiresAt <= cutoff && run.subscribers.size === 0) this.runs.delete(runId)
+    for (const [runId, run] of this.runs) if (run.done && run.expiresAt <= cutoff && run.subscribers.size === 0) this.runs.delete(runId)
   }
 }

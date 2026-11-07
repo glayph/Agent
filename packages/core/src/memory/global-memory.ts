@@ -63,11 +63,12 @@ function ownerPeers(config: unknown): Set<string> {
  * only when the sender is listed in `agent.memory.global.owner_peers` as "<source>:<peerId>"
  * (for example "telegram:123456789").
  */
-export function isOwnerOrigin(origin: Pick<TurnOrigin, "source" | "peerId">, config: unknown): boolean {
+export function isOwnerOrigin(origin: Pick<TurnOrigin, "source" | "peerId"> | null | undefined, config: unknown): boolean {
+  if (!origin || typeof origin.source !== "string") return false;
   const source = origin.source.trim().toLowerCase();
   if (!source || EXCLUDED_SOURCES.has(source)) return false;
   if (OWNER_SOURCES.has(source)) return true;
-  const peer = (origin.peerId ?? "").trim().toLowerCase();
+  const peer = typeof origin.peerId === "string" ? origin.peerId.trim().toLowerCase() : "";
   return peer.length > 0 && ownerPeers(config).has(`${source}:${peer}`);
 }
 
@@ -81,6 +82,10 @@ export interface GlobalMemoryHit {
   text: string;
   region: string;
   score: number;
+  provenance: "owner" | "agent";
+  sourceReference?: string;
+  timestamp?: string;
+  source?: "graph";
 }
 
 export interface GlobalMemory {
@@ -111,6 +116,7 @@ export function createGlobalMemory(deps: GlobalMemoryDeps): GlobalMemory {
 
   return {
     recall(goal, origin) {
+      if (typeof goal !== "string") return undefined;
       const query = goal.trim();
       if (query.length < 2 || !isOwnerOrigin(origin, deps.getConfig())) return undefined;
       try {
@@ -131,6 +137,7 @@ export function createGlobalMemory(deps: GlobalMemoryDeps): GlobalMemory {
     },
 
     search(query, origin, limit) {
+      if (typeof query !== "string") return [];
       const text = query.trim();
       if (text.length < 2 || !isOwnerOrigin(origin, deps.getConfig())) return [];
       try {
@@ -139,22 +146,29 @@ export function createGlobalMemory(deps: GlobalMemoryDeps): GlobalMemory {
         const hook = integration.preExecutionHook(clip(text, 1_000), { taskId: origin.sessionId });
         const hits: GlobalMemoryHit[] = [];
         const seen = new Set<string>();
-        const push = (id: unknown, body: unknown, region: unknown, score: unknown) => {
-          const value = typeof body === "string" ? body.trim() : "";
-          const key = value.toLowerCase();
-          if (!value || seen.has(key)) return;
+        const push = (item: { text?: unknown; provenance?: unknown; id?: unknown; score?: unknown; sourceReference?: unknown; timestamp?: unknown }, region: unknown) => {
+          const value = typeof item.text === "string" ? item.text.trim() : "";
+          const provenance = item.provenance === "owner" || item.provenance === "agent" ? item.provenance : undefined;
+          const key = value.normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase();
+          if (!value || !provenance || seen.has(key)) return;
           seen.add(key);
           hits.push({
-            id: `graph:${String(id ?? hits.length)}`,
+            id: `graph:${String(item.id ?? hits.length)}`,
             text: clip(value, 1_200),
             region: typeof region === "string" && region ? region : "graph",
-            score: typeof score === "number" && Number.isFinite(score) ? score : 0,
+            score: typeof item.score === "number" && Number.isFinite(item.score) ? item.score : 0,
+            provenance,
+            ...(typeof item.sourceReference === "string" ? { sourceReference: item.sourceReference } : {}),
+            ...(typeof item.timestamp === "string" ? { timestamp: item.timestamp } : {}),
+            source: "graph",
           });
         };
-        for (const item of hook.factCards?.items ?? []) push(item.id, item.text, "fact", item.score ?? 1);
-        for (const item of hook.selectiveContext?.items ?? []) push(item.id, item.text, item.region, item.score);
-        for (const item of hook.graphContext?.items ?? []) push(item.id, item.text, item.category, item.score);
-        return hits.sort((a, b) => b.score - a.score).slice(0, Math.max(1, limit));
+        // Entity fact cards have no per-edge provenance in the legacy schema;
+        // omitting them is safer than letting an unknown source bypass trust.
+        for (const item of hook.selectiveContext?.items ?? []) push(item, item.region);
+        for (const item of hook.graphContext?.items ?? []) push(item, item.category);
+        const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(20, Math.floor(limit))) : 8;
+        return hits.sort((a, b) => b.score - a.score).slice(0, boundedLimit);
       } catch (error) {
         log("global_memory.search_failed", { error: error instanceof Error ? error.message : String(error) });
         return [];

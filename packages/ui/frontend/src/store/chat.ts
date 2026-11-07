@@ -89,6 +89,8 @@ export interface ChatMessage {
   /** Delivery state of a user message; completed is the default and omitted. */
   deliveryStatus?: ChatDeliveryStatus
   deliveryDetail?: string
+  /** Number of earlier lane entries when the server accepted this queued message. */
+  deliveryQueuePosition?: number
 }
 
 export type ChatDeliveryStatus =
@@ -157,6 +159,8 @@ export interface RunActivity {
   runId: string
   elapsedSeconds: number
   idleSeconds: number
+  /** Gateway has reached the configured no-progress threshold and is aborting the stalled run. */
+  inactivityTimeoutReached?: boolean
   activity: "model" | "writing" | "tool" | "approval"
   activitySeconds: number
   label?: string
@@ -211,10 +215,6 @@ export const assistantDetailVisibilityAtom =
     assistantDetailVisibilityStorage,
     { getOnInit: true },
   )
-export const showAssistantDetailsAtom = atom(
-  (get) => get(assistantDetailVisibilityAtom) !== "none",
-)
-
 export const thinkingModeAtom = atomWithStorage<ThinkingMode>(
   THINKING_MODE_STORAGE_KEY,
   DEFAULT_THINKING_MODE,

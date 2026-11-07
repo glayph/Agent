@@ -64,7 +64,7 @@ describe("runtime config schema", () => {
       concurrency: {
         maxConcurrentTasks: 0,
         maxParallelToolCalls: 0,
-        toolLockTimeoutMs: 999,
+        toolLockTimeoutMs: -1,
       },
       channels: { telegram: "bad" },
     });
@@ -491,8 +491,36 @@ describe("runtime config schema", () => {
     expect(bad.errors).toContainEqual(expect.objectContaining({ path: "agent.self_check.max_revisions" }));
   });
 
+  it("accepts a boolean agent.verify_actions setting", () => {
+    expect(validateRuntimeConfig({ agent: { verify_actions: true } }).valid).toBe(true);
+    const invalid = validateRuntimeConfig({ agent: { verify_actions: "yes" } });
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors).toContainEqual(expect.objectContaining({ path: "agent.verify_actions" }));
+  });
+
   it("accepts agent.dynamic_budget and rejects out-of-range values", () => {
     expect(validateRuntimeConfig({ agent: { dynamic_budget: { enabled: true, extension_turns: 8, max_extensions: 3 } } }).valid).toBe(true);
     expect(validateRuntimeConfig({ agent: { dynamic_budget: { max_extensions: 50 } } }).valid).toBe(false);
   });
+  it("requires risk acceptance, audit logging, and a note for unrestricted security overrides", () => {
+    const missingAcknowledgement = validateRuntimeConfig({ agent: { security: { bypass_restrictions: true, sandbox_mode: false } } });
+    expect(missingAcknowledgement.valid).toBe(false);
+    expect(missingAcknowledgement.errors.map((item) => item.path)).toEqual(expect.arrayContaining([
+      "agent.security.risk_acceptance", "agent.security.audit_logging", "agent.security.approval_note",
+    ]));
+
+    const acknowledged = validateRuntimeConfig({ agent: { security: {
+      bypass_restrictions: true, sandbox_mode: false, risk_acceptance: true, audit_logging: true,
+      approval_note: "Owner accepts unrestricted mode for personal Miki deployment.",
+    } } });
+    expect(acknowledged.valid).toBe(true);
+  });
+
+  it("validates runtime approval-escalation settings", () => {
+    expect(validateRuntimeConfig({ tools: {
+      auto_approve_safe: true, auto_approve_all: true, require_confirm_destructive: true, require_confirm_computer_use: false,
+    } }).valid).toBe(true);
+    expect(validateRuntimeConfig({ tools: { require_confirm_destructive: "yes" } }).valid).toBe(false);
+  });
+
 });

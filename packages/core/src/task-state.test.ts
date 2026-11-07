@@ -39,10 +39,12 @@ describe("task lifecycle state machine", () => {
   it("rejects invalid and terminal transitions", () => {
     expect(() => transitionTask(task("queued"), "completed")).toThrow(InvalidTaskTransitionError);
     expect(() => transitionTask(task("completed"), "running")).toThrow("completed -> running");
-    expect(taskStatusTransitions("failed")).toEqual([]);
+    expect(taskStatusTransitions("failed")).toEqual(["queued", "superseded"]);
+    expect(canTransitionTaskStatus("failed", "queued")).toBe(true);
     expect(isTerminalTaskStatus("completed")).toBe(true);
     expect(isTerminalTaskStatus("failed")).toBe(true);
     expect(isTerminalTaskStatus("cancelled")).toBe(true);
+    expect(isTerminalTaskStatus("superseded")).toBe(true);
     expect(isTerminalTaskStatus("running")).toBe(false);
   });
 });

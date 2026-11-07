@@ -51,6 +51,8 @@ export interface PluginManifest {
   capabilities: readonly PluginCapability[];
   runtimeStatus: PluginRuntimeStatus;
   description?: string;
+  /** Optional local icon registry key for the Monitoring graph; external URLs are not accepted. */
+  monitorIconKey?: string;
   configKey?: string;
   requiredConfig?: readonly string[];
   secretFields?: readonly string[];

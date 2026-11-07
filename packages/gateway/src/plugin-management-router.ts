@@ -15,7 +15,7 @@ const PERMISSIONS = new Set(["network", "filesystem-read", "filesystem-write", "
 const UNSUPPORTED_SANDBOX_PERMISSIONS = new Set(["network", "secrets", "shell", "browser", "computer-use", "mcp", "agent-delegation"])
 const CAPABILITIES = new Set(["ai-provider", "channel", "mcp", "tool", "memory", "search", "browser", "computer-use", "knowledge", "storage", "authentication", "security", "scheduler", "workflow", "code-execution", "integration", "notification", "model-router", "observability", "guardrail", "agent-to-agent"])
 
-type PluginManifest = { id: string; displayName: string; version: string; apiVersion: string; entrypoint: string; capabilities: string[]; permissions: string[]; dependencies?: string[]; description?: string; platform?: string[] }
+type PluginManifest = { id: string; displayName: string; version: string; apiVersion: string; entrypoint: string; capabilities: string[]; permissions: string[]; dependencies?: string[]; description?: string; platform?: string[]; monitorIconKey?: string }
 type InstalledRow = { id: string; version: string; digest: string; source: string; install_path: string; enabled: number; lifecycle_state: string; runtime_status: string; manifest_json: string; permissions_json: string; grants_json: string; installed_at: string; updated_at: string; last_error_code: string | null }
 type RuntimeHandle = { child: ChildProcessWithoutNullStreams; request: (message: Record<string, unknown>, timeoutMs?: number) => Promise<Record<string, unknown>>; stop: () => Promise<void>; health: () => Promise<{ ok: boolean; details?: Record<string, unknown> }> }
 
@@ -42,7 +42,11 @@ function validateManifest(input: unknown): PluginManifest {
   if (dependencies.length > 32 || dependencies.some((item) => typeof item !== "string" || !ID_PATTERN.test(item))) throw new Error("manifest_dependencies_invalid")
   const platform = Array.isArray(input.platform) ? input.platform : ["any"]
   if (platform.some((item) => !["any", "linux", "win32", "darwin"].includes(String(item)))) throw new Error("manifest_platform_invalid")
-  return { id, version, entrypoint, apiVersion: API_VERSION, displayName: input.displayName.trim(), capabilities: [...new Set(input.capabilities as string[])], permissions: [...new Set(permissions as string[])], dependencies: [...new Set(dependencies as string[])], description: typeof input.description === "string" ? input.description.slice(0, 500) : undefined, platform: [...new Set(platform as string[])] }
+  const monitorIconKey = typeof input.monitorIconKey === "string" ? input.monitorIconKey.trim().toLowerCase() : undefined
+  // Icons are resolved only from the bundled local registry; manifests cannot supply markup or remote URLs.
+  const supportedMonitorIcons = new Set(["plugin", "github", "slack", "gmail", "calendar", "notion", "linear", "hubspot", "salesforce", "jira", "drive", "discord"])
+  if (monitorIconKey && !supportedMonitorIcons.has(monitorIconKey)) throw new Error("manifest_monitor_icon_invalid")
+  return { id, version, entrypoint, apiVersion: API_VERSION, displayName: input.displayName.trim(), capabilities: [...new Set(input.capabilities as string[])], permissions: [...new Set(permissions as string[])], dependencies: [...new Set(dependencies as string[])], description: typeof input.description === "string" ? input.description.slice(0, 500) : undefined, platform: [...new Set(platform as string[])], ...(monitorIconKey ? { monitorIconKey } : {}) }
 }
 
 const RUNNER_SOURCE = String.raw`
@@ -140,6 +144,8 @@ export interface PluginManagementOptions {
   requireAuth: RequestHandler
   now: () => string
   builtinIds: ReadonlySet<string>
+  /** Run extension code with the guest OS identity and skip the nested plugin sandbox. */
+  allowUnrestrictedGuestPlugins?: () => boolean
   registerShutdownHandler?: (handler: () => void | Promise<void>) => void
 }
 
@@ -177,10 +183,66 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
     } catch { return false }
   })()
   const listRows = () => db.prepare("SELECT * FROM plugin_installations ORDER BY installed_at DESC").all() as InstalledRow[]
-  const publicRow = (row: InstalledRow) => ({ id: row.id, version: row.version, digest: row.digest, source: row.source, enabled: row.enabled === 1, lifecycle_state: row.lifecycle_state, runtime_status: row.runtime_status, manifest: JSON.parse(row.manifest_json) as PluginManifest, requested_permissions: JSON.parse(row.permissions_json) as string[], granted_permissions: JSON.parse(row.grants_json) as string[], installed_at: row.installed_at, updated_at: row.updated_at, last_error_code: row.last_error_code, sandbox_supported: sandboxAvailable })
+  const unrestrictedGuestPlugins = () => options.allowUnrestrictedGuestPlugins?.() === true
+  const pluginExecutionMode = () => unrestrictedGuestPlugins() ? "guest_unrestricted" : sandboxAvailable ? "os_sandbox" : "unavailable"
+  const publicRow = (row: InstalledRow) => ({ id: row.id, version: row.version, digest: row.digest, source: row.source, enabled: row.enabled === 1, lifecycle_state: row.lifecycle_state, runtime_status: row.runtime_status, manifest: JSON.parse(row.manifest_json) as PluginManifest, requested_permissions: JSON.parse(row.permissions_json) as string[], granted_permissions: JSON.parse(row.grants_json) as string[], installed_at: row.installed_at, updated_at: row.updated_at, last_error_code: row.last_error_code, sandbox_supported: sandboxAvailable && !unrestrictedGuestPlugins(), execution_mode: pluginExecutionMode() })
   const rowById = (id: string) => db.prepare("SELECT * FROM plugin_installations WHERE id=?").get(id) as InstalledRow | undefined
 
   const request = (runtime: RuntimeHandle, message: Record<string, unknown>, timeoutMs = 2_000) => runtime.request(message, timeoutMs)
+  /** Only enabled, healthy plugins running under the active guest/OS execution mode are visible to the autonomous agent. */
+  const listAgentPlugins = () => listRows().flatMap((row) => {
+    if (row.enabled !== 1 || row.lifecycle_state !== "healthy" || row.runtime_status !== "healthy" || !runtimes.has(row.id)) return []
+    const manifest = JSON.parse(row.manifest_json) as PluginManifest
+    const requested = JSON.parse(row.permissions_json) as string[]
+    const granted = unrestrictedGuestPlugins() ? requested : JSON.parse(row.grants_json) as string[]
+    return [{
+      id: manifest.id,
+      name: manifest.displayName,
+      version: manifest.version,
+      monitorIconKey: manifest.monitorIconKey,
+      description: manifest.description || "",
+      capabilities: [...manifest.capabilities],
+      permissions: requested.filter((permission) => granted.includes(permission)),
+    }]
+  })
+  const invokeAgentPlugin = async (pluginId: string, method: string, payload: unknown) => {
+    if (!ID_PATTERN.test(pluginId) || pluginId.length > 120) throw new Error("plugin_id_invalid")
+    if (!/^[a-z0-9_.:-]{1,120}$/i.test(method)) throw new Error("plugin_method_invalid")
+    if (!isRecord(payload)) throw new Error("plugin_payload_must_be_object")
+    let serialized: string
+    try { serialized = JSON.stringify(payload) } catch { throw new Error("plugin_payload_not_serializable") }
+    if (serialized.length > 65_536) throw new Error("plugin_payload_too_large")
+    const row = rowById(pluginId)
+    if (!row || row.enabled !== 1) throw new Error("plugin_not_enabled")
+    const manifest = JSON.parse(row.manifest_json) as PluginManifest
+    const guestMode = unrestrictedGuestPlugins()
+    const granted = guestMode ? [...manifest.permissions] : JSON.parse(row.grants_json) as string[]
+    if (guestMode && JSON.stringify(granted) !== row.grants_json) {
+      db.prepare("UPDATE plugin_installations SET grants_json=?,updated_at=? WHERE id=?").run(JSON.stringify(granted), now(), pluginId)
+    }
+    if (manifest.permissions.some((permission) => !granted.includes(permission))) throw new Error("plugin_permission_grant_missing")
+    // Ordinary mode requires a declared manifest capability; guest owner mode
+    // lets the agent call any method implemented by the plugin runtime.
+    // `tool` and `integration` are general extension capabilities; other capabilities
+    // can only invoke their own namespace (for example `memory.search`).
+    const namespace = method.split(/[.:]/, 1)[0] || method
+    const capabilityAllowed = guestMode || manifest.capabilities.some((capability) =>
+      method === capability || method.startsWith(`${capability}.`) || method.startsWith(`${capability}:`)
+      || (capability === "tool" && method.length > 0)
+      || (capability === "integration" && namespace === "integration"),
+    )
+    if (!capabilityAllowed) throw new Error("plugin_capability_not_declared")
+    const runtime = runtimes.get(pluginId)
+    if (!runtime || runtime.child.exitCode !== null || runtime.child.killed) throw new Error("plugin_runtime_unavailable")
+    const response = await request(runtime, { type: "invoke", method, payload }, 120_000)
+    if (response.ok !== true) {
+      const code = typeof response.error === "string" && /^[a-z0-9_:-]{1,100}$/i.test(response.error) ? response.error : "plugin_call_failed"
+      audit(pluginId, "agent_invoke", "failed", code)
+      throw new Error(code)
+    }
+    audit(pluginId, "agent_invoke", "success")
+    return { plugin: pluginId, method, result: response.result ?? null }
+  }
 
   const stopRuntime = async (id: string) => {
     const runtime = runtimes.get(id)
@@ -190,10 +252,11 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
   }
 
   const startRuntime = async (row: InstalledRow, granted: string[]) => {
-    if (!sandboxAvailable) throw new Error("sandbox_unavailable")
+    const guestMode = unrestrictedGuestPlugins()
+    if (!guestMode && !sandboxAvailable) throw new Error("sandbox_unavailable")
     const manifest = JSON.parse(row.manifest_json) as PluginManifest
     const unsupported = manifest.permissions.filter((permission) => UNSUPPORTED_SANDBOX_PERMISSIONS.has(permission))
-    if (unsupported.length) throw new Error("permission_not_supported_by_sandbox")
+    if (!guestMode && unsupported.length) throw new Error("permission_not_supported_by_sandbox")
     if (manifest.permissions.some((permission) => !granted.includes(permission))) throw new Error("permission_grant_required")
     if (!manifest.platform?.includes("any") && !manifest.platform?.includes(process.platform)) throw new Error("plugin_platform_incompatible")
     const packageRoot = realpathSync(row.install_path)
@@ -201,11 +264,30 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
     if (!entry.startsWith(`${packageRoot}${path.sep}`) || !existsSync(entry)) throw new Error("plugin_entrypoint_missing")
     // Bound CPU time and open descriptors in addition to network namespace
     // isolation, a capped Node heap, and Node's filesystem permission model.
-    const args = ["-Urn", "--", "prlimit", "--cpu=60", "--nofile=128", "--",
-      process.execPath, "--max-old-space-size=256", "--experimental-permission", `--allow-fs-read=${packageRoot}`,
-      ...(granted.includes("filesystem-write") ? [`--allow-fs-write=${packageRoot}`] : []),
+    const nodeArgs = ["--max-old-space-size=256",
+      ...(guestMode ? [] : ["--experimental-permission", `--allow-fs-read=${packageRoot}`,
+        ...(granted.includes("filesystem-write") ? [`--allow-fs-write=${packageRoot}`] : [])]),
       path.join(packageRoot, ".miki-plugin-runner.mjs"), entry]
-    const child = spawn("unshare", args, { cwd: packageRoot, env: { PATH: "/usr/bin:/bin", HOME: packageRoot, NODE_ENV: "production", MIKI_PLUGIN_ID: manifest.id, MIKI_PLUGIN_VERSION: manifest.version, MIKI_PLUGIN_PERMISSIONS: JSON.stringify(granted) }, stdio: ["pipe", "pipe", "pipe"] })
+    let child: ChildProcessWithoutNullStreams
+    const pluginEnv = guestMode
+      ? { ...process.env, HOME: process.env.HOME || packageRoot, NODE_ENV: "production", MIKI_PLUGIN_ID: manifest.id, MIKI_PLUGIN_VERSION: manifest.version, MIKI_PLUGIN_PERMISSIONS: JSON.stringify(granted) }
+      : { PATH: "/usr/bin:/bin", HOME: packageRoot, NODE_ENV: "production", MIKI_PLUGIN_ID: manifest.id, MIKI_PLUGIN_VERSION: manifest.version, MIKI_PLUGIN_PERMISSIONS: JSON.stringify(granted) }
+    if (guestMode) {
+      // The outer disposable VM/container is the security boundary in owner mode.
+      // Keep resource limits where prlimit exists, but do not apply a nested network
+      // namespace or Node permission sandbox that would remove guest capabilities.
+      let prlimitAvailable = false
+      if (process.platform === "linux") {
+        try { execFileSync("prlimit", ["--version"], { timeout: 1_000, stdio: "ignore" }); prlimitAvailable = true } catch { /* optional guest utility */ }
+      }
+      child = prlimitAvailable
+        ? spawn("prlimit", ["--cpu=60", "--nofile=128", "--", process.execPath, ...nodeArgs], { cwd: packageRoot, env: pluginEnv, stdio: ["pipe", "pipe", "pipe"] })
+        : spawn(process.execPath, nodeArgs, { cwd: packageRoot, env: pluginEnv, stdio: ["pipe", "pipe", "pipe"] })
+    } else {
+      const args = ["-Urn", "--", "prlimit", "--cpu=60", "--nofile=128", "--",
+        process.execPath, ...nodeArgs]
+      child = spawn("unshare", args, { cwd: packageRoot, env: pluginEnv, stdio: ["pipe", "pipe", "pipe"] })
+    }
     let stdout = ""
     let stderr = ""
     child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString("utf8")).slice(-4000) })
@@ -317,7 +399,7 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
     return visit(pluginId)
   }
 
-  router.get("/installed", (_req, res) => res.json({ plugins: listRows().map(publicRow), total: db.prepare("SELECT COUNT(*) AS n FROM plugin_installations").get() && (db.prepare("SELECT COUNT(*) AS n FROM plugin_installations").get() as { n: number }).n, sandbox_supported: sandboxAvailable }))
+  router.get("/installed", (_req, res) => res.json({ plugins: listRows().map(publicRow), total: db.prepare("SELECT COUNT(*) AS n FROM plugin_installations").get() && (db.prepare("SELECT COUNT(*) AS n FROM plugin_installations").get() as { n: number }).n, sandbox_supported: sandboxAvailable && !unrestrictedGuestPlugins(), execution_mode: pluginExecutionMode() }))
 
   router.get("/marketplace", (_req, res) => {
     const registry = readTrustedRegistry(configDir)
@@ -393,10 +475,10 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
       shouldRestartOld = installed?.enabled === 1
       if (installed && installed.version === manifest.version && installed.digest === digest) return res.status(409).json({ error: "plugin_already_installed" })
       // Never silently grant new capabilities during an upgrade of a currently enabled plugin.
-      if (shouldRestartOld && manifest.permissions.some((permission) => !oldGrants.includes(permission))) {
+      if (shouldRestartOld && !unrestrictedGuestPlugins() && manifest.permissions.some((permission) => !oldGrants.includes(permission))) {
         return res.status(409).json({ error: "plugin_upgrade_requires_permission_review", permissions: manifest.permissions.filter((permission) => !oldGrants.includes(permission)) })
       }
-      if (shouldRestartOld && manifest.permissions.some((permission) => UNSUPPORTED_SANDBOX_PERMISSIONS.has(permission))) throw new Error("permission_not_supported_by_sandbox")
+      if (shouldRestartOld && !unrestrictedGuestPlugins() && manifest.permissions.some((permission) => UNSUPPORTED_SANDBOX_PERMISSIONS.has(permission))) throw new Error("permission_not_supported_by_sandbox")
       for (const dependency of manifest.dependencies ?? []) if (!rowById(dependency) && dependency !== manifest.id) throw new Error("plugin_dependency_missing")
       if (createsDependencyCycle(manifest.id, manifest.dependencies ?? [])) throw new Error("plugin_dependency_cycle")
       dest = path.join(root, `${manifest.id}-${manifest.version}`)
@@ -415,7 +497,9 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
       renameSync(extractReal, dest)
       movedNew = true
       const at = now()
-      const newGrants = oldGrants.filter((permission) => manifest.permissions.includes(permission))
+      const newGrants = unrestrictedGuestPlugins()
+        ? [...manifest.permissions]
+        : oldGrants.filter((permission) => manifest.permissions.includes(permission))
       const writeNewRow = db.transaction(() => {
         db.prepare("DELETE FROM plugin_installations WHERE id=?").run(manifest.id)
         db.prepare(`INSERT INTO plugin_installations(id,version,digest,source,install_path,enabled,lifecycle_state,runtime_status,manifest_json,permissions_json,grants_json,installed_at,updated_at,last_error_code)
@@ -495,7 +579,11 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
     if (suppliedGrants !== undefined && (!Array.isArray(suppliedGrants) || suppliedGrants.some((permission: unknown) => typeof permission !== "string" || !PERMISSIONS.has(permission)))) {
       return res.status(400).json({ error: "plugin_permission_invalid" })
     }
-    const grants = suppliedGrants === undefined ? JSON.parse(row.grants_json) as string[] : [...new Set(suppliedGrants as string[])]
+    const grants = suppliedGrants === undefined
+      ? unrestrictedGuestPlugins()
+        ? [...new Set(manifest.permissions)]
+        : JSON.parse(row.grants_json) as string[]
+      : [...new Set(suppliedGrants as string[])]
     if (enabled === false) {
       db.prepare("UPDATE plugin_installations SET enabled=0,lifecycle_state='stopping',updated_at=?,last_error_code=NULL WHERE id=?").run(now(), id)
       try { await stopRuntime(id) } catch {}
@@ -505,11 +593,11 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
     }
     if (enabled !== true && req.body?.granted_permissions === undefined) return res.status(400).json({ error: "enabled_or_grants_required" })
     if (enabled === true) {
+      const unsupported = manifest.permissions.filter((permission) => UNSUPPORTED_SANDBOX_PERMISSIONS.has(permission))
+      if (!unrestrictedGuestPlugins() && unsupported.length) return res.status(409).json({ error: "permission_not_supported_by_sandbox", permissions: unsupported })
       const missing = manifest.permissions.filter((permission) => !grants.includes(permission))
       if (missing.length) return res.status(403).json({ error: "permission_grant_required", permissions: missing })
-      const unsupported = manifest.permissions.filter((permission) => UNSUPPORTED_SANDBOX_PERMISSIONS.has(permission))
-      if (unsupported.length) return res.status(409).json({ error: "permission_not_supported_by_sandbox", permissions: unsupported })
-      if (!sandboxAvailable) return res.status(409).json({ error: "sandbox_unavailable" })
+      if (!sandboxAvailable && !unrestrictedGuestPlugins()) return res.status(409).json({ error: "sandbox_unavailable" })
       db.prepare("UPDATE plugin_installations SET lifecycle_state='starting',updated_at=?,last_error_code=NULL WHERE id=?").run(now(), id)
       try {
         const handle = await startRuntime(row, grants)
@@ -550,7 +638,7 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
   router.delete("/:id", async (req, res) => {
     const id = typeof req.params.id === "string" ? req.params.id : ""
     if (builtinIds.has(id)) return res.status(409).json({ error: "builtin_plugin_immutable" })
-    if (req.header("x-confirm-plugin-uninstall") !== id) return res.status(428).json({ error: "plugin_uninstall_confirmation_required" })
+    if (!unrestrictedGuestPlugins() && req.header("x-confirm-plugin-uninstall") !== id) return res.status(428).json({ error: "plugin_uninstall_confirmation_required" })
     const row = rowById(id)
     if (!row) return res.status(404).json({ error: "plugin_not_found" })
     const dependents = dependenciesFor(id)
@@ -569,7 +657,11 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
   const startEnabledPlugins = async () => {
     for (const row of listRows()) {
       if (row.enabled !== 1) continue
-      const grants = JSON.parse(row.grants_json) as string[]
+      const manifest = JSON.parse(row.manifest_json) as PluginManifest
+      const grants = unrestrictedGuestPlugins() ? [...manifest.permissions] : JSON.parse(row.grants_json) as string[]
+      if (unrestrictedGuestPlugins() && JSON.stringify(grants) !== row.grants_json) {
+        db.prepare("UPDATE plugin_installations SET grants_json=?,updated_at=? WHERE id=?").run(JSON.stringify(grants), now(), row.id)
+      }
       try {
         await startRuntime(row, grants)
         db.prepare("UPDATE plugin_installations SET lifecycle_state='healthy',runtime_status='healthy',updated_at=?,last_error_code=NULL WHERE id=?").run(now(), row.id)
@@ -580,5 +672,5 @@ export function createPluginManagementRouter(options: PluginManagementOptions) {
       }
     }
   }
-  return { router, startEnabledPlugins, sandboxAvailable }
+  return { router, startEnabledPlugins, sandboxAvailable, listAgentPlugins, invokeAgentPlugin }
 }

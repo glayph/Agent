@@ -28,7 +28,7 @@ export interface mikiMessage {
 }
 
 export type MikiWsClientMessage =
-  | { type: "authenticate"; session_id: string }
+  | { type: "authenticate"; session_id: string; payload?: { resume_active?: boolean } }
   | {
       type: "resume"
       session_id: string
@@ -52,7 +52,7 @@ export interface MikiWsServerMessage extends mikiMessage {
   sequence?: number
 }
 
-function parseAttachments(
+export function parseAttachments(
   payload: Record<string, unknown>,
 ): ChatAttachment[] | undefined {
   const raw = payload.attachments
@@ -776,19 +776,23 @@ export function handlemikiMessage(
 
       const runId = parseRunId(payload)
       const currentState = getChatState()
+      // A request-scoped rejection belongs to a particular user message and
+      // must still be handled while a different run is active in this chat.
+      // Only unscoped run errors are subject to stale/unscoped-run filtering.
       if (
-        isStaleRun(
+        !requestId &&
+        (isStaleRun(
           currentState.activeRunId,
           currentState.runStatus,
           runId,
           currentState.runningRunIds,
         ) ||
-        isUnscopedWhileRunning(
-          currentState.activeRunId,
-          currentState.runStatus,
-          runId,
-          currentState.runningRunIds,
-        )
+          isUnscopedWhileRunning(
+            currentState.activeRunId,
+            currentState.runStatus,
+            runId,
+            currentState.runningRunIds,
+          ))
       ) {
         return
       }
@@ -810,18 +814,19 @@ export function handlemikiMessage(
       }
       updateChatStore((prev) => {
         if (
-          isStaleRun(
+          !requestId &&
+          (isStaleRun(
             prev.activeRunId,
             prev.runStatus,
             runId,
             prev.runningRunIds,
           ) ||
-          isUnscopedWhileRunning(
-            prev.activeRunId,
-            prev.runStatus,
-            runId,
-            prev.runningRunIds,
-          )
+            isUnscopedWhileRunning(
+              prev.activeRunId,
+              prev.runStatus,
+              runId,
+              prev.runningRunIds,
+            ))
         ) {
           return prev
         }
@@ -830,10 +835,20 @@ export function handlemikiMessage(
           : prev.runningRunIds
         return {
           messages: requestId
-            ? prev.messages.filter((msg) => msg.id !== requestId)
+            ? prev.messages.map((msg) =>
+                msg.id === requestId && msg.role === "user"
+                  ? {
+                      ...msg,
+                      deliveryStatus: "failed" as const,
+                      deliveryDetail: errorMessage || "The gateway rejected this message.",
+                    }
+                  : msg,
+              )
             : prev.messages,
           runningRunIds,
-          isTyping: runningRunIds.length > 0,
+          isTyping:
+            runningRunIds.length > 0 ||
+            Boolean(requestId && prev.activeRunId && prev.runStatus === "running"),
           ...(runId
             ? {
                 activeRunId: runningRunIds.at(-1) ?? runId,
@@ -868,6 +883,7 @@ export function handlemikiMessage(
           runId,
           elapsedSeconds: num(payload.elapsed_seconds),
           idleSeconds: num(payload.idle_seconds),
+          ...(payload.inactivity_timeout_reached === true ? { inactivityTimeoutReached: true } : {}),
           activity,
           activitySeconds: num(payload.activity_seconds),
           ...(typeof payload.label === "string" && payload.label
@@ -942,6 +958,7 @@ export function handlemikiMessage(
                 ...next,
                 deliveryStatus: undefined,
                 deliveryDetail: undefined,
+                deliveryQueuePosition: undefined,
               }
             return {
               ...next,
@@ -949,8 +966,13 @@ export function handlemikiMessage(
               deliveryDetail:
                 rawStatus === "failed" ||
                 rawStatus === "cancelled" ||
-                rawStatus === "processing"
+                rawStatus === "processing" ||
+                rawStatus === "retrying"
                   ? detail
+                  : undefined,
+              deliveryQueuePosition:
+                rawStatus === "queued" && typeof payload.queue_position === "number" && Number.isFinite(payload.queue_position)
+                  ? Math.max(0, Math.floor(payload.queue_position))
                   : undefined,
             }
           }
@@ -960,6 +982,7 @@ export function handlemikiMessage(
             deliveryStatus: "unknown",
             deliveryDetail:
               detail ?? `Unrecognized delivery status: ${String(rawStatus)}`,
+            deliveryQueuePosition: undefined,
           }
         }),
         ...(rawStatus === "processing" && runId

@@ -58,6 +58,27 @@ describe("createFetchLLMClient", () => {
 });
 
 describe("createRegistryLLMClient", () => {
+  it("preserves provider-advertised vision capability and leaves unknown capability unset", () => {
+    const registry = { complete: jest.fn(async () => okBody) } as never;
+    expect(createRegistryLLMClient(registry, "vision-model", { supportsVision: true }).supportsVision).toBe(true);
+    expect(createRegistryLLMClient(registry, "text-model", { supportsVision: false }).supportsVision).toBe(false);
+    expect(createRegistryLLMClient(registry, "unknown-model").supportsVision).toBeUndefined();
+  });
+
+  it("routes an explicit credential profile through the provider registry", async () => {
+    const complete = jest.fn(async () => okBody);
+    const client = createRegistryLLMClient({ complete } as never, "gemini-flash", {
+      credentialProfile: "GEMINI_API_KEY_BACKUP",
+    });
+    expect(client.credentialProfile).toBe("GEMINI_API_KEY_BACKUP");
+    expect(client.routeKey).toBe("gemini-flash::credential:GEMINI_API_KEY_BACKUP");
+    await client.complete([{ role: "user", content: "a" }]);
+    expect(complete).toHaveBeenCalledWith("gemini-flash", expect.any(Array), expect.objectContaining({
+      credentialProfile: "GEMINI_API_KEY_BACKUP",
+      credentials: undefined,
+    }));
+  });
+
   it("passes tools, generation settings, and streaming through the provider registry", async () => {
     const complete = jest.fn(async () => okBody);
     const client = createRegistryLLMClient({ complete } as never, "gemini-flash");
@@ -103,7 +124,7 @@ describe("createFetchLLMClient streaming", () => {
   it("streams text deltas and assembles the full response", async () => {
     const chunk = (delta: unknown, extra: Record<string, unknown> = {}) => JSON.stringify({ choices: [{ index: 0, delta, ...extra }] });
     const fetchImpl = jest.fn(async () => sseResponse([
-      chunk({ role: "assistant", content: "Hel" }),
+      chunk({ role: "assistant", content: "Hel", extra_content: { google: { thought_signature: "message-signature" } } }),
       chunk({ content: "lo " }),
       chunk({ content: "world" }, { finish_reason: "stop" }),
       JSON.stringify({ choices: [], usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }),
@@ -114,6 +135,7 @@ describe("createFetchLLMClient streaming", () => {
     const response = await client.complete([{ role: "user", content: "hi" }], { onTextDelta: (d) => seen.push(d) });
     expect(seen).toEqual(["Hel", "lo ", "world"]);
     expect(response.choices?.[0].message?.content).toBe("Hello world");
+    expect(response.choices?.[0].message?.extra_content).toEqual({ google: { thought_signature: "message-signature" } });
     expect(response.usage?.total_tokens).toBe(5);
     const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true } });
@@ -134,7 +156,7 @@ describe("createFetchLLMClient streaming", () => {
 
   it("falls back to a normal completion when the provider rejects streaming", async () => {
     const fetchImpl = jest.fn()
-      .mockResolvedValueOnce(json(400, { error: { message: "stream_options not supported" } }))
+      .mockResolvedValueOnce(json(400, { error: { message: "invalid request", code: "unsupported_parameter", param: "stream_options" } }))
       .mockResolvedValueOnce(json(200, okBody));
     const client = createFetchLLMClient({ baseUrl: "http://x", model: "m", fetchImpl: fetchImpl as never, retryDelayMs: 1 });
     const response = await client.complete([{ role: "user", content: "hi" }], { onTextDelta: () => undefined });
@@ -144,9 +166,9 @@ describe("createFetchLLMClient streaming", () => {
 });
 
 describe("retry timing", () => {
-  it("parses Retry-After seconds and dates and caps absurd values", () => {
+  it("parses Retry-After seconds and dates without truncating provider wait instructions", () => {
     expect(parseRetryAfterMs("2")).toBe(2000);
-    expect(parseRetryAfterMs("999999")).toBe(30_000);
+    expect(parseRetryAfterMs("999999")).toBe(999_999_000);
     expect(parseRetryAfterMs(Date.UTC(2030, 0, 1, 0, 0, 5) ? new Date(Date.UTC(2030, 0, 1, 0, 0, 5)).toUTCString() : "", Date.UTC(2030, 0, 1))).toBe(5000);
     expect(parseRetryAfterMs("garbage")).toBeUndefined();
     expect(parseRetryAfterMs(null)).toBeUndefined();

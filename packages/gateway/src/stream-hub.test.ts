@@ -5,7 +5,9 @@ class FakeSocket {
   readyState = 1;
   OPEN = 1;
   sent: Array<Record<string, any>> = [];
+  throwOnSend = false;
   send(raw: string) {
+    if (this.throwOnSend) throw new Error("socket is closing");
     this.sent.push(JSON.parse(raw));
   }
   get types() {
@@ -44,6 +46,19 @@ describe("StreamHub", () => {
     expect(socket.sent[0]).toMatchObject({ type: "message.delta", session_id: "s1", checkpoint_id: "checkpoint_r1" });
     expect(socket.sent[0].payload).toMatchObject({ text: "a", run_id: "r1" });
     expect(run.events).toHaveLength(2);
+  });
+
+  it("keeps buffering and continues the run when a subscriber closes during send", () => {
+    const closing = new FakeSocket();
+    const healthy = new FakeSocket();
+    const run = hub.createRun({ runId: "r-closing", sessionId: "s1", contextId: "c1", socket: asSocket(closing) });
+    run.subscribers.add(asSocket(healthy));
+    closing.throwOnSend = true;
+
+    expect(() => hub.publish(run, "message.delta", { text: "still running" })).not.toThrow();
+    expect(run.events).toHaveLength(1);
+    expect(run.subscribers.has(asSocket(closing))).toBe(false);
+    expect(healthy.sent[0]).toMatchObject({ type: "message.delta", payload: { text: "still running" } });
   });
 
   it("never buffers or sequences live-only events (heartbeats)", () => {
@@ -160,7 +175,9 @@ describe("StreamHub", () => {
     expect(run.events).toHaveLength(3);
     const late = new FakeSocket();
     capped.resume(run, asSocket(late), 0);
-    expect(late.sent.map((message) => message.sequence)).toEqual([3, 4, 5]);
+    expect(late.types[0]).toBe("stream_gap");
+    expect(late.sent[0].payload).toMatchObject({ requested_sequence: 0, oldest_buffered_sequence: 3, latest_sequence: 5 });
+    expect(late.sent.slice(1).map((message) => message.sequence)).toEqual([3, 4, 5]);
     capped.dispose();
   });
 
@@ -174,7 +191,7 @@ describe("StreamHub", () => {
   });
 
   describe("disconnects and expiry", () => {
-    it("detach stops delivery and starts the resume grace period for an unfinished run", () => {
+    it("detach stops delivery but keeps an unfinished run until it completes", () => {
       const socket = new FakeSocket();
       hub.attach("s1", asSocket(socket));
       const run = hub.createRun({ runId: "r1", sessionId: "s1", contextId: "c1", socket: asSocket(socket) });
@@ -182,7 +199,7 @@ describe("StreamHub", () => {
       hub.detach(asSocket(socket));
 
       expect(run.subscribers.size).toBe(0);
-      expect(run.expiresAt).toBe(clock + 30_000);
+      expect(run.expiresAt).toBe(Number.POSITIVE_INFINITY);
       hub.publish(run, "message.delta", {});
       expect(socket.sent).toEqual([]);
     });
@@ -213,22 +230,37 @@ describe("StreamHub", () => {
       expect(run.expiresAt).toBe(clock + 10_000);
     });
 
-    it("sweeps expired unwatched runs but keeps watched ones", async () => {
-      const sweeping = new StreamHub({ sweepIntervalMs: 5, clock: () => clock, resumeGraceMs: 1_000 });
-      const watched = new FakeSocket();
-      sweeping.createRun({ runId: "gone", sessionId: "s1", contextId: "c1" });
-      sweeping.createRun({ runId: "kept", sessionId: "s1", contextId: "c1", socket: asSocket(watched) });
+    it("keeps disconnected active runs, but sweeps expired finished runs", async () => {
+      const sweeping = new StreamHub({ sweepIntervalMs: 5, clock: () => clock, finishedRetentionMs: 1_000 });
+      const active = sweeping.createRun({ runId: "active", sessionId: "s1", contextId: "c1" });
+      const finished = sweeping.createRun({ runId: "finished", sessionId: "s1", contextId: "c1" });
+      sweeping.finish(finished, "completed");
       advance(2_000);
       await new Promise((resolve) => setTimeout(resolve, 30));
 
-      expect(sweeping.get("gone")).toBeUndefined();
-      expect(sweeping.get("kept")).toBeDefined();
+      expect(sweeping.get("active")).toBe(active);
+      expect(sweeping.get("finished")).toBeUndefined();
       sweeping.dispose();
+    });
+
+    it("automatically reattaches all active streams after a session reconnect", () => {
+      const run = hub.createRun({ runId: "r1", sessionId: "s1", contextId: "c1" });
+      hub.publish(run, "message.delta", { content: "in progress" });
+      const socket = new FakeSocket();
+      hub.resumeActiveForSession("s1", asSocket(socket));
+      expect(socket.types).toEqual(["stream_checkpoint", "message.delta"]);
+      expect(socket.sent[0].payload).toMatchObject({ run_id: "r1", checkpoint_id: "checkpoint_r1" });
     });
   });
 });
 
 describe("sendSocketEvent", () => {
+  it("does not throw when a socket closes between readyState and send", () => {
+    const socket = new FakeSocket();
+    socket.throwOnSend = true;
+    expect(() => sendSocketEvent(asSocket(socket), "error", "s1", {})).not.toThrow();
+  });
+
   it("lifts checkpoint_id and sequence to the top level and skips closed sockets", () => {
     const socket = new FakeSocket();
     sendSocketEvent(asSocket(socket), "stream_checkpoint", "s1", { checkpoint_id: "cp", sequence: 0, run_id: "r1" });

@@ -13,8 +13,10 @@ let root: string;
 let server: http.Server;
 let base: string;
 let audit: SkillAuditEvent[];
+let noConfirmActions = false;
 
 beforeEach(async () => {
+  noConfirmActions = false;
   root = fs.mkdtempSync(path.join(os.tmpdir(), "skills-router-"));
   const bundled = path.join(root, "bundled", "cat", "builtin-one");
   fs.mkdirSync(bundled, { recursive: true });
@@ -39,6 +41,7 @@ beforeEach(async () => {
       downloadedSkillsDir: path.join(root, "downloaded"),
       configPath: path.join(root, "ws", "config", "tools.yaml"),
       audit: (event) => audit.push(event),
+      noConfirmActions: () => noConfirmActions,
       pluginHealth: () => ({
         "tools.core-registry": {
           ok: true,
@@ -130,6 +133,15 @@ describe("/api/skills", () => {
       "import:ok",
       "delete:ok",
     ]);
+  });
+
+  it("allows skill removal without a confirmation header in sandbox no-confirm mode", async () => {
+    const imported = await upload("guest-skill.md", SKILL_MD("guest-skill"), "text/markdown");
+    expect(imported.status).toBe(201);
+    noConfirmActions = true;
+    const removed = await fetch(`${base}/guest-skill`, { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    expect(await json(removed)).toEqual({ status: "deleted", name: "guest-skill" });
   });
 
   it("protects built-ins and reports duplicates and suspicious uploads with a usable error", async () => {

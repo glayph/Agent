@@ -8,7 +8,7 @@ export type GoalAcceptanceCheck =
   | { type: "file_exists"; path: string }
   | { type: "file_contains"; path: string; text: string; caseSensitive?: boolean }
   | { type: "http_status"; url: string; expectedStatus?: number; bodyContains?: string; timeoutMs?: number }
-  | { type: "tool_called"; name: string; status?: string };
+  | { type: "tool_called"; name: string; status?: string; requireConfirmation?: boolean };
 
 export interface GoalAcceptanceContract {
   mode?: "all" | "any";
@@ -18,6 +18,12 @@ export interface GoalAcceptanceContract {
 export interface GoalAcceptanceToolEvidence {
   name: string;
   status?: string;
+  /**
+   * What the tool's own structured result said about the effect: `false` when it reported that nothing was
+   * delivered/applied, `true` when it explicitly confirmed it, `undefined` when it said nothing either way.
+   * A call that merely finished ("succeeded") is not proof that its external effect happened.
+   */
+  confirmed?: boolean;
 }
 
 export interface GoalAcceptanceContext {
@@ -32,7 +38,6 @@ export interface GoalAcceptanceResult {
   checks: Array<{ type: string; passed: boolean; detail: string }>;
 }
 
-const DEFAULT_ACCEPTANCE_BUDGET_MS = 15_000;
 const ACCEPTANCE_CHECK_TYPES = new Set([
   "final_text_contains", "final_text_regex", "file_exists", "file_contains", "http_status", "tool_called",
 ]);
@@ -42,7 +47,7 @@ export function isGoalAcceptanceContract(value: unknown): value is GoalAcceptanc
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as { mode?: unknown; checks?: unknown };
   if (candidate.mode !== undefined && candidate.mode !== "all" && candidate.mode !== "any") return false;
-  if (!Array.isArray(candidate.checks) || candidate.checks.length === 0 || candidate.checks.length > 25) return false;
+  if (!Array.isArray(candidate.checks) || candidate.checks.length === 0) return false;
   // Final model text is not independent proof that the requested work occurred.
   // Require at least one artifact, HTTP response, or successfully observed tool call.
   const hasIndependentEvidence = candidate.checks.some((raw) => {
@@ -68,7 +73,8 @@ export function isGoalAcceptanceContract(value: unknown): value is GoalAcceptanc
       case "http_status":
         return typeof check.url === "string" && /^https?:\/\//i.test(check.url) && (check.expectedStatus === undefined || (Number.isInteger(check.expectedStatus) && Number(check.expectedStatus) >= 100 && Number(check.expectedStatus) <= 599));
       case "tool_called":
-        return typeof check.name === "string" && check.name.trim().length > 0 && check.status === "succeeded";
+        return typeof check.name === "string" && check.name.trim().length > 0 && check.status === "succeeded"
+          && (check.requireConfirmation === undefined || typeof check.requireConfirmation === "boolean");
       default:
         return false;
     }
@@ -90,18 +96,16 @@ function matchesText(actual: string, expected: string, caseSensitive = false): b
 export async function verifyGoalAcceptance(
   contract: GoalAcceptanceContract | null | undefined,
   context: GoalAcceptanceContext,
-  maxDurationMs = DEFAULT_ACCEPTANCE_BUDGET_MS,
+  /** @deprecated Kept for call-site compatibility; verification has no aggregate time budget. */
+  _maxDurationMs?: number,
 ): Promise<GoalAcceptanceResult> {
   if (!contract || !isGoalAcceptanceContract(contract)) {
     return { passed: false, reason: "No deterministic Goal Acceptance Contract with valid independent evidence is configured.", checks: [] };
   }
   const checks: GoalAcceptanceResult["checks"] = [];
-  const deadline = Date.now() + Math.max(0, Math.min(120_000, Math.floor(maxDurationMs)));
+  // Evaluate the full deterministic contract. Individual external HTTP checks retain
+  // their own request timeout; an aggregate wall-clock cap must not hide later evidence.
   for (const check of contract.checks) {
-    if (Date.now() >= deadline) {
-      checks.push({ type: "budget_exhausted", passed: false, detail: "Acceptance verification exceeded its total time budget." });
-      break;
-    }
     try {
       if (check.type === "final_text_contains") {
         const passed = matchesText(context.finalText, check.text, check.caseSensitive);
@@ -124,8 +128,15 @@ export async function verifyGoalAcceptance(
         checks.push({ type: check.type, passed, detail: passed ? `File ${check.path} contains the expected text.` : `File ${check.path} does not contain the expected text.` });
       } else if (check.type === "tool_called") {
         const calls = context.toolCalls ?? [];
-        const passed = calls.some((call) => call.name === check.name && (check.status === undefined || call.status === check.status));
-        checks.push({ type: check.type, passed, detail: passed ? `Tool '${check.name}' was observed with the expected status.` : `Tool '${check.name}' was not observed with the expected status.` });
+        const matching = calls.filter((call) => call.name === check.name && (check.status === undefined || call.status === check.status));
+        // A tool whose own result says the effect did not happen never counts, and a check that demands
+        // confirmation needs the tool to have confirmed it explicitly.
+        const passed = matching.some((call) => call.confirmed !== false && (!check.requireConfirmation || call.confirmed === true));
+        const detail = passed ? `Tool '${check.name}' was observed with the expected status${check.requireConfirmation ? " and confirmed its effect" : ""}.`
+          : matching.length === 0 ? `Tool '${check.name}' was not observed with the expected status.`
+            : matching.every((call) => call.confirmed === false) ? `Tool '${check.name}' finished but its result reported that the effect did not happen.`
+              : `Tool '${check.name}' finished but did not confirm its effect.`;
+        checks.push({ type: check.type, passed, detail });
       } else if (check.type === "http_status") {
         const url = await validateNetworkUrl(check.url);
         const controller = new AbortController();
@@ -157,3 +168,4 @@ export async function verifyGoalAcceptance(
     checks,
   };
 }
+

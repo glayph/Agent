@@ -111,6 +111,20 @@ export interface RuntimeJob {
   }
 }
 
+export interface SystemHealthSample {
+  id: number
+  sampledAt: number
+  status: "ok" | "degraded" | "unhealthy" | "unknown"
+  host: { cpuCount: number | null; loadPerCpu: number | null; loadAvailable: boolean | null; freeMemoryRatio: number | null; freeMemoryBytes: number | null; totalMemoryBytes: number | null; freeDiskRatio: number | null; diskFreeBytes: number | null; diskTotalBytes: number | null }
+  process: { rssBytes: number | null; heapUsedBytes: number | null; cpuPercentOfOneCore: number | null }
+  eventLoopP99Ms: number | null
+  runs: { active: number | null }
+  resources: { activeLeases: number | null; waiting: number | null; oldestWaiterAgeMs: number | null; saturated: string[] }
+  outboxPending: number | null
+  modelReachable: boolean | null
+  databaseOk: boolean | null
+}
+
 export interface FullHealthReport {
   status: "healthy" | "degraded" | "failed"
   checkedAt: string
@@ -150,6 +164,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export function getFullHealthReport(): Promise<FullHealthReport> {
   return request<FullHealthReport>("/api/enhancements/health/full")
+}
+
+export function getSystemHealthSamples(limit = 240): Promise<{ samples: SystemHealthSample[]; fetchedAt: string }> {
+  return request<{ samples: SystemHealthSample[]; fetchedAt: string }>(`/api/monitor/system-health?limit=${Math.max(1, Math.min(2_000, Math.floor(limit)))}`)
 }
 
 export function runDoctor(): Promise<{ report: DoctorReport }> {

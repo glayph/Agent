@@ -58,6 +58,9 @@ const llm = http.createServer((req, res) => {
     if (asked("LONGBG") && !asked("any news")) return call("terminal_run", { command: "sleep 2; echo bg-ok", background: true })
     if (last.role === "tool") return reply({ role: "assistant", content: `TOOL RESULT SEEN: ${last.content}` })
     const text = String(last.content)
+    // Webchat runs ask the model for a short user-facing update before the first action (preActionUpdates).
+    if (last.role === "user" && text.startsWith("Before the first action, write one concise, user-facing update"))
+      return reply({ role: "assistant", content: "I understand the request and will carry it out step by step." })
     // HANGONCE hangs the first time only (retry test); plain HANG never answers (cancel/timeout tests).
     if (text.includes("HANGONCE")) {
       if (!hangedOnce) { hangedOnce = true; return }
@@ -263,7 +266,7 @@ await check("chat: the agent loop calls a tool and answers from its result", asy
   const toolCreate = events.find((e) => e.type === "message.create" && e.payload.kind === "tool_calls")
   assert.equal(toolCreate.payload.tool_calls[0].function.name, "workspace_list")
   assert.ok(events.some((e) => e.type === "message.update" && e.payload.message_id === toolCreate.payload.message_id))
-  const final = events.find((e) => e.type === "message.create" && e.payload.kind === "normal")
+  const final = events.filter((e) => e.type === "message.create" && e.payload.kind === "normal").at(-1)
   assert.ok(final.payload.content.includes("hello.txt"), final.payload.content)
   const end = events.find((e) => e.type === "node.run_end")
   assert.equal(end.payload.status, "completed")
@@ -291,7 +294,8 @@ await check("chat: the user message is persisted immediately and marked complete
   const accepted = events.find((e) => e.type === "message.accepted")
   assert.ok(accepted, "the gateway should acknowledge the saved message before running the model")
   assert.ok(events.findIndex((e) => e.type === "message.accepted") < events.findIndex((e) => e.type === "node.run_start"))
-  const statuses = events.filter((e) => e.type === "message.status").map((e) => e.payload.status)
+  // The direct reply and the run stream may both announce "processing"; the contract is the order of distinct states.
+  const statuses = events.filter((e) => e.type === "message.status").map((e) => e.payload.status).filter((status, index, all) => index === 0 || status !== all[index - 1])
   assert.deepEqual(statuses, ["processing", "completed"], `delivery status sequence: ${statuses}`)
   assert.equal(accepted.payload.client_message_id, "t1")
   const history = await api("GET", "/api/sessions/s-persist")
@@ -331,12 +335,12 @@ await check("chat: a run that never answers is stopped, saved as failed, and the
   assert.ok(beats.at(-1).elapsed_seconds > beats[0].elapsed_seconds, "elapsed time advances")
   const failedStatus = events.filter((e) => e.type === "message.status").at(-1)
   assert.equal(failedStatus.payload.status, "failed")
-  assert.match(failedStatus.payload.detail, /15 seconds/)
+  assert.equal(failedStatus.payload.detail, "miki_error_run_timeout")
   const ends = events.filter((e) => e.type === "node.run_end")
   assert.equal(ends.length, 1, "exactly one terminal run_end (no premature cancelled followed by failed)")
   const end = ends[0]
   assert.equal(end.payload.status, "failed")
-  assert.match(error.payload.message, /15 seconds/)
+  assert.equal(error.payload.message, "miki_error_run_timeout")
   const history = await api("GET", "/api/sessions/s-timeout")
   const user = history.json.messages.find((m) => m.role === "user")
   assert.ok(user, "the user message must survive the failure")
@@ -365,7 +369,7 @@ await check("chat: a failed turn can be retried from the user message and then c
       if (event.type === "stream_done") { clearTimeout(timer); ws.close(); resolve(seen) }
     })
   })
-  const statuses = events.filter((e) => e.type === "message.status").map((e) => e.payload.status)
+  const statuses = events.filter((e) => e.type === "message.status").map((e) => e.payload.status).filter((status, index, all) => index === 0 || status !== all[index - 1])
   assert.deepEqual(statuses, ["processing", "completed"], `retry statuses: ${statuses}; events: ${events.map((e) => e.type)}`)
   const history2 = await api("GET", "/api/sessions/s-retry")
   const users = history2.json.messages.filter((m) => m.role === "user")
@@ -394,43 +398,25 @@ await check("terminal: a background command that finishes later is announced to 
   assert.match(final, /NOTICE SEEN: command finished successfully/, final)
 })
 
-await check("chat: a write waits for approval, runs after approval, and the file exists", async () => {
-  let approved = false
+// Interactive runs are autonomous (turbo mode): tool calls execute directly and never wait for approval.
+await check("chat: a write runs directly without an approval prompt, and the file exists", async () => {
+  let sawApproval = false
   const events = await chat("s-write", "WRITEFILE now", {
     onEvent: async (event) => {
-      if (event.type === "message.create" || event.type === "message.update") {
-        const status = event.payload.tool_calls?.[0]?.extra_content?.tool_feedback_explanation
-        if (status === "awaiting_approval" && !approved) {
-          approved = true
-          const pending = (await api("GET", "/api/control/approvals")).json.requests.find((r) => r.status === "pending" && r.action === "file_write")
-          await api("POST", `/api/control/approvals/${pending.id}/approve`, {})
-        }
-      }
+      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval") sawApproval = true
     },
   })
-  assert.ok(approved, "the call should have asked for approval")
+  assert.equal(sawApproval, false, "autonomous runs must not stop for approval")
   assert.equal(events.find((e) => e.type === "node.run_end").payload.status, "completed")
   assert.equal(fs.readFileSync(path.join(workspace, "notes", "out.txt"), "utf8"), "written by the agent")
-})
-
-await check("chat: a denied write never touches the filesystem", async () => {
-  fs.rmSync(path.join(workspace, "notes"), { recursive: true, force: true })
-  const events = await chat("s-deny", "WRITEFILE again", {
-    onEvent: async (event) => {
-      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval") {
-        const pending = (await api("GET", "/api/control/approvals")).json.requests.find((r) => r.status === "pending" && r.action === "file_write")
-        await api("POST", `/api/control/approvals/${pending.id}/deny`, { reason: "not now" })
-      }
-    },
-  })
-  assert.equal(fs.existsSync(path.join(workspace, "notes", "out.txt")), false)
-  assert.ok(events.some((e) => e.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation?.startsWith("denied")))
+  const pending = (await api("GET", "/api/control/approvals")).json.requests.filter((r) => r.status === "pending" && r.action === "file_write")
+  assert.equal(pending.length, 0, "no approval request may be left pending")
 })
 
 await check("chat: secret files are blocked and the model is told why", async () => {
   fs.writeFileSync(path.join(workspace, ".env"), "OPENAI_API_KEY=sk-should-never-leak-123456789012")
   const events = await chat("s-secret", "READSECRET")
-  const final = events.find((e) => e.type === "message.create" && e.payload.kind === "normal")
+  const final = events.filter((e) => e.type === "message.create" && e.payload.kind === "normal").at(-1)
   assert.ok(final.payload.content.includes("blocked"), final.payload.content)
   assert.ok(!JSON.stringify(events).includes("should-never-leak"))
 })
@@ -589,61 +575,25 @@ await check("files: runs are recorded in the audit table", async () => {
   assert.ok(rows.some((r) => r.file === "broken.js" && r.status === "failed" && r.exit_code === 4))
 })
 
-await check("agent: file_run waits for approval, then returns real script output to the model", async () => {
+await check("agent: file_run executes directly and returns real script output to the model", async () => {
   let asked = false
   const events = await chat("s-run", "RUNJOB please", {
     onEvent: async (event) => {
-      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval" && !asked) {
-        asked = true
-        const pending = (await api("GET", "/api/control/approvals")).json.requests.find((r) => r.status === "pending" && r.action === "file_run")
-        await api("POST", `/api/control/approvals/${pending.id}/approve`, {})
-      }
+      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval") asked = true
     },
   })
-  assert.ok(asked)
-  const final = events.find((e) => e.type === "message.create" && e.payload.kind === "normal")
+  assert.equal(asked, false)
+  const final = events.filter((e) => e.type === "message.create" && e.payload.kind === "normal").at(-1)
   assert.ok(final.payload.content.includes("job ok from-agent"), final.payload.content)
 })
 
-await check("agent: a denied file_run never executes", async () => {
-  fs.writeFileSync(abs("job.js"), `require("fs").writeFileSync(${JSON.stringify(abs("ran.marker"))}, "x")`)
-  await chat("s-run-deny", "RUNJOB again", {
-    onEvent: async (event) => {
-      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval") {
-        const pending = (await api("GET", "/api/control/approvals")).json.requests.find((r) => r.status === "pending" && r.action === "file_run")
-        await api("POST", `/api/control/approvals/${pending.id}/deny`, {})
-      }
-    },
-  })
-  assert.equal(fs.existsSync(abs("ran.marker")), false)
-})
-
-await check("agent: file_delete needs approval; file_move organizes files", async () => {
+await check("agent: file_delete and file_move execute directly", async () => {
   fs.mkdirSync(abs("trash/inner"), { recursive: true })
   fs.writeFileSync(abs("trash/inner/x.txt"), "x")
-  let asked = false
-  await chat("s-del", "DELETEDIR now", {
-    onEvent: async (event) => {
-      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval" && !asked) {
-        asked = true
-        assert.equal(fs.existsSync(abs("trash")), true, "must not be deleted before approval")
-        const pending = (await api("GET", "/api/control/approvals")).json.requests.find((r) => r.status === "pending" && r.action === "file_delete")
-        await api("POST", `/api/control/approvals/${pending.id}/approve`, {})
-      }
-    },
-  })
-  assert.ok(asked)
+  await chat("s-del", "DELETEDIR now")
   assert.equal(fs.existsSync(abs("trash")), false)
-  // file_move is a config_write tool, so it is approved the same way.
   fs.writeFileSync(abs("hello.txt"), "move me")
-  await chat("s-move", "MKMOVE", {
-    onEvent: async (event) => {
-      if (event.payload?.tool_calls?.[0]?.extra_content?.tool_feedback_explanation === "awaiting_approval") {
-        const pending = (await api("GET", "/api/control/approvals")).json.requests.find((r) => r.status === "pending" && r.action === "file_move")
-        await api("POST", `/api/control/approvals/${pending.id}/approve`, {})
-      }
-    },
-  })
+  await chat("s-move", "MKMOVE")
   assert.equal(fs.readFileSync(abs("moved-by-agent.txt"), "utf8"), "move me")
 })
 

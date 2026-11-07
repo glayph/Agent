@@ -10,8 +10,8 @@ export function messageHasRetryPrompt(message: ChatMessage): boolean {
 
 /**
  * A user message whose turn failed (timeout, provider error). The failed turn leaves an error
- * message after it, so it is no longer the last message but must stay retryable, as long as the
- * user has not said anything newer. Mirrors the gateway rule for `message.retry`.
+ * message after it, so it is no longer the last message but must stay retryable. Newer messages
+ * do not erase an unanswered turn; the gateway carries it over in its original position.
  */
 export function findFailedUserTurn(
   messages: ChatMessage[],
@@ -48,11 +48,9 @@ export function getRetryableMessageIds(messages: ChatMessage[]): Set<string> {
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]
     if (message.role !== "user" || !isUnansweredUserMessage(message)) continue
-    const hasNewerUserMessage = messages
-      .slice(index + 1)
-      .some((candidate) => candidate.role === "user")
-    if (!hasNewerUserMessage || message.deliveryStatus === "cancelled")
-      ids.add(message.id)
+    // The gateway can resume an earlier unanswered prompt as a carryover turn,
+    // without deleting or reordering the messages the user sent afterwards.
+    ids.add(message.id)
   }
   return ids
 }

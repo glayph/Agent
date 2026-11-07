@@ -104,6 +104,7 @@ class GraphCognitiveMemory {
         structured_value TEXT,
         source_type TEXT,
         source_reference TEXT,
+        trust_level TEXT NOT NULL DEFAULT 'untrusted',
         fingerprint TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -197,6 +198,20 @@ class GraphCognitiveMemory {
       );
       CREATE INDEX IF NOT EXISTS idx_project_contexts_status ON project_contexts(scope_key, status, last_active_at);
     `);
+    const nodeColumns = this.db.prepare('PRAGMA table_info(memory_nodes)').all();
+    const needsTrustMigration = !nodeColumns.some((column) => column.name === 'trust_level');
+    if (needsTrustMigration) {
+      // Add the column and backfill atomically. This is a one-time legacy
+      // migration: running this source-based backfill on every startup would
+      // incorrectly promote intentionally-untrusted agent/imported records.
+      this.db.transaction(() => {
+        this.db.exec("ALTER TABLE memory_nodes ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'untrusted'");
+        // Backfill only unambiguous internal sources. A user row is owner-trusted
+        // only when the server-authored metadata explicitly records owner approval.
+        this.db.exec("UPDATE memory_nodes SET trust_level = CASE WHEN source_type = 'agent' THEN 'agent' WHEN source_type = 'user' AND CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.trust') = 'owner' ELSE 0 END THEN 'owner' ELSE 'untrusted' END");
+      })();
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_memory_nodes_scope_trust ON memory_nodes(scope_key, trust_level, status)");
   }
 
   _seedCategories() {
@@ -281,10 +296,16 @@ class GraphCognitiveMemory {
     const existing = this.db.prepare('SELECT * FROM memory_nodes WHERE scope_key = ? AND fingerprint = ?').get(scope.scopeKey, fingerprint);
     const now = input.createdAt ? new Date(input.createdAt).toISOString() : nowIso();
     const metadata = { ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}), ...((input.factKey || input.fact_key) ? { factKey: String(input.factKey || input.fact_key) } : {}) };
+    const sourceType = String(input.sourceType || input.source_type || 'conversation');
+    const trustLevel = ['owner', 'agent'].includes(input.trustLevel || input.trust_level)
+      ? (input.trustLevel || input.trust_level)
+      : (sourceType === 'agent' ? 'agent' : (sourceType === 'user' && metadata.trust === 'owner' ? 'owner' : 'untrusted'));
     const projectId = input.projectId || scope.projectId || null;
     if (existing) {
-      this.db.prepare(`UPDATE memory_nodes SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ?, confidence = MAX(confidence, ?), explicit_importance = MAX(explicit_importance, ?) WHERE id = ?`)
-        .run(now, now, clamp(input.confidence, 0, 1) || existing.confidence, clamp(input.explicitImportance, 0, 1) || existing.explicit_importance, existing.id);
+      // Only an explicit owner approval may upgrade an existing untrusted
+      // duplicate. An agent repeating imported text is not proof of provenance.
+      this.db.prepare(`UPDATE memory_nodes SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ?, confidence = MAX(confidence, ?), explicit_importance = MAX(explicit_importance, ?), trust_level = CASE WHEN ? = 'owner' THEN 'owner' ELSE trust_level END WHERE id = ?`)
+        .run(now, now, clamp(input.confidence, 0, 1) || existing.confidence, clamp(input.explicitImportance, 0, 1) || existing.explicit_importance, trustLevel, existing.id);
       this._recordAccess(scope, existing.id, input.taskReference, false, true, null, { duplicate: true });
       return { stored: false, duplicate: true, nodeId: existing.id, category: categorySlug };
     }
@@ -301,11 +322,11 @@ class GraphCognitiveMemory {
     }
     this.db.prepare(`
       INSERT INTO memory_nodes
-      (id, scope_key, agent_id, owner_id, workspace_id, project_id, category_id, memory_type, content, structured_value, source_type, source_reference, fingerprint, created_at, updated_at, last_accessed_at, access_count, explicit_importance, confidence, semantic_relevance, graph_relevance, recency_score, frequency_score, relationship_strength, activation_score, status, review_at, expires_at, is_pinned, is_archived, metadata, embedding)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0, 0, 1, 0.1, 0, 0, 'active', ?, ?, ?, 0, ?, ?)
+      (id, scope_key, agent_id, owner_id, workspace_id, project_id, category_id, memory_type, content, structured_value, source_type, source_reference, trust_level, fingerprint, created_at, updated_at, last_accessed_at, access_count, explicit_importance, confidence, semantic_relevance, graph_relevance, recency_score, frequency_score, relationship_strength, activation_score, status, review_at, expires_at, is_pinned, is_archived, metadata, embedding)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0, 0, 1, 0.1, 0, 0, 'active', ?, ?, ?, 0, ?, ?)
     `).run(
       nodeId, scope.scopeKey, scope.agentId, scope.ownerId, scope.workspaceId, projectId, categoryId, memoryType, canonical,
-      input.structuredValue == null ? null : json(input.structuredValue), input.sourceType || input.source_type || 'conversation', input.sourceReference || input.source_reference || null,
+      input.structuredValue == null ? null : json(input.structuredValue), sourceType, input.sourceReference || input.source_reference || null, trustLevel,
       fingerprint, now, now, now, clamp(input.explicitImportance, 0, 1) || 0.5, clamp(input.confidence, 0, 1) || 0.7, input.reviewAt || null, input.expiresAt || null,
       input.isPinned ? 1 : 0, json(metadata), input.embedding ? json(input.embedding) : null,
     );
@@ -379,12 +400,14 @@ class GraphCognitiveMemory {
   retrieve(query = '', options = {}) {
     const scope = this.normalizeScope(options.scope);
     const limit = Math.max(1, Math.min(this.options.maxInjectedMemories, Number(options.limit) || this.options.maxInjectedMemories));
-    const tokens = this._tokens(query);
+    const boundedQuery = typeof query === 'string' ? query.normalize('NFKC').slice(0, 2_000) : '';
+    const tokens = this._tokens(boundedQuery);
+    if (!tokens.length) return [];
     const scopeKeys = this._scopeKeys(scope);
     const scopePlaceholders = scopeKeys.map(() => '?').join(',');
     // Fix #2: expiry predicate is mandatory — expired nodes must not enter
     // retrieval even if maintenance() has not yet archived them.
-    const rows = this.db.prepare(`SELECT n.*, c.slug AS category_slug FROM memory_nodes n JOIN memory_categories c ON c.id = n.category_id WHERE n.scope_key IN (${scopePlaceholders}) AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY n.activation_score DESC, n.updated_at DESC LIMIT ?`).all(...scopeKeys, this.options.maxCandidates);
+    const rows = this.db.prepare(`SELECT n.*, c.slug AS category_slug FROM memory_nodes n JOIN memory_categories c ON c.id = n.category_id WHERE n.scope_key IN (${scopePlaceholders}) AND n.trust_level IN ('owner','agent') AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY n.activation_score DESC, n.updated_at DESC LIMIT ?`).all(...scopeKeys, this.options.maxCandidates);
     const scored = rows.map((node) => {
       // Whole-token matching (not substrings), with the same stemming as the query.
       const haystack = new Set(tokenize(`${node.content} ${node.memory_type} ${node.category_slug} ${node.source_reference || ''}`, { max: 512 }));
@@ -412,7 +435,7 @@ class GraphCognitiveMemory {
       if ((options.maxGraphDepth == null ? this.options.maxGraphDepth : options.maxGraphDepth) >= 1) {
         // Fix #2: neighbor traversal also checks expiry — expired nodes must
         // not be pulled in as graph neighbors.
-        const neighbors = this.db.prepare(`SELECT n.*, c.slug AS category_slug, e.weight AS edge_weight, e.relation_type FROM memory_edges e JOIN memory_nodes n ON n.id = CASE WHEN e.source_node_id = ? THEN e.target_node_id ELSE e.source_node_id END JOIN memory_categories c ON c.id = n.category_id WHERE e.scope_key = ? AND (e.source_node_id = ? OR e.target_node_id = ?) AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY e.weight DESC LIMIT 6`).all(item.node.id, scope.scopeKey, item.node.id, item.node.id);
+        const neighbors = this.db.prepare(`SELECT n.*, c.slug AS category_slug, e.weight AS edge_weight, e.relation_type FROM memory_edges e JOIN memory_nodes n ON n.id = CASE WHEN e.source_node_id = ? THEN e.target_node_id ELSE e.source_node_id END JOIN memory_categories c ON c.id = n.category_id WHERE e.scope_key = ? AND (e.source_node_id = ? OR e.target_node_id = ?) AND n.trust_level IN ('owner','agent') AND n.status = 'active' AND n.is_archived = 0 AND (n.expires_at IS NULL OR n.expires_at > datetime('now')) ORDER BY e.weight DESC LIMIT 6`).all(item.node.id, scope.scopeKey, item.node.id, item.node.id);
         for (const neighbor of neighbors) {
           const neighborScore = clamp(item.score * 0.82 + Number(neighbor.edge_weight || 0) * 0.18);
           add({ node: neighbor, score: neighborScore, lexical: 0, projectBoost: neighbor.project_id ? this._projectBoost(scope, neighbor.project_id) : 0 }, item.node.id);
@@ -435,6 +458,8 @@ class GraphCognitiveMemory {
       memoryType: item.node.memory_type,
       sourceType: item.node.source_type,
       sourceReference: item.node.source_reference,
+      provenance: item.node.trust_level,
+      timestamp: item.node.updated_at,
       score: Number(item.score.toFixed(6)),
       reasons: this._reasons(item.node, item.lexical, item.node.graph_relevance, item.projectBoost),
       via: item.via,

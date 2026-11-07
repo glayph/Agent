@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import Database from "better-sqlite3"
-import { DatabaseBackups, beginBoot, createRejectionGuard, ensureHealthyDatabase, installCrashHandlers, installRejectionGuard, listBackups, markCleanExit, noteCrashReason, recordCrash } from "./process-safety.js"
+import { DatabaseBackups, beginBoot, createRejectionGuard, ensureHealthyDatabase, installCrashHandlers, installRejectionGuard, listBackups, markCleanExit, noteCrashReason, recordCrash, recoveryV2Enabled } from "./process-safety.js"
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "miki-safety-"))
 function makeDb(file: string, rows: number) {
@@ -11,6 +11,14 @@ function makeDb(file: string, rows: number) {
   for (let i = 0; i < rows; i += 1) db.prepare("INSERT INTO t VALUES(?)").run(`row-${i}`)
   return db
 }
+
+describe("recovery mode configuration", () => {
+  it("enables continuous recovery by default and disables only explicit false values", () => {
+    expect(recoveryV2Enabled(undefined)).toBe(true)
+    for (const value of ["0", "false", "off", "no", "FALSE", " false "]) expect(recoveryV2Enabled(value)).toBe(false)
+    for (const value of ["1", "true", "on", "yes", "", "enabled"]) expect(recoveryV2Enabled(value)).toBe(true)
+  })
+})
 
 describe("database safety", () => {
   it("backs up the database and keeps only the newest few", async () => {
@@ -37,6 +45,19 @@ describe("database safety", () => {
     restored.close()
   })
 
+  it("restores a missing runtime database from the newest verified backup", async () => {
+    const dir = tmp(); const file = path.join(dir, "miki-runtime.sqlite"); const bdir = path.join(dir, "backups")
+    const source = makeDb(file, 4)
+    await new DatabaseBackups(source, bdir, () => undefined).backupNow()
+    source.close(); fs.rmSync(file, { force: true })
+    const result = ensureHealthyDatabase(file, bdir, () => undefined)
+    expect(result.status).toBe("restored")
+    expect(result.reason).toBe("database file missing")
+    const restored = new Database(file)
+    expect((restored.prepare("SELECT COUNT(*) n FROM t").get() as { n: number }).n).toBe(4)
+    restored.close()
+  })
+
   it("starts fresh, but keeps the damaged file, when there is no usable backup", () => {
     const dir = tmp(); const file = path.join(dir, "miki-runtime.sqlite")
     fs.writeFileSync(file, "garbage".repeat(100))
@@ -45,6 +66,26 @@ describe("database safety", () => {
     expect(fs.existsSync(file)).toBe(false)
     expect(fs.existsSync(result.corruptMovedTo as string)).toBe(true)
     expect(ensureHealthyDatabase(path.join(dir, "missing.sqlite"), dir, () => undefined).status).toBe("absent")
+  })
+
+  it("fails closed when a corrupt database cannot be quarantined", () => {
+    const dir = tmp(); const file = path.join(dir, "miki-runtime.sqlite")
+    fs.writeFileSync(file, "not a sqlite database".repeat(10))
+    const rename = jest.spyOn(fs, "renameSync").mockImplementation(() => { throw new Error("permission denied") })
+    try {
+      const result = ensureHealthyDatabase(file, path.join(dir, "backups"), () => undefined)
+      expect(result.status).toBe("blocked")
+      expect(fs.existsSync(file)).toBe(true)
+    } finally { rename.mockRestore() }
+  })
+
+  it("creates distinct backups when two backups share the same clock timestamp", async () => {
+    const dir = tmp(); const db = makeDb(path.join(dir, "d.sqlite"), 2)
+    const backups = new DatabaseBackups(db, path.join(dir, "backups"), () => undefined, { now: () => new Date("2026-10-27T10:00:00.000Z") })
+    const first = await backups.backupNow(); const second = await backups.backupNow()
+    expect(first).toBeTruthy(); expect(second).toBeTruthy(); expect(second).not.toBe(first)
+    expect(listBackups(path.join(dir, "backups"))).toHaveLength(2)
+    db.close()
   })
 
   it("leaves a healthy database alone", () => {

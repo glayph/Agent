@@ -8,7 +8,7 @@ import { errorMessage } from "./util.js";
 const DEFAULT_TREE_ENTRIES = Number.POSITIVE_INFINITY;
 const DEFAULT_TREE_BYTES = Number.POSITIVE_INFINITY;
 const DEFAULT_TREE_DEPTH = Number.POSITIVE_INFINITY;
-const DEFAULT_READ_BYTES = Number.MAX_SAFE_INTEGER;
+const DEFAULT_READ_BYTES = 64 * 1024;
 
 export interface FileToolsOptions {
   root: string | (() => string);
@@ -16,6 +16,11 @@ export interface FileToolsOptions {
   /** Kill switch for execution; evaluated on every call so it can be toggled at runtime. */
   executionEnabled?: () => boolean;
   allowNativeExecution?: boolean;
+  /** Sandbox owner mode can access credential-like guest files and mutate the workspace root. */
+  allowSensitivePaths?: boolean | (() => boolean);
+  allowWorkspaceRootMutation?: boolean | (() => boolean);
+  /** Sandbox owner mode passes the complete guest environment to script processes. */
+  inheritEnvironment?: boolean | (() => boolean);
   /** Optional per-operation safety caps. Unset means no artificial size/count cap. */
   maxTreeEntries?: number;
   maxTreeBytes?: number;
@@ -79,6 +84,9 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       : options.restrictToWorkspace !== false;
   const rel = (abs: string) => path.relative(getRoot(), abs) || ".";
   const executionOn = () => options.executionEnabled?.() ?? true;
+  const allowSensitivePaths = () => typeof options.allowSensitivePaths === "function" ? options.allowSensitivePaths() : options.allowSensitivePaths === true;
+  const allowWorkspaceRootMutation = () => typeof options.allowWorkspaceRootMutation === "function" ? options.allowWorkspaceRootMutation() : options.allowWorkspaceRootMutation === true;
+  const inheritEnvironment = () => typeof options.inheritEnvironment === "function" ? options.inheritEnvironment() : options.inheritEnvironment === true;
   const treeLimits = {
     entries: options.maxTreeEntries ?? DEFAULT_TREE_ENTRIES,
     bytes: options.maxTreeBytes ?? DEFAULT_TREE_BYTES,
@@ -97,10 +105,12 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
     return abs;
   };
   const notRoot = (abs: string) => {
+    if (allowWorkspaceRootMutation()) return;
     const root = getRoot();
     if (path.resolve(abs) === root) throw new Error("The workspace root cannot be modified.");
   };
   const assertNotSensitive = (abs: string) => {
+    if (allowSensitivePaths()) return;
     const relative = path.relative(getRoot(), path.resolve(abs));
     const segments = relative.split(path.sep).filter(Boolean);
     const protectedDirectories = new Set([".git", ".ssh", ".aws", ".azure", ".gnupg"]);
@@ -289,23 +299,24 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
       name: "file_run",
       description:
         `Run a script from the workspace and return its output (stdout, stderr, exit code). Supported types: ${supportedRunExtensions().join(", ")}. ` +
-        "No shell is used; the script gets a reduced environment without secrets and a time limit. Requires the user's approval.",
+        "No shell is used. Ordinary mode uses a reduced environment; sandbox owner mode inherits the full guest process environment and runs without an approval prompt. An optional timeoutSeconds deadline can be supplied; otherwise it runs until exit or cancellation.",
       risk: "service",
       approval: "required",
+      timeoutMsForInput: (input) => Number(input.timeoutSeconds) > 0 ? Number(input.timeoutSeconds) * 1000 : 0,
       parameters: {
         type: "object",
         required: ["path"],
         properties: {
           path: { type: "string" },
           args: { type: "array", description: "Command-line arguments (strings)." },
-          timeoutSeconds: { type: "integer", description: "Default 30, maximum 300." },
+          timeoutSeconds: { type: "integer", minimum: 1, description: "Optional wall-clock deadline in seconds; omitted means no deadline." },
         },
         additionalProperties: false,
       },
       async execute(input, context) {
         if (!executionOn()) throw new Error("File execution is disabled by the workspace policy.");
         const args = Array.isArray(input.args) ? input.args.map((item) => String(item)) : [];
-        const timeoutSeconds = input.timeoutSeconds === undefined ? 30 : Number(input.timeoutSeconds);
+        const timeoutSeconds = Number(input.timeoutSeconds) > 0 ? Number(input.timeoutSeconds) : 0;
         try {
           const result = await runWorkspaceFile({
             root: getRoot(),
@@ -314,6 +325,8 @@ export function createFileManagementTools(options: FileToolsOptions): EngineTool
             args,
             timeoutMs: timeoutSeconds * 1000,
             allowNative: options.allowNativeExecution,
+            allowSensitiveFiles: allowSensitivePaths(),
+            inheritEnvironment: inheritEnvironment(),
             signal: context.signal,
           });
           options.onRun?.({ file: result.file, args, status: result.status, exitCode: result.exitCode, durationMs: result.durationMs, runId: context.runId });

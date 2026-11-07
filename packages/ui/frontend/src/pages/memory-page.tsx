@@ -1,4 +1,5 @@
 import {
+  IconCheck,
   IconDatabase,
   IconRefresh,
   IconSearch,
@@ -10,13 +11,19 @@ import type { FormEvent } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
+  type GovernedMemoryRecord,
   type MemoryChunk,
   type MemoryItem,
   type MemorySearchResult,
   type MemoryStats,
+  approveMemoryProcedure,
+  confirmMemoryPreference,
+  forgetGovernedMemory,
   forgetMemoryChunk,
   getMemoryStats,
   inspectMemoryChunk,
+  listGovernedMemory,
+  listMemoryProcedures,
   listMemoryChunks,
   reindexMemory,
   searchMemory,
@@ -110,6 +117,9 @@ export function MemoryPage() {
   const { t } = useTranslation()
   const [stats, setStats] = useState<MemoryStats | null>(null)
   const [chunks, setChunks] = useState<MemoryChunk[]>([])
+  const [reviewPreferences, setReviewPreferences] = useState<GovernedMemoryRecord[]>([])
+  const [procedureCandidates, setProcedureCandidates] = useState<GovernedMemoryRecord[]>([])
+  const [governanceError, setGovernanceError] = useState<string | null>(null)
   const [region, setRegion] = useState("all")
   const [query, setQuery] = useState("")
   const [searchResult, setSearchResult] = useState<MemorySearchResult | null>(
@@ -136,6 +146,61 @@ export function MemoryPage() {
       notify.error(message, { id: "memory-page:error:stats" })
     }
   }, [t])
+
+  const loadGovernance = useCallback(async () => {
+    setGovernanceError(null)
+    try {
+      const [preferences, procedures] = await Promise.all([
+        listGovernedMemory({ kind: "preference", status: "review", limit: 100 }),
+        listMemoryProcedures(),
+      ])
+      setReviewPreferences(preferences.records)
+      setProcedureCandidates(procedures.procedures.filter((record) => record.status === "draft" || record.status === "review"))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to load governed memory."
+      setGovernanceError(message)
+    }
+  }, [])
+
+  const resolvePreference = async (record: GovernedMemoryRecord) => {
+    setBusy(`preference:${record.id}`)
+    try {
+      await confirmMemoryPreference(record)
+      notify.success("Preference confirmed; other conflicting candidates were superseded.")
+      await loadGovernance()
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : "Could not confirm this preference.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const approveProcedure = async (record: GovernedMemoryRecord) => {
+    setBusy(`procedure:${record.id}`)
+    try {
+      await approveMemoryProcedure(record.id)
+      notify.success("Procedure approved and saved for future reference.")
+      await loadGovernance()
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : "Could not approve this procedure.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const forgetGovernedRecord = async (record: GovernedMemoryRecord) => {
+    if (!window.confirm(`Forget this ${record.kind} memory?`)) return
+    setBusy(`forget-record:${record.id}`)
+    try {
+      await forgetGovernedMemory(record.id)
+      notify.success("Governed memory record forgotten.")
+      await loadGovernance()
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : "Could not forget this memory.")
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const load = useCallback(async () => {
     const requestId = ++chunksRequestIdRef.current
@@ -165,7 +230,8 @@ export function MemoryPage() {
 
   useEffect(() => {
     void loadStats()
-  }, [loadStats])
+    void loadGovernance()
+  }, [loadStats, loadGovernance])
 
   useEffect(() => {
     setSelected(null)
@@ -272,7 +338,7 @@ export function MemoryPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void Promise.all([load(), loadStats()])}
+          onClick={() => void Promise.all([load(), loadStats(), loadGovernance()])}
           disabled={loading}
         >
           <IconRefresh data-icon="inline-start" />
@@ -310,7 +376,7 @@ export function MemoryPage() {
             className="border-destructive/40 bg-destructive/5 flex flex-col items-start gap-3 rounded-xl border p-5 sm:p-6"
           >
             <p className="text-destructive text-sm">{error}</p>
-            <Button variant="outline" size="sm" onClick={() => void Promise.all([load(), loadStats()])} disabled={loading}>
+            <Button variant="outline" size="sm" onClick={() => void Promise.all([load(), loadStats(), loadGovernance()])} disabled={loading}>
               <IconRefresh data-icon="inline-start" />
               {t("pages.memory.retry", { defaultValue: "Try again" })}
             </Button>
@@ -339,6 +405,65 @@ export function MemoryPage() {
                 detail={t("pages.memory.metrics.retrievals_detail", { defaultValue: "Diagnostic traces" })}
               />
             </div>
+
+            <SectionPanel
+              title="Governed memory review"
+              description="Review contradictory owner preferences and approve reusable workflow candidates. Draft procedures are never executed automatically."
+            >
+              {governanceError && <div role="alert" className="rounded-md border border-destructive/30 p-3 text-sm">{governanceError}</div>}
+              <div className="space-y-3">
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">Preferences needing review ({reviewPreferences.length})</h3>
+                  </div>
+                  {reviewPreferences.length ? reviewPreferences.map((record) => (
+                    <div key={record.id} className="mb-2 rounded-lg border p-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{record.status}</Badge>
+                        <Badge variant="secondary">{record.provenance}</Badge>
+                        <span className="text-muted-foreground text-xs">{formatDateTime(record.updatedAt)}</span>
+                      </div>
+                      <p className="text-sm leading-6">{record.content}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button size="sm" onClick={() => void resolvePreference(record)} disabled={busy !== null}>
+                          <IconCheck data-icon="inline-start" /> Use this preference
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => void forgetGovernedRecord(record)} disabled={busy !== null}>
+                          <IconTrash data-icon="inline-start" /> Forget
+                        </Button>
+                      </div>
+                    </div>
+                  )) : <p className="text-muted-foreground text-sm">No unresolved preference conflicts.</p>}
+                </div>
+                <div className="border-t pt-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">Workflow candidates awaiting approval ({procedureCandidates.length})</h3>
+                  </div>
+                  {procedureCandidates.length ? procedureCandidates.map((record) => {
+                    const steps = Array.isArray(record.metadata.steps) ? record.metadata.steps as Array<Record<string, unknown>> : []
+                    return (
+                      <div key={record.id} className="mb-2 rounded-lg border p-3">
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{record.status}</Badge>
+                          <Badge variant="secondary">{record.metadata.platform ? String(record.metadata.platform) : "unknown platform"}</Badge>
+                          <span className="text-muted-foreground text-xs">{record.evidenceIds.length} evidence run(s)</span>
+                        </div>
+                        <p className="text-sm font-medium">{record.content}</p>
+                        {steps.length > 0 && <ol className="text-muted-foreground mt-2 list-decimal space-y-1 pl-5 text-xs">{steps.map((step, index) => <li key={`${record.id}:${index}`}>{String(step.tool || "tool")} — {String(step.status || "unknown")}</li>)}</ol>}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button size="sm" onClick={() => void approveProcedure(record)} disabled={busy !== null}>
+                            <IconCheck data-icon="inline-start" /> Approve procedure
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => void forgetGovernedRecord(record)} disabled={busy !== null}>
+                            <IconTrash data-icon="inline-start" /> Forget
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  }) : <p className="text-muted-foreground text-sm">No workflow candidates awaiting approval.</p>}
+                </div>
+              </div>
+            </SectionPanel>
 
             <SectionPanel
               title={t("pages.memory.search_title", {

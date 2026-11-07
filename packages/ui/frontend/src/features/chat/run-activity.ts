@@ -2,8 +2,8 @@ import type { RunActivity } from "@/store/chat"
 
 /** A model that has produced nothing for this long is called out as slow. */
 export const SLOW_MODEL_SECONDS = 60
-/** Heartbeats arrive every 5s; if none arrived for this long the data is stale and hidden. */
-export const STALE_AFTER_MS = 30_000
+/** A long silence is surfaced as a possible stall before the gateway inactivity limit is reached. */
+export const STALLED_AFTER_SECONDS = 5 * 60
 
 export function formatElapsed(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds))
@@ -20,8 +20,21 @@ export function describeRunActivity(
   activity: RunActivity,
   idleSeconds: number,
 ): { text: string; slow: boolean } {
+  if (activity.inactivityTimeoutReached) {
+    return {
+      text: `No progress for ${formatElapsed(idleSeconds)}. The inactivity limit has been reached; Miki is stopping this run to prevent a silent hang.`,
+      slow: true,
+    }
+  }
+  if (idleSeconds >= STALLED_AFTER_SECONDS) {
+    return {
+      text: `This run may be stalled (no progress for ${formatElapsed(idleSeconds)}). The configured inactivity watchdog will stop it if progress does not resume.`,
+      slow: true,
+    }
+  }
   switch (activity.activity) {
     case "model":
+      if (activity.label) return { text: activity.label, slow: false }
       return idleSeconds >= SLOW_MODEL_SECONDS
         ? {
             text: `The model is slow to answer (nothing for ${formatElapsed(idleSeconds)}). You can keep waiting or press Stop.`,

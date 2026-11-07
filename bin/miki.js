@@ -43,6 +43,13 @@ function loadDotEnvFiles() {
 
 loadDotEnvFiles();
 
+// This source package is intended to be usable through a temporary/public Web UI.
+// Keep remote first-time setup enabled by default; an explicit environment value
+// can still disable it for deployments that require local-only setup.
+if (process.env.MIKI_ALLOW_REMOTE_SETUP === undefined) {
+  process.env.MIKI_ALLOW_REMOTE_SETUP = "1";
+}
+
 const requiredRuntimeFiles = [
   ["gateway", "packages/gateway/dist/index.js"],
   ["core API", "packages/core/dist/api/index.js"],

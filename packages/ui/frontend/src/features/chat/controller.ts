@@ -15,6 +15,7 @@ import {
   type MikiWsClientMessage,
   type MikiWsServerMessage,
   handlemikiMessage,
+  parseAttachments,
 } from "@/features/chat/protocol"
 import {
   findFailedUserTurn,
@@ -38,6 +39,7 @@ import {
   updateChatStore,
 } from "@/store/chat"
 import { type GatewayState, gatewayAtom } from "@/store/gateway"
+import { CHAT_INPUT_LIMITS } from "@miki/config"
 
 const store = getDefaultStore()
 
@@ -95,6 +97,7 @@ function hideResolvedErrors(messages: ChatMessage[]): ChatMessage[] {
 let wsRef: WebSocket | null = null
 let isConnecting = false
 let msgIdCounter = 0
+let retryRequestCounter = 0
 let activeSessionIdRef = getChatState().activeSessionId
 let initialized = false
 let hydratePromise: Promise<void> | null = null
@@ -109,6 +112,9 @@ let customWsFactory: ((url: string) => WebSocket) | null = null
 // Keep unacknowledged frames in memory and replay them with the same id after reconnect.
 // The gateway deduplicates by client message id, so this closes the send/ack race safely.
 const pendingOutgoing = new Map<string, { sessionId: string; frame: string }>()
+// Retry requests are retained until the gateway acknowledges the exact request id.
+// Replaying the same frame is safe because the gateway persists retry idempotency keys.
+const pendingRetries = new Map<string, { sessionId: string; frame: string; targetMessageId: string; userMessageId: string }>()
 
 export function setWebSocketFactory(
   factory: ((url: string) => WebSocket) | null,
@@ -298,9 +304,18 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected", runError: undefined })
       isConnecting = false
       reconnectAttempts = 0
-      socket.send(
-        JSON.stringify({ type: "authenticate", session_id: sessionId }),
-      )
+      try {
+        socket.send(
+          JSON.stringify({
+            type: "authenticate",
+            session_id: sessionId,
+            payload: { resume_active: !activeCheckpointId },
+          }),
+        )
+      } catch {
+        try { socket.close() } catch { /* the close event will schedule a new connection */ }
+        return
+      }
       for (const [messageId, pending] of pendingOutgoing) {
         if (pending.sessionId !== sessionId) continue
         try {
@@ -329,6 +344,33 @@ export async function connectChat() {
                 : message,
             ),
           }))
+          try { socket.close() } catch { /* the close event will schedule a new connection */ }
+          return
+        }
+      }
+      for (const pending of pendingRetries.values()) {
+        if (pending.sessionId !== sessionId) continue
+        try {
+          socket.send(pending.frame)
+          updateChatStore((prev) => ({
+            isTyping: true,
+            messages: prev.messages.map((message) =>
+              message.id === pending.userMessageId
+                ? { ...message, deliveryStatus: "retrying", deliveryDetail: undefined }
+                : message,
+            ),
+          }))
+        } catch {
+          updateChatStore((prev) => ({
+            isTyping: true,
+            messages: prev.messages.map((message) =>
+              message.id === pending.userMessageId
+                ? { ...message, deliveryStatus: "retrying", deliveryDetail: "Retry is safely queued until the chat connection returns." }
+                : message,
+            ),
+          }))
+          try { socket.close() } catch { /* the close event will schedule a new connection */ }
+          return
         }
       }
       const currentState = getChatState()
@@ -373,6 +415,9 @@ export async function connectChat() {
           const payload = message.payload || {}
           const content =
             typeof payload.content === "string" ? payload.content.trim() : ""
+          // Files the agent sent from a background run arrive as a message that may have no text.
+          const proactiveAttachments = parseAttachments(payload)
+          const hasProactiveAttachments = (proactiveAttachments?.length ?? 0) > 0
           const messageId =
             typeof payload.message_id === "string"
               ? payload.message_id
@@ -381,7 +426,7 @@ export async function connectChat() {
           const belongsHere =
             typeof payload.session_id !== "string" ||
             payload.session_id === activeSessionIdRef
-          if (content && belongsHere) {
+          if ((content || hasProactiveAttachments) && belongsHere) {
             updateChatStore((prev) => ({
               messages: prev.messages.some(
                 (candidate) => candidate.id === messageId,
@@ -399,6 +444,9 @@ export async function connectChat() {
                         : {}),
                       ...(typeof payload.notification_kind === "string"
                         ? { notificationKind: payload.notification_kind }
+                        : {}),
+                      ...(hasProactiveAttachments
+                        ? { attachments: proactiveAttachments }
                         : {}),
                       timestamp: message.timestamp ?? Date.now(),
                     },
@@ -438,8 +486,7 @@ export async function connectChat() {
             typeof payload.client_message_id === "string"
               ? payload.client_message_id
               : ""
-          const status =
-            message.type === "message.accepted" ? "queued" : payload.status
+          const status = payload.status ?? (message.type === "message.accepted" ? "queued" : undefined)
           if (
             messageId &&
             [
@@ -453,7 +500,97 @@ export async function connectChat() {
           ) {
             pendingOutgoing.delete(clientId)
             pendingOutgoing.delete(messageId)
+            const pendingRetry = pendingRetries.get(clientId)
+            if (pendingRetry) {
+              pendingRetries.delete(clientId)
+              const deliveryStatus = ["queued", "processing", "retrying", "failed", "cancelled"].includes(String(status))
+                ? (String(status) as "queued" | "processing" | "retrying" | "failed" | "cancelled")
+                : undefined
+              updateChatStore((prev) => ({
+                messages: prev.messages.map((candidate) =>
+                  candidate.id === pendingRetry.userMessageId
+                    ? { ...candidate, deliveryStatus, deliveryDetail: undefined }
+                    : candidate,
+                ),
+              }))
+              if (message.type === "message.duplicate") {
+                void loadSessionMessages(sessionId).then((historyMessages) => {
+                  if (activeSessionIdRef !== sessionId) return
+                  updateChatStore((prev) => ({ messages: hideResolvedErrors(mergeHistoryMessages(historyMessages, prev.messages)) }))
+                }).catch((error) => console.warn("Could not reconcile chat after a duplicate retry:", error))
+              }
+            }
           }
+        }
+        // A rejected send must be correlated with its optimistic user bubble.
+        // Otherwise the pending frame survives reconnects and is replayed even
+        // when the gateway has already rejected it (for example, invalid media).
+        if (message.type === "error") {
+          const requestId =
+            typeof message.payload?.request_id === "string"
+              ? message.payload.request_id
+              : ""
+          if (requestId) {
+            const rejectedOutgoing = pendingOutgoing.get(requestId)
+            pendingOutgoing.delete(requestId)
+            if (rejectedOutgoing) {
+              const detail = typeof message.payload?.message === "string" ? message.payload.message : "The gateway could not accept this message."
+              updateChatStore((prev) => ({
+                messages: prev.messages.map((candidate) =>
+                  candidate.id === requestId
+                    ? { ...candidate, deliveryStatus: "failed", deliveryDetail: detail }
+                    : candidate,
+                ),
+              }))
+            }
+            const pendingRetry = pendingRetries.get(requestId)
+            if (pendingRetry) {
+              pendingRetries.delete(requestId)
+              const detail = typeof message.payload?.message === "string" ? message.payload.message : "The gateway could not accept this retry."
+              updateChatStore((prev) => ({
+                isTyping: Boolean(activeCheckpointId) || [...pendingRetries.values()].some((item) => item.sessionId === sessionId),
+                messages: prev.messages.map((candidate) =>
+                  candidate.id === pendingRetry.userMessageId
+                    ? { ...candidate, deliveryStatus: "failed", deliveryDetail: detail }
+                    : candidate,
+                ),
+              }))
+            }
+          }
+        }
+        if (message.type === "stream_gap") {
+          const payload = message.payload ?? {}
+          const oldest = Number(payload.oldest_buffered_sequence)
+          if (Number.isFinite(oldest) && oldest > 0) activeSequence = Math.max(activeSequence, oldest - 1)
+          void loadSessionMessages(sessionId).then((historyMessages) => {
+            if (activeSessionIdRef !== sessionId) return
+            updateChatStore((prev) => ({ messages: hideResolvedErrors(mergeHistoryMessages(historyMessages, prev.messages)) }))
+          }).catch((error) => console.warn("Could not reconcile chat history after a stream gap:", error))
+          return
+        }
+        if (
+          message.type === "error" &&
+          message.payload?.code === "resume_not_found"
+        ) {
+          const payload = message.payload
+          const missingRunId = typeof payload.run_id === "string" ? payload.run_id : ""
+          activeCheckpointId = null
+          activeSequence = -1
+          updateChatStore((prev) => {
+            const runningRunIds = missingRunId
+              ? prev.runningRunIds.filter((runId) => runId !== missingRunId)
+              : prev.runningRunIds
+            return {
+              runningRunIds,
+              isTyping: runningRunIds.length > 0,
+              ...(runningRunIds.length === 0 ? { runStatus: "failed" as const } : {}),
+            }
+          })
+          void loadSessionMessages(sessionId).then((historyMessages) => {
+            if (activeSessionIdRef !== sessionId) return
+            updateChatStore((prev) => ({ messages: hideResolvedErrors(mergeHistoryMessages(historyMessages, prev.messages)) }))
+          }).catch((error) => console.warn("Could not reconcile chat history after a missing stream checkpoint:", error))
+          return
         }
         if (message.type === "stream_checkpoint") {
           activeCheckpointId =
@@ -462,7 +599,11 @@ export async function connectChat() {
               : null
           activeSequence =
             typeof message.sequence === "number" ? message.sequence : -1
-          updateChatStore({ isTyping: Boolean(activeCheckpointId) })
+          const checkpointRunId = typeof message.payload?.run_id === "string" ? message.payload.run_id : ""
+          updateChatStore((prev) => ({
+            isTyping: Boolean(activeCheckpointId),
+            ...(checkpointRunId ? { runningRunIds: prev.runningRunIds.includes(checkpointRunId) ? prev.runningRunIds : [...prev.runningRunIds, checkpointRunId] } : {}),
+          }))
           return
         }
         if (typeof message.checkpoint_id === "string") {
@@ -515,9 +656,28 @@ export async function connectChat() {
                         ? payload.error
                         : undefined,
                   }
-                : {}),
+              : {}),
             }
           })
+          // The gateway persists the final assistant message independently of
+          // the live socket stream. Reconcile once at stream completion so a
+          // dropped create/update event cannot make the reply appear only
+          // after a full page reload.
+          void loadSessionMessages(sessionId)
+            .then((historyMessages) => {
+              if (activeSessionIdRef !== sessionId) return
+              updateChatStore((prev) => ({
+                messages: hideResolvedErrors(
+                  mergeHistoryMessages(historyMessages, prev.messages),
+                ),
+              }))
+            })
+            .catch((error) =>
+              console.warn(
+                "Could not reconcile chat history after stream completion:",
+                error,
+              ),
+            )
           return
         }
         if (message.type === "resume") {
@@ -566,17 +726,21 @@ export async function connectChat() {
         }
         updateChatStore((prev) => ({
           connectionState: "disconnected",
-          isTyping: Boolean(activeCheckpointId),
-          messages: prev.messages.map((message) =>
-            pendingOutgoing.has(message.id)
+          isTyping: Boolean(activeCheckpointId) || [...pendingRetries.values()].some((item) => item.sessionId === sessionId),
+          messages: prev.messages.map((message) => {
+            const retryPending = [...pendingRetries.values()].some((item) => item.sessionId === sessionId && item.userMessageId === message.id)
+            if (retryPending) {
+              return { ...message, deliveryStatus: "retrying", deliveryDetail: "Retry is safely queued until the chat connection returns." }
+            }
+            return pendingOutgoing.has(message.id)
               ? {
                   ...message,
                   deliveryStatus: "uncertain",
                   deliveryDetail:
                     "Connection lost before the server confirmed delivery; it will be retried safely.",
                 }
-              : message,
-          ),
+              : message
+          }),
         }))
         scheduleReconnect(generation, sessionId)
       })
@@ -608,9 +772,10 @@ export async function connectChat() {
         }
         updateChatStore({
           connectionState: "error",
-          isTyping: Boolean(activeCheckpointId),
+          isTyping: Boolean(activeCheckpointId) || [...pendingRetries.values()].some((item) => item.sessionId === sessionId),
         })
         scheduleReconnect(generation, sessionId)
+        try { socket.close() } catch { /* reconnect timer remains the fallback */ }
       })
     }
 
@@ -721,6 +886,7 @@ interface SendChatMessageInput {
   content: string
   attachments?: ChatAttachment[]
   requestedModel?: string
+  requestedModelIndex?: number
   voice?: ChatVoiceMetadata
   audio?: EphemeralAudioPayload
   thinkingMode?: "auto" | "off" | "low" | "medium" | "high"
@@ -745,6 +911,7 @@ function sendmikiMessage(
   content: string,
   attachments: ChatAttachment[],
   requestedModel?: string,
+  requestedModelIndex?: number,
   voice?: ChatVoiceMetadata,
   audio?: EphemeralAudioPayload,
   thinkingMode?: "auto" | "off" | "low" | "medium" | "high",
@@ -770,6 +937,9 @@ function sendmikiMessage(
       ...(requestedModel?.trim()
         ? { requested_model: requestedModel.trim() }
         : {}),
+      ...(Number.isSafeInteger(requestedModelIndex) && Number(requestedModelIndex) > 0
+        ? { requested_model_index: requestedModelIndex }
+        : {}),
       ...(voice ? { voice } : {}),
       ...(audio ? { audio } : {}),
       ...(thinkingMode ? { thinking_mode: thinkingMode } : {}),
@@ -780,6 +950,7 @@ export async function sendChatMessage({
   content,
   attachments = [],
   requestedModel,
+  requestedModelIndex,
   voice,
   audio,
   thinkingMode = "auto",
@@ -791,11 +962,18 @@ export async function sendChatMessage({
 
   const normalizedContent = content.trim()
   const normalizedAttachments = normalizeOutgoingAttachments(attachments)
-  if (normalizedAttachments.length > 16) {
+  if (normalizedContent.length > CHAT_INPUT_LIMITS.textCharacters) {
+    notify.error(
+      `Messages are limited to ${CHAT_INPUT_LIMITS.textCharacters.toLocaleString()} characters.`,
+      { id: "chat:text-limit" },
+    )
+    return false
+  }
+  if (normalizedAttachments.length > CHAT_INPUT_LIMITS.attachmentCount || normalizedAttachments.some((attachment) => attachment.url.length > CHAT_INPUT_LIMITS.attachmentUrlCharacters)) {
     notify.error(
       i18n.t("chat.attachmentLimit", {
         defaultValue:
-          "You can send up to 16 attachments at a time. Remove some files and try again.",
+          `You can send up to ${CHAT_INPUT_LIMITS.attachmentCount} attachments at a time. Each URL must be at most ${CHAT_INPUT_LIMITS.attachmentUrlCharacters} characters.`,
       }),
       { id: "chat:attachment-limit" },
     )
@@ -838,6 +1016,7 @@ export async function sendChatMessage({
       normalizedContent,
       normalizedAttachments,
       requestedModel,
+      requestedModelIndex,
       voice,
       audio,
       thinkingMode,
@@ -886,6 +1065,9 @@ export async function editChatMessage({
 }: EditChatMessageInput): Promise<boolean> {
   const normalizedContent = content.trim()
   const normalizedAttachments = normalizeOutgoingAttachments(attachments)
+  if (normalizedContent.length > CHAT_INPUT_LIMITS.textCharacters
+    || normalizedAttachments.length > CHAT_INPUT_LIMITS.attachmentCount
+    || normalizedAttachments.some((attachment) => attachment.url.length > CHAT_INPUT_LIMITS.attachmentUrlCharacters)) return false
   if (!normalizedContent && normalizedAttachments.length === 0) return false
 
   const state = getChatState()
@@ -939,83 +1121,111 @@ export async function forkChatSessionFromMessage(
 }
 
 export async function retryChatMessage(messageId: string): Promise<boolean> {
-  if (!wsRef || wsRef.readyState !== WebSocket.OPEN) return false
+  const gatewayRunning = store.get(gatewayAtom).status === "running"
+  if (!gatewayRunning) return false
+
   const state = getChatState()
-  const targetIndex = state.messages.findIndex(
-    (message) => message.id === messageId,
-  )
+  const targetIndex = state.messages.findIndex((message) => message.id === messageId)
   if (targetIndex < 0) return false
   const target = state.messages[targetIndex]
   const isFailedTurn = findFailedUserTurn(state.messages)?.id === messageId
-  // An older message the user sent that never got an answer can be run again too; later messages stay as they are.
   const isUnanswered = isUnansweredUserMessage(target)
-  if (
-    targetIndex !== state.messages.length - 1 &&
-    !isFailedTurn &&
-    !isUnanswered
-  )
+  if (targetIndex !== state.messages.length - 1 && !isFailedTurn && !isUnanswered) return false
+
+  const promptMessage = target.role === "user"
+    ? target
+    : state.messages.slice(0, targetIndex).reverse().find((message) => message.role === "user")
+  if (!promptMessage || (!promptMessage.content.trim() && !promptMessage.attachments?.length && !promptMessage.voice?.transcript.trim())) {
     return false
-  const promptMessage =
-    target.role === "user"
-      ? target
-      : state.messages
-          .slice(0, targetIndex)
-          .reverse()
-          .find((message) => message.role === "user")
-  const attachments = normalizeOutgoingAttachments(promptMessage?.attachments)
+  }
+  const attachments = normalizeOutgoingAttachments(promptMessage.attachments)
+  const requestId = `retry-${Date.now()}-${++retryRequestCounter}-${Math.random().toString(36).slice(2, 9)}`
+  const frame = JSON.stringify({
+    type: "message.retry",
+    id: requestId,
+    payload: {
+      message_id: messageId,
+      prompt_message_id: promptMessage.id,
+      content: promptMessage.content || promptMessage.voice?.transcript || "",
+      thinking_mode: store.get(thinkingModeAtom),
+      ...(attachments.length > 0
+        ? {
+            attachments: attachments.map((attachment) => ({
+              type: attachment.type,
+              url: attachment.url,
+              ...(attachment.filename ? { filename: attachment.filename } : {}),
+              ...(attachment.contentType ? { content_type: attachment.contentType } : {}),
+            })),
+          }
+        : {}),
+    },
+  })
+
+  // Keep the retry until an accepted/duplicate acknowledgement arrives. If the
+  // socket drops at any point, the exact same id is replayed on reconnect.
+  pendingRetries.set(requestId, {
+    sessionId: activeSessionIdRef,
+    frame,
+    targetMessageId: messageId,
+    userMessageId: promptMessage.id,
+  })
   activeCheckpointId = null
   activeSequence = -1
-  try {
-    wsRef.send(
-      JSON.stringify({
-        type: "message.retry",
-        id: messageId,
-        payload: {
-          message_id: messageId,
-          thinking_mode: store.get(thinkingModeAtom),
-          ...(attachments.length > 0
-            ? {
-                attachments: attachments.map((attachment) => ({
-                  type: attachment.type,
-                  url: attachment.url,
-                  ...(attachment.filename
-                    ? { filename: attachment.filename }
-                    : {}),
-                  ...(attachment.contentType
-                    ? { content_type: attachment.contentType }
-                    : {}),
-                })),
-              }
-            : {}),
-        },
-      }),
-    )
+  updateChatStore((prev) => ({
+    messages: target.role === "assistant"
+      ? prev.messages.filter((message) => message.id !== messageId)
+      : isFailedTurn
+        ? prev.messages.slice(0, targetIndex + 1).map((message) =>
+            message.id === promptMessage.id
+              ? { ...message, deliveryStatus: "retrying" as const, deliveryDetail: undefined }
+              : message,
+          )
+        : prev.messages.map((message) =>
+            message.id === promptMessage.id
+              ? { ...message, deliveryStatus: "retrying" as const, deliveryDetail: undefined }
+              : message,
+          ),
+    isTyping: true,
+  }))
+
+  shouldMaintainConnection = true
+  const socket = wsRef
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
     updateChatStore((prev) => ({
-      messages:
-        target.role === "assistant"
-          ? prev.messages.filter((message) => message.id !== messageId)
-          : isFailedTurn
-            ? // The gateway drops what the failed attempt left behind (error message etc.); mirror that.
-              prev.messages.slice(0, targetIndex + 1).map((message) =>
-                message.id === messageId
-                  ? {
-                      ...message,
-                      deliveryStatus: "processing" as const,
-                      deliveryDetail: undefined,
-                    }
-                  : message,
-              )
-            : prev.messages,
-      isTyping: true,
+      connectionState: prev.connectionState === "connected" ? "connecting" : prev.connectionState,
+      messages: prev.messages.map((message) =>
+        message.id === promptMessage.id
+          ? { ...message, deliveryStatus: "retrying", deliveryDetail: "Retry is safely queued until the chat connection returns." }
+          : message,
+      ),
     }))
+    void connectChat()
+    return true
+  }
+
+  try {
+    socket.send(frame)
     return true
   } catch (error) {
-    console.error("Failed to retry chat message:", error)
-    return false
+    console.warn("Retry send was interrupted; it will be replayed after reconnect:", error)
+    updateChatStore((prev) => ({
+      connectionState: "connecting",
+      messages: prev.messages.map((message) =>
+        message.id === promptMessage.id
+          ? { ...message, deliveryStatus: "retrying", deliveryDetail: "Retry is safely queued until the chat connection returns." }
+          : message,
+      ),
+    }))
+    try { socket.close() } catch { void connectChat() }
+    return true
   }
 }
 
 export async function switchChatSession(sessionId: string) {
+  if (sessionId !== SINGLE_CHAT_SESSION_ID) {
+    console.warn("Miki uses one canonical chat session; ignoring session switch:", sessionId)
+    return
+  }
   if (sessionId === activeSessionIdRef) {
     return
   }

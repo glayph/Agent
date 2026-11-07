@@ -1,17 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { modelRetryDelayMs, retryModelCall, sleepUnlessAborted } from "./model-retry.js";
+import { isRetryableProviderError, ModelCircuitBreaker, modelRetryDelayMs, retryModelCall, sleepUnlessAborted } from "./model-retry.js";
 
-const CYCLE = [2000, 4000, 8000, 12000];
+const RAMP = [2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000];
 
 describe("model retry delays", () => {
-  it("waits 2s, 4s, 8s, 12s and then starts the cycle again at 2s", () => {
+  it("uses capped exponential retry delays", () => {
     const delays = Array.from({ length: 12 }, (_, index) => modelRetryDelayMs(index));
-    expect(delays).toEqual([...CYCLE, ...CYCLE, ...CYCLE]);
+    expect(delays).toEqual([...RAMP, 300_000, 300_000, 300_000]);
   });
 
   it("treats an invalid index as the first retry", () => {
     expect(modelRetryDelayMs(-3)).toBe(2000);
     expect(modelRetryDelayMs(Number.NaN)).toBe(2000);
+  });
+
+  it("treats HTTP 503 as transient even when its diagnostic text contains billing", async () => {
+    const circuit = new ModelCircuitBreaker({ failureThreshold: 1, resetTimeoutMs: 5_000 });
+    await expect(circuit.execute(async () => { throw Object.assign(new Error("billing diagnostics endpoint temporarily unavailable"), { status: 503 }); })).rejects.toThrow(/billing diagnostics/);
+    expect(circuit.snapshot().open).toBe(true);
+  });
+
+
+  it("does not classify natural-language error prose as a retry instruction", () => {
+    expect(isRetryableProviderError(new Error("temporarily unavailable; retry later"))).toBe(false);
+    expect(isRetryableProviderError(Object.assign(new Error("network failure"), { cause: Object.assign(new Error("socket"), { code: "ECONNRESET" }) }))).toBe(true);
+  });
+
+  it("does not retry or open the circuit for a structured entitlement block on HTTP 429", async () => {
+    const circuit = new ModelCircuitBreaker({ failureThreshold: 1, resetTimeoutMs: 5_000 });
+    const entitlement = Object.assign(new Error("Provider requires an active payment method."), {
+      name: "ProviderRequestError", category: "provider_entitlement", status: 429, retryable: false,
+    });
+    await expect(circuit.execute(async () => { throw entitlement; })).rejects.toThrow(/payment method/);
+    expect(circuit.snapshot()).toMatchObject({ failures: 0, open: false });
   });
 });
 
@@ -35,13 +56,29 @@ describe("retryModelCall", () => {
       attempt: async () => { calls += 1; return "fail" },
       shouldRetry: (result) => result === "fail",
       maxRetries: 5,
+      delayMs: () => 0,
       signal: new AbortController().signal,
       sleep: async (ms) => { waits.push(ms) },
     });
     expect(outcome).toEqual({ result: "fail", stopped: false });
     expect(calls).toBe(6);
-    expect(waits).toEqual([...CYCLE, 2000]);
+    expect(waits).toEqual([0, 0, 0, 0, 0]);
   });
+
+  it("continues past the old five-retry default until the provider recovers", async () => {
+    let calls = 0
+    const waits: number[] = []
+    const outcome = await retryModelCall({
+      attempt: async () => { calls += 1; return calls < 8 ? "fail" : "ok" },
+      shouldRetry: (result) => result === "fail",
+      signal: new AbortController().signal,
+      delayMs: () => 0,
+      sleep: async (ms) => { waits.push(ms) },
+    })
+    expect(outcome).toEqual({ result: "ok", stopped: false })
+    expect(calls).toBe(8)
+    expect(waits).toHaveLength(7)
+  })
 
   it("supports disabling retries explicitly", async () => {
     let calls = 0;
@@ -74,12 +111,13 @@ describe("retryModelCall", () => {
     await retryModelCall({
       attempt: async () => { calls += 1; events.push(`attempt${calls}`); return calls < 3 ? "fail" : "ok" },
       shouldRetry: (result) => result === "fail",
+      delayMs: () => 100,
       onRetry: ({ retry, delayMs }) => events.push(`retry${retry}:${delayMs}`),
       onResumed: () => events.push("resumed"),
       signal: new AbortController().signal,
       sleep: async () => {},
     });
-    expect(events).toEqual(["attempt1", "retry1:2000", "resumed", "attempt2", "retry2:4000", "resumed", "attempt3"]);
+    expect(events).toEqual(["attempt1", "retry1:100", "resumed", "attempt2", "retry2:100", "resumed", "attempt3"]);
   });
 
   it("stops at once when the turn is stopped during a wait", async () => {
@@ -146,3 +184,38 @@ describe("sleepUnlessAborted", () => {
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 });
+
+
+describe("ModelCircuitBreaker", () => {
+  it("marks a repeatedly failing route as degraded without blocking a fresh attempt", async () => {
+    let now = 1_000
+    let calls = 0
+    const breaker = new ModelCircuitBreaker({ failureThreshold: 2, resetTimeoutMs: 5_000, now: () => now })
+    const fail = async () => { calls += 1; throw Object.assign(new Error("provider unavailable"), { status: 503 }) }
+    await expect(breaker.execute(fail)).rejects.toMatchObject({ status: 503 })
+    await expect(breaker.execute(fail)).rejects.toMatchObject({ status: 503 })
+    expect(breaker.snapshot()).toMatchObject({ failures: 2, open: true, retryAfterMs: 5_000 })
+    await expect(breaker.execute(async () => { calls += 1; return "recovered" })).resolves.toBe("recovered")
+    expect(calls).toBe(3)
+    expect(breaker.snapshot()).toMatchObject({ failures: 0, open: false, retryAfterMs: 0 })
+  })
+
+  it("allows concurrent recovery attempts while the route is marked degraded", async () => {
+    let now = 0
+    const breaker = new ModelCircuitBreaker({ failureThreshold: 1, resetTimeoutMs: 100, now: () => now })
+    await expect(breaker.execute(async () => { throw Object.assign(new Error("down"), { status: 503 }) })).rejects.toThrow("down")
+    now = 10
+    const results = await Promise.all([
+      breaker.execute(async () => "first"),
+      breaker.execute(async () => "parallel"),
+    ])
+    expect(results).toEqual(["first", "parallel"])
+    expect(breaker.snapshot()).toMatchObject({ failures: 0, open: false, retryAfterMs: 0 })
+  })
+
+  it("does not mark permanent authentication errors as transient failures", async () => {
+    const breaker = new ModelCircuitBreaker({ failureThreshold: 1 })
+    await expect(breaker.execute(async () => { throw Object.assign(new Error("Invalid API key"), { status: 401 }) })).rejects.toMatchObject({ status: 401 })
+    expect(breaker.snapshot()).toMatchObject({ failures: 0, open: false })
+  })
+})

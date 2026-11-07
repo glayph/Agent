@@ -9,10 +9,13 @@ import {
 } from "@/features/monitor/activity-copy"
 import { StatusIcon } from "@/features/monitor/node-visuals"
 import {
+  MONITOR_NODE_DIMENSIONS,
+  NODE_ICON_REGISTRY,
   NODE_TYPE_ACCENT,
   NODE_TYPE_ICON,
   NODE_TYPE_LABEL,
   STATUS_COLOR,
+  monitorNodeMotionTarget,
 } from "@/features/monitor/node-visuals.constants"
 import { type MonitorNode, toggleNodeUIState } from "@/features/monitor/store"
 import { cn } from "@/lib/utils"
@@ -25,7 +28,7 @@ function formatDuration(ms?: number): string | null {
 
 function AgentNodeInner({ data }: NodeProps) {
   const node = (data as { node: MonitorNode }).node
-  const Icon = NODE_TYPE_ICON[node.type]
+  const Icon = NODE_ICON_REGISTRY[node.iconKey ?? ""] ?? NODE_TYPE_ICON[node.type]
   const accent = NODE_TYPE_ACCENT[node.type]
   const statusColor = STATUS_COLOR[node.status]
   const expanded = node.uiState === "expanded"
@@ -46,11 +49,13 @@ function AgentNodeInner({ data }: NodeProps) {
       style={{ cursor: "pointer" }}
     >
       <Handle
+        id="target"
         type="target"
         position={Position.Left}
         style={{ background: accent, width: 8, height: 8, border: "none" }}
       />
       <Handle
+        id="source"
         type="source"
         position={Position.Right}
         style={{ background: accent, width: 8, height: 8, border: "none" }}
@@ -59,18 +64,16 @@ function AgentNodeInner({ data }: NodeProps) {
       <motion.div
         layout
         transition={{ type: "spring", stiffness: 320, damping: 28, mass: 0.6 }}
-        animate={{
-          boxShadow: isActive
-            ? `0 0 0 1px ${accent}55, 0 0 22px 2px ${accent}33`
-            : `0 0 0 1px rgba(255,255,255,0.06), 0 2px 10px rgba(0,0,0,0.4)`,
-        }}
+        animate={monitorNodeMotionTarget(node.status, accent)}
         className={cn(
           "overflow-hidden rounded-xl border border-white/[0.06] bg-[#181a20] select-none",
           "font-mono",
         )}
         style={{
-          width: expanded ? 268 : 56,
-          height: expanded ? 168 : 56,
+          width:
+            MONITOR_NODE_DIMENSIONS[expanded ? "expanded" : "minimized"].width,
+          height:
+            MONITOR_NODE_DIMENSIONS[expanded ? "expanded" : "minimized"].height,
         }}
       >
         <AnimatePresence mode="wait" initial={false}>
@@ -108,7 +111,7 @@ function AgentNodeInner({ data }: NodeProps) {
                 <div className="flex items-center justify-between">
                   <span className="text-white/35">Activity</span>
                   <span style={{ color: accent }}>
-                    {NODE_TYPE_LABEL[node.type]}
+                    {node.displayName || NODE_TYPE_LABEL[node.type]}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">

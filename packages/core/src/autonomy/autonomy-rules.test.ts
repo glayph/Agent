@@ -70,6 +70,9 @@ function harness(replies: ScriptedReply[], configOverride: Record<string, unknow
   return { db, goals, supervisor, executed, notices, llm, expireRetry, close: () => db.close() };
 }
 
+/** Each autonomous run first asks the model for a plan; an unusable plan falls back to the main loop. */
+const PLAN_REPLY = { text: "{}" };
+
 const gateNotices = (notices: Array<{ event?: Record<string, unknown> }>) => notices.filter((n) => n.event?.type === "approval_gate_blocked");
 
 describe("autonomy rules: no routine confirmation, notices, endless goals", () => {
@@ -79,6 +82,7 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
 
   it("(a) an assigned goal runs its tools without a confirmation prompt and completes", async () => {
     const h = harness([
+      PLAN_REPLY,
       { calls: [{ name: "file_read", args: { path: "notes.txt" } }] },
       { text: "The notes were read." },
     ]);
@@ -96,6 +100,7 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
   it("(b) a notice is sent once when an approval gate stops a call, and the cycle still completes", async () => {
     getPermissionLedger().learn({ category: "shell", decision: "ask", note: "ask me before any shell command" });
     const h = harness([
+      PLAN_REPLY,
       { calls: [{ name: "terminal_run", args: { command: "echo first" } }] },
       { calls: [{ name: "terminal_run", args: { command: "echo second" } }] },
       { text: "The shell step is blocked by your saved permission rule." },
@@ -139,11 +144,11 @@ describe("autonomy rules: no routine confirmation, notices, endless goals", () =
     // With max_retries 0 the old cap would have blocked the goal after its first failed attempt.
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       expect((await h.supervisor.tick("retry")).status).toBe("idle");
-      expect(h.goals.get(goal.id)?.status).toBe("active");
+      expect(h.goals.get(goal.id)?.status).toBe("pending");
       h.expireRetry(goal.id);
     }
     expect(h.llm.requests.length).toBeGreaterThanOrEqual(3);
-    expect(h.goals.get(goal.id)?.status).toBe("active");
+    expect(h.goals.get(goal.id)?.status).toBe("pending");
     h.close();
   });
 

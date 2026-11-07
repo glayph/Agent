@@ -26,13 +26,6 @@ export function clearStoredSessionId() {
 }
 
 
-export function readSessionIdFromHash(): string {
-  if (typeof window === "undefined") return ""
-  const hash = window.location.hash
-  const match = hash.match(/[#&]session=([^&]*)/)
-  return match ? decodeURIComponent(match[1]).trim() : ""
-}
-
 export function clearSessionIdFromHash() {
   if (typeof window === "undefined") return
   const hash = window.location.hash
@@ -47,12 +40,10 @@ export function clearSessionIdFromHash() {
 }
 
 export function getInitialActiveSessionId(): string {
-  // A shared link is an explicit request to open that server-backed session.
-  // Normal launches retain the last session, while fresh installs use the
-  // single-chat default.
-  return (
-    readSessionIdFromHash() || readStoredSessionId() || SINGLE_CHAT_SESSION_ID
-  )
+  // Miki intentionally has one durable conversation. Ignore legacy local
+  // session selections and shared-session hashes so every launch returns to
+  // the canonical transcript.
+  return SINGLE_CHAT_SESSION_ID
 }
 
 export function normalizeUnixTimestamp(timestamp: number): number {

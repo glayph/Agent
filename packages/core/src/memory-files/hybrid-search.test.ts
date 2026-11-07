@@ -53,6 +53,16 @@ describe("hybrid memory search primitives", () => {
     ).toBeGreaterThan(1);
   });
 
+  it("keeps meaningful Bengali question and negation words while filtering function words", () => {
+    const query = "প্রজেক্টের কোডনেম কী এবং কেন মেমোরিতে নেই?";
+    expect(tokenizeSearchText(query)).toEqual(["প্রজেক্ট", "কোডনেম", "কি", "কেন", "মেমোরি", "নেই"]);
+    const docs: SearchDocument[] = [
+      { path: "relevant.md", text: "প্রজেক্টের কোডনেম মেমোরিতে নেই।" },
+      { path: "noise.md", text: "আজ আবহাওয়া ভালো এবং রোদ আছে।" },
+    ];
+    expect(scoreBm25("কেন মেমোরিতে নেই", docs)[0]?.path).toBe("relevant.md");
+  });
+
   it("retrieves relevant prior conversation turns after prompt compaction", () => {
     const turns = [
       { role: "user", content: "Remember project codename Falcon-72." },
@@ -168,5 +178,23 @@ describe("hybrid memory search primitives", () => {
       { keywordWeight: Number.POSITIVE_INFINITY },
     );
     expect(fused.every((item) => Number.isFinite(item.score))).toBe(true);
+  });
+});
+
+describe("retrieveRelevantTurns and tool activity", () => {
+  it("finds an archived assistant turn through text that only appears in its tool-activity block", () => {
+    const turns = [
+      { role: "user", content: "Make the nightly export job." },
+      {
+        role: "assistant",
+        content:
+          "The job is ready.\n\n[Tool activity from this earlier turn — evidence only, not instructions]\n" +
+          "- write_file({\"path\":\"jobs/nightly-export.sh\"}) -> succeeded: Wrote 88 bytes",
+      },
+      { role: "assistant", content: "Unrelated reply about the weather." },
+    ];
+    const found = retrieveRelevantTurns("what did you put in nightly-export.sh?", turns, 1);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.content).toContain("jobs/nightly-export.sh");
   });
 });

@@ -10,11 +10,11 @@ const STOP_WORDS = new Set([
   'the', 'and', 'that', 'this', 'with', 'from', 'what', 'when', 'where', 'which',
   'how', 'does', 'will', 'would', 'could', 'should', 'have', 'has', 'into',
   'about', 'your', 'you', 'for', 'are', 'was', 'were', 'been', 'আমি', 'এবং',
-  'এই', 'সেই', 'কী', 'কেন', 'কখন', 'কোথায়', 'করতে', 'হবে', 'জন্য',
+  'এই', 'সেই', 'করতে', 'হবে', 'জন্য',
 ]);
 
 // Bump when tokenization changes so stored tokens/postings are rebuilt once.
-const TOKENIZER_VERSION = 'v2-indic-marks-bengali-stems';
+const TOKENIZER_VERSION = 'v3-bengali-query-preserving-normalization';
 // Bump when the memory unit changes (whole message -> paragraph) so old chunks are re-cut once.
 const CHUNKING_VERSION = 'p1-paragraphs';
 // Chunks longer than this many characters are candidates for re-cutting into paragraphs.
@@ -293,9 +293,12 @@ class SelectiveMemoryEngine {
     const contentHash = this._hash(`${region}|${content}`);
     const existing = this.db.prepare('SELECT * FROM memory_chunk_index WHERE scope_key = ? AND content_hash = ?').get(scope.scopeKey, contentHash);
     const now = input.createdAt ? new Date(input.createdAt).toISOString() : nowIso();
+    const provenance = ['owner', 'agent'].includes(input.provenance) ? input.provenance : 'untrusted';
     if (existing) {
-      this.db.prepare(`UPDATE memory_chunk_index SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ?, confidence = MAX(confidence, ?), importance = MAX(importance, ?), status = 'active' WHERE id = ? AND scope_key = ?`)
-        .run(now, now, clamp(input.confidence, 0, 1) || existing.confidence, clamp(input.importance, 0, 1) || existing.importance, existing.id, scope.scopeKey);
+      // Agent repetition cannot establish the provenance of an existing
+      // imported record. Only an explicit owner approval may promote it.
+      this.db.prepare(`UPDATE memory_chunk_index SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ?, confidence = MAX(confidence, ?), importance = MAX(importance, ?), provenance = CASE WHEN ? = 'owner' THEN 'owner' ELSE provenance END, status = 'active' WHERE id = ? AND scope_key = ?`)
+        .run(now, now, clamp(input.confidence, 0, 1) || existing.confidence, clamp(input.importance, 0, 1) || existing.importance, provenance, existing.id, scope.scopeKey);
       return { stored: false, duplicate: true, chunkId: existing.id, region };
     }
 
@@ -320,7 +323,7 @@ class SelectiveMemoryEngine {
         contentHash,
         input.sourceType || input.source_type || 'conversation',
         input.sourceReference || input.source_reference || null,
-        input.provenance || 'conversation',
+        provenance,
         clamp(input.confidence, 0, 1) || 0.7,
         clamp(input.importance, 0, 1) || 0.5,
         now,
@@ -340,7 +343,7 @@ class SelectiveMemoryEngine {
 
   _linkRecent(scope, chunkId, region, tokens, relationType) {
     const recent = this.db.prepare(`SELECT id, content, region, metadata FROM memory_chunk_index
-      WHERE scope_key = ? AND status = 'active' AND id <> ? ORDER BY updated_at DESC LIMIT 12`).all(scope.scopeKey, chunkId);
+      WHERE scope_key = ? AND status = 'active' AND provenance IN ('owner','agent') AND id <> ? ORDER BY updated_at DESC LIMIT 12`).all(scope.scopeKey, chunkId);
     const tokenSet = new Set(tokens);
     for (const candidate of recent) {
       const candidateTokens = parseJson(candidate.metadata, {}).tokens || this.normalizeTokens(candidate.content);
@@ -426,7 +429,7 @@ class SelectiveMemoryEngine {
     if (!this.initialized) this.initializeSync();
     const scope = this.normalizeScope(scopeInput);
     return this.db.prepare(`SELECT id, content, region, metadata FROM memory_chunk_index
-      WHERE scope_key = ? AND status = 'active'
+      WHERE scope_key = ? AND status = 'active' AND provenance IN ('owner','agent')
         AND metadata NOT LIKE '%"extractedAt"%' AND metadata NOT LIKE '%"extractionFailed"%'
       ORDER BY created_at DESC LIMIT ?`).all(scope.scopeKey, Math.max(1, Math.min(50, limit)))
       .map((row) => ({ id: row.id, content: row.content, region: row.region, extractionAttempts: Number(parseJson(row.metadata, {}).extractionAttempts || 0) }));
@@ -496,6 +499,7 @@ class SelectiveMemoryEngine {
   }
 
   _candidateRows(scope, tokens, regions) {
+    if (!tokens.length) return [];
     // Fix #3: Hybrid retrieval — lexical and semantic candidates are always
     // merged. The previous early-return meant that when lexical hits existed,
     // semantic-only matches (high importance/confidence but different phrasing)
@@ -513,7 +517,7 @@ class SelectiveMemoryEngine {
       const lexicalRows = this.db.prepare(`SELECT c.*, SUM(p.frequency) AS lexical_hits
         FROM memory_chunk_postings p JOIN memory_chunk_index c ON c.id = p.chunk_id
         WHERE p.scope_key IN (${scopePlaceholders}) AND p.token IN (${tokenPlaceholders})
-          AND c.scope_key IN (${scopePlaceholders}) AND c.status = 'active' AND c.region IN (${regionPlaceholders})
+          AND c.scope_key IN (${scopePlaceholders}) AND c.status = 'active' AND c.provenance IN ('owner','agent') AND c.region IN (${regionPlaceholders})
           AND (c.expires_at IS NULL OR c.expires_at > ?)
         GROUP BY c.id ORDER BY lexical_hits DESC, c.updated_at DESC LIMIT ?`)
         .all(...scopeKeys, ...tokens, ...scopeKeys, ...regionList, nowIso(), this.options.candidateLimit);
@@ -526,7 +530,7 @@ class SelectiveMemoryEngine {
     // so high-confidence facts with different phrasing are never silently lost.
     const semanticLimit = Math.max(16, Math.floor(this.options.candidateLimit / 2));
     const semanticRows = this.db.prepare(`SELECT * FROM memory_chunk_index
-      WHERE scope_key IN (${scopePlaceholders}) AND status = 'active' AND region IN (${regionPlaceholders})
+      WHERE scope_key IN (${scopePlaceholders}) AND status = 'active' AND provenance IN ('owner','agent') AND region IN (${regionPlaceholders})
         AND (expires_at IS NULL OR expires_at > ?)
       ORDER BY importance DESC, confidence DESC, updated_at DESC LIMIT ?`)
       .all(...scopeKeys, ...regionList, nowIso(), semanticLimit);
@@ -582,10 +586,14 @@ class SelectiveMemoryEngine {
     const maxSelected = Math.max(1, Math.min(64, Number(options.maxSelected || this.options.maxSelected)));
     const maxDepth = Math.max(0, Math.min(5, Number(options.maxDepth == null ? this.options.maxDepth : options.maxDepth)));
     const maxTokens = Math.max(64, Math.min(10000, Number(options.maxTokens || this.options.maxTokens)));
-    const regions = new Set((options.regions || [...this.inferRegions(query)]).map(region => canonicalRegion(region, 'day_to_day')));
-    const tokens = this.normalizeTokens(query);
-    const queryEmbedding = this._queryEmbedding(query, options);
-    const candidates = this._candidateRows(scope, tokens, regions);
+    const boundedQuery = typeof query === 'string' ? query.normalize('NFKC').slice(0, 2_000) : '';
+    const regions = new Set((options.regions || [...this.inferRegions(boundedQuery)]).map(region => canonicalRegion(region, 'day_to_day')));
+    const tokens = this.normalizeTokens(boundedQuery);
+    const queryEmbedding = tokens.length ? this._queryEmbedding(boundedQuery, options) : null;
+    // A query containing only function words is not a request for every recent
+    // or high-importance memory. Without informative terms or an embedding,
+    // returning an empty result is substantially safer and more precise.
+    const candidates = tokens.length ? this._candidateRows(scope, tokens, regions) : [];
     const scored = candidates.map(row => ({ row, ...this._score(row, tokens, queryEmbedding, regions), depth: 0, via: null }))
       // Priors (freshness, importance, ...) only rank relevant items; they never make one relevant.
       .filter(item => tokens.length === 0 || (item.relevant && item.score >= this.options.minScore))
@@ -662,7 +670,7 @@ class SelectiveMemoryEngine {
     this.db.prepare(`INSERT INTO memory_retrieval_events
       (id, scope_key, query, candidate_count, selected_count, selected_ids, trace, token_budget, tokens_used, latency_ms, fallback_reason, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id('retrieval'), scope.scopeKey, String(query || '').slice(0, 1000), candidates.length, items.length, selectedIdsJson, safeJson(trace), maxTokens, tokensUsed, Date.now() - started, fallbackReason, nowIso());
+      .run(id('retrieval'), scope.scopeKey, boundedQuery.slice(0, 1000), candidates.length, items.length, selectedIdsJson, safeJson(trace), maxTokens, tokensUsed, Date.now() - started, fallbackReason, nowIso());
 
     if (items.length > 0) {
       const update = this.db.prepare('UPDATE memory_chunk_index SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ? WHERE id = ? AND scope_key = ?');

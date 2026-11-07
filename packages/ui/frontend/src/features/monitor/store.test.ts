@@ -11,6 +11,7 @@ import {
   setNodePosition,
   serializeMonitorHistory,
   restoreMonitorHistory,
+  hydrateMonitorHistory,
   toggleNodeUIState,
   updateMonitorStore,
 } from "./store"
@@ -86,6 +87,28 @@ describe("sanitized local monitor history", () => {
     expect(serialized).not.toContain("should-not-persist")
     expect(serialized).not.toContain("private result")
     expect(serialized).toContain("shell_execute")
+  })
+
+  it("round-trips trusted tool presentation metadata and semantic parents", () => {
+    const node = baseNode({
+      id: "run-1:browser",
+      runId: "run-1",
+      type: "browser",
+      label: "browser_navigate",
+      iconKey: "browser",
+      displayName: "Browser",
+      toolName: "browser_navigate",
+      parentNodeIds: ["run-1:root", "other-run:root"],
+    })
+    const serialized = serializeMonitorHistory({
+      runs: { "run-1": { id: "run-1", status: "running", startedAt: 10 } },
+      nodes: { [node.id]: node }, edges: {}, nodeOrder: [node.id],
+    })
+    const restored = restoreMonitorHistory(serialized, 500)
+    expect(restored.nodes[node.id]).toMatchObject({
+      iconKey: "browser", displayName: "Browser", toolName: "browser_navigate",
+      parentNodeIds: ["run-1:root"], status: "failed",
+    })
   })
 
   it("restores completed history and marks interrupted runs as failed", () => {
@@ -273,5 +296,19 @@ describe("clearMonitorRun", () => {
     })
     clearMonitorRun("run-unknown")
     expect(getMonitorState().nodes["a"]).toBeDefined()
+  })
+})
+
+describe("historical monitor hydration", () => {
+  it("keeps terminal runs and failed-node diagnostics when older history is loaded", () => {
+    hydrateMonitorHistory({
+      runs: [{ id: "old-run", status: "failed", startedAt: 10, endedAt: 20 }],
+      nodes: [{ id: "old-run:task", runId: "old-run", type: "tool", label: "browser_navigate", status: "failed", level: 1, parallel: false, error: "network timeout", createdAt: 11, updatedAt: 20 }],
+      edges: [{ id: "old-run:root->old-run:task", runId: "old-run", source: "old-run:root", target: "old-run:task", animated: false }],
+    }, true)
+    const state = getMonitorState()
+    expect(state.runs["old-run"]?.status).toBe("failed")
+    expect(state.nodes["old-run:task"]).toMatchObject({ status: "failed", error: "network timeout" })
+    expect(Object.values(state.edges)).toContainEqual(expect.objectContaining({ source: "old-run:root", target: "old-run:task" }))
   })
 })

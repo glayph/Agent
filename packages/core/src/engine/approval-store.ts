@@ -8,7 +8,7 @@ import type {
   ApprovalGate,
   ToolApprovalRequest,
 } from "./types.js";
-import { stableStringify, truncate } from "./util.js";
+import { redactSecrets, stableStringify, truncate } from "./util.js";
 
 export type ApprovalStatus =
   "pending" | "approved" | "denied" | "expired" | "consumed";
@@ -42,6 +42,23 @@ export interface ApprovalStoreOptions {
   now?: () => number;
 }
 
+
+function redactApprovalInput(value: unknown, depth = 0): unknown {
+  if (depth > 8) return "[TRUNCATED]";
+  if (typeof value === "string") return redactSecrets(value).slice(0, 2_000);
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => redactApprovalInput(item, depth + 1));
+  if (!value || typeof value !== "object") return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 100)) {
+    if (/(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key)/i.test(key)) {
+      output[key] = "[REDACTED]";
+    } else {
+      output[key] = redactApprovalInput(item, depth + 1);
+    }
+  }
+  return output;
+}
+
 /**
  * In-memory approval queue shared by the agent engine (tool calls) and the
  * control service (typed system operations). A request stays pending until a
@@ -50,6 +67,7 @@ export interface ApprovalStoreOptions {
 export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
   private readonly records = new Map<string, InternalRecord>();
   private readonly waiters = new Map<string, (d: ApprovalDecision) => void>();
+  private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly ttlMs: number;
   private readonly maxRecords: number;
   private readonly now: () => number;
@@ -108,15 +126,14 @@ export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
       resource: request.toolName,
       risk: request.risk,
       reason: request.reason,
-      preview: truncate(stableStringify(request.input), 600),
+      preview: truncate(stableStringify(redactApprovalInput(request.input)), 600),
       inputKey: stableStringify(request.input),
     });
-    hooks?.onPending?.(record.id, record.expiresAt);
-
     return new Promise<ApprovalDecision>((resolve) => {
       const finish = (decision: ApprovalDecision) => {
         signal?.removeEventListener("abort", onAbort);
         this.waiters.delete(record.id);
+        this.clearExpiryTimer(record.id);
         resolve({ ...decision, approvalId: record.id });
       };
       const onAbort = () => {
@@ -129,7 +146,20 @@ export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
       };
       if (signal?.aborted) return onAbort();
       signal?.addEventListener("abort", onAbort, { once: true });
+      // Register the waiter before publishing the request so a synchronous
+      // owner decision from an onPending hook cannot race the waiter setup.
       this.waiters.set(record.id, finish);
+      const expiresInMs = Math.max(0, Date.parse(record.expiresAt) - this.now());
+      const expiryTimer = setTimeout(() => this.expireToolRequest(record.id), expiresInMs);
+      this.expiryTimers.set(record.id, expiryTimer);
+      try {
+        hooks?.onPending?.(record.id, record.expiresAt);
+      } catch {
+        record.status = "denied";
+        record.decidedBy = "system";
+        record.decidedAt = new Date(this.now()).toISOString();
+        finish({ approved: false, reason: "The approval request could not be published." });
+      }
     });
   }
 
@@ -146,7 +176,7 @@ export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
       resource: request.capability,
       risk: request.risk,
       reason: request.reason,
-      preview: truncate(stableStringify(request.sanitizedInput), 600),
+      preview: truncate(stableStringify(redactApprovalInput(request.sanitizedInput)), 600),
       inputKey: this.controlKey(
         request.capability,
         request.action,
@@ -210,6 +240,7 @@ export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
     const created = this.now();
     const record: InternalRecord = {
       ...fields,
+      reason: redactSecrets(fields.reason).slice(0, 500),
       id: `apr_${randomUUID()}`,
       status: "pending",
       createdAt: new Date(created).toISOString(),
@@ -241,6 +272,29 @@ export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
     return this.publicRecord(record);
   }
 
+  private clearExpiryTimer(id: string): void {
+    const timer = this.expiryTimers.get(id);
+    if (timer) clearTimeout(timer);
+    this.expiryTimers.delete(id);
+  }
+
+  /** Expire a waiting tool call even when the dashboard does not poll the queue. */
+  private expireToolRequest(id: string): void {
+    this.expiryTimers.delete(id);
+    const record = this.records.get(id);
+    if (!record || record.kind !== "tool" || record.status !== "pending") return;
+    const now = this.now();
+    if (Date.parse(record.expiresAt) > now) {
+      const timer = setTimeout(() => this.expireToolRequest(id), Date.parse(record.expiresAt) - now);
+      this.expiryTimers.set(id, timer);
+      return;
+    }
+    record.status = "expired";
+    record.decidedBy = "system";
+    record.decidedAt = new Date(now).toISOString();
+    this.waiters.get(id)?.({ approved: false, reason: "The approval request expired." });
+  }
+
   /** Expire stale pending requests and cap the history that is kept in memory. */
   private sweep(): void {
     const now = this.now();
@@ -249,6 +303,7 @@ export class ApprovalStore implements ApprovalGate, ControlApprovalAdapter {
         record.status = "expired";
         record.decidedBy = "system";
         record.decidedAt = new Date(now).toISOString();
+        this.clearExpiryTimer(record.id);
         this.waiters.get(record.id)?.({
           approved: false,
           reason: "The approval request expired.",

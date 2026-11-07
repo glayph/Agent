@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { createGoalTools, GoalStore } from "./goals-router.js";
+import { createGoalTools, GoalStore, normalizeGoalAcceptance } from "./goals-router.js";
 
 describe("persistent goal tool adapters", () => {
   let db: Database.Database;
@@ -21,11 +21,42 @@ describe("persistent goal tool adapters", () => {
       priority: 2,
       context: { phase: 2, source: "test" },
       steps: ["Inspect", "Verify"],
+      acceptance: { mode: "all", checks: [{ type: "file_exists", path: "autonomy/review.md" }] },
     });
     expect(goal).toMatchObject({ title: "Review autonomy", priority: 2 });
     const stored = store.get(Number((goal as { id: number }).id))!;
     expect(JSON.parse(stored.context ?? "{}")).toEqual({ phase: 2, source: "test" });
     expect(JSON.parse(stored.steps)).toEqual(["Inspect", "Verify"]);
+    expect(JSON.parse(stored.acceptance_contract ?? "null")).toEqual({ mode: "all", checks: [{ type: "file_exists", path: "autonomy/review.md" }] });
+  });
+
+  it("rejects goal_create without a verifiable acceptance contract by default", async () => {
+    const create = createGoalTools(store).find((item) => item.name === "goal_create");
+    await expect(create!.execute({ objective: "Do work without verification" })).rejects.toThrow(/acceptance contract is required/i);
+    expect(store.list()).toHaveLength(0);
+  });
+
+  it("allows the legacy compatibility mode only when explicitly configured", async () => {
+    const create = createGoalTools(store, { requireAcceptanceContract: () => false }).find((item) => item.name === "goal_create");
+    const goal = await create!.execute({ objective: "Legacy compatible goal" });
+    expect(goal).toMatchObject({ title: "Legacy compatible goal", acceptance_contract: null });
+  });
+
+  it("rejects acceptance checks that cannot independently verify completion", () => {
+    expect(() => normalizeGoalAcceptance({ checks: [{ type: "final_text_contains", text: "done" }] }, true))
+      .toThrow(/independent evidence check/i);
+  });
+
+  it("allows an owner to repair a blocked goal contract and requeue it", () => {
+    const goal = store.create({ title: "Legacy blocked goal", steps: ["Work"], replaceExisting: false });
+    const update = createGoalTools(store).find((item) => item.name === "goal_update");
+    const repaired = update!.execute({
+      goal_id: goal.id,
+      status: "pending",
+      acceptance: { mode: "all", checks: [{ type: "file_exists", path: "autonomy/result.md" }] },
+    }) as ReturnType<GoalStore["get"]>;
+    expect(repaired).toMatchObject({ id: goal.id, status: "pending" });
+    expect(JSON.parse(repaired!.acceptance_contract ?? "null")).toEqual({ mode: "all", checks: [{ type: "file_exists", path: "autonomy/result.md" }] });
   });
 
   it("updates goal priority, context and steps through goal_update", () => {
@@ -66,7 +97,7 @@ describe("persistent goal tool adapters", () => {
     for (const name of ["priority", "context", "source", "steps", "acceptance_contract"]) {
       expect(names.has(name)).toBe(true);
     }
-    const goal = migrated.create({ title: "Migrated" });
+    const goal = migrated.create({ title: "Migrated", replaceExisting: false });
     expect(goal.priority).toBe(5);
     expect(goal.steps).toBe("[]");
   });

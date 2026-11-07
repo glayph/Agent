@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@jest/globals"
-import { mkdtempSync } from "node:fs"
+import { mkdtempSync, existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { execFileSync } from "node:child_process"
+import Database from "better-sqlite3"
 import { ProcessManager } from "./process-manager.js"
 import { createTerminalTools } from "./terminal-tool.js"
 
@@ -52,6 +54,117 @@ describe("ProcessManager", () => {
     expect(await pm.waitForExit(proc.id, 3000)).toBe(true)
     expect(proc.status).toBe("killed")
   })
+  it("adds the exit-code path column to databases created by older versions", async () => {
+    const dir = cwd()
+    const db = new Database(path.join(dir, "legacy.sqlite"))
+    db.exec(`CREATE TABLE miki_background_processes (
+      process_id TEXT PRIMARY KEY, command TEXT NOT NULL, cwd TEXT NOT NULL, pid INTEGER,
+      run_id TEXT, session_id TEXT, detached INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL, ended_at INTEGER, status TEXT NOT NULL,
+      exit_code INTEGER, signal TEXT, error TEXT, timed_out INTEGER NOT NULL DEFAULT 0,
+      announced INTEGER NOT NULL DEFAULT 0, stdout_path TEXT, stderr_path TEXT,
+      stdout_observed_bytes INTEGER NOT NULL DEFAULT 0, stderr_observed_bytes INTEGER NOT NULL DEFAULT 0,
+      stdout_total_chars INTEGER NOT NULL DEFAULT 0, stderr_total_chars INTEGER NOT NULL DEFAULT 0,
+      stdout_delivered_chars INTEGER NOT NULL DEFAULT 0, stderr_delivered_chars INTEGER NOT NULL DEFAULT 0,
+      pid_start_token TEXT
+    )`)
+    const manager = new ProcessManager({ db, dataRoot: dir })
+    const columns = db.prepare("PRAGMA table_info(miki_background_processes)").all() as Array<{ name: string }>
+    expect(columns.some((column) => column.name === "exit_code_path")).toBe(true)
+    await manager.close()
+    db.close()
+  })
+
+  it("restores every active process instead of applying the terminal-history page size", async () => {
+    const dir = cwd()
+    const db = new Database(path.join(dir, "many-processes.sqlite"))
+    const seed = new ProcessManager({ db, dataRoot: dir })
+    const insert = db.prepare(`INSERT INTO miki_background_processes
+      (process_id,command,cwd,detached,started_at,status,announced,stdout_observed_bytes,stderr_observed_bytes,
+       stdout_total_chars,stderr_total_chars,stdout_delivered_chars,stderr_delivered_chars)
+      VALUES(?,?,?,?,?,'running',0,0,0,0,0,0,0)`)
+    for (let index = 0; index < 510; index++) {
+      insert.run(`restored-${index}`, "unverifiable", dir, 1, Date.now() + index)
+    }
+    await seed.close()
+    const restored = new ProcessManager({ db, dataRoot: dir })
+    expect(restored.list()).toHaveLength(510)
+    expect(restored.list().every((proc) => proc.status === "interrupted")).toBe(true)
+    await restored.close()
+    db.close()
+  })
+
+  it("persists detached jobs and recovers the real exit code without re-running the command", async () => {
+    const dir = cwd()
+    const dbFile = path.join(dir, "miki.sqlite")
+    const db1 = new Database(dbFile)
+    const first = new ProcessManager({ db: db1, dataRoot: dir, pollMs: 100 })
+    const marker = path.join(dir, "ran-once.txt")
+    const command = `sleep 2; printf 'persisted-output'; printf 'ran' >> '${marker.replace(/'/g, "'\\''")}' ; exit 7`
+    const proc = first.start({ command, cwd: dir, env: process.env, detached: true, sessionId: "durable-session" })
+    expect(proc.pid).toBeGreaterThan(0)
+    await first.close()
+    db1.close()
+
+    // The original gateway manager is closed, but its detached process continues.
+    const db2 = new Database(dbFile)
+    const second = new ProcessManager({ db: db2, dataRoot: dir, pollMs: 100 })
+    const recovered = second.get(proc.id)
+    expect(recovered).toBeDefined()
+    expect(recovered?.status).toBe("running")
+    expect(await second.waitForExit(proc.id, 8_000)).toBe(true)
+    expect(recovered?.status).toBe("exited")
+    expect(recovered?.exitCode).toBe(7)
+    expect(recovered?.stdout.takeNew(200).text).toContain("persisted-output")
+    expect(existsSync(marker)).toBe(true)
+    expect((await import("node:fs")).readFileSync(marker, "utf8")).toBe("ran")
+    await second.close()
+    db2.close()
+  }, 15_000)
+  it("recovers a command that completed while the gateway was offline", async () => {
+    const dir = cwd()
+    const dbFile = path.join(dir, "miki.sqlite")
+    const db1 = new Database(dbFile)
+    const first = new ProcessManager({ db: db1, dataRoot: dir, pollMs: 100 })
+    const proc = first.start({ command: "sleep 0.5; printf offline-finished; exit 9", cwd: dir, env: process.env, detached: true })
+    await first.close()
+    db1.close()
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+
+    const db2 = new Database(dbFile)
+    const second = new ProcessManager({ db: db2, dataRoot: dir, pollMs: 100 })
+    const recovered = second.get(proc.id)
+    expect(recovered?.status).toBe("exited")
+    expect(recovered?.exitCode).toBe(9)
+    expect(recovered?.stdout.takeNew(200).text).toContain("offline-finished")
+    await second.close()
+    db2.close()
+  }, 10_000)
+
+  it("marks an un-verifiable process as interrupted and never replays it", async () => {
+    const dir = cwd()
+    const dbFile = path.join(dir, "miki.sqlite")
+    const db1 = new Database(dbFile)
+    const first = new ProcessManager({ db: db1, dataRoot: dir })
+    const proc = first.start({ command: "sleep 30", cwd: dir, env: process.env, detached: true })
+    await first.close()
+    db1.prepare("UPDATE miki_background_processes SET pid=99999999,pid_start_token='not-a-real-process' WHERE process_id=?").run(proc.id)
+    db1.close()
+    const db2 = new Database(dbFile)
+    const second = new ProcessManager({ db: db2, dataRoot: dir })
+    expect(second.get(proc.id)?.status).toBe("interrupted")
+    expect(second.get(proc.id)?.error).toMatch(/was not re-executed/)
+    // Clean up the original detached command without relying on the deliberately corrupted PID.
+    if (proc.pid) {
+      try {
+        if (process.platform === "win32") execFileSync("taskkill.exe", ["/PID", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
+        else process.kill(-proc.pid, "SIGKILL")
+      } catch { /* already exited */ }
+    }
+    await second.close()
+    db2.close()
+  }, 10_000)
+
   it("queues a finish notice exactly once", async () => {
     const pm = new ProcessManager()
     const proc = pm.start({ command: "exit 3", cwd: cwd(), env: process.env, sessionId: "s" })

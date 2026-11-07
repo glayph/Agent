@@ -40,6 +40,13 @@ describe("isOwnerOrigin", () => {
     expect(isOwnerOrigin({ source: "telegram" }, { agent: { memory: { global: { owner_peers: ["telegram:42"] } } } })).toBe(false);
   });
 
+  it("rejects missing or malformed authenticated origins", () => {
+    expect(isOwnerOrigin(undefined, {})).toBe(false);
+    expect(isOwnerOrigin(null, {})).toBe(false);
+    expect(isOwnerOrigin({ source: "   " }, {})).toBe(false);
+    expect(isOwnerOrigin({ source: "telegram", peerId: 42 as unknown as string }, { agent: { memory: { global: { owner_peers: ["telegram:42"] } } } })).toBe(false);
+  });
+
   it("accepts a platform sender only when listed as source:peer", () => {
     const config = { agent: { memory: { global: { owner_peers: ["Telegram:42", 7, ""] } } } };
     expect(isOwnerOrigin({ source: "telegram", peerId: "42" }, config)).toBe(true);
@@ -155,12 +162,12 @@ describe("search (graph + semantic)", () => {
     factCards: { items: [{ id: "f1", text: "Miki runs inside VirtualBox", score: 0.9 }], text: "" },
     selectiveContext: {
       items: [
-        { id: "s1", text: "Owner installs Miki on Ubuntu", region: "long_term", score: 0.7 },
-        { id: "s2", text: "miki runs inside virtualbox", region: "daily", score: 0.5 },
+        { id: "s1", text: "Owner installs Miki on Ubuntu", region: "long_term", score: 0.7, provenance: "owner" },
+        { id: "s2", text: "miki runs inside virtualbox", region: "daily", score: 0.5, provenance: "agent" },
       ],
       text: "",
     },
-    graphContext: { items: [{ id: "g1", text: "Ubuntu VM has 8 GB RAM", category: "static", score: 0.4 }], text: "" },
+    graphContext: { items: [{ id: "g1", text: "Ubuntu VM has 8 GB RAM", category: "static", score: 0.4, provenance: "owner" }], text: "" },
   };
   const integration = { preExecutionHook: () => hook } as unknown as AgentMemoryIntegration;
   const origin = { source: "webchat", sessionId: "chat-1" };
@@ -168,8 +175,9 @@ describe("search (graph + semantic)", () => {
   it("returns de-duplicated, score-ranked hits from facts, selective and graph memory", () => {
     const memory = createGlobalMemory({ getIntegration: () => integration, getConfig: () => ({}) });
     const hits = memory.search("where does Miki run?", origin, 10);
-    expect(hits.map((hit) => hit.id)).toEqual(["graph:f1", "graph:s1", "graph:g1"]);
-    expect(hits[1]).toMatchObject({ region: "long_term" });
+    expect(hits.map((hit) => hit.id)).toEqual(["graph:s1", "graph:s2", "graph:g1"]);
+    expect(hits[0]).toMatchObject({ region: "long_term" });
+    expect(hits.some((hit) => hit.id === "graph:f1")).toBe(false);
   });
 
   it("honours the limit and the owner check, and never throws", () => {

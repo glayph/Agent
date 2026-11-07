@@ -1,8 +1,10 @@
 export { AgentEngine, NoModelConfiguredError } from "./agent-engine.js";
 export type { AgentEngineOptions, LLMResolver, SelfCheckConfig, DynamicBudgetConfig } from "./agent-engine.js";
 export { verifyAnswer, parseVerdict, buildEvidence } from "./verifier.js";
+export { verifyToolAction } from "./action-verifier.js";
+export type { ActionVerification, ActionVerificationStatus, VerifyActionInput } from "./action-verifier.js";
 export type { AnswerVerdict } from "./verifier.js";
-export { ToolRegistry } from "./tool-registry.js";
+export { ToolRegistry, resolveToolApproval, type ToolApprovalSettings, type ResolvedToolApproval } from "./tool-registry.js";
 export { ApprovalStore } from "./approval-store.js";
 export type {
   ApprovalRecord,
@@ -57,16 +59,28 @@ export {
   isTerminalTaskStatus,
   taskStatusTransitions,
   transitionTask,
+  isRunnableTaskStatus,
 } from "../task-state.js";
 export type { TaskLifecycle, TaskStatus } from "../task-state.js";
+export { TaskExecutionError, classifyTaskError } from "../task-errors.js";
+export type { TaskErrorCategory, TaskErrorOptions, ClassifiedTaskError } from "../task-errors.js";
 export { DurableTaskStore } from "../task-store.js";
 export type {
   CreateTaskInput,
   DurableTask,
   TaskTransitionEvent,
+  DurableActionClaim,
+  CreateTaskPlanInput,
+  CreatedTaskPlan,
+  ReplanTaskPlanInput,
+  ReplannedTaskPlan,
+  TaskDependency,
+  TaskTreeNode,
 } from "../task-store.js";
 export { DurableTaskWorker } from "../task-worker.js";
 export type {
   DurableTaskHandler,
   DurableTaskWorkerOptions,
+  DurableTaskVerifier,
+  TaskVerificationOutcome,
 } from "../task-worker.js";

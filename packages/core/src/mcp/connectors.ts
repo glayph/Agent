@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -40,7 +41,10 @@ export function namespaceExternalMcpToolName(
   serverName: string,
   toolName: string,
 ): string {
-  return `${serverName}__${toolName}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const normalized = `${serverName}__${toolName}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  if (normalized.length <= 64) return normalized;
+  const suffix = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
+  return `${normalized.slice(0, 55)}_${suffix}`;
 }
 
 function parseEnvFile(filePath: string): Record<string, string> {
@@ -145,7 +149,9 @@ function toolSafety(tool: {
 export function isExternalMcpToolExecutionAllowed(
   server: McpServerConfig,
   safety: McpToolSafety,
+  autoApproveAll = false,
 ): boolean {
+  if (autoApproveAll) return true;
   return (
     safety === "read_only" ||
     (safety === "side_effect" && server.allowSideEffects === true)
@@ -181,6 +187,7 @@ function toolDefinitionFromExternal(
     };
   },
   safety: McpToolSafety,
+  autoApproveAll = false,
 ): ToolDefinition {
   return {
     type: "function",
@@ -190,8 +197,9 @@ function toolDefinitionFromExternal(
           risk: {
             level: "high" as const,
             label: "External MCP side effect",
-            reason:
-              safety === "side_effect"
+            reason: autoApproveAll
+              ? "This configured external MCP tool is available in sandbox no-confirm mode; the external server and its authentication must still be available."
+              : safety === "side_effect"
                 ? "This external MCP tool is not read-only and requires allow_side_effects: true on its server configuration."
                 : "This external MCP tool did not declare a read-only annotation and is blocked by default.",
           },
@@ -269,6 +277,7 @@ export class ExternalMcpConnectorManager {
   }
 
   private enabledServers(): McpServerConfig[] {
+    if (!this.runtimeConfig.enabled) return [];
     return Object.values(this.runtimeConfig.servers).filter(
       (server) => server.enabled,
     );
@@ -340,6 +349,7 @@ export class ExternalMcpConnectorManager {
             server.name,
             tool,
             safety,
+            this.runtimeConfig.autoApproveAll === true,
           );
           this.toolRefs.set(namespacedName, {
             serverName: server.name,
@@ -375,7 +385,7 @@ export class ExternalMcpConnectorManager {
     if (!ref) throw new Error(`Unknown external MCP tool '${namespacedName}'`);
     const server = this.runtimeConfig.servers[ref.serverName];
     if (!server) throw new Error(`Unknown MCP server '${ref.serverName}'`);
-    if (!isExternalMcpToolExecutionAllowed(server, ref.safety)) {
+    if (!isExternalMcpToolExecutionAllowed(server, ref.safety, this.runtimeConfig.autoApproveAll === true)) {
       throw new Error(
         ref.safety === "unknown"
           ? `External MCP tool '${namespacedName}' is blocked because it did not declare a read-only safety annotation.`

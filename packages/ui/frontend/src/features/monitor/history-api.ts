@@ -2,7 +2,7 @@ import { launcherFetch } from "@/api/http"
 
 export interface ServerMonitorSnapshot {
   runs: Array<{ id: string; status: "running" | "completed" | "failed"; startedAt: number; endedAt?: number; planTotal?: number; planLevels?: number; lastSeq?: number }>
-  nodes: Array<{ id: string; runId: string; type: string; label: string; status: string; level: number; parallel: boolean; attempt?: number; durationMs?: number; createdAt: number; updatedAt: number; uiState?: "minimized" | "expanded" }>
+  nodes: Array<{ id: string; runId: string; type: string; label: string; status: string; level: number; parallel: boolean; iconKey?: string; displayName?: string; toolName?: string; pluginId?: string; providerId?: string; attempt?: number; durationMs?: number; error?: string; createdAt: number; updatedAt: number; uiState?: "minimized" | "expanded" }>
   edges: Array<{ id: string; runId: string; source: string; target: string; animated: boolean }>
   high_water_seq: number
   next_before_seq: number | null
@@ -12,8 +12,8 @@ export interface ServerMonitorSnapshot {
 
 export type MonitorHistoryCursor = NonNullable<ServerMonitorSnapshot["next_before"]>
 
-export async function fetchMonitorHistory(before?: MonitorHistoryCursor): Promise<ServerMonitorSnapshot> {
-  const query = new URLSearchParams({ limit: "12" })
+export async function fetchMonitorHistory(before?: MonitorHistoryCursor, activeOnly = true): Promise<ServerMonitorSnapshot> {
+  const query = new URLSearchParams({ limit: "50", ...(activeOnly ? { active_only: "1" } : {}) })
   if (before) {
     query.set("before_seq", String(before.seq))
     query.set("before_started_at", before.started_at)

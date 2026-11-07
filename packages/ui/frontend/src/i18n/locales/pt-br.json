@@ -66,7 +66,10 @@
         "provider_failure": "A solicitação ao modelo falhou. Confira a configuração do modelo e tente novamente.",
         "token_limit": "A solicitação excedeu o limite de contexto ou de saída do modelo. Reduza a solicitação ou escolha um modelo com contexto maior.",
         "execution_limit": "A execução atingiu um limite antes de produzir uma resposta final. Tente novamente com um escopo menor.",
-        "internal": "Não foi possível concluir a solicitação. Tente novamente; se o problema continuar, confira os logs do gateway."
+        "internal": "Não foi possível concluir a solicitação. Tente novamente; se o problema continuar, confira os logs do gateway.",
+        "run_timeout": "A execução atingiu o limite de tempo e foi interrompida. Sua mensagem foi salva; tente novamente ou peça ao Miki para continuar.",
+        "run_stalled": "A execução foi interrompida após um longo período sem atividade. Sua mensagem foi salva; confira o status mais recente e tente novamente.",
+        "queue_timeout": "Uma execução anterior desta conversa não terminou a tempo, então esta mensagem não pôde começar. Sua mensagem foi salva; interrompa a execução anterior ou tente novamente."
       }
     },
     "placeholder": "Inicie uma nova mensagem…",
@@ -251,7 +254,16 @@
     "assistantDetailMenuTitle": "Detalhes da resposta",
     "delivery": {
       "processing": "Miki está processando esta solicitação.",
-      "processingActivity": "Miki está trabalhando; esta mensagem será lida após a etapa atual ({{activity}})."
+      "processingActivity": "Miki está trabalhando; esta mensagem será lida após a etapa atual ({{activity}}).",
+      "sending": "Enviando…",
+      "uncertain": "A entrega é incerta; verificando a conexão.",
+      "unknown": "O status de entrega é desconhecido.",
+      "queued": "Na fila",
+      "queuedPosition": "Na fila · {{position}} mensagem(ns) à frente",
+      "retrying": "Tentando novamente",
+      "failed": "Falhou",
+      "cancelled": "Cancelado",
+      "retryActivity": "Tentando novamente: {{activity}}"
     },
     "tools": {
       "used": "{{count}} ferramentas usadas",
@@ -610,7 +622,9 @@
       "context": "Contexto",
       "gpuLayers": "Camadas de GPU",
       "autoStart": "Iniciar automaticamente"
-    }
+    },
+    "defaultChangeNextRun": "As novas execuções usarão o modelo selecionado.",
+    "defaultChangeNextRunDescription": "{{count}} execução(ões) ativa(s) continuará(ão) com o modelo atual."
   },
   "channels": {
     "loadError": "Falha ao carregar canais",
@@ -1486,8 +1500,8 @@
       "session_scope_global_desc": "Todas as mensagens compartilham um contexto global.",
       "heartbeat_enabled": "Ativar decisões em ociosidade",
       "heartbeat_enabled_hint": "Permite decisões autônomas do modelo quando ocioso. Metas enfileiradas e agendadas continuam quando desativado.",
-      "heartbeat_interval": "Intervalo de decisão em ociosidade (minutos)",
-      "heartbeat_interval_hint": "Intervalo desejado entre decisões autônomas do modelo durante a ociosidade. O agendamento inclui uma pequena variação.",
+      "heartbeat_interval": "Intervalo de observação em ambiente quieto (segundos)",
+      "heartbeat_interval_hint": "Intervalo alternativo quando nenhum evento ou objetivo concluído desperta o loop autônomo. O trabalho significativo continua imediatamente.",
       "devices_enabled": "Habilitar Dispositivos",
       "devices_enabled_hint": "Habilitar integrações com dispositivos de hardware.",
       "monitor_usb": "Monitorar USB",
@@ -1676,14 +1690,22 @@
         "waiting": "Aguardando",
         "queued": "Na fila",
         "done": "Concluído",
-        "active": "Ativo"
+        "active": "Ativo",
+        "verifying": "Verificando",
+        "waiting_approval": "Aguardando aprovação"
       },
       "decisions": {
         "act": "Executar",
         "ask": "Perguntar antes",
         "block": "Bloquear"
       },
-      "historyInfo": "Os status recentes das ferramentas são mantidos neste navegador; entradas e saídas sensíveis não são armazenadas."
+      "historyInfo": "Os status recentes das ferramentas são mantidos neste navegador; entradas e saídas sensíveis não são armazenadas.",
+      "backgroundJobs": "Tarefas em segundo plano",
+      "backgroundJobsInfo": "O trabalho de longa duração continua de forma independente e é restaurado após a reinicialização do Gateway.",
+      "noBackgroundJobs": "Nenhuma tarefa em segundo plano ainda.",
+      "attempt": "Tentativa",
+      "progress": "Progresso",
+      "needsReconciliation": "Uma ação externa precisa de verificação manual antes de esta tarefa poder ser repetida."
     },
     "monitor": {
       "inspector": "Inspetor de atividade ao vivo",

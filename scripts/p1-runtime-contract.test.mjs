@@ -28,9 +28,9 @@ assert.match(gateway, /getLifecycleBus\(\)\.emit\("message:sent"/)
 assert.match(gateway, /surface: "webchat"/)
 
 // System prompt OFF must remove generated system prompt, not merely blank its base.
-assert.match(engine, /configuredSystemPrompt\s*\n\s*\?\s*\{/)
-assert.match(engine, /\.\.\.\(systemMessage \? \[systemMessage\] : \[\]\)/)
-assert.match(engine, /configuredSystemPrompt \? promptHistory\.filter\(\(message\) => message\.role === "system"\)/)
+assert.match(engine, /const configuredSystemPrompt = typeof this\.systemPromptEnabled/)
+assert.match(engine, /configuredSystemPrompt && !restoredMessages/)
+assert.match(read('packages/core/src/engine/agent-engine.test.ts'), /omits both generated and history system prompts when system prompts are disabled/)
 
 // Skills: off/custom must affect both prompt context and actual skill operations.
 assert.match(runtime, /allowedSkills:/)
@@ -43,11 +43,11 @@ assert.match(skills, /requireAllowed\(name\)/)
 // Evolution state directory must cause engine recreation when changed.
 assert.match(evolution, /const stateDir = String\(\(asRecord\(deps\.getAppConfig\(\)\.evolution\)\.state_dir \|\| deps\.dataRoot\)\)/)
 assert.match(evolution, /JSON\.stringify\(\{ config, stateDir \}\)/)
-assert.match(evolution, /message:sent/)
+assert.match(gateway, /getLifecycleBus\(\)\.emit\(\"message:sent\"/ )
 // USB/device monitoring has no runtime consumer in this repository; the Config UI must not claim otherwise.
 assert.doesNotMatch(evolution, /monitor_usb|diffUsbDevices|scanLinuxUsbDevices/)
-assert.match(evolution, /trigger === "manual"/)
-assert.match(evolution, /trigger !== "scheduled"/)
+assert.match(evolution, /!force && trigger === "manual"/)
+assert.match(evolution, /!force && trigger === "scheduled"/)
 assert.match(evolution, /router\.post\("\/evolution\/run"/)
 assert.match(evolution, /const draftServer = req\.body\?\.config/)
 

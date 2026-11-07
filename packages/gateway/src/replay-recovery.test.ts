@@ -7,8 +7,8 @@ function chatDb() {
   db.exec("CREATE TABLE chat_messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at TEXT, kind TEXT DEFAULT 'normal', context_id TEXT, status TEXT DEFAULT 'completed', status_detail TEXT)")
   return db
 }
-const add = (db: Database.Database, id: string, ctx: string, status: string, at: string, detail: string | null = null) =>
-  db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,status,status_detail) VALUES(?,?,?,?,?,?,?,?)").run(id, ctx, "user", "hi", at, ctx, status, detail)
+const add = (db: Database.Database, id: string, ctx: string, status: string, at: string, detail: string | null = null, failureKind: string | null = null) =>
+  db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,context_id,status,status_detail,failure_kind) VALUES(?,?,?,?,?,?,?,?,?)").run(id, ctx, "user", "hi", at, ctx, status, detail, failureKind)
 
 describe("recovery manager", () => {
   it("declares recovery only after three green checks in a row, then replays once", async () => {
@@ -61,8 +61,8 @@ describe("replay sweeper", () => {
   it("replays unanswered and temporarily failed messages in order, and leaves real failures alone", async () => {
     const { db, order, sweeper } = build()
     add(db, "m1", "c1", "processing", "2026-10-27T11:00:00.000Z")
-    add(db, "m2", "c1", "failed", "2026-10-27T11:01:00.000Z", "fetch failed: ECONNREFUSED")
-    add(db, "m3", "c2", "failed", "2026-10-27T11:02:00.000Z", "The provider rejected the API key (401)")
+    add(db, "m2", "c1", "failed", "2026-10-27T11:01:00.000Z", "Provider connection reset.", "network")
+    add(db, "m3", "c2", "failed", "2026-10-27T11:02:00.000Z", "The provider rejected the API key.", "auth")
     add(db, "m4", "c2", "completed", "2026-10-27T11:03:00.000Z")
     const result = await sweeper.sweep("test")
     expect(order).toEqual(["m1", "m2"]) // c1 kept in order; m3 (a real refusal) and m4 (done) untouched
@@ -78,7 +78,7 @@ describe("replay sweeper", () => {
   })
 
   it("sets a poison message aside after three attempts instead of replaying it for ever", async () => {
-    const { db, order, given, sweeper } = build({ replay: async () => { throw new Error("boom") } })
+    const { db, order, given, sweeper } = build({ maxAttempts: 3, replay: async () => { throw new Error("boom") } })
     add(db, "poison", "c1", "queued", "2026-10-27T11:00:00.000Z")
     for (let i = 0; i < 3; i += 1) await sweeper.sweep("test") // three failed attempts
     const result = await sweeper.sweep("test")
@@ -90,6 +90,24 @@ describe("replay sweeper", () => {
     expect(given).toHaveLength(1) // the user is told once
   })
 
+  it("keeps retrying a transient replay beyond the former default attempt ceiling", async () => {
+    const { db, order, sweeper } = build({ replay: async () => { const error = new Error("provider connection reset"); Object.assign(error, { code: "ECONNRESET" }); throw error } })
+    add(db, "recovering", "c1", "queued", "2026-10-27T11:00:00.000Z")
+    for (let i = 0; i < 6; i += 1) {
+      const result = await sweeper.sweep("provider outage")
+      expect(result.quarantined).toBe(0)
+    }
+    expect(order).toEqual([])
+    expect(db.prepare("SELECT replay_attempts a, replay_state s FROM chat_messages WHERE id='recovering'").get()).toEqual({ a: 6, s: null })
+  })
+
+  it("does not expire an abandoned message under the persistent default", async () => {
+    const { db, order, sweeper } = build()
+    add(db, "old-default", "c1", "queued", "2020-01-01T00:00:00.000Z")
+    await sweeper.sweep("restart recovery")
+    expect(order).toEqual(["old-default"])
+  })
+
   it("does not replay messages older than the time limit, and reports them once", async () => {
     const { db, order, given, sweeper } = build({ ttlMs: 60 * 60_000 })
     add(db, "old", "c1", "queued", "2026-10-27T08:00:00.000Z")
@@ -99,9 +117,9 @@ describe("replay sweeper", () => {
     expect(given).toEqual(["old:expired"])
   })
 
-  it("runs at most two conversations at the same time", async () => {
+  it("honors an explicit replay concurrency ceiling", async () => {
     let active = 0, peak = 0
-    const { db, sweeper } = build({ replay: async () => { active += 1; peak = Math.max(peak, active); await new Promise((r) => setTimeout(r, 15)); active -= 1; return outcome } })
+    const { db, sweeper } = build({ concurrency: 2, replay: async () => { active += 1; peak = Math.max(peak, active); await new Promise((r) => setTimeout(r, 15)); active -= 1; return outcome } })
     for (let i = 0; i < 6; i += 1) add(db, `m${i}`, `c${i}`, "queued", `2026-10-27T11:0${i}:00.000Z`)
     const result = await sweeper.sweep("test")
     expect(result.replayed).toBe(6)

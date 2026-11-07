@@ -22,6 +22,11 @@ describe("parsePlanJson", () => {
     );
     expect(steps).toEqual([{ title: "Read", tool: "file_read" }, { title: "Think" }]);
   });
+  it("does not impose a default plan-step ceiling", () => {
+    const rawSteps = Array.from({ length: 30 }, (_, index) => ({ title: `Step ${index + 1}` }));
+    const steps = parsePlanJson(JSON.stringify({ steps: rawSteps }), known);
+    expect(steps).toHaveLength(30);
+  });
   it("returns null for invalid replies", () => {
     expect(parsePlanJson("no json here", known)).toBeNull();
     expect(parsePlanJson('{"steps": "nope"}', known)).toBeNull();
@@ -36,6 +41,12 @@ describe("createPlan", () => {
     const plan = await createPlan({ goal, llm: client, toolNames: [] });
     expect(plan.source).toBe("llm");
     expect(plan.steps.map((s) => s.title)).toEqual(["Search", "Fix", "Test"]);
+  });
+  it("does not truncate a long plan at an arbitrary default step count", async () => {
+    const steps = Array.from({ length: 30 }, (_, index) => ({ title: `Step ${index + 1}` }));
+    const { client } = scriptedLLM([{ text: JSON.stringify({ steps }) }]);
+    const plan = await createPlan({ goal, llm: client, toolNames: [] });
+    expect(plan.steps).toHaveLength(30);
   });
   it("falls back to the minimal plan when the model fails or replies badly", async () => {
     const onFallback = jest.fn();

@@ -447,6 +447,24 @@ class LearningStore {
     return this.db.prepare('DELETE FROM learning_experiences WHERE scope_key=? AND created_at < ?').run(scope.scopeKey, cutoff).changes;
   }
 
+  /** Prune expired learning evidence and terminal artifacts without deleting active policy or pending owner review. */
+  pruneLearningData(scopeInput, retentionDays = 90) {
+    this._ensureReady();
+    const scope = this.normalizeScope(scopeInput);
+    const cutoff = new Date(Date.now() - Math.max(7, Number(retentionDays || 90)) * 86400000).toISOString();
+    const tx = this.db.transaction(() => {
+      const experiences = this.db.prepare('DELETE FROM learning_experiences WHERE scope_key=? AND created_at < ?').run(scope.scopeKey, cutoff).changes;
+      const decisions = this.db.prepare('DELETE FROM learning_decisions WHERE scope_key=? AND created_at < ?').run(scope.scopeKey, cutoff).changes;
+      const cycles = this.db.prepare("DELETE FROM improvement_cycles WHERE scope_key=? AND status IN ('completed','failed','degraded') AND completed_at IS NOT NULL AND completed_at < ?").run(scope.scopeKey, cutoff).changes;
+      // Draft, pending_approval and approved proposals are deliberately retained for owner review.
+      const proposals = this.db.prepare("DELETE FROM improvement_proposals WHERE scope_key=? AND status IN ('applied','rejected','rolled_back') AND created_at < ?").run(scope.scopeKey, cutoff).changes;
+      const snapshots = this.db.prepare("DELETE FROM learning_policy_snapshots WHERE scope_key=? AND status='retired' AND retired_at IS NOT NULL AND retired_at < ?").run(scope.scopeKey, cutoff).changes;
+      const retrievalEdges = this.db.prepare('DELETE FROM run_retrieved_edges WHERE scope_key=? AND retrieved_at < ?').run(scope.scopeKey, cutoff).changes;
+      return { experiences, decisions, cycles, proposals, snapshots, retrievalEdges };
+    });
+    return tx();
+  }
+
   listExperiences(scopeInput, options = {}) {
     this._ensureReady();
     const scope = this.normalizeScope(scopeInput);

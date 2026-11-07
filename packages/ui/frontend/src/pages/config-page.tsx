@@ -642,7 +642,7 @@ function ConfigFormView() {
             proactive: {
               enabled: form.heartbeatEnabled,
               llm_when_idle: form.heartbeatEnabled,
-              decision_interval_seconds: Math.round(heartbeatInterval * 60),
+              decision_interval_seconds: Math.round(heartbeatInterval),
             },
           },
         })

@@ -79,6 +79,8 @@ export interface SummaryDoc {
   outcomes: string[];
   tools: Record<string, { n: number; failed: number }>;
   files: string[];
+  /** One line per tool step recorded in earlier assistant turns (name, arguments, status, result). Absent when none. */
+  activity?: string[];
   turns: number;
 }
 

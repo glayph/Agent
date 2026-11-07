@@ -4,6 +4,10 @@ This directory contains annotated file-tree documentation for the complete Miki 
 
 Reading these files in order provides a deep structural understanding of the monorepo without needing to open every source file.
 
+## Project execution roadmap
+
+Miki-এর পরবর্তী implementation কাজের ধারাবাহিক নির্দেশনা, Phase TODO এবং continuation state: [Implementation Roadmap](../IMPLEMENTATION-ROADMAP.md)। পরবর্তী কাজ নির্বাচন করতে `docs/implementation-roadmap/EXECUTION_STATE.md`-কে source of truth হিসেবে ব্যবহার করো।
+
 ## Chunks
 
 | File | Scope |

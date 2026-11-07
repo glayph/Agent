@@ -18,6 +18,8 @@ function makeEngine() {
     maxTokens: 80,
   });
   engine.initializeSync();
+  const ingest = engine.ingest.bind(engine);
+  engine.ingest = (input = {}) => ingest({ provenance: 'owner', ...input });
   return { engine, db, dir };
 }
 
@@ -52,7 +54,7 @@ try {
       content: 'Tomorrow schedule: review the Agent Miki memory design.',
       sourceType: 'user',
       sourceReference: 'message-1',
-      provenance: 'user_stated',
+      provenance: 'owner',
       confidence: 0.95,
       importance: 0.8,
     });

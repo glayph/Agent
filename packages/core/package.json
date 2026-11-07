@@ -26,6 +26,10 @@
       "import": "./dist/llm/provider/sdk/index.js",
       "types": "./dist/llm/provider/sdk/index.d.ts"
     },
+    "./llm/model-router": {
+      "import": "./dist/llm/model-router.js",
+      "types": "./dist/llm/model-router.d.ts"
+    },
     "./control": {
       "import": "./dist/control/index.js",
       "types": "./dist/control/index.d.ts"
@@ -109,6 +113,10 @@
     "./mcp/types": {
       "import": "./dist/mcp/types.js",
       "types": "./dist/mcp/types.d.ts"
+    },
+    "./task-coordinator": {
+      "import": "./dist/task-coordinator.js",
+      "types": "./dist/task-coordinator.d.ts"
     }
   },
   "scripts": {
@@ -126,28 +134,19 @@
     "@miki/skills": "file:../skills",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
-    "cors": "^2.8.5",
     "express": "^4.19.0",
-    "https-proxy-agent": "^5.0.1",
     "js-yaml": "^4.2.1",
     "openai": "^6.49.0",
     "playwright": "^1.44.0",
-    "qrcode": "^1.5.4",
     "tar": "^7.5.22",
-    "telegraf": "^4.16.0",
-    "turndown": "^7.2.4",
-    "undici": "^8.10.0",
     "ws": "^8.17.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.9",
-    "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
-    "@types/qrcode": "^1.5.6",
-    "@types/turndown": "^5.0.6",
     "@types/ws": "^8.5.10"
   },
   "engines": {

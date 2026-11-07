@@ -2,10 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 // The permission ledger stores what the user has taught Miki about acting on
-// its own. There are no built-in restrictions: a call is allowed unless a rule
-// learned from user feedback says to ask first (or never to do it). A one-time
-// grant lets a single asked-about call proceed after the user agrees; a "block"
-// rule is final and is not lifted by a one-time grant.
+// its own. Learned "ask" rules become real approval requests in AgentEngine;
+// "block" rules are final and are not lifted by a one-time grant. A one-time
+// grant lets a single asked-about call proceed after the user agrees.
 
 export type LearnedDecision = "act" | "ask" | "block";
 
@@ -27,7 +26,7 @@ export interface OnceGrant {
 }
 
 export interface LedgerVerdict {
-  mode: "auto" | "block";
+  mode: "auto" | "approval" | "block";
   reason: string;
 }
 
@@ -87,17 +86,45 @@ function isGrant(value: unknown): value is OnceGrant {
 }
 
 function readLedgerFile(filePath: string): LedgerFile {
+  let contents: string;
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<LedgerFile>;
-    return {
-      version: 1,
-      rules: Array.isArray(parsed.rules) ? parsed.rules.filter(isRule) : [],
-      grants: Array.isArray(parsed.grants) ? parsed.grants.filter(isGrant) : [],
-    };
-  } catch {
-    // A missing or unreadable file means nothing has been learned yet.
-    return { version: 1, rules: [], grants: [] };
+    contents = fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    // Only a never-created ledger is an empty ledger. An unreadable existing
+    // ledger may contain a learned block/ask rule, so it must not fail open.
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return { version: 1, rules: [], grants: [] };
+    }
+    throw new Error(
+      "Could not read the learned permission ledger; refusing to ignore stored permission rules.",
+      { cause: error },
+    );
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch (error) {
+    throw new Error("The learned permission ledger is corrupt; refusing to ignore stored permission rules.", {
+      cause: error,
+    });
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    (parsed as Partial<LedgerFile>).version !== 1 ||
+    !Array.isArray((parsed as Partial<LedgerFile>).rules) ||
+    !Array.isArray((parsed as Partial<LedgerFile>).grants) ||
+    !(parsed as Partial<LedgerFile>).rules!.every(isRule) ||
+    !(parsed as Partial<LedgerFile>).grants!.every(isGrant)
+  ) {
+    throw new Error("The learned permission ledger has an invalid structure; refusing to ignore stored permission rules.");
+  }
+
+  const ledger = parsed as LedgerFile;
+  return { version: 1, rules: [...ledger.rules], grants: [...ledger.grants] };
 }
 
 export class PermissionLedger {
@@ -136,11 +163,8 @@ export class PermissionLedger {
     }
     const scope = rule.match ? ` matching "${rule.match}"` : "";
     return {
-      mode: "block",
-      reason:
-        `The user asked to be asked before "${category}" actions${scope}. Note: ${rule.note || "no note"}. ` +
-        "Ask the user in your reply and wait for a clear yes. After a yes, call permission_grant_once " +
-        "with the same category and match, then retry this action.",
+      mode: "approval",
+      reason: `The user requested approval before "${category}" actions${scope}. Note: ${rule.note || "no note"}.`,
     };
   }
 

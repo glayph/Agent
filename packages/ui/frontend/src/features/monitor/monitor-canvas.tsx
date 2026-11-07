@@ -46,6 +46,7 @@ import {
   toReactFlowEdges,
   toReactFlowNodes,
 } from "@/features/monitor/layout"
+import { MIKI_AGENT_NODE_ID, withMikiAgentLayer } from "@/features/monitor/miki-agent-layer"
 import "@/features/monitor/monitor.css"
 import {
   type MonitorNode,
@@ -73,8 +74,9 @@ type MonitorLayoutSnapshot = {
 const monitorLayoutAtom = selectAtom(
   monitorAtom,
   (state): MonitorLayoutSnapshot => {
-    const nodes = Object.values(state.nodes)
-    const edges = Object.values(state.edges)
+    const graph = withMikiAgentLayer(Object.values(state.nodes), Object.values(state.edges))
+    const nodes = graph.nodes
+    const edges = graph.edges
     const key = `${nodes
       .map((node) => `${node.id}:${node.uiState}:${node.hasManualPosition ? `${node.position?.x ?? 0},${node.position?.y ?? 0}` : "auto"}`)
       .join("|")}#${edges.map((edge) => `${edge.id}:${edge.source}:${edge.target}`).join("|")}`
@@ -109,8 +111,10 @@ function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
   const hasFitOnce = useRef(false)
   const previousNodeCount = useRef(0)
 
-  const rawNodes = Object.values(state.nodes)
-  const rawEdges = Object.values(state.edges)
+  const graph = useMemo(
+    () => withMikiAgentLayer(Object.values(state.nodes), Object.values(state.edges)),
+    [state.nodes, state.edges],
+  )
   // `selectAtom` preserves this geometry-only snapshot when live status/output
   // events arrive, so rendering never mutates or reads refs during render and
   // Dagre only runs when topology, node size, or manual positions change.
@@ -119,14 +123,16 @@ function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
     const positioned = computeLayout(layoutInput.nodes, layoutInput.edges).nodes
     return new Map(positioned.flatMap((node) => node.position ? [[node.id, node.position] as const] : []))
   }, [layoutInput])
-  const nodes = toReactFlowNodes(rawNodes.map((node) => ({
+  const nodes = toReactFlowNodes(graph.nodes.map((node) => ({
     ...node,
     position: node.hasManualPosition && node.position ? node.position : positions.get(node.id),
   }))).map((node) => ({
     ...node,
     selected: node.id === selectedNodeId,
+    draggable: node.id !== MIKI_AGENT_NODE_ID,
+    selectable: node.id !== MIKI_AGENT_NODE_ID,
   }))
-  const edges = toReactFlowEdges(rawEdges)
+  const edges = toReactFlowEdges(graph.edges)
 
   useEffect(() => {
     if (nodes.length === 0) return
@@ -135,7 +141,7 @@ function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
     if (!hasFitOnce.current || grew) {
       hasFitOnce.current = true
       const id = window.setTimeout(() => {
-        fitView({ padding: 0.35, duration: 400, maxZoom: 1.1 })
+        fitView({ padding: 0.35, duration: 120, maxZoom: 1.1 })
       }, 50)
       return () => window.clearTimeout(id)
     }
@@ -143,11 +149,13 @@ function CanvasInner({ selectedNodeId }: { selectedNodeId?: string }) {
 
   const handleNodeDoubleClick: NodeMouseHandler = (event, node) => {
     event.stopPropagation()
+    if (node.id === MIKI_AGENT_NODE_ID) return
     toggleNodeUIState(node.id)
   }
 
   const handleNodeClick: NodeMouseHandler = (event, node) => {
     event.stopPropagation()
+    if (node.id === MIKI_AGENT_NODE_ID) return
     selectMonitorNode(node.id)
   }
 
@@ -420,9 +428,11 @@ function MonitorWorkspace() {
             // Keep local fallback intact; a later mount retries the idempotent migration.
           }
         }
-        const snapshot = await fetchMonitorHistory()
+        const snapshot = await fetchMonitorHistory(undefined, false)
         if (cancelled) return
-        hydrateMonitorHistory(snapshot)
+        // The canvas is a live execution surface. Terminal runs/nodes belong
+        // to durable history and must not respawn after a reload or hydration.
+        hydrateMonitorHistory(snapshot, false)
         setNextBefore(snapshot.next_before)
         setHistorySource("server")
       } catch {
@@ -438,8 +448,10 @@ function MonitorWorkspace() {
     setLoadingOlder(true)
     setHistoryError(undefined)
     try {
-      const snapshot = await fetchMonitorHistory(nextBefore)
-      hydrateMonitorHistory(snapshot)
+      const snapshot = await fetchMonitorHistory(nextBefore, false)
+      // Loading older pages must not reintroduce completed nodes into the live
+      // canvas after their despawn transition has already finished.
+      hydrateMonitorHistory(snapshot, false)
       setNextBefore(snapshot.next_before)
       setHistorySource("server")
     } catch {
@@ -453,46 +465,12 @@ function MonitorWorkspace() {
     () => Object.values(state.runs).sort((a, b) => b.startedAt - a.startedAt),
     [state.runs],
   )
-  const nodes = useMemo(
-    () => Object.values(state.nodes).sort((a, b) => a.createdAt - b.createdAt),
-    [state.nodes],
-  )
   const selectedRun = state.selectedRunId
     ? runs.find((run) => run.id === state.selectedRunId)
     : runs[0]
   const selectedNode = state.selectedNodeId
     ? state.nodes[state.selectedNodeId]
     : undefined
-  if (nodes.length === 0) {
-    return (
-      <div className="flex h-full min-h-0 flex-col" data-miki-page-shell="monitor">
-      <PageHeader title={t("navigation.monitor", { defaultValue: "Agent Monitor" })} titleLevel={1} />
-      <div
-        className="bg-background flex min-h-0 flex-1 items-center justify-center px-6 py-10"
-        data-miki-page="monitor"
-        aria-label={t("navigation.monitor", { defaultValue: "Agent Monitor" })}
-      >
-        <div className="flex max-w-sm flex-col items-center text-center" role="status">
-          <div className="bg-muted text-muted-foreground mb-3 flex size-10 items-center justify-center rounded-xl">
-            <IconInfoCircle className="size-5" aria-hidden="true" />
-          </div>
-          <h1 className="text-foreground text-sm font-semibold">{t("pages.monitor.noActivity", { defaultValue: "No activity yet" })}</h1>
-          <p className="text-muted-foreground mt-1 text-xs leading-5">
-            {t("pages.monitor.noActivityDescription", { defaultValue: "Start a task in chat to see its steps here." })}
-          </p>
-          <MonitorHistoryStatusBar source={historySource} loadingOlder={loadingOlder} hasOlder={nextBefore !== null} error={historyError} onLoadOlder={() => void loadOlderHistory()} />
-          <Link
-            to="/"
-            className="bg-primary text-primary-foreground mt-4 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-opacity hover:opacity-90"
-          >
-            {t("pages.monitor.openChat", { defaultValue: "Open chat" })}
-          </Link>
-        </div>
-      </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-full min-h-0 flex-col" data-miki-page-shell="monitor">
       <PageHeader title={t("navigation.monitor", { defaultValue: "Agent Monitor" })} titleLevel={1} />

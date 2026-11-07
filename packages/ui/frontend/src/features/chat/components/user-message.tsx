@@ -6,7 +6,7 @@ import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { useMessageActionLabels } from "@/features/chat/components/use-message-action-labels"
 import { formatMessageTime } from "@/hooks/use-miki-chat"
 import { cn } from "@/lib/utils"
-import type { ChatAttachment } from "@/store/chat"
+import type { ChatAttachment, ChatDeliveryStatus } from "@/store/chat"
 
 interface UserMessageProps {
   id: string
@@ -20,6 +20,9 @@ interface UserMessageProps {
   onDelete?: () => void
   onFork?: () => void
   onRetry?: () => void
+  deliveryStatus?: ChatDeliveryStatus
+  deliveryDetail?: string
+  deliveryQueuePosition?: number
 }
 
 const EMPTY_ATTACHMENTS: ChatAttachment[] = []
@@ -35,6 +38,9 @@ export const UserMessage = memo(function UserMessage({
   onDelete,
   onFork,
   onRetry,
+  deliveryStatus,
+  deliveryDetail,
+  deliveryQueuePosition,
 }: UserMessageProps) {
   const { t } = useTranslation()
   const actionLabels = useMessageActionLabels()
@@ -51,6 +57,14 @@ export const UserMessage = memo(function UserMessage({
   )
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
+  const deliveryLabel = deliveryStatus
+    ? t(`chat.delivery.${deliveryStatus}`, { defaultValue: deliveryStatus })
+    : ""
+  const deliveryText = deliveryStatus === "queued" && typeof deliveryQueuePosition === "number" && deliveryQueuePosition > 0
+    ? t("chat.delivery.queuedPosition", { position: deliveryQueuePosition, defaultValue: `${deliveryLabel} · ${deliveryQueuePosition}` })
+    : (deliveryStatus === "processing" || deliveryStatus === "retrying") && deliveryDetail
+      ? t(deliveryStatus === "retrying" ? "chat.delivery.retryActivity" : "chat.delivery.processingActivity", { activity: deliveryDetail, defaultValue: `${deliveryLabel} (${deliveryDetail})` })
+      : deliveryLabel
   const actionBar = (
     <MessageActionBar
       content={content}
@@ -140,6 +154,24 @@ export const UserMessage = memo(function UserMessage({
         </>
       )}
       {!hasText && attachments.length > 0 && actionBar}
+      {deliveryStatus && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-delivery-status={deliveryStatus}
+          className={cn(
+            "max-w-[var(--chat-user-message-max)] px-1 text-right text-[11px] leading-4",
+            deliveryStatus === "failed" || deliveryStatus === "cancelled"
+              ? "text-destructive"
+              : "text-muted-foreground/80",
+          )}
+        >
+          <span>{deliveryText}</span>
+          {deliveryDetail && (
+            <span className="ml-1 [overflow-wrap:anywhere]">{deliveryDetail}</span>
+          )}
+        </div>
+      )}
     </div>
   )
 })

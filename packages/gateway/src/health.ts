@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs"
 import { monitorEventLoopDelay } from "node:perf_hooks"
 import type Database from "better-sqlite3"
 
@@ -19,6 +20,13 @@ export type HealthStatus = "ok" | "degraded" | "unhealthy"
 export interface ModelProbeResult {
   configured: boolean
   reachable: boolean
+  /** Catalog/model-list request reachability; it does not prove completion entitlement. */
+  catalogReachable?: boolean
+  /** Null/undefined means no real completion probe has been run. */
+  completionReachable?: boolean | null
+  /** Null/undefined means completion entitlement has not been tested. */
+  entitlementBlocked?: boolean | null
+  lastErrorAt?: string | null
   /** The provider answered but is still loading the model (a local llama server starting up). */
   loading?: boolean
   detail?: string
@@ -26,11 +34,37 @@ export interface ModelProbeResult {
 
 export interface HealthDeps {
   db: Database.Database
-  /** One real, time-limited request to the model provider. Never throws. */
+  /** One time-limited catalog reachability request; completion entitlement is not inferred. Never throws. */
   probeModel: () => Promise<ModelProbeResult>
   channels: () => Array<{ name: string; enabled: boolean; configured: boolean; connected: boolean; lastError?: string }>
   outbox: () => { pending: number; failed: number; oldestPendingAgeMs: number }
-  runProgress: () => { activeRuns: number; lastProgressAt?: number }
+  runProgress: () => {
+    activeRuns: number;
+    lastProgressAt?: number;
+    queuedMessages?: number;
+    oldestQueuedAgeMs?: number;
+    conversationLanes?: number;
+    activeLanes?: number;
+    waitingLaneEntries?: number;
+    oldestActiveLaneAgeMs?: number;
+    oldestLaneWaitAgeMs?: number;
+  }
+  resourceSnapshot?: () => {
+    cpuCount?: number
+    loadPerCpu?: number
+    loadAvailable?: boolean
+    freeMemoryRatio?: number
+    freeMemoryBytes?: number
+    totalMemoryBytes?: number
+    diskFreeBytes?: number
+    diskTotalBytes?: number
+    freeDiskRatio?: number
+    sampledAt?: string
+    activeLeases: number
+    waiting: number
+    oldestWaiterAgeMs?: number
+    byResource: Array<{ resource: string; units: number; capacity: number }>
+  }
   /** Recovery manager state, when recovery v2 is on. */
   recovery?: () => string | undefined
   gatewayRole: string
@@ -40,6 +74,10 @@ export interface HealthDeps {
   modelProbeTtlMs?: number
   /** Event-loop delay (p99) above this makes the gateway degraded. Default 1000 ms. */
   eventLoopWarnMs?: number
+  resourceWaitWarnMs?: number
+  lowMemoryWarnRatio?: number
+  lowDiskWarnRatio?: number
+  highLoadWarnPerCpu?: number
   /** A reply waiting in the outbox longer than this makes the gateway degraded. Default 10 min. */
   outboxWarnAgeMs?: number
 }
@@ -53,13 +91,48 @@ export interface HealthReport {
   lifecycle_owner: string
   pid: number
   uptime_s: number
+  resource_arbitration: {
+    cpuCount?: number
+    loadPerCpu?: number
+    loadAvailable?: boolean
+    freeMemoryRatio?: number
+    freeMemoryBytes?: number
+    totalMemoryBytes?: number
+    diskFreeBytes?: number
+    diskTotalBytes?: number
+    freeDiskRatio?: number
+    sampledAt?: string
+    activeLeases: number
+    waiting: number
+    oldestWaiterAgeMs?: number
+    byResource: Array<{ resource: string; units: number; capacity: number }>
+  } | null
+  resources: {
+    process_rss_bytes: number
+    process_heap_used_bytes: number
+    process_external_bytes: number
+    process_open_file_descriptors: number | null
+    process_active_resources: number
+    process_cpu_percent_of_one_core: number | null
+  }
+  resource_pressure: { ok: boolean; reasons: string[]; saturated_resources: string[]; oldest_waiter_age_s: number }
   checks: {
     database: { ok: boolean; ms: number; error?: string }
     event_loop: { ok: boolean; p99_ms: number; max_ms: number }
-    model: { ok: boolean; configured: boolean; reachable: boolean | null; loading: boolean; detail?: string; checked_age_s: number | null }
+    model: { ok: boolean; configured: boolean; reachable: boolean | null; catalog_reachable: boolean | null; completion_reachable: boolean | null; completion_tested: boolean; entitlement_blocked: boolean | null; last_error_at: string | null; loading: boolean; detail?: string; checked_age_s: number | null }
     channels: { ok: boolean; items: Array<{ name: string; connected: boolean; lastError?: string }> }
     outbox: { ok: boolean; pending: number; failed: number; oldest_pending_age_s: number }
-    runs: { active: number; last_progress_age_s: number | null }
+    runs: {
+      active: number;
+      last_progress_age_s: number | null;
+      queued_messages?: number;
+      oldest_queued_age_s?: number;
+      conversation_lanes?: number;
+      active_lanes?: number;
+      waiting_lane_entries?: number;
+      oldest_active_lane_age_s?: number;
+      oldest_lane_wait_age_s?: number;
+    }
     recovery: { state: string | null }
   }
   degraded_reasons: string[]
@@ -70,12 +143,17 @@ export function createHealthMonitor(deps: HealthDeps) {
   const modelTtl = deps.modelProbeTtlMs ?? 15_000
   const loopWarn = deps.eventLoopWarnMs ?? 1_000
   const outboxWarn = deps.outboxWarnAgeMs ?? 10 * 60_000
+  const resourceWaitWarn = deps.resourceWaitWarnMs ?? 60_000
+  const lowMemoryWarn = deps.lowMemoryWarnRatio ?? 0.08
+  const lowDiskWarn = deps.lowDiskWarnRatio ?? 0.05
+  const highLoadWarn = deps.highLoadWarnPerCpu ?? 2
   const startedAt = now()
   const loop = monitorEventLoopDelay({ resolution: 20 })
   let loopStarted = false
   let model: { at: number; result: ModelProbeResult } | undefined
   let probing: Promise<void> | undefined
   let timer: NodeJS.Timeout | undefined
+  let lastCpuSample: { usage: NodeJS.CpuUsage; at: bigint } | undefined
 
   const refreshModel = (): Promise<void> => {
     if (probing) return probing
@@ -126,10 +204,18 @@ export function createHealthMonitor(deps: HealthDeps) {
 
       if (!model || now() - model.at > modelTtl * 4) void refreshModel()
       const m = model?.result
+      const catalogReachable = m ? (m.catalogReachable ?? m.reachable) : null
       const modelCheck = {
-        ok: Boolean(m && m.configured && m.reachable),
+        // Keep `ok`/`reachable` backwards compatible, but explicitly label this
+        // as catalog reachability, not successful model completion.
+        ok: Boolean(m && m.configured && catalogReachable),
         configured: m?.configured ?? false,
-        reachable: m ? m.reachable : null,
+        reachable: catalogReachable,
+        catalog_reachable: catalogReachable,
+        completion_reachable: m?.completionReachable ?? null,
+        completion_tested: typeof m?.completionReachable === "boolean",
+        entitlement_blocked: m?.entitlementBlocked ?? null,
+        last_error_at: m?.lastErrorAt ?? null,
         loading: Boolean(m?.loading),
         ...(m?.detail ? { detail: m.detail.slice(0, 200) } : {}),
         checked_age_s: model ? Math.round((now() - model.at) / 1000) : null,
@@ -146,7 +232,53 @@ export function createHealthMonitor(deps: HealthDeps) {
       if (!outbox.ok) reasons.push(`${outbox.pending} channel repl${outbox.pending === 1 ? "y is" : "ies are"} waiting to be delivered`)
 
       const progress = deps.runProgress()
-      const runs = { active: progress.activeRuns, last_progress_age_s: progress.lastProgressAt === undefined ? null : Math.max(0, Math.round((now() - progress.lastProgressAt) / 1000)) }
+      const runs = {
+        active: progress.activeRuns,
+        last_progress_age_s: progress.lastProgressAt === undefined ? null : Math.max(0, Math.round((now() - progress.lastProgressAt) / 1000)),
+        ...(progress.queuedMessages !== undefined ? { queued_messages: progress.queuedMessages } : {}),
+        ...(progress.oldestQueuedAgeMs !== undefined ? { oldest_queued_age_s: Math.round(Math.max(0, progress.oldestQueuedAgeMs) / 1000) } : {}),
+        ...(progress.conversationLanes !== undefined ? { conversation_lanes: progress.conversationLanes } : {}),
+        ...(progress.activeLanes !== undefined ? { active_lanes: progress.activeLanes } : {}),
+        ...(progress.waitingLaneEntries !== undefined ? { waiting_lane_entries: progress.waitingLaneEntries } : {}),
+        ...(progress.oldestActiveLaneAgeMs !== undefined ? { oldest_active_lane_age_s: Math.round(Math.max(0, progress.oldestActiveLaneAgeMs) / 1000) } : {}),
+        ...(progress.oldestLaneWaitAgeMs !== undefined ? { oldest_lane_wait_age_s: Math.round(Math.max(0, progress.oldestLaneWaitAgeMs) / 1000) } : {}),
+      }
+      let resourceArbitration: HealthReport["resource_arbitration"] = null
+      try { resourceArbitration = deps.resourceSnapshot?.() ?? null } catch { /* Resource telemetry must never break health reporting. */ }
+      const memory = process.memoryUsage()
+      let openFileDescriptors: number | null = null
+      if (process.platform === "linux") {
+        try { openFileDescriptors = readdirSync("/proc/self/fd").length } catch { /* procfs may be restricted by the container. */ }
+      }
+      let activeResources = 0
+      try { activeResources = process.getActiveResourcesInfo().length } catch { /* Keep health useful on limited Node runtimes. */ }
+      const cpuAt = process.hrtime.bigint()
+      const cpuUsage = process.cpuUsage()
+      let processCpuPercent: number | null = null
+      if (lastCpuSample) {
+        const elapsedUs = Number(cpuAt - lastCpuSample.at) / 1_000
+        const usedUs = (cpuUsage.user - lastCpuSample.usage.user) + (cpuUsage.system - lastCpuSample.usage.system)
+        if (elapsedUs > 0 && Number.isFinite(usedUs)) processCpuPercent = Math.round(Math.max(0, usedUs / elapsedUs * 100) * 10) / 10
+      }
+      lastCpuSample = { usage: cpuUsage, at: cpuAt }
+      const resources = {
+        process_rss_bytes: memory.rss,
+        process_heap_used_bytes: memory.heapUsed,
+        process_external_bytes: memory.external,
+        process_open_file_descriptors: openFileDescriptors,
+        process_active_resources: activeResources,
+        process_cpu_percent_of_one_core: processCpuPercent,
+      }
+
+      const pressureReasons: string[] = []
+      const saturatedResources = (resourceArbitration?.byResource ?? []).filter((item) => item.capacity > 0 && item.units >= item.capacity).map((item) => item.resource)
+      const oldestWaiterAgeMs = resourceArbitration?.oldestWaiterAgeMs ?? 0
+      if (resourceArbitration?.freeMemoryRatio !== undefined && resourceArbitration.freeMemoryRatio < lowMemoryWarn) pressureReasons.push("host memory is critically low")
+      if (resourceArbitration?.freeDiskRatio !== undefined && resourceArbitration.freeDiskRatio < lowDiskWarn) pressureReasons.push("data volume disk space is critically low")
+      if (resourceArbitration?.loadAvailable !== false && resourceArbitration?.loadPerCpu !== undefined && resourceArbitration.loadPerCpu >= highLoadWarn) pressureReasons.push("host load is critically high")
+      if (resourceArbitration && resourceArbitration.waiting > 0 && saturatedResources.length > 0 && oldestWaiterAgeMs >= resourceWaitWarn) pressureReasons.push("resource waiters are experiencing sustained capacity starvation")
+      const resourcePressure = { ok: pressureReasons.length === 0, reasons: pressureReasons, saturated_resources: saturatedResources, oldest_waiter_age_s: Math.round(oldestWaiterAgeMs / 1000) }
+      for (const reason of pressureReasons) reasons.push(reason)
 
       const status: HealthStatus = !database.ok ? "unhealthy" : reasons.length > 0 ? "degraded" : "ok"
       return {
@@ -159,6 +291,9 @@ export function createHealthMonitor(deps: HealthDeps) {
         pid: process.pid,
         uptime_s: Math.round((now() - startedAt) / 1000),
         checks: { database, event_loop: eventLoop, model: modelCheck, channels, outbox, runs, recovery: { state: deps.recovery?.() ?? null } },
+        resource_arbitration: resourceArbitration,
+        resources,
+        resource_pressure: resourcePressure,
         degraded_reasons: reasons,
       }
     },

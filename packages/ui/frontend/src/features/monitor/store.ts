@@ -14,7 +14,9 @@ export type MonitorNodeStatus =
   "pending" | "running" | "retrying" | "completed" | "failed"
 
 export type MonitorNodeType =
-  "tool" | "skill" | "plugin" | "file" | "command" | "pattern" | "system"
+  | "tool" | "skill" | "plugin" | "file" | "command" | "pattern" | "system"
+  | "browser" | "computer" | "terminal" | "memory" | "mcp" | "search"
+  | "goal" | "workflow" | "agent"
 
 export type MonitorNodeUIState = "minimized" | "expanded"
 
@@ -23,8 +25,16 @@ export interface MonitorNode {
   runId: string
   type: MonitorNodeType
   label: string
+  /** Local icon registry key supplied by the trusted runtime/tool manifest. */
+  iconKey?: string
+  displayName?: string
+  toolName?: string
+  pluginId?: string
+  providerId?: string
+  /** Actual semantic parent ids from the backend graph contract. */
+  parentNodeIds?: string[]
   status: MonitorNodeStatus
-  /** Execution "wave" from the planner — used to place columns and infer edges. */
+  /** Execution "wave" from the planner — a layout hint only; never used to infer graph edges. */
   level: number
   parallel: boolean
   input?: unknown
@@ -50,6 +60,8 @@ export interface MonitorEdge {
   runId: string
   /** Active while data/control is actually flowing between the two nodes. */
   animated: boolean
+  /** Frontend-only continuity edge; never written back to semantic history. */
+  displayOnly?: boolean
 }
 
 export interface MonitorRun {
@@ -77,7 +89,6 @@ export interface MonitorState {
 
 const MONITOR_HISTORY_STORAGE_KEY = "miki.monitor.history.v1"
 const MAX_PERSISTED_NODES = 500
-const MAX_IN_MEMORY_COMPLETED_RUNS = 100
 
 function emptyMonitorState(): MonitorState {
   return {
@@ -109,13 +120,13 @@ function safePosition(value: unknown): { x: number; y: number } | undefined {
  * intentionally excluded from browser storage.
  */
 export function serializeMonitorHistory(state: MonitorState): string {
-  const orderedRuns = Object.values(state.runs).sort(
-    (left, right) => (right.endedAt ?? right.startedAt) - (left.endedAt ?? left.startedAt),
+  const orderedRuns = Object.values(state.runs).filter((run) => run.status === "running").sort(
+    (left, right) => right.startedAt - left.startedAt,
   )
   const persistedRuns = orderedRuns.slice(0, 12)
   const runIds = new Set(persistedRuns.map((run) => run.id))
   const persistedNodes = Object.values(state.nodes)
-    .filter((node) => runIds.has(node.runId))
+    .filter((node) => runIds.has(node.runId) && (node.status === "pending" || node.status === "running" || node.status === "retrying"))
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, MAX_PERSISTED_NODES)
   const nodes = Object.fromEntries(persistedNodes.map((node) => [node.id, {
@@ -123,6 +134,12 @@ export function serializeMonitorHistory(state: MonitorState): string {
     runId: node.runId,
     type: node.type,
     label: node.label,
+    ...(node.iconKey ? { iconKey: node.iconKey } : {}),
+    ...(node.displayName ? { displayName: node.displayName } : {}),
+    ...(node.toolName ? { toolName: node.toolName } : {}),
+    ...(node.pluginId ? { pluginId: node.pluginId } : {}),
+    ...(node.providerId ? { providerId: node.providerId } : {}),
+    ...(node.parentNodeIds ? { parentNodeIds: node.parentNodeIds } : {}),
     status: node.status,
     level: node.level,
     parallel: node.parallel,
@@ -146,7 +163,7 @@ export function serializeMonitorHistory(state: MonitorState): string {
     ...(run.speedClass ? { speedClass: run.speedClass } : {}),
   }]))
   const edges = Object.fromEntries(Object.values(state.edges)
-    .filter((edge) => runIds.has(edge.runId) && nodeIds.has(edge.source) && nodeIds.has(edge.target))
+    .filter((edge) => !edge.displayOnly && runIds.has(edge.runId) && nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => [edge.id, {
       id: edge.id,
       source: edge.source,
@@ -186,7 +203,7 @@ export function restoreMonitorHistory(raw: string | null, now = Date.now()): Mon
         ...(typeof value.speedClass === "string" ? { speedClass: value.speedClass } : {}),
       }
     }
-    const validTypes = new Set<MonitorNodeType>(["tool", "skill", "plugin", "file", "command", "pattern", "system"])
+    const validTypes = new Set<MonitorNodeType>(["tool", "skill", "plugin", "file", "command", "pattern", "system", "browser", "computer", "terminal", "memory", "mcp", "search", "goal", "workflow", "agent"])
     const validStatuses = new Set<MonitorNodeStatus>(["pending", "running", "retrying", "completed", "failed"])
     const nodes: MonitorState["nodes"] = {}
     for (const [id, value] of Object.entries(parsed.nodes)) {
@@ -199,6 +216,12 @@ export function restoreMonitorHistory(raw: string | null, now = Date.now()): Mon
         runId: value.runId,
         type: value.type as MonitorNodeType,
         label: value.label,
+        ...(typeof value.iconKey === "string" ? { iconKey: value.iconKey } : {}),
+        ...(typeof value.displayName === "string" ? { displayName: value.displayName } : {}),
+        ...(typeof value.toolName === "string" ? { toolName: value.toolName } : {}),
+        ...(typeof value.pluginId === "string" ? { pluginId: value.pluginId } : {}),
+        ...(typeof value.providerId === "string" ? { providerId: value.providerId } : {}),
+        ...(Array.isArray(value.parentNodeIds) ? { parentNodeIds: value.parentNodeIds.filter((item): item is string => typeof item === "string" && item.startsWith(`${value.runId}:`)).slice(0, 50) } : {}),
         status: interrupted ? "failed" : value.status as MonitorNodeStatus,
         level: finiteNumber(value.level) ? value.level : 0,
         parallel: value.parallel === true,
@@ -229,12 +252,10 @@ export function restoreMonitorHistory(raw: string | null, now = Date.now()): Mon
 }
 
 function readMonitorHistory(): MonitorState {
-  if (typeof window === "undefined") return emptyMonitorState()
-  try {
-    return restoreMonitorHistory(window.localStorage.getItem(MONITOR_HISTORY_STORAGE_KEY))
-  } catch {
-    return emptyMonitorState()
-  }
+  // Browser cache is used only for one-time legacy import. On mount, the Gateway
+  // restores active runs from its durable store; cached terminal runs must never
+  // reappear as live canvas nodes after a reload.
+  return emptyMonitorState()
 }
 
 function persistMonitorHistory(state: MonitorState) {
@@ -263,22 +284,6 @@ export function updateMonitorStore(
   const prev = store.get(monitorAtom)
   const patch = typeof updater === "function" ? updater(prev) : updater
   const next: MonitorState = { ...prev, ...patch }
-  const completed = Object.values(next.runs)
-    .filter((run) => run.status !== "running")
-    .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))
-  const expiredRuns = completed.slice(MAX_IN_MEMORY_COMPLETED_RUNS)
-  if (expiredRuns.length > 0) {
-    const expiredIds = new Set(expiredRuns.map((run) => run.id))
-    const expiredNodeIds = new Set(
-      Object.values(next.nodes).filter((node) => expiredIds.has(node.runId)).map((node) => node.id),
-    )
-    next.runs = Object.fromEntries(Object.entries(next.runs).filter(([id]) => !expiredIds.has(id)))
-    next.nodes = Object.fromEntries(Object.entries(next.nodes).filter(([, node]) => !expiredIds.has(node.runId)))
-    next.edges = Object.fromEntries(Object.entries(next.edges).filter(([, edge]) => !expiredIds.has(edge.runId)))
-    next.nodeOrder = next.nodeOrder.filter((id) => !expiredNodeIds.has(id))
-    if (next.selectedRunId && expiredIds.has(next.selectedRunId)) next.selectedRunId = undefined
-    if (next.selectedNodeId && expiredNodeIds.has(next.selectedNodeId)) next.selectedNodeId = undefined
-  }
   store.set(monitorAtom, next)
   persistMonitorHistory(next)
 }
@@ -289,15 +294,15 @@ export function hydrateMonitorHistory(snapshot: {
   runs?: unknown[]
   nodes?: unknown[]
   edges?: unknown[]
-}) {
+}, includeTerminal = false) {
   const current = store.get(monitorAtom)
-  const validTypes = new Set<MonitorNodeType>(["tool", "skill", "plugin", "file", "command", "pattern", "system"])
+  const validTypes = new Set<MonitorNodeType>(["tool", "skill", "plugin", "file", "command", "pattern", "system", "browser", "computer", "terminal", "memory", "mcp", "search", "goal", "workflow", "agent"])
   const validStatuses = new Set<MonitorNodeStatus>(["pending", "running", "retrying", "completed", "failed"])
   const runs: MonitorState["runs"] = {}
   for (const raw of snapshot.runs ?? []) {
     if (!isRecord(raw) || typeof raw.id !== "string" || !finiteNumber(raw.startedAt)) continue
-    if (raw.status !== "running" && raw.status !== "completed" && raw.status !== "failed") continue
-    runs[raw.id] = { id: raw.id, status: raw.status, startedAt: raw.startedAt,
+    if (raw.status !== "running" && !(includeTerminal && (raw.status === "completed" || raw.status === "failed"))) continue
+    runs[raw.id] = { id: raw.id, status: raw.status as MonitorRun["status"], startedAt: raw.startedAt,
       ...(finiteNumber(raw.endedAt) ? { endedAt: raw.endedAt } : {}),
       ...(finiteNumber(raw.planTotal) ? { planTotal: raw.planTotal } : {}),
       ...(finiteNumber(raw.planLevels) ? { planLevels: raw.planLevels } : {}),
@@ -308,23 +313,67 @@ export function hydrateMonitorHistory(snapshot: {
     if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.runId !== "string" || !runs[raw.runId]) continue
     if (typeof raw.label !== "string" || !validTypes.has(raw.type as MonitorNodeType) || !validStatuses.has(raw.status as MonitorNodeStatus)) continue
     if (!finiteNumber(raw.createdAt) || !finiteNumber(raw.updatedAt)) continue
+    if (raw.status !== "pending" && raw.status !== "running" && raw.status !== "retrying" && !(includeTerminal && (raw.status === "completed" || raw.status === "failed"))) continue
     nodes[raw.id] = { id: raw.id, runId: raw.runId, type: raw.type as MonitorNodeType, label: raw.label,
+      ...(typeof raw.iconKey === "string" ? { iconKey: raw.iconKey } : {}),
+      ...(typeof raw.displayName === "string" ? { displayName: raw.displayName } : {}),
+      ...(typeof raw.toolName === "string" ? { toolName: raw.toolName } : {}),
+      ...(typeof raw.pluginId === "string" ? { pluginId: raw.pluginId } : {}),
+      ...(typeof raw.providerId === "string" ? { providerId: raw.providerId } : {}),
+      ...(typeof raw.error === "string" ? { error: raw.error } : {}),
+      ...(Array.isArray(raw.parentNodeIds) ? { parentNodeIds: raw.parentNodeIds.filter((item): item is string => typeof item === "string").slice(0, 50) } : {}),
       status: raw.status as MonitorNodeStatus, level: finiteNumber(raw.level) ? raw.level : 0, parallel: raw.parallel === true,
       ...(finiteNumber(raw.attempt) ? { attempt: raw.attempt } : {}), ...(finiteNumber(raw.durationMs) ? { durationMs: raw.durationMs } : {}),
       createdAt: raw.createdAt, updatedAt: raw.updatedAt, uiState: raw.uiState === "expanded" ? "expanded" : "minimized" }
   }
-  const edges: MonitorState["edges"] = {}
+  // Backfill a synthetic root for active runs created by older Gateway versions
+  // that did not emit a root node. This provides a truthful run-level parent,
+  // without guessing relationships between sibling tools.
+  for (const run of Object.values(runs)) {
+    const rootId = `${run.id}:root`
+    if (!nodes[rootId]) nodes[rootId] = { id: rootId, runId: run.id, type: "goal", label: "Goal", iconKey: "goal", displayName: "Goal", status: run.status, level: 0, parallel: false, createdAt: run.startedAt, updatedAt: run.endedAt ?? run.startedAt, uiState: "minimized" }
+  }
+  // Contract completed/intermediate nodes out of the active graph while preserving
+  // the true dependency path between the remaining live nodes.
+  const rawParents = new Map<string, string[]>()
   for (const raw of snapshot.edges ?? []) {
-    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.runId !== "string" || typeof raw.source !== "string" || typeof raw.target !== "string") continue
-    if (!nodes[raw.source] || !nodes[raw.target] || !runs[raw.runId]) continue
-    edges[raw.id] = { id: raw.id, runId: raw.runId, source: raw.source, target: raw.target, animated: false }
+    if (!isRecord(raw) || typeof raw.source !== "string" || typeof raw.target !== "string" || typeof raw.runId !== "string") continue
+    if (!runs[raw.runId]) continue
+    const parents = rawParents.get(raw.target) ?? []
+    parents.push(raw.source)
+    rawParents.set(raw.target, parents)
+  }
+  for (const node of Object.values(nodes)) {
+    if (node.id !== `${node.runId}:root` && !rawParents.has(node.id)) rawParents.set(node.id, [`${node.runId}:root`])
+  }
+  const edges: MonitorState["edges"] = {}
+  const resolveActiveAncestors = (nodeId: string, runId: string, visiting = new Set<string>()): string[] => {
+    if (visiting.has(nodeId)) return []
+    const nextVisiting = new Set(visiting).add(nodeId)
+    const result = new Set<string>()
+    const parents = rawParents.get(nodeId) ?? []
+    for (const parentId of parents) {
+      const activeParent = nodes[parentId]
+      if (activeParent?.runId === runId) result.add(parentId)
+      else for (const ancestor of resolveActiveAncestors(parentId, runId, nextVisiting)) result.add(ancestor)
+    }
+    if (result.size === 0 && nodeId !== `${runId}:root` && nodes[`${runId}:root`]) result.add(`${runId}:root`)
+    return [...result]
+  }
+  for (const node of Object.values(nodes)) {
+    if (node.id === `${node.runId}:root`) continue
+    for (const source of resolveActiveAncestors(node.id, node.runId)) {
+      const id = `${source}->${node.id}`
+      edges[id] = { id, runId: node.runId, source, target: node.id, animated: node.status === "running" || node.status === "retrying", ...(rawParents.get(node.id)?.includes(source) ? {} : { displayOnly: true }) }
+    }
   }
   // Existing in-memory entries may be newer because the WebSocket stream is live while the snapshot loads.
   const mergedRuns = { ...runs, ...current.runs }
   const mergedNodes = { ...nodes, ...current.nodes }
   const mergedEdges = { ...edges, ...current.edges }
   const nodeOrder = [...new Set([...Object.keys(nodes), ...current.nodeOrder])].filter((id) => Boolean(mergedNodes[id]))
-  const next = { ...current, runs: mergedRuns, nodes: mergedNodes, edges: mergedEdges, nodeOrder }
+  const selectedNodeId = current.selectedNodeId && mergedNodes[current.selectedNodeId] ? current.selectedNodeId : undefined
+  const next = { ...current, runs: mergedRuns, nodes: mergedNodes, edges: mergedEdges, nodeOrder, selectedNodeId }
   store.set(monitorAtom, next)
   persistMonitorHistory(next)
 }
@@ -335,6 +384,38 @@ export function resetMonitorStore() {
   if (typeof window !== "undefined") {
     try { window.localStorage.removeItem(MONITOR_HISTORY_STORAGE_KEY) } catch { /* optional storage */ }
   }
+}
+
+
+/** Remove one terminal node from the live graph without changing backend history. */
+export function removeMonitorNode(nodeId: string) {
+  updateMonitorStore((prev) => {
+    const node = prev.nodes[nodeId]
+    if (!node) return {}
+    const incoming = Object.values(prev.edges).filter((edge) => edge.target === nodeId)
+    const outgoing = Object.values(prev.edges).filter((edge) => edge.source === nodeId)
+    const remainingNodes = Object.fromEntries(Object.entries(prev.nodes).filter(([id]) => id !== nodeId))
+    const remainingEdges: MonitorState["edges"] = Object.fromEntries(
+      Object.entries(prev.edges).filter(([, edge]) => edge.source !== nodeId && edge.target !== nodeId),
+    )
+    const parents = incoming.map((edge) => edge.source).filter((id) => Boolean(remainingNodes[id]))
+    const fallbackRoot = `${node.runId}:root`
+    const anchors = parents.length > 0 ? parents : remainingNodes[fallbackRoot] ? [fallbackRoot] : []
+    for (const childEdge of outgoing) {
+      const child = remainingNodes[childEdge.target]
+      if (!child || child.status === "completed" || child.status === "failed") continue
+      for (const parentId of anchors) {
+        const id = `display:${parentId}->${child.id}`
+        remainingEdges[id] = { id, source: parentId, target: child.id, runId: node.runId, animated: child.status === "running" || child.status === "retrying", displayOnly: true }
+      }
+    }
+    return {
+      nodes: remainingNodes,
+      edges: remainingEdges,
+      nodeOrder: prev.nodeOrder.filter((id) => id !== nodeId),
+      ...(prev.selectedNodeId === nodeId ? { selectedNodeId: undefined } : {}),
+    }
+  })
 }
 
 export function clearMonitorRun(runId: string) {

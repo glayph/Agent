@@ -12,7 +12,6 @@ const MAX_WAIT_SECONDS = 30
 /** Engine-side safety margin for one slice: the tool itself never blocks longer than MAX_WAIT_SECONDS. */
 // Must stay above the engine's default 60 s tool timeout, or a slice would be cut off before the command is checked.
 const SLICE_TOOL_TIMEOUT_MS = Math.max(MAX_WAIT_SECONDS + 30, 120) * 1000
-const MAX_TIMEOUT_SECONDS = 24 * 3600
 const MAX_OUTPUT_CHARS = 60_000
 
 /**
@@ -48,13 +47,13 @@ const BLOCKED_PATTERNS: Array<{ re: RegExp; why: string }> = [
 
 const SECRET_ENV = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|COOKIE)/i
 
-export function blockedReason(command: string): string | undefined {
-  if (!terminalSafeMode()) return undefined
+export function blockedReason(command: string, safeModeEnabled = terminalSafeMode()): string | undefined {
+  if (!safeModeEnabled) return undefined
   return BLOCKED_PATTERNS.find((item) => item.re.test(command))?.why
 }
 
-function sanitizedEnv(): NodeJS.ProcessEnv {
-  if (!terminalSafeMode()) return { ...process.env }
+function sanitizedEnv(safeModeEnabled = terminalSafeMode()): NodeJS.ProcessEnv {
+  if (!safeModeEnabled) return { ...process.env }
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (!SECRET_ENV.test(key)) env[key] = value
@@ -120,6 +119,8 @@ export interface TerminalToolOptions {
   restrictToWorkspace: () => boolean
   /** Live config switch for terminal_run and delegated coding-agent execution. */
   executionEnabled?: () => boolean
+  /** Owner mode may disable environment-driven terminal tripwires inside the outer VM. */
+  safeMode?: () => boolean
   /** Remote channel runs are blocked unless the owner explicitly enables them. */
   allowRemote?: () => boolean
   isRemoteRun?: (runId: string) => boolean
@@ -137,10 +138,10 @@ function isInside(base: string, target: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
 }
 
-function resolveCwd(root: string, requested: unknown, restrict: boolean): string {
+function resolveCwd(root: string, requested: unknown, restrict: boolean, safeModeEnabled = terminalSafeMode()): string {
   const base = path.resolve(root)
   const target = typeof requested === "string" && requested.trim() ? path.resolve(base, requested) : base
-  const confine = restrict || terminalSafeMode()
+  const confine = restrict || safeModeEnabled
   if (confine && !isInside(base, target)) throw new Error("cwd must stay inside the workspace.")
   if (!existsSync(target) || !statSync(target).isDirectory()) throw new Error(`cwd does not exist: ${target}`)
   if (!confine) return target
@@ -158,14 +159,28 @@ const clampSeconds = (value: unknown, fallback: number, min: number, max: number
 }
 
 /** Snapshot of a process for the model: final result when finished, a progress report while running. */
-export function describeProcess(proc: ManagedProcess): Record<string, unknown> {
+export function describeProcess(proc: ManagedProcess, manager?: ProcessManager): Record<string, unknown> {
+  manager?.refresh(proc)
   const out = proc.stdout.takeNew(MAX_OUTPUT_CHARS)
   const err = proc.stderr.takeNew(MAX_OUTPUT_CHARS)
   const omitted = out.omitted + err.omitted
+  manager?.save(proc)
   const base = { command: proc.command, cwd: proc.cwd, process_id: proc.id, duration_ms: (proc.endedAt ?? Date.now()) - proc.startedAt }
+  const outputEvidence = {
+    // Incremental fields are useful while polling. The retained tails are cumulative,
+    // so the final poll remains informative even when earlier polls consumed all deltas.
+    stdout_tail: proc.stdout.tail(MAX_OUTPUT_CHARS),
+    stderr_tail: proc.stderr.tail(MAX_OUTPUT_CHARS),
+    stdout_total_chars: proc.stdout.total,
+    stderr_total_chars: proc.stderr.total,
+    stdout_delivered_chars: proc.stdout.delivered,
+    stderr_delivered_chars: proc.stderr.delivered,
+    output_was_empty: proc.stdout.total === 0 && proc.stderr.total === 0,
+  }
   if (proc.status === "running") {
     return {
       ...base,
+      ...outputEvidence,
       status: "running",
       elapsed_seconds: Math.round(base.duration_ms / 1000),
       new_stdout: out.text,
@@ -173,6 +188,7 @@ export function describeProcess(proc: ManagedProcess): Record<string, unknown> {
       ...(omitted ? { output_omitted_chars: omitted } : {}),
       message:
         `The command is STILL RUNNING and has not been stopped. Do not assume it succeeded or failed. ` +
+        `The new_stdout/new_stderr fields contain only output since the previous poll; stdout_tail/stderr_tail contain the retained cumulative output. ` +
         `Call terminal_status with process_id "${proc.id}" to wait for it (it returns the moment the command exits, or after ~${MAX_WAIT_SECONDS}s with the newest output), ` +
         `terminal_kill to stop it, or continue other work: you will also get a system notice as soon as it finishes.`,
     }
@@ -180,6 +196,7 @@ export function describeProcess(proc: ManagedProcess): Record<string, unknown> {
   proc.announced = true
   return {
     ...base,
+    ...outputEvidence,
     status: proc.status,
     exit_code: proc.exitCode ?? null,
     signal: proc.signal ?? null,
@@ -187,6 +204,9 @@ export function describeProcess(proc: ManagedProcess): Record<string, unknown> {
     stdout: out.text,
     stderr: err.text,
     truncated: omitted > 0,
+    output_summary: proc.stdout.total === 0 && proc.stderr.total === 0
+      ? "The process produced no captured stdout or stderr."
+      : `Captured ${proc.stdout.total} stdout characters and ${proc.stderr.total} stderr characters.`,
     ...(proc.error ? { error: proc.error } : {}),
   }
 }
@@ -233,6 +253,7 @@ export function testCommandPatterns(
 export function createTerminalTools(options: TerminalToolOptions): EngineTool[] {
   const processes = options.processes ?? new ProcessManager()
   const approvalMode = () => "auto" as const
+  const safeMode = () => options.safeMode?.() ?? terminalSafeMode()
   const assertExecutionAllowed = (runId: string) => {
     if (options.executionEnabled?.() === false) {
       throw new Error("Terminal command execution is disabled in Config.")
@@ -260,7 +281,7 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
         cwd: { type: "string", description: "Working directory (relative to the workspace, or absolute). Default: workspace root." },
         wait_seconds: { type: "integer", minimum: 1, maximum: MAX_WAIT_SECONDS, description: `How long to wait for the command before reporting that it is still running (default ${MAX_WAIT_SECONDS}).` },
         background: { type: "boolean", description: "Start the command and return immediately; it keeps running after this run ends. Use for dev servers and long jobs." },
-        timeout_seconds: { type: "integer", minimum: 1, maximum: MAX_TIMEOUT_SECONDS, description: "OPTIONAL hard limit: stop the command after this many seconds. Leave unset unless you want it stopped automatically." },
+        timeout_seconds: { type: "integer", minimum: 1, description: "OPTIONAL hard limit: stop the command after this many seconds. Leave unset unless you want it stopped automatically." },
       },
       required: ["command"],
       additionalProperties: false,
@@ -278,19 +299,20 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
       if (configuredPatterns.blocked) {
         throw new Error(`Command blocked by configured deny pattern (${configuredPatterns.matchedBlacklist}).`)
       }
-      const blocked = blockedReason(command)
+      const safeModeEnabled = safeMode()
+      const blocked = blockedReason(command, safeModeEnabled)
       if (blocked) throw new Error(`Command blocked by terminal policy (${blocked}).`)
-      const cwd = resolveCwd(options.root(), input.cwd, options.restrictToWorkspace())
+      const cwd = resolveCwd(options.root(), input.cwd, options.restrictToWorkspace(), safeModeEnabled)
       const background = input.background === true
       const configuredTimeout = Number(options.timeoutSeconds?.() ?? 0)
       const requestedTimeout = input.timeout_seconds === undefined ? configuredTimeout : Number(input.timeout_seconds)
       const hardLimit = Number.isFinite(requestedTimeout) && requestedTimeout > 0
-        ? clampSeconds(requestedTimeout, 0, 1, MAX_TIMEOUT_SECONDS) * 1000
+        ? clampSeconds(requestedTimeout, 0, 1, Number.MAX_SAFE_INTEGER) * 1000
         : undefined
       const proc = processes.start({
         command,
         cwd,
-        env: sanitizedEnv(),
+        env: sanitizedEnv(safeModeEnabled),
         runId: context.runId,
         ...(context.sessionId ? { sessionId: context.sessionId } : {}),
         detached: background,
@@ -304,15 +326,15 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
         processes.kill(proc.id)
         await processes.waitForExit(proc.id, 2000)
       }
-      return describeProcess(proc)
+      return describeProcess(proc, processes)
     },
   }
 
   const status: EngineTool = {
     name: "terminal_status",
     description:
-      "Check a command started with terminal_run. Waits until the command exits (returns immediately when it does) or up to wait_seconds, " +
-      "and returns only the NEW output since your last check. Without process_id it lists the commands of this session.",
+      "Check a command started with terminal_run. Waits until the command exits (returns immediately when it does) or up to wait_seconds. " +
+      "new_stdout/new_stderr contain incremental output; stdout_tail/stderr_tail and character counters preserve cumulative evidence across polls. Without process_id it lists the commands of this session.",
     risk: "read",
     repeatSafe: true,
     approval: "auto",
@@ -342,7 +364,7 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
       if (!proc) throw new Error(`Unknown process_id "${id}". Call terminal_status without process_id to list commands.`)
       const wait = input.wait_seconds === 0 ? 0 : clampSeconds(input.wait_seconds, MAX_WAIT_SECONDS, 0, MAX_WAIT_SECONDS)
       if (wait > 0) await processes.waitForExit(id, wait * 1000, context.signal)
-      return describeProcess(proc)
+      return describeProcess(proc, processes)
     },
   }
 
@@ -363,7 +385,7 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
       if (!proc) throw new Error(`Unknown process_id "${id}".`)
       processes.kill(id)
       await processes.waitForExit(id, 3000)
-      return describeProcess(proc)
+      return describeProcess(proc, processes)
     },
   }
 
@@ -393,7 +415,8 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
       const resolved = resolveCodingAgent(typeof input.agent === "string" ? input.agent : undefined)
       if ("error" in resolved) throw new Error(resolved.error)
       // The command is assembled by Miki (or set by the owner in MIKI_CODING_AGENT_COMMAND), never by the model, so it is not run through the blocklist.
-      const cwd = resolveCwd(options.root(), input.cwd, options.restrictToWorkspace())
+      const safeModeEnabled = safeMode()
+      const cwd = resolveCwd(options.root(), input.cwd, options.restrictToWorkspace(), safeModeEnabled)
       let promptPath: string | undefined
       if (resolved.promptFile) {
         promptPath = path.join(cwd, resolved.promptFile)
@@ -412,14 +435,14 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
       }
       const configuredTimeout = Number(options.timeoutSeconds?.() ?? 0)
       const hardLimit = Number.isFinite(configuredTimeout) && configuredTimeout > 0
-        ? clampSeconds(configuredTimeout, 0, 1, MAX_TIMEOUT_SECONDS) * 1000
+        ? clampSeconds(configuredTimeout, 0, 1, Number.MAX_SAFE_INTEGER) * 1000
         : undefined
       let proc: ManagedProcess
       try {
         proc = processes.start({
           command: resolved.command,
           cwd,
-          env: { ...sanitizedEnv(), MIKI_DELEGATE_PROMPT: prompt },
+          env: { ...sanitizedEnv(safeModeEnabled), MIKI_DELEGATE_PROMPT: prompt },
           runId: context.runId,
           ...(context.sessionId ? { sessionId: context.sessionId } : {}),
           detached: false,
@@ -431,7 +454,7 @@ export function createTerminalTools(options: TerminalToolOptions): EngineTool[] 
         throw error
       }
       await processes.waitForExit(proc.id, clampSeconds(input.wait_seconds, MAX_WAIT_SECONDS, 1, MAX_WAIT_SECONDS) * 1000, context.signal)
-      return { agent: resolved.name, ...describeProcess(proc) }
+      return { agent: resolved.name, ...describeProcess(proc, processes) }
     },
   }
 

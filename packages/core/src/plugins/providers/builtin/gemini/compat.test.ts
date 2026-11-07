@@ -26,43 +26,38 @@ describe("normalizeGeminiExtra", () => {
     expect(result.max_tokens).toBe(256);
   });
 
-  it("converts tool continuations into provider-safe execution summaries", () => {
-    const normalized = normalizeGeminiMessages([
-      { role: "user", content: "Create a page." },
+  it("preserves the assistant function call, thought signature, and paired tool result", () => {
+    const messages = [
+      { role: "user" as const, content: "Create a page." },
       {
-        role: "assistant",
-        content: "",
+        role: "assistant" as const,
+        content: null,
         tool_calls: [
           {
             id: "call-1",
             type: "function",
-            function: {
-              name: "file_write",
-              arguments: '{"path":"index.html"}',
-            },
-            extra_content: { internal_signature: "do-not-send" },
+            function: { name: "file_write", arguments: '{"path":"index.html"}' },
+            extra_content: { google: { thought_signature: "signature-123" } },
           },
         ],
-        extra_content: { provider_private: true },
       },
       {
-        role: "tool",
+        role: "tool" as const,
         tool_call_id: "call-1",
         name: "file_write",
         content: "File written",
       },
-    ]);
+    ];
 
-    expect(normalized).toEqual([
-      { role: "user", content: "Create a page." },
-      {
-        role: "assistant",
-        content: "The requested tool operation was executed.",
-      },
-      {
-        role: "user",
-        content: "Tool result (file_write): File written",
-      },
-    ]);
+    expect(normalizeGeminiMessages(messages)).toEqual(messages);
+  });
+
+  it("preserves provider metadata attached to the assistant message", () => {
+    const message = {
+      role: "assistant" as const,
+      content: "continuing",
+      extra_content: { google: { thought_signature: "message-signature" } },
+    };
+    expect(normalizeGeminiMessages([message])).toEqual([message]);
   });
 });

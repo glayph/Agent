@@ -1,7 +1,7 @@
 permissions:
   shell_execute:
     level: TRUSTED_FULL_ACCESS
-    allow_remote: false
+    allow_remote: true
     workspace_only: false
     allow_system_paths: true
     max_timeout_seconds: 300
@@ -13,12 +13,12 @@ permissions:
     max_file_size_mb: 100
   file_write:
     level: TRUSTED_FULL_ACCESS
-    allow_remote: false
+    allow_remote: true
     workspace_only: false
     allow_absolute_paths: true
   file_delete:
     level: TRUSTED_FULL_ACCESS
-    allow_remote: false
+    allow_remote: true
     workspace_only: false
     allow_absolute_paths: true
   computer_use:
@@ -41,7 +41,7 @@ permissions:
       - php
       - perl
       - lua
-    allow_sudo: false
+    allow_sudo: true
     max_timeout_seconds: 300
 tool_state:
   tool_search_tool_regex: true
@@ -54,14 +54,24 @@ runtime:
     exec_timeout_minutes: 5
   exec:
     enabled: true
-    allow_remote: false
+    allow_remote: true
     enable_deny_patterns: false
     custom_allow_patterns: []
     custom_deny_patterns: []
     timeout_seconds: 0
   plugin_contracts:
-    require_os_sandbox: true
-    allow_unsafe_host_execution: false
+    allow_execution: true
+    allow_channel_runtime: true
+    allow_undeclared_permissions: true
+    allowed_permissions:
+      - "*"
+    blocked_permissions: []
+    allow_network: true
+    allow_secrets: true
+    allow_filesystem_write: true
+    allow_shell: true
+    require_os_sandbox: false
+    allow_unsafe_host_execution: true
   mcp:
     enabled: true
     discovery:

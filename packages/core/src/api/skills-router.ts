@@ -42,6 +42,8 @@ export interface SkillsRouterOptions {
   pluginHealth?: () =>
     Record<string, PluginHealth> | Promise<Record<string, PluginHealth>>;
   audit?: (event: SkillAuditEvent) => void;
+  /** Skip destructive-action confirmation headers only in the isolated guest owner mode. */
+  noConfirmActions?: () => boolean;
 }
 
 const MAX_IMPORT_BYTES = 55 * 1024 * 1024;
@@ -280,7 +282,7 @@ export function createSkillsRouter(options: SkillsRouterOptions): Router {
   router.delete(
     "/:name",
     wrap(async (req, res) => {
-      if (req.headers["x-miki-confirm"] !== "delete-skill")
+      if (options.noConfirmActions?.() !== true && req.headers["x-miki-confirm"] !== "delete-skill")
         throw new SkillStoreError(
           400,
           "Deleting a skill requires the X-Miki-Confirm: delete-skill header.",

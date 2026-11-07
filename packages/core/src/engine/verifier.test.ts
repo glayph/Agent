@@ -14,9 +14,8 @@ function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   };
 }
 const user = (content: string): EngineMessage[] => [{ role: "user", content }];
-/** Requests the run itself made; the separate "did the agent finish?" completion check is not counted. */
-const modelRequests = (llm: { requests: Array<{ messages: EngineMessage[] }> }) =>
-  llm.requests.filter((request) => !String(request.messages[0]?.content).includes("You classify whether the agent has completed"));
+/** Every recorded completion is a model request made by the run. */
+const modelRequests = (llm: { requests: Array<{ messages: EngineMessage[] }> }) => llm.requests;
 
 describe("parseVerdict", () => {
   it("reads a verdict wrapped in prose or fences", () => {
@@ -103,12 +102,28 @@ describe("engine self-check", () => {
 
   it("skips the check for chat-only runs and when disabled", async () => {
     const chat = scriptedLLM([{ text: "hello" }]);
-    await new AgentEngine({ llm: chat.client, tools: registry(), selfCheck: {} }).run({ history: user("hi") });
+    await new AgentEngine({ llm: chat.client, tools: registry(), selfCheck: { minToolCalls: 1 } }).run({ history: user("hi") });
     expect(modelRequests(chat)).toHaveLength(1);
 
     const off = scriptedLLM([{ calls: [{ name: "write_note", args: {} }] }, { text: "done" }]);
     await new AgentEngine({ llm: off.client, tools: registry(), selfCheck: () => false }).run({ history: user("go") });
     expect(modelRequests(off)).toHaveLength(2);
+  });
+
+
+  it("checks text-only drafts when the host sets a zero tool-call threshold", async () => {
+    const llm = scriptedLLM([
+      { text: "I will create the requested file now." },
+      { text: '{"ok":false,"issues":["The requested file has not been created; use the available file tool before claiming progress."]}' },
+      { calls: [{ name: "write_note", args: {} }] },
+      { text: "I couldn't create the note because the disk is full." },
+      { text: '{"ok":true,"issues":[]}' },
+    ]);
+    const result = await new AgentEngine({ llm: llm.client, tools: registry(), selfCheck: { minToolCalls: 0 } })
+      .run({ history: user("create a note") });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("I couldn't create the note because the disk is full.");
+    expect(modelRequests(llm)).toHaveLength(5);
   });
 
   it("is off unless the host enables it", async () => {

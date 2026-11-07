@@ -1,4 +1,4 @@
-import { TokenBudgetManager } from "./token-budget-manager.js";
+import { TokenBudgetManager, charsPerToken } from "./token-budget-manager.js";
 
 describe("TokenBudgetManager", () => {
   it("allocates compact budgets for simple tasks with input estimates", () => {
@@ -10,6 +10,13 @@ describe("TokenBudgetManager", () => {
     expect(budget.model).toBe("gemini/gemini-3.5-flash-lite");
     expect(budget.estimatedInputTokens).toBeGreaterThan(0);
     expect(budget.reservedOutputTokens).toBeGreaterThan(0);
+  });
+
+  it("uses structural complexity rather than task-word keywords", () => {
+    const manager = new TokenBudgetManager();
+    expect(manager.allocateBudget("Compare this?").tier).toBe("simple");
+    const structured = Array.from({ length: 18 }, (_, index) => `step ${index}: { value: [${index}] }`).join("\n");
+    expect(manager.allocateBudget("Do this", structured).tier).toBe("complex");
   });
 
   it("reserves more output budget under high context pressure", () => {
@@ -95,5 +102,36 @@ describe("TokenBudgetManager", () => {
     expect(usage.total_tokens).toBe(128_000);
     expect(usage.compress_at_tokens).toBeGreaterThan(100_000);
     expect(usage.used_percent).toBe(1);
+  });
+});
+
+describe("script-aware token estimation", () => {
+  it("estimates Latin text at about one token per four characters", () => {
+    const manager = new TokenBudgetManager();
+    expect(manager.estimateTokenCount("a".repeat(400))).toBe(100);
+    expect(charsPerToken("a".repeat(400))).toBe(4);
+  });
+
+  it("counts Bengali text about one token per character instead of under-counting it", () => {
+    const manager = new TokenBudgetManager();
+    const bengali = "ক".repeat(400);
+    expect(manager.estimateTokenCount(bengali)).toBeGreaterThanOrEqual(400);
+    expect(charsPerToken(bengali)).toBe(1);
+  });
+
+  it("lands mixed text between the Latin and non-Latin estimates", () => {
+    const manager = new TokenBudgetManager();
+    const mixed = "ক".repeat(100) + "a".repeat(400);
+    const tokens = manager.estimateTokenCount(mixed);
+    expect(tokens).toBeGreaterThan(100);
+    expect(tokens).toBeLessThan(500);
+    expect(charsPerToken(mixed)).toBeGreaterThan(1);
+    expect(charsPerToken(mixed)).toBeLessThan(4);
+  });
+
+  it("returns zero tokens and four chars per token for empty text", () => {
+    const manager = new TokenBudgetManager();
+    expect(manager.estimateTokenCount("")).toBe(0);
+    expect(charsPerToken("")).toBe(4);
   });
 });

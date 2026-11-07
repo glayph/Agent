@@ -5,20 +5,26 @@ import {
   type UIEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
-import type { SessionSummary } from "@/api/sessions"
 import { uploadChatAttachment } from "@/api/chat-attachments"
 import { type VoiceCloudAudioResult, transcribeVoiceAudio } from "@/api/voice"
+import { getAutonomyStatus, type AutonomyStatus } from "@/features/activity/activity-api"
 import type { ChatInputDisabledReason } from "@/features/chat/components/chat-composer"
 import { ChatInspector } from "@/features/chat/components/chat-inspector"
 import { chatInspectorAtom } from "@/features/chat/components/chat-inspector-store"
 import { ModelSelector } from "@/features/chat/components/model-selector"
-import { SessionHistoryMenu } from "@/features/chat/components/session-history-menu"
 import { ChatMessageList } from "@/features/chat/components/workspace/chat-message-list"
+import {
+  captureChatMessageAnchor,
+  isNearChatScrollBottom,
+  restoreChatMessageAnchor,
+  type ChatMessageAnchor,
+} from "@/features/chat/components/workspace/chat-scroll-utils"
 import { Composer } from "@/features/chat/components/workspace/composer"
 import type { WorkspaceStatusPill } from "@/features/chat/components/workspace/types"
 import { WorkspaceHeader } from "@/features/chat/components/workspace/workspace-header"
@@ -29,7 +35,6 @@ import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useMikiChat } from "@/hooks/use-miki-chat"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useSessionHistory } from "@/hooks/use-session-history"
 import { notify } from "@/lib/notify"
 import { Button } from "@/shared/ui/button"
 import {
@@ -64,9 +69,6 @@ const ALLOWED_AUDIO_TYPES = new Set([
   "audio/flac",
   "audio/x-flac",
 ])
-const SESSION_HISTORY_REFRESH_DELAYS_MS = [500, 1800] as const
-
-
 function preferredRecorderMimeType(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined
   const candidates = [
@@ -165,45 +167,6 @@ function resolveChatInputDisabledReason({
   return null
 }
 
-function normalizePreview(value: string): string {
-  return value.trim().replace(/\s+/g, " ")
-}
-
-function truncatePreview(value: string, maxLength: number): string {
-  const preview = normalizePreview(value)
-  if (preview.length <= maxLength) {
-    return preview
-  }
-  return `${preview.slice(0, Math.max(0, maxLength - 3))}...`
-}
-
-function timestampToIso(timestamp: ChatMessage["timestamp"] | undefined) {
-  if (timestamp === undefined) {
-    return new Date().toISOString()
-  }
-
-  if (typeof timestamp === "number") {
-    const millis = timestamp < 1e12 ? timestamp * 1000 : timestamp
-    const date = new Date(millis)
-    return Number.isNaN(date.getTime())
-      ? new Date().toISOString()
-      : date.toISOString()
-  }
-
-  const trimmed = timestamp.trim()
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    const numeric = Number(trimmed)
-    if (Number.isFinite(numeric)) {
-      return timestampToIso(numeric)
-    }
-  }
-
-  const date = new Date(trimmed)
-  return Number.isNaN(date.getTime())
-    ? new Date().toISOString()
-    : date.toISOString()
-}
-
 // eslint-disable-next-line react-refresh/only-export-components -- kept exported for deterministic status tests
 export function buildStatusPills({
   connectionState,
@@ -243,78 +206,6 @@ export function buildStatusPills({
   ]
 }
 
-function buildActiveSessionProjection({
-  activeSessionId,
-  fallbackSummary,
-  messages,
-}: {
-  activeSessionId: string
-  fallbackSummary: {
-    attachment: string
-    empty: string
-  }
-  messages: ChatMessage[]
-}): SessionSummary | null {
-  if (!activeSessionId || messages.length === 0) {
-    return null
-  }
-
-  const firstVisibleMessage =
-    messages.find(
-      (message) => message.role === "user" && normalizePreview(message.content),
-    ) ?? messages.find((message) => normalizePreview(message.content))
-  const hasAttachment = messages.some(
-    (message) => (message.attachments?.length ?? 0) > 0,
-  )
-  const summaryText =
-    normalizePreview(firstVisibleMessage?.content ?? "") ||
-    (hasAttachment ? fallbackSummary.attachment : fallbackSummary.empty)
-  const firstMessage = messages[0]
-  const lastMessage = messages[messages.length - 1]
-
-  return {
-    id: activeSessionId,
-    title: truncatePreview(summaryText, 72),
-    preview: truncatePreview(summaryText, 120),
-    message_count: messages.length,
-    created: timestampToIso(firstMessage?.timestamp),
-    updated: timestampToIso(lastMessage?.timestamp),
-  }
-}
-
-function mergeActiveSessionProjection(
-  sessions: SessionSummary[],
-  projection: SessionSummary | null,
-): SessionSummary[] {
-  if (!projection) {
-    return sessions
-  }
-
-  const existingIndex = sessions.findIndex(
-    (session) => session.id === projection.id,
-  )
-  if (existingIndex === -1) {
-    return [projection, ...sessions]
-  }
-
-  const existingSession = sessions[existingIndex]
-  const projectedSession: SessionSummary = {
-    ...existingSession,
-    title: normalizePreview(existingSession.title)
-      ? existingSession.title
-      : projection.title,
-    preview: projection.preview,
-    message_count: Math.max(
-      existingSession.message_count,
-      projection.message_count,
-    ),
-    updated: projection.updated,
-  }
-  const nextSessions = [...sessions]
-  nextSessions[existingIndex] = projectedSession
-  return nextSessions
-}
-
 export function ChatPage() {
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -328,8 +219,8 @@ export function ChatPage() {
   const recorderMaxTimerRef = useRef<number | null>(null)
   const isAtBottomRef = useRef(true)
   const scrollFrameRef = useRef<number | null>(null)
-  const historyRefreshTimersRef = useRef<number[]>([])
-  const lastHistoryRefreshKeyRef = useRef("")
+  const scrollAnchorRef = useRef<ChatMessageAnchor | null>(null)
+  const [isFollowingLatest, setIsFollowingLatest] = useState(true)
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false)
@@ -338,7 +229,7 @@ export function ChatPage() {
   >("idle")
   const [voiceElapsedMs, setVoiceElapsedMs] = useState(0)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
-  const hasLoadedSessionsRef = useRef(false)
+  const [autonomyStatus, setAutonomyStatus] = useState<AutonomyStatus | null>(null)
   const isMobile = useIsMobile()
 
   const {
@@ -351,10 +242,7 @@ export function ChatPage() {
     sendMessage,
     deleteMessage,
     editMessage,
-    forkFromMessage,
     retryMessage,
-    switchSession,
-    newChat,
   } = useMikiChat()
   const monitorState = useAtomValue(monitorAtom)
   const setChatInspector = useSetAtom(chatInspectorAtom)
@@ -385,74 +273,42 @@ export function ChatPage() {
     [messages],
   )
 
-  const {
-    sessions,
-    hasMore: hasMoreSessions,
-    loadError: sessionHistoryLoadError,
-    loadErrorMessage: sessionHistoryLoadErrorMessage,
-    observerRef: sessionHistoryObserverRef,
-    loadSessions,
-    handleDeleteSession,
-  } = useSessionHistory({
-    activeSessionId,
-    onDeletedActiveSession: () => {
-      void newChat()
-    },
-  })
-
-  useEffect(() => {
-    if (hasLoadedSessionsRef.current) return
-
-    hasLoadedSessionsRef.current = true
-    void loadSessions(true)
-  }, [loadSessions])
-
-  useEffect(
-    () => () => {
-      historyRefreshTimersRef.current.forEach((timerId) =>
-        window.clearTimeout(timerId),
-      )
-      historyRefreshTimersRef.current = []
-    },
-    [],
-  )
-
-  const scheduleSessionHistoryRefresh = useCallback(() => {
-    historyRefreshTimersRef.current.forEach((timerId) =>
-      window.clearTimeout(timerId),
-    )
-    historyRefreshTimersRef.current = []
-
-    for (const delayMs of SESSION_HISTORY_REFRESH_DELAYS_MS) {
-      const timerId = window.setTimeout(() => {
-        historyRefreshTimersRef.current =
-          historyRefreshTimersRef.current.filter((id) => id !== timerId)
-        void loadSessions(true)
-      }, delayMs)
-      historyRefreshTimersRef.current.push(timerId)
-    }
-  }, [loadSessions])
-
-  useEffect(() => {
-    if (!activeSessionId || messages.length === 0) {
-      lastHistoryRefreshKeyRef.current = ""
-      return
-    }
-
-    const historyRefreshKey = `${activeSessionId}:${messages.length}`
-    if (lastHistoryRefreshKeyRef.current === historyRefreshKey) {
-      return
-    }
-
-    lastHistoryRefreshKeyRef.current = historyRefreshKey
-    scheduleSessionHistoryRefresh()
-  }, [activeSessionId, messages.length, scheduleSessionHistoryRefresh])
-
   const { state: gwState } = useGateway()
   const isGatewayRunning = gwState === "running"
 
+  // Foreground chat owns `isTyping`, but autonomous ambient/goal runs have no
+  // user message to drive that state. Poll the live autonomy endpoint so the
+  // top-bar loader also proves self-started work is happening.
+  useEffect(() => {
+    let cancelled = false
+    const loadAutonomyStatus = async () => {
+      try {
+        const next = await getAutonomyStatus()
+        if (!cancelled) setAutonomyStatus(next)
+      } catch {
+        // Preserve the last known state through transient status failures.
+      }
+    }
+    void loadAutonomyStatus()
+    const timer = window.setInterval(() => void loadAutonomyStatus(), 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  const autonomousWorking = Boolean(
+    autonomyStatus?.proactive_loop?.ambient_in_flight ||
+      autonomyStatus?.in_flight ||
+      autonomyStatus?.running_goals?.some(
+        (goal) => goal.status === "active" || goal.status === "running",
+      ),
+  )
+  const isMikiWorking = isTyping || autonomousWorking
+
   const {
     defaultModelName,
+    defaultModelIndex,
     defaultModelId,
     hasAvailableModels,
     hasAnyModels,
@@ -495,6 +351,7 @@ export function ChatPage() {
           sent = await sendMessage({
             content: transcript,
             requestedModel: defaultModelId,
+            requestedModelIndex: defaultModelIndex ? Number(defaultModelIndex) : undefined,
             voice: {
               source,
               provider: result.provider,
@@ -510,6 +367,7 @@ export function ChatPage() {
           sent = await sendMessage({
             content: "",
             requestedModel: defaultModelId,
+            requestedModelIndex: defaultModelIndex ? Number(defaultModelIndex) : undefined,
             voice: {
               source,
               provider: "cloud",
@@ -543,7 +401,7 @@ export function ChatPage() {
         setVoiceElapsedMs(0)
       }
     },
-    [defaultModelId, sendMessage, t],
+    [defaultModelId, defaultModelIndex, sendMessage, t],
   )
 
   const handleStopVoice = useCallback(() => {
@@ -735,18 +593,35 @@ export function ChatPage() {
 
   const syncScrollState = useCallback((element: HTMLDivElement) => {
     const { clientHeight, scrollHeight, scrollTop } = element
-    isAtBottomRef.current = scrollHeight - scrollTop <= clientHeight + 10
+    const nearBottom = isNearChatScrollBottom({
+      scrollHeight,
+      scrollTop,
+      clientHeight,
+    })
+    isAtBottomRef.current = nearBottom
+    setIsFollowingLatest((current) =>
+      current === nearBottom ? current : nearBottom,
+    )
+    scrollAnchorRef.current = captureChatMessageAnchor(element)
+  }, [])
+
+  const scrollToLatest = useCallback(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    // Sending a new message explicitly re-enters follow mode. Subsequent stream
+    // growth follows only while the user remains near the bottom.
+    isAtBottomRef.current = true
+    setIsFollowingLatest(true)
+    element.scrollTo({ top: element.scrollHeight, behavior: "auto" })
+    scrollAnchorRef.current = captureChatMessageAnchor(element)
   }, [])
 
   const handleScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
-      const element = event.currentTarget
-      if (scrollFrameRef.current !== null) return
-
-      scrollFrameRef.current = window.requestAnimationFrame(() => {
-        scrollFrameRef.current = null
-        syncScrollState(element)
-      })
+      // Read user intent synchronously so a simultaneous streaming resize cannot
+      // pull the viewport down before the next animation frame.
+      syncScrollState(event.currentTarget)
     },
     [syncScrollState],
   )
@@ -760,19 +635,80 @@ export function ChatPage() {
     [],
   )
 
+  // Keep the viewport pinned while content grows (streaming Markdown, lazy
+  // message rendering, images and attachments), but never override a user's
+  // deliberate scroll away from the latest message.
   useEffect(() => {
-    if (scrollRef.current) {
-      if (messages.length === 0 && !isTyping) {
-        syncScrollState(scrollRef.current)
-        return
-      }
+    const viewport = scrollRef.current
+    const content = viewport?.firstElementChild
+    if (!viewport || !content || typeof ResizeObserver === "undefined") return
 
-      if (isAtBottomRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
-      syncScrollState(scrollRef.current)
+    const observer = new ResizeObserver(() => {
+      if (scrollFrameRef.current !== null) return
+      scrollFrameRef.current = window.requestAnimationFrame(() => {
+        scrollFrameRef.current = null
+        if (isAtBottomRef.current) {
+          viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" })
+        } else if (scrollAnchorRef.current) {
+          // Preserve the reader's current message when content above it grows
+          // or older history is revealed. Growth below it leaves scrollTop alone.
+          restoreChatMessageAnchor(viewport, scrollAnchorRef.current)
+        }
+        syncScrollState(viewport)
+      })
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [syncScrollState])
+
+  const previousTailMessageIdRef = useRef<string | null>(
+    messages[messages.length - 1]?.id ?? null,
+  )
+  const previousMessageCountRef = useRef(messages.length)
+  const previousSessionIdRef = useRef(activeSessionId)
+
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current
+    const tailMessage = messages[messages.length - 1]
+    const tailMessageId = tailMessage?.id ?? null
+    const sessionChanged = previousSessionIdRef.current !== activeSessionId
+    const appendedUserMessage =
+      !sessionChanged &&
+      tailMessage?.role === "user" &&
+      messages.length > previousMessageCountRef.current &&
+      tailMessageId !== previousTailMessageIdRef.current
+
+    previousSessionIdRef.current = activeSessionId
+    previousTailMessageIdRef.current = tailMessageId
+    previousMessageCountRef.current = messages.length
+
+    if (!viewport) return
+
+    if (sessionChanged) {
+      isAtBottomRef.current = true
+      scrollAnchorRef.current = null
+      setIsFollowingLatest(true)
+      if (hasHydratedActiveSession) scrollToLatest()
+      return
     }
-  }, [messages, isTyping, syncScrollState])
+
+    if (appendedUserMessage) {
+      // A newly sent user message must be visible even if the user had been
+      // reading older history. Following remains enabled until they scroll up.
+      scrollToLatest()
+      return
+    }
+
+    if (isAtBottomRef.current && (messages.length > 0 || isTyping)) {
+      scrollToLatest()
+    }
+  }, [
+    activeSessionId,
+    hasHydratedActiveSession,
+    isTyping,
+    messages,
+    scrollToLatest,
+  ])
 
   const handleSend = async () => {
     if (
@@ -812,6 +748,7 @@ export function ChatPage() {
         content: input,
         attachments,
         requestedModel: defaultModelId,
+        requestedModelIndex: defaultModelIndex ? Number(defaultModelIndex) : undefined,
       })
     ) {
       setInput("")
@@ -962,36 +899,6 @@ export function ChatPage() {
     !isUploadingAttachments &&
     (canInput || isEditingMessage) &&
     (Boolean(input.trim()) || attachments.length > 0)
-  const activeSessionProjection = useMemo(
-    () =>
-      buildActiveSessionProjection({
-        activeSessionId,
-        fallbackSummary: {
-          attachment: t("chat.workspace.attachmentConversation"),
-          empty: t("chat.workspace.newConversation"),
-        },
-        messages,
-      }),
-    [activeSessionId, messages, t],
-  )
-  const displaySessions = useMemo(
-    () => mergeActiveSessionProjection(sessions, activeSessionProjection),
-    [activeSessionProjection, sessions],
-  )
-  const handleForkMessage = useCallback(
-    async (messageId: string) => {
-      if (!(await forkFromMessage(messageId))) {
-        notify.error(
-          t("chat.actions.forkUnavailable", {
-            defaultValue: "Unable to fork this conversation",
-          }),
-          { id: `chat:fork-unavailable:${messageId}` },
-        )
-      }
-    },
-    [forkFromMessage, t],
-  )
-
   const handleInspectMessage = useCallback(
     (messageId: string) => {
       if (!activeSessionId) return
@@ -1010,22 +917,6 @@ export function ChatPage() {
 
   const headerControls = (
     <div className="flex items-center gap-2">
-      <SessionHistoryMenu
-        sessions={displaySessions}
-        activeSessionId={activeSessionId}
-        hasMore={hasMoreSessions}
-        loadError={sessionHistoryLoadError}
-        loadErrorMessage={sessionHistoryLoadErrorMessage}
-        observerRef={sessionHistoryObserverRef}
-        onOpenChange={(open) => {
-          if (open) void loadSessions(true)
-        }}
-        onSwitchSession={(sessionId) => {
-          void switchSession(sessionId)
-        }}
-        onDeleteSession={handleDeleteSession}
-        compact={isMobile}
-      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -1100,6 +991,7 @@ export function ChatPage() {
       {(hasAvailableModels || hasAnyModels) && (
         <ModelSelector
           defaultModelName={defaultModelName}
+          defaultModelIndex={defaultModelIndex}
           apiKeyModels={apiKeyModels}
           oauthModels={oauthModels}
           localModels={localModels}
@@ -1119,7 +1011,14 @@ export function ChatPage() {
             title="Miki"
             statuses={[]}
             controls={headerControls}
-            isWorking={isTyping}
+            isWorking={isMikiWorking}
+            workingLabel={
+              autonomousWorking && !isTyping
+                ? t("chat.autonomousWorking", {
+                    defaultValue: "Miki is working autonomously",
+                  })
+                : t("chat.agentWorking", { defaultValue: "Miki is working" })
+            }
           />
         }
 
@@ -1133,13 +1032,14 @@ export function ChatPage() {
                 isGatewayRunning={isGatewayRunning}
                 hasAvailableModels={hasAvailableModels}
                 defaultModelName={defaultModelName}
-                connectionState={connectionState}
                 retryableMessageIds={retryableMessageIds}
+                sessionId={activeSessionId}
                 scrollRef={scrollRef}
                 onScroll={handleScroll}
+                isFollowingLatest={isFollowingLatest}
+                onJumpToLatest={scrollToLatest}
                 onEditMessage={handleEditMessage}
                 onDeleteMessage={deleteMessage}
-                onForkMessage={handleForkMessage}
                 onRetryMessage={handleRetryMessage}
                 onInspectMessage={handleInspectMessage}
               />

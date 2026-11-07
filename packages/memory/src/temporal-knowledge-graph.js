@@ -649,7 +649,9 @@ class TemporalKnowledgeGraph {
           summary: eventData.summary || null,
           sourceType: eventData.source || 'system',
           sourceReference: eventData.messageId || eventData.runId || eventData.taskId || eventId,
-          provenance: eventData.source || 'conversation',
+          provenance: eventData.source === 'user' && eventData.metadata?.trust === 'owner'
+            ? 'owner'
+            : (eventData.source === 'agent' ? 'agent' : 'untrusted'),
           confidence: typeof eventData.confidence === 'number' ? eventData.confidence : 0.7,
           importance,
           createdAt: now,

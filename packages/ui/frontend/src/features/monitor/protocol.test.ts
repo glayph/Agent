@@ -1,16 +1,22 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { mikiMessage } from "@/features/chat/protocol"
 
-import { handleMonitorMessage } from "./protocol"
-import { getMonitorState, resetMonitorStore } from "./store"
+import { handleMonitorMessage, resetMonitorProtocolLifecycle } from "./protocol"
+import { getMonitorState, hydrateMonitorHistory, resetMonitorStore } from "./store"
 
 function msg(type: string, payload: Record<string, unknown>): mikiMessage {
   return { type, payload }
 }
 
 beforeEach(() => {
+  resetMonitorProtocolLifecycle()
   resetMonitorStore()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  resetMonitorProtocolLifecycle()
 })
 
 describe("handleMonitorMessage: node.run_start", () => {
@@ -101,8 +107,8 @@ describe("handleMonitorMessage: node.spawn", () => {
     const { nodes } = getMonitorState()
     expect(nodes["n1"].type).toBe("skill")
     expect(nodes["n2"].type).toBe("file")
-    expect(nodes["n3"].type).toBe("command")
-    expect(nodes["n4"].type).toBe("tool")
+    expect(nodes["n3"].type).toBe("terminal")
+    expect(nodes["n4"].type).toBe("search")
   })
 
   it("defaults an unlabeled node to the literal string 'unknown'", () => {
@@ -127,64 +133,60 @@ describe("handleMonitorMessage: node.spawn", () => {
     expect(getMonitorState().nodeOrder).toEqual(["n1"])
   })
 
-  it("connects a level>0 node to every node in the previous level of the same run", () => {
-    handleMonitorMessage(
-      msg("node.spawn", {
-        run_id: "run-1",
-        node_id: "a",
-        label: "tool_a",
-        level: 0,
-      }),
-    )
-    handleMonitorMessage(
-      msg("node.spawn", {
-        run_id: "run-1",
-        node_id: "b",
-        label: "tool_b",
-        level: 0,
-      }),
-    )
-    handleMonitorMessage(
-      msg("node.spawn", {
-        run_id: "run-1",
-        node_id: "c",
-        label: "tool_c",
-        level: 1,
-      }),
-    )
+  it("connects nodes only to their explicit semantic parents, not every node in a prior level", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "run-1" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-1", node_id: "run-1:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-1", node_id: "run-1:a", label: "tool_a", parent_node_ids: ["run-1:root"], level: 0 }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-1", node_id: "run-1:b", label: "tool_b", parent_node_ids: ["run-1:root"], level: 0 }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-1", node_id: "run-1:c", label: "tool_c", parent_node_ids: ["run-1:a"], level: 1 }))
     const { edges } = getMonitorState()
-    expect(edges["a->c"]).toMatchObject({
-      source: "a",
-      target: "c",
-      runId: "run-1",
-      animated: true,
-    })
-    expect(edges["b->c"]).toMatchObject({
-      source: "b",
-      target: "c",
-      runId: "run-1",
-      animated: true,
-    })
+    expect(edges["run-1:a->run-1:c"]).toMatchObject({ source: "run-1:a", target: "run-1:c", runId: "run-1", animated: true })
+    expect(edges["run-1:b->run-1:c"]).toBeUndefined()
+    expect(edges["run-1:a->run-1:b"]).toBeUndefined()
+    expect(edges["run-1:root->run-1:a"]).toBeDefined()
+    expect(edges["run-1:root->run-1:b"]).toBeDefined()
   })
 
-  it("does not connect level>0 nodes across different runs", () => {
-    handleMonitorMessage(
-      msg("node.spawn", {
-        run_id: "run-1",
-        node_id: "a",
-        label: "tool_a",
-        level: 0,
-      }),
-    )
-    handleMonitorMessage(
-      msg("node.spawn", {
-        run_id: "run-2",
-        node_id: "c",
-        label: "tool_c",
-        level: 1,
-      }),
-    )
-    expect(getMonitorState().edges).toEqual({})
+  it("resolves a dependency when its parent node arrives later", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:child", label: "child_tool", parent_node_ids: ["r:parent"] }))
+    expect(getMonitorState().edges["r:parent->r:child"]).toBeUndefined()
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:parent", label: "parent_tool", parent_node_ids: ["r:root"] }))
+    expect(getMonitorState().edges["r:parent->r:child"]).toMatchObject({ source: "r:parent", target: "r:child" })
+  })
+
+  it("anchors a child to the run root when its declared parent never arrives, then replaces the fallback when it does", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:child", label: "browser_navigate", parent_node_ids: ["r:missing-plan-step"] }))
+
+    expect(getMonitorState().edges["r:root->r:child"]).toMatchObject({
+      source: "r:root", target: "r:child", displayOnly: true,
+    })
+
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:missing-plan-step", label: "Research", parent_node_ids: ["r:root"] }))
+    expect(getMonitorState().edges["r:missing-plan-step->r:child"]).toMatchObject({
+      source: "r:missing-plan-step", target: "r:child",
+    })
+    expect(getMonitorState().edges["r:root->r:child"]).toBeUndefined()
+  })
+
+  it("does not create cross-run dependency edges", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "run-1" }))
+    handleMonitorMessage(msg("node.run_start", { run_id: "run-2" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-1", node_id: "run-1:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-2", node_id: "run-2:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-1", node_id: "run-1:a", label: "tool_a", parent_node_ids: ["run-1:root"] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "run-2", node_id: "run-2:c", label: "tool_c", parent_node_ids: ["run-1:a"] }))
+    expect(getMonitorState().edges["run-1:a->run-2:c"]).toBeUndefined()
+    expect(getMonitorState().nodes["run-2:c"].parentNodeIds).toEqual(["run-2:root"])
+  })
+
+  it("uses trusted icon and display metadata supplied by the runtime", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "browser-1", label: "browser_navigate", node_type: "browser", icon_key: "browser", display_name: "Browser", tool_name: "browser_navigate" }))
+    expect(getMonitorState().nodes["browser-1"]).toMatchObject({ type: "browser", iconKey: "browser", displayName: "Browser", toolName: "browser_navigate" })
   })
 
   it("is ignored when run_id or node_id is missing", () => {
@@ -207,6 +209,17 @@ describe("handleMonitorMessage: node.update", () => {
     expect(node.attempt).toBe(2)
   })
 
+  it("animates incoming dependency edges when a pending tool starts", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:tool", label: "browser_navigate", status: "pending", parent_node_ids: ["r:root"] }))
+    expect(getMonitorState().edges["r:root->r:tool"].animated).toBe(false)
+    handleMonitorMessage(msg("node.update", { run_id: "r", node_id: "r:tool", status: "running" }))
+    expect(getMonitorState().edges["r:root->r:tool"].animated).toBe(true)
+    handleMonitorMessage(msg("node.update", { run_id: "r", node_id: "r:tool", status: "completed" }))
+    expect(getMonitorState().edges["r:root->r:tool"].animated).toBe(false)
+  })
+
   it("is ignored for an unknown node", () => {
     handleMonitorMessage(
       msg("node.update", { node_id: "missing", status: "retrying" }),
@@ -217,84 +230,146 @@ describe("handleMonitorMessage: node.update", () => {
 
 describe("handleMonitorMessage: node.complete", () => {
   it("marks a successful node completed and stops incoming edge animation", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
     handleMonitorMessage(
       msg("node.spawn", {
         run_id: "r",
-        node_id: "a",
+        node_id: "r:a",
         label: "tool_a",
+        parent_node_ids: ["r:root"],
         level: 0,
       }),
     )
     handleMonitorMessage(
       msg("node.spawn", {
         run_id: "r",
-        node_id: "b",
+        node_id: "r:b",
         label: "tool_b",
+        parent_node_ids: ["r:a"],
         level: 1,
       }),
     )
     handleMonitorMessage(
       msg("node.complete", {
-        node_id: "b",
+        node_id: "r:b",
         ok: true,
         duration_ms: 120,
         result_message: "done",
       }),
     )
     const state = getMonitorState()
-    expect(state.nodes["b"]).toMatchObject({
+    expect(state.nodes["r:b"]).toMatchObject({
       status: "completed",
       durationMs: 120,
       resultMessage: "done",
     })
-    expect(state.nodes["b"].error).toBeUndefined()
-    expect(state.edges["a->b"].animated).toBe(false)
+    expect(state.nodes["r:b"].error).toBeUndefined()
+    expect(state.edges["r:a->r:b"].animated).toBe(false)
   })
 
   it("marks a failed node failed, records an error, and stops its outgoing edges too", () => {
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
     handleMonitorMessage(
       msg("node.spawn", {
         run_id: "r",
-        node_id: "a",
+        node_id: "r:a",
         label: "tool_a",
+        parent_node_ids: ["r:root"],
         level: 0,
       }),
     )
     handleMonitorMessage(
       msg("node.spawn", {
         run_id: "r",
-        node_id: "b",
+        node_id: "r:b",
         label: "tool_b",
+        parent_node_ids: ["r:a"],
         level: 1,
       }),
     )
     handleMonitorMessage(
       msg("node.spawn", {
         run_id: "r",
-        node_id: "c",
+        node_id: "r:c",
         label: "tool_c",
+        parent_node_ids: ["r:b"],
         level: 2,
       }),
     )
     handleMonitorMessage(
       msg("node.complete", {
-        node_id: "b",
+        node_id: "r:b",
         ok: false,
         result_message: "permission denied",
       }),
     )
     const state = getMonitorState()
-    expect(state.nodes["b"].status).toBe("failed")
-    expect(state.nodes["b"].error).toBe("permission denied")
+    expect(state.nodes["r:b"].status).toBe("failed")
+    expect(state.nodes["r:b"].error).toBe("permission denied")
     // Incoming edge (a->b) stops because b settled.
-    expect(state.edges["a->b"].animated).toBe(false)
+    expect(state.edges["r:a->r:b"].animated).toBe(false)
     // Outgoing edge (b->c) also stops because b failed.
-    expect(state.edges["b->c"].animated).toBe(false)
+    expect(state.edges["r:b->r:c"].animated).toBe(false)
   })
 
   it("is ignored for an unknown node", () => {
     handleMonitorMessage(msg("node.complete", { node_id: "missing", ok: true }))
     expect(getMonitorState().nodes["missing"]).toBeUndefined()
+  })
+})
+
+describe("live graph lifecycle", () => {
+  it("removes completed nodes after the exit transition and reconnects active descendants", () => {
+    vi.useFakeTimers()
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:step", node_type: "workflow", label: "Plan step", parent_node_ids: ["r:root"] }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:tool", node_type: "browser", label: "browser_navigate", parent_node_ids: ["r:step"] }))
+    handleMonitorMessage(msg("node.complete", { run_id: "r", node_id: "r:step", ok: true }))
+    expect(getMonitorState().nodes["r:step"].status).toBe("completed")
+    vi.advanceTimersByTime(800)
+    expect(getMonitorState().nodes["r:step"]).toBeUndefined()
+    expect(getMonitorState().nodes["r:tool"]).toBeDefined()
+    expect(Object.values(getMonitorState().edges)).toContainEqual(expect.objectContaining({ source: "r:root", target: "r:tool", displayOnly: true }))
+  })
+
+  it("clears the entire live run after its completion transition", () => {
+    vi.useFakeTimers()
+    handleMonitorMessage(msg("node.run_start", { run_id: "r" }))
+    handleMonitorMessage(msg("node.spawn", { run_id: "r", node_id: "r:root", node_type: "goal", label: "Goal", parent_node_ids: [] }))
+    handleMonitorMessage(msg("node.run_end", { run_id: "r", status: "completed" }))
+    expect(getMonitorState().nodes["r:root"]).toMatchObject({ status: "completed" })
+    expect(Object.values(getMonitorState().edges).every((edge) => !edge.animated)).toBe(true)
+    vi.advanceTimersByTime(60_000)
+    expect(getMonitorState().runs.r).toBeUndefined()
+    expect(getMonitorState().nodes).toEqual({})
+    expect(getMonitorState().edges).toEqual({})
+  })
+
+  it("restores only running runs and contracts completed intermediate nodes", () => {
+    hydrateMonitorHistory({
+      runs: [
+        { id: "active", status: "running", startedAt: 1 },
+        { id: "done", status: "completed", startedAt: 2 },
+      ],
+      nodes: [
+        { id: "active:root", runId: "active", type: "goal", label: "Goal", status: "running", level: 0, parallel: false, createdAt: 1, updatedAt: 1 },
+        { id: "active:step", runId: "active", type: "workflow", label: "Step", status: "completed", level: 1, parallel: false, createdAt: 2, updatedAt: 2 },
+        { id: "active:tool", runId: "active", type: "browser", label: "Browser", status: "running", level: 2, parallel: false, createdAt: 3, updatedAt: 3 },
+        { id: "done:root", runId: "done", type: "goal", label: "Goal", status: "running", level: 0, parallel: false, createdAt: 1, updatedAt: 1 },
+      ],
+      edges: [
+        { id: "active:root->active:step", runId: "active", source: "active:root", target: "active:step" },
+        { id: "active:step->active:tool", runId: "active", source: "active:step", target: "active:tool" },
+      ],
+    })
+    const state = getMonitorState()
+    expect(state.runs.done).toBeUndefined()
+    expect(state.nodes["active:step"]).toBeUndefined()
+    expect(state.nodes["active:tool"]).toBeDefined()
+    expect(state.edges["active:root->active:tool"]).toMatchObject({ source: "active:root", target: "active:tool", displayOnly: true })
   })
 })
 

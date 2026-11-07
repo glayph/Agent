@@ -49,6 +49,38 @@ export interface TokenCountableMessage {
   name?: string;
 }
 
+/** Code points above this value are treated as non-Latin (Bengali, Devanagari, CJK, emoji, ...). */
+const LATIN_CODE_POINT_LIMIT = 0x024f;
+
+interface ScriptCounts {
+  codePoints: number;
+  nonLatin: number;
+}
+
+function countScripts(text: string): ScriptCounts {
+  let codePoints = 0;
+  let nonLatin = 0;
+  for (const ch of text) {
+    codePoints += 1;
+    if ((ch.codePointAt(0) ?? 0) > LATIN_CODE_POINT_LIMIT) nonLatin += 1;
+  }
+  return { codePoints, nonLatin };
+}
+
+/**
+ * Characters per token for a piece of text, between 1 and 4.
+ * Latin text is about 4 characters per token. Bengali and other non-Latin scripts cost about one
+ * token per character, so the value falls toward 1 as the non-Latin share grows. This is the single
+ * conversion used for every token <-> character budget in the runtime.
+ */
+export function charsPerToken(text: string): number {
+  if (!text) return 4;
+  const { codePoints, nonLatin } = countScripts(text);
+  if (codePoints === 0) return 4;
+  const tokens = nonLatin + (codePoints - nonLatin) / 4;
+  return Math.min(4, Math.max(1, codePoints / tokens));
+}
+
 export class TokenBudgetManager {
   private modelProfiles: Map<string, ModelProfile> = new Map([
     [
@@ -82,28 +114,13 @@ export class TokenBudgetManager {
     ],
   ]);
 
-  private complexityKeywords = {
-    simple: ["count", "list", "what is", "define", "lookup", "fetch", "get"],
-    complex: [
-      "analyze",
-      "reason",
-      "compare",
-      "debug",
-      "design",
-      "optimize",
-      "improve",
-      "refactor",
-      "explain how",
-      "system prompt",
-      "context",
-      "mcp",
-    ],
-  };
-
   estimateTokenCount(text = ""): number {
     if (!text) return 0;
     const words = text.trim().split(/\s+/).filter(Boolean).length;
-    const charEstimate = Math.ceil(text.length / 4);
+    // Latin text is about 4 characters per token. Bengali and other non-Latin scripts cost about one
+    // token per character or more, so they are counted per character instead of being under-counted.
+    const { codePoints, nonLatin } = countScripts(text);
+    const charEstimate = Math.ceil((codePoints - nonLatin) / 4) + nonLatin;
     return Math.max(words, charEstimate);
   }
 
@@ -184,40 +201,27 @@ export class TokenBudgetManager {
     query: string,
     context: string = "",
   ): TaskComplexity {
-    const text = (query + " " + context).toLowerCase();
+    const normalizedQuery = query.trim();
+    const queryTokens = this.estimateTokenCount(normalizedQuery);
+    const contextTokens = this.estimateTokenCount(context);
+    const nonEmptyLines = `${normalizedQuery}\n${context}`.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+    const questionCount = (normalizedQuery.match(/[?？]/g) || []).length;
+    const codeSignalCount = (context.match(/[{}()[\]<>;`]/g) || []).length;
     let score = 0;
 
-    // Complexity signals
-    for (const keyword of this.complexityKeywords.complex) {
-      if (text.includes(keyword)) {
-        score += 2;
-      }
-    }
-
-    for (const keyword of this.complexityKeywords.simple) {
-      if (text.includes(keyword)) {
-        score -= 1;
-      }
-    }
-
-    // Context length is a signal
-    if (context.length > 10000) score += 2;
-    else if (context.length > 5000) score += 1;
-
-    // Question complexity signals
-    const questionCount = (query.match(/\?/g) || []).length;
+    // Structural signals only: no task words or hard-coded natural-language keyword list.
+    if (contextTokens > 5_000) score += 2;
+    else if (contextTokens > 1_500) score += 1;
+    if (contextTokens > 5_000 && queryTokens > 8) score += 1;
+    if (queryTokens > 1_000) score += 2;
+    else if (queryTokens > 250) score += 1;
+    if (nonEmptyLines > 12) score += 2;
+    else if (nonEmptyLines > 4) score += 1;
     if (questionCount > 2) score += 1;
+    if (codeSignalCount > 80) score += 2;
+    else if (codeSignalCount > 20) score += 1;
 
-    // Multi-step indicators
-    if (
-      text.includes("first") ||
-      text.includes("then") ||
-      text.includes("after") ||
-      text.includes("step")
-    ) {
-      score += 1;
-    }
-
+    if (queryTokens <= 12 && contextTokens === 0 && questionCount <= 1) score -= 2;
     if (score >= 3) return "complex";
     if (score <= -1) return "simple";
     return "standard";

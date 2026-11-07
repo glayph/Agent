@@ -3,7 +3,7 @@ import { AutonomyReplanner } from "./autonomy-replanner.js";
 describe("AutonomyReplanner", () => {
   const replanner = new AutonomyReplanner();
 
-  it("classifies blocked attempts and forbids blindly repeating them", () => {
+  it("does not treat model-authored BLOCKED prose as a control signal", () => {
     const context = replanner.build({
       goalId: 7,
       goalTitle: "Publish report",
@@ -11,8 +11,8 @@ describe("AutonomyReplanner", () => {
       result: { status: "completed", finalText: "BLOCKED: publication requires approval.", error: undefined },
       now: "2026-01-01T00:00:00.000Z",
     });
-    expect(context.kind).toBe("blocked");
-    expect(context.instruction).toMatch(/Do not repeat/);
+    expect(context.kind).toBe("verification_failed");
+    expect(context.instruction).toMatch(/acceptance condition/i);
     expect(replanner.toPrompt(context)).toContain("REPLAN REQUIRED");
   });
 

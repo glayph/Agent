@@ -64,7 +64,7 @@ describe("config page form model", () => {
     expect(form.maxCompletionTokens).toBe("64000")
     expect(form.contextWindow).toBe("")
     expect(form.heartbeatEnabled).toBe(false)
-    expect(form.heartbeatInterval).toBe("30")
+    expect(form.heartbeatInterval).toBe("1800")
     expect(form.turnProfile).toMatchObject({
       enabled: true,
       historyMode: "off",

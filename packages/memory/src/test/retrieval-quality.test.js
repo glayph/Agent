@@ -15,6 +15,11 @@ function makeEngine(options = {}) {
   const db = new Database(path.join(dir, 'memory.db'));
   const engine = new SelectiveMemoryEngine(db, { candidateLimit: 64, maxSelected: 8, maxDepth: 2, maxTokens: 400, ...options });
   engine.initializeSync();
+  // Existing fixtures represent memories explicitly supplied by the owner.
+  const ingest = engine.ingest.bind(engine);
+  engine.ingest = (input = {}) => ingest({ provenance: 'owner', ...input });
+  const ingestParagraphs = engine.ingestParagraphs.bind(engine);
+  engine.ingestParagraphs = (input = {}) => ingestParagraphs({ provenance: 'owner', ...input });
   return { engine, db, dir };
 }
 
@@ -31,10 +36,43 @@ function test(name, fn) {
 test('tokenizer keeps Bengali words whole and strips common suffixes', () => {
   assert.deepStrictEqual(tokenize('মেমোরি সিস্টেম আপগ্রেড করো'), ['মেমোরি', 'সিস্টেম', 'আপগ্রেড']);
   assert.ok(tokenize('মেমোরিতে কী আছে?').includes('মেমোরি'));
+  assert.ok(tokenize('কেন মেমোরিতে কিছু নেই?').includes('কেন'));
+  assert.ok(tokenize('কেন মেমোরিতে কিছু নেই?').includes('নেই'));
+  assert.ok(tokenize('এটা কাজ করবে না').includes('না'));
+  assert.deepStrictEqual(tokenize('কীভাবে মেমোরিতে কাজ হয়'), tokenize('কিভাবে মেমোরিতে কাজ হয়'));
   assert.deepStrictEqual(tokenize('আমি Miki কে VirtualBox এর মধ্যে install করবো'), ['miki', 'virtualbox', 'install']);
   // Latin and accented text is unchanged.
   assert.deepStrictEqual(tokenize('memory system upgrade'), ['memory', 'system', 'upgrade']);
   assert.ok(tokenize('Café résumé').includes('café'));
+});
+
+test('stopword-only queries do not fan out to unrelated high-priority memories', () => {
+  const { engine, dir } = makeEngine();
+  try {
+    engine.ingest({ scope, region: 'long_term', content: 'A highly important project memory about deployment.', importance: 1, confidence: 1 });
+    const result = engine.retrieve('the and of for', { scope, maxSelected: 5 });
+    assert.strictEqual(result.items.length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('untrusted imported content cannot be retrieved or promoted by agent repetition', () => {
+  const { engine, db, dir } = makeEngine();
+  try {
+    const input = { scope, region: 'long_term', content: 'The recovery phrase is amber compass for the project.', sourceType: 'external_import' };
+    const imported = engine.ingest({ ...input, provenance: 'untrusted' });
+    assert.strictEqual(engine.retrieve('recovery phrase amber compass', { scope }).items.length, 0, 'external content stays untrusted by default');
+    const repeated = engine.ingest({ ...input, provenance: 'agent', sourceType: 'agent' });
+    assert.strictEqual(repeated.duplicate, true);
+    assert.strictEqual(db.prepare('SELECT provenance FROM memory_chunk_index WHERE id=?').get(imported.chunkId).provenance, 'untrusted');
+    assert.strictEqual(engine.retrieve('recovery phrase amber compass', { scope }).items.length, 0, 'agent repetition cannot establish owner trust');
+    engine.ingest({ ...input, provenance: 'owner', sourceType: 'user' });
+    assert.strictEqual(db.prepare('SELECT provenance FROM memory_chunk_index WHERE id=?').get(imported.chunkId).provenance, 'owner');
+    assert.ok(engine.retrieve('recovery phrase amber compass', { scope }).items.length > 0, 'explicit owner approval promotes the record');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Bengali memories are recalled, including inflected forms of the same word', () => {
@@ -50,6 +88,11 @@ test('Bengali memories are recalled, including inflected forms of the same word'
     const inflected = engine.retrieve('মেমোরিতে কী পরিবর্তন হবে?', { scope });
     assert.ok(inflected.items.some((item) => item.text.includes('গ্রাফ')), 'inflected form should still match');
     assert.ok(!inflected.items.some((item) => item.text.includes('আবহাওয়া')), 'unrelated Bengali memory must not be recalled');
+    const short = engine.retrieve('কোডনেম', { scope });
+    assert.ok(short.items.some((item) => item.text.includes('ফ্যালকন')), 'short Bengali topic query should recall its memory');
+    assert.ok(!short.items.some((item) => item.text.includes('আবহাওয়া')), 'short query must still filter unrelated records');
+    const mixed = engine.retrieve('VirtualBox এর কোডনেম', { scope });
+    assert.ok(mixed.items.some((item) => item.text.includes('ফ্যালকন')), 'mixed Bengali and English query should recall relevant memory');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

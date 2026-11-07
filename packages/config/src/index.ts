@@ -91,7 +91,7 @@ export interface LLMResponse {
     total_tokens?: number;
   };
   choices?: Array<{
-    message?: { content?: string; role?: string; tool_calls?: unknown[] };
+    message?: { content?: string; role?: string; tool_calls?: unknown[]; extra_content?: Record<string, unknown> };
     finish_reason?: string;
   }>;
 }
@@ -459,3 +459,5 @@ export default settings;
 export * from "./channel-meta.js";
 
 export * from "./channel-secrets.js";
+
+export * from "./chat-limits.js";

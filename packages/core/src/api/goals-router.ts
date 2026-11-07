@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { Router } from "express";
 
 import { getErrorMessage } from "../errors.js";
-import type { GoalAcceptanceContract } from "../autonomy/goal-acceptance.js";
+import { isGoalAcceptanceContract, type GoalAcceptanceContract } from "../autonomy/goal-acceptance.js";
 import type { EngineTool } from "../engine/types.js";
 
 type GoalStatus = "pending" | "active" | "completed" | "blocked" | "cancelled";
@@ -20,6 +20,28 @@ const DEFAULT_STEPS = [
   "Verify the result",
   "Report the outcome",
 ];
+
+/** Validate a goal contract at the boundary where an owner or agent creates/updates a goal. */
+export function normalizeGoalAcceptance(
+  value: unknown,
+  required: boolean,
+): GoalAcceptanceContract | null {
+  if (value === undefined || value === null) {
+    if (required) {
+      throw new Error("A valid acceptance contract is required. Include at least one independent evidence check (file_exists, file_contains, http_status, or tool_called with status='succeeded').");
+    }
+    return null;
+  }
+  if (!isGoalAcceptanceContract(value)) {
+    throw new Error("acceptance must contain valid deterministic checks and at least one independent evidence check (file_exists, file_contains, http_status, or tool_called with status='succeeded').");
+  }
+  return value;
+}
+
+export interface GoalAcceptancePolicy {
+  /** Defaults to true, matching AutonomousSupervisor's fail-closed default. */
+  requireAcceptanceContract?: () => boolean;
+}
 
 interface GoalDbRow {
   id: number;
@@ -162,6 +184,7 @@ export class GoalStore {
       priority?: number;
       context?: Record<string, unknown> | null;
       steps?: string[];
+      acceptance?: GoalAcceptanceContract | null;
     },
   ): GoalDbRow | undefined {
     const current = this.get(id);
@@ -183,7 +206,7 @@ export class GoalStore {
       .prepare(
         `UPDATE pursue_goals
             SET title = ?, description = ?, priority = ?, status = ?, status_reason = ?, progress = ?, total_steps = ?,
-                completed_steps = ?, context = ?, steps = ?, updated_at = ?, last_pursued_at = ?
+                completed_steps = ?, context = ?, steps = ?, acceptance_contract = ?, updated_at = ?, last_pursued_at = ?
           WHERE id = ?`,
       )
       .run(
@@ -197,6 +220,7 @@ export class GoalStore {
         completed,
         patch.context === undefined ? current.context : (patch.context ? JSON.stringify(patch.context) : null),
         JSON.stringify(steps),
+        patch.acceptance === undefined ? current.acceptance_contract : (patch.acceptance ? JSON.stringify(patch.acceptance) : null),
         now,
         now,
         id,
@@ -281,7 +305,7 @@ function snapshot(store: GoalStore) {
 }
 
 /** Tool adapters for normal agent runs. Autonomous runs deliberately need an explicit policy grant before mutating goals. */
-export function createGoalTools(store: GoalStore): EngineTool[] {
+export function createGoalTools(store: GoalStore, policy: GoalAcceptancePolicy = {}): EngineTool[] {
   const parseContext = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
   const parseSteps = (value: unknown): string[] =>
@@ -289,7 +313,7 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
   return [
     {
       name: "goal_create",
-      description: "Create a persistent pursue goal. Complex objectives remain active across turns until completed, blocked, cancelled, or replaced.",
+      description: "Create a persistent pursue goal. The acceptance object is required by default and must be deterministic: {mode:'all'|'any',checks:[{type:'file_exists',path:'...'}|{type:'file_contains',path:'...',text:'...'}|{type:'http_status',url:'...',expected_status:200}|{type:'tool_called',name:'...',status:'succeeded'}]}. Include at least one independent evidence check; a generic metric, prose criterion, or empty checks array is invalid. Complex objectives remain active across turns until completed, blocked, cancelled, or replaced.",
       risk: "config_write",
       approval: "required",
       parameters: {
@@ -301,17 +325,32 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
           steps: { type: "array", items: { type: "string" }, maxItems: 50 },
           replace_existing: { type: "boolean" },
           context: { type: "object" },
-          acceptance: { type: "object" },
+          acceptance: {
+            type: "object",
+            required: ["checks"],
+            properties: {
+              mode: { type: "string", enum: ["all", "any"] },
+              checks: {
+                type: "array", minItems: 1,
+                items: {
+                  type: "object", required: ["type"], additionalProperties: false,
+                  properties: {
+                    type: { type: "string", enum: ["file_exists", "file_contains", "http_status", "tool_called", "final_text_contains"] },
+                    path: { type: "string" }, url: { type: "string" }, text: { type: "string" }, name: { type: "string" },
+                    status: { type: "string", enum: ["succeeded"] }, expectedStatus: { type: "integer" },
+                  },
+                },
+              },
+            },
+          },
         },
-        required: ["objective"],
+        required: policy.requireAcceptanceContract?.() === false ? ["objective"] : ["objective", "acceptance"],
         additionalProperties: false,
       },
       async execute(input) {
         const objective = typeof input.objective === "string" ? input.objective.trim() : "";
         if (!objective) throw new Error("objective is required");
-        const acceptance = input.acceptance && typeof input.acceptance === "object" && !Array.isArray(input.acceptance)
-          ? input.acceptance as GoalAcceptanceContract
-          : null;
+        const acceptance = normalizeGoalAcceptance(input.acceptance, policy.requireAcceptanceContract?.() ?? true);
         const steps = parseSteps(input.steps);
         return store.create({
           title: objective,
@@ -338,7 +377,7 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
     },
     {
       name: "goal_update",
-      description: "Update a persistent goal's objective, priority, progress, plan, context, or lifecycle status.",
+      description: "Update a persistent goal's objective, priority, progress, plan, context, acceptance contract, or lifecycle status. A blocked goal can be resumed by supplying a valid acceptance contract and setting status to pending.",
       risk: "config_write",
       approval: "required",
       parameters: {
@@ -355,6 +394,7 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
           total_steps: { type: "integer", minimum: 0 },
           steps: { type: "array", items: { type: "string" }, maxItems: 50 },
           context: { type: "object" },
+          acceptance: { type: "object" },
         },
         additionalProperties: false,
       },
@@ -363,6 +403,13 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
         if (!current) throw new Error("No matching pursue goal found.");
         const status = typeof input.status === "string" ? input.status as GoalStatus : undefined;
         if (status && !STATUSES.includes(status)) throw new Error("Invalid goal status.");
+        const contractRequired = policy.requireAcceptanceContract?.() ?? true;
+        const acceptanceValue = input.acceptance === undefined
+          ? current.acceptance_contract ? (() => { try { return JSON.parse(current.acceptance_contract) as unknown; } catch { return null; } })() : null
+          : input.acceptance;
+        if (contractRequired && (status === "pending" || status === "active")) {
+          normalizeGoalAcceptance(acceptanceValue, true);
+        }
         return store.update(current.id, {
           title: typeof input.objective === "string" ? input.objective.trim() : undefined,
           description: typeof input.description === "string" ? input.description.trim() : undefined,
@@ -374,6 +421,9 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
           totalSteps: typeof input.total_steps === "number" ? input.total_steps : undefined,
           steps: Array.isArray(input.steps) ? parseSteps(input.steps) : undefined,
           context: input.context === undefined ? undefined : parseContext(input.context),
+          acceptance: input.acceptance === undefined
+            ? undefined
+            : normalizeGoalAcceptance(input.acceptance, policy.requireAcceptanceContract?.() ?? true),
         });
       },
     },
@@ -385,7 +435,7 @@ export function createGoalTools(store: GoalStore): EngineTool[] {
  * POST  /goals       -> create goal, returns snapshot
  * PATCH /goals/:id   -> update goal, returns snapshot
  */
-export function createGoalsRouter(store: GoalStore): Router {
+export function createGoalsRouter(store: GoalStore, policy: GoalAcceptancePolicy = {}): Router {
   const router = Router();
 
   router.get("/", (_req, res) => {
@@ -410,14 +460,11 @@ export function createGoalsRouter(store: GoalStore): Router {
             .filter((s): s is string => typeof s === "string" && s.trim() !== "")
             .map((s) => s.trim())
         : [];
-      const acceptance =
-        body["acceptance"] &&
-        typeof body["acceptance"] === "object" &&
-        !Array.isArray(body["acceptance"])
-          ? (body["acceptance"] as GoalAcceptanceContract)
-          : null;
-      if (acceptance && (!Array.isArray(acceptance.checks) || acceptance.checks.length === 0)) {
-        res.status(400).json({ error: "acceptance.checks must contain at least one deterministic check" });
+      let acceptance: GoalAcceptanceContract | null;
+      try {
+        acceptance = normalizeGoalAcceptance(body["acceptance"], policy.requireAcceptanceContract?.() ?? true);
+      } catch (error) {
+        res.status(400).json({ error: getErrorMessage(error) });
         return;
       }
       const context = body["context"] && typeof body["context"] === "object" && !Array.isArray(body["context"])
@@ -449,6 +496,15 @@ export function createGoalsRouter(store: GoalStore): Router {
       }
       const body = (req.body ?? {}) as Record<string, unknown>;
       const status = body["status"];
+      let acceptance: GoalAcceptanceContract | null | undefined;
+      if (Object.prototype.hasOwnProperty.call(body, "acceptance")) {
+        try {
+          acceptance = normalizeGoalAcceptance(body["acceptance"], policy.requireAcceptanceContract?.() ?? true);
+        } catch (error) {
+          res.status(400).json({ error: getErrorMessage(error) });
+          return;
+        }
+      }
       if (
         status !== undefined &&
         !STATUSES.includes(status as GoalStatus)
@@ -458,12 +514,28 @@ export function createGoalsRouter(store: GoalStore): Router {
       }
       const num = (v: unknown) =>
         typeof v === "number" && Number.isFinite(v) ? v : undefined;
+      const existing = store.get(id);
+      if (!existing) {
+        res.status(404).json({ error: "goal not found" });
+        return;
+      }
+      if ((policy.requireAcceptanceContract?.() ?? true) && (status === "pending" || status === "active")) {
+        const existingContract = existing.acceptance_contract
+          ? (() => { try { return JSON.parse(existing.acceptance_contract) as unknown; } catch { return null; } })()
+          : null;
+        try { normalizeGoalAcceptance(acceptance === undefined ? existingContract : acceptance, true); }
+        catch (error) {
+          res.status(400).json({ error: getErrorMessage(error) });
+          return;
+        }
+      }
       const updated = store.update(id, {
         title: typeof body["objective"] === "string" ? body["objective"].trim() : undefined,
         description: typeof body["description"] === "string" ? body["description"] : undefined,
         priority: num(body["priority"]),
         context: body["context"] && typeof body["context"] === "object" && !Array.isArray(body["context"]) ? body["context"] as Record<string, unknown> : undefined,
         steps: Array.isArray(body["steps"]) ? (body["steps"] as unknown[]).filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim()) : undefined,
+        acceptance,
         status: status as GoalStatus | undefined,
         statusReason:
           typeof body["statusReason"] === "string"

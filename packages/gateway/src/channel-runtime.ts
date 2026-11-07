@@ -251,6 +251,8 @@ export class ChannelRuntimeManager {
             if (!dm.ok || !channelId) throw new Error("Discord DM channel request failed")
             await this.sendDiscord(settings.token, channelId, message)
           }
+          // Proof of delivery for the log: the send call above returned without throwing. No recipient or text is logged.
+          this.deps.log(`${name} proactive notice delivered.`)
         } catch {
           // Do not include exception text, recipient IDs, or message content in gateway logs.
           this.deps.log(`${name} proactive notice delivery failed; channel request was unsuccessful.`)

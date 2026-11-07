@@ -55,6 +55,30 @@ describe("MemoryWriter", () => {
     void content;
   });
 
+  it("replays trusted write observations when the index observer is attached after startup", () => {
+    const writer = new MemoryWriter(store, summarizer, hooks, () => DEFAULT_MEMORY_FILES_CONFIG);
+    writer.enqueue({ type: "daily_note", text: "owner run survived writer startup", source: "run", provenance: "agent" });
+    writer.drainSync();
+    const observed: Array<{ path: string; provenance: string }> = [];
+    writer.setWriteObserver((relPath, provenance) => observed.push({ path: relPath, provenance }));
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ provenance: "agent" });
+    expect(observed[0]?.path).toMatch(/^memory\//);
+  });
+
+
+  it("preserves the least-trusted provenance when observations are queued before index attachment", () => {
+    const writer = new MemoryWriter(store, summarizer, hooks, () => DEFAULT_MEMORY_FILES_CONFIG);
+    writer.enqueue({ type: "daily_note", text: "untrusted first write", source: "import", provenance: "untrusted" });
+    writer.enqueue({ type: "daily_note", text: "owner later append", source: "owner", provenance: "owner" });
+    writer.drainSync();
+    const observed: Array<{ path: string; provenance: string; hadExistingContent: boolean }> = [];
+    writer.setWriteObserver((relPath, provenance, hadExistingContent) => observed.push({ path: relPath, provenance, hadExistingContent }));
+    expect(observed).toHaveLength(1);
+    expect(observed[0]?.provenance).toBe("untrusted");
+    expect(observed[0]?.hadExistingContent).toBe(false);
+  });
+
   it("a failing task job is caught, counted, and does not stop later jobs", async () => {
     const writer = new MemoryWriter(store, summarizer, hooks, () => DEFAULT_MEMORY_FILES_CONFIG);
     writer.enqueue({

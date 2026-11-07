@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, mayBeFollowUpFeedback, parseFollowUpClassification, preferenceNote, previousAnswerFor, requestContextHash } from "./answer-feedback.js";
+import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, mayBeFollowUpFeedback, parseFollowUpClassification, preferenceNote, previousAnswerFor, requestContextHash, isDurablePreferenceFeedback } from "./answer-feedback.js";
 
 function chatDb() {
   const db = new Database(":memory:");
@@ -109,8 +109,8 @@ describe("follow-up feedback gate", () => {
     }
   });
 
-  it("skips ordinary new requests, empty text and over-long text", () => {
-    expect(mayBeFollowUpFeedback("Summarise the quarterly report for Q3")).toBe(false);
+  it("no longer uses wording lists: any ordinary message goes to the classifier, empty and over-long text is skipped", () => {
+    expect(mayBeFollowUpFeedback("Summarise the quarterly report for Q3")).toBe(true);
     expect(mayBeFollowUpFeedback("   ")).toBe(false);
     expect(mayBeFollowUpFeedback("wrong ".repeat(300))).toBe(false);
   });
@@ -147,3 +147,18 @@ describe("feedback rate limit (shared database)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+
+describe("durable preference feedback detection", () => {
+  it("recognizes explicit durable preferences in English and Bengali", () => {
+    for (const text of ["Please remember to answer in Bengali", "From now on, always use tables", "মনে রাখবে সবসময় বাংলায় উত্তর দেবে", "আমার পছন্দের ভাষা বাংলা", "ভবিষ্যতে এভাবে উত্তর দেবে"]) {
+      expect(isDurablePreferenceFeedback(text)).toBe(true)
+    }
+  })
+
+  it("does not treat ordinary corrections or new requests as durable preferences", () => {
+    for (const text of ["This answer is wrong", "Make this paragraph shorter", "ঢাকার আবহাওয়া বলো", "I want to visit Dhaka"]) {
+      expect(isDurablePreferenceFeedback(text)).toBe(false)
+    }
+  })
+})

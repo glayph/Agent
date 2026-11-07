@@ -25,6 +25,9 @@ export interface SearchHit {
   endLine: number;
   score: number;
   snippet: string;
+  provenance?: string;
+  sourceReference?: string;
+  timestamp?: string;
 }
 
 const TOKEN_RE = /[\p{L}\p{M}\p{N}]+/gu;
@@ -56,6 +59,12 @@ function chunkFile(rel: string, content: string, boost: number): Chunk[] {
     size = 0;
   };
   lines.forEach((line, i) => {
+    // Review/superseded USER.md entries remain on disk for audit but are never searchable as active memory.
+    if (/status:\s*(?:superseded|review)\b/i.test(line) || /^\s*[-*]\s*(?:\[[^\]]+\]\s*)?Preference:\s*/i.test(line)) {
+      if (buf.length > 0) flush(i)
+      start = i + 1
+      return
+    }
     if (buf.length === 0) start = i + 1;
     const startsBlock = /^#{1,6}\s/.test(line);
     if (startsBlock && buf.length > 0) {
@@ -172,6 +181,7 @@ export async function readMemoryRange(
   requested: string,
   from?: number,
   lines?: number,
+  maxChars = 20_000,
 ): Promise<GetResult> {
   const raw = (requested || "").trim().replace(/\\/g, "/");
   const abs = path.isAbsolute(raw)
@@ -199,8 +209,8 @@ export async function readMemoryRange(
     return { path: rel, text: "", error: (err as Error).message };
   }
   if (from === undefined && lines === undefined) {
-    return content.length > 20_000
-      ? { path: rel, text: `${content.slice(0, 20_000)}\n…[truncated; pass from/lines for the rest]` }
+    return content.length > maxChars
+      ? { path: rel, text: `${content.slice(0, maxChars)}\n…[truncated; pass from/lines for the rest]` }
       : { path: rel, text: content };
   }
   const all = content.split(/\r?\n/);

@@ -16,6 +16,10 @@ export interface AutonomyPolicyConfig {
   allowedTools?: string[];
   /** High-impact side-effect tools require explicit opt-in independent of profile. */
   allowedExternalSideEffectTools?: string[];
+  /** Auto-approve all tool actions after hard capability and network checks. */
+  autoApproveAll?: boolean;
+  /** Allow file tools to target any path visible inside the isolated guest environment. */
+  allowAllPaths?: boolean;
   workspaceRoot?: string;
 }
 
@@ -43,8 +47,31 @@ const EXTERNAL_SIDE_EFFECT_TOOLS = new Set([
   "terminal_run", "terminal_kill", "delegate_coding_agent", "file_delete", "file_run", "skill_install", "skill_delete",
   "browser_click", "browser_type", "computer_invoke", "computer_set_text", "computer_hotkey",
   "computer_clipboard", "computer_launch", "computer_terminate_app", "computer_click_at",
-  "computer_drag", "computer_scroll", "goal_create", "goal_update",
+  "computer_drag", "computer_scroll", "goal_create", "goal_update", "plugin_invoke",
 ]);
+
+const OWNER_CONFIRMATION_PATTERNS = [
+  /\b(?:rm|rmdir|del|erase|shred)\b/i,
+  /\b(?:mkfs|format|dd)\b/i,
+  /\b(?:sudo|su\s+-|passwd|chpasswd|useradd|usermod|groupadd|groupmod|visudo)\b/i,
+  /\b(?:git\s+push|npm\s+publish|pnpm\s+publish|yarn\s+publish|docker\s+system\s+prune|terraform\s+destroy|kubectl\s+delete)\b/i,
+  /\b(?:buy|purchase|checkout|pay(?:ment)?|transfer|withdraw|send|publish|post|submit|delete|remove|erase|format|password|credential|api[-_ ]?key|secret|two[-_ ]?factor|2fa)\b/i,
+];
+
+function stringsIn(value: unknown, depth = 0): string[] {
+  if (depth > 5 || value == null) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap((item) => stringsIn(item, depth + 1));
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap((item) => stringsIn(item, depth + 1));
+  return [];
+}
+
+function requiresOwnerConfirmation(tool: EngineTool, input: Record<string, unknown>): boolean {
+  if (["file_delete", "skill_install", "skill_delete", "computer_terminate_app"].includes(tool.name)) return true;
+  const text = `${tool.name} ${tool.description} ${tool.name === "terminal_run" ? String(input.command ?? "") : stringsIn(input).join(" ")}`.slice(0, 20_000);
+  if (!text) return false;
+  return OWNER_CONFIRMATION_PATTERNS.some((pattern) => pattern.test(text));
+}
 
 /**
  * Enforces the resolved tool capability set at execution time. Tool-list omission is
@@ -56,6 +83,8 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
   private readonly capabilityProfile: "safe" | "developer" | "operator";
   private readonly allowedTools?: Set<string>;
   private readonly allowedExternalSideEffectTools: Set<string>;
+  private readonly autoApproveAll: boolean;
+  private readonly allowAllPaths: boolean;
   private readonly browserAllowedDomains: string[];
   private readonly allowBrowser: boolean;
   private readonly allowComputerUse: boolean;
@@ -69,6 +98,8 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
     this.capabilityProfile = config.capabilityProfile ?? "operator";
     this.allowedTools = Array.isArray(config.allowedTools) ? new Set(config.allowedTools) : undefined;
     this.allowedExternalSideEffectTools = new Set(config.allowedExternalSideEffectTools ?? []);
+    this.autoApproveAll = config.autoApproveAll === true;
+    this.allowAllPaths = this.autoApproveAll && config.allowAllPaths === true;
     this.browserAllowedDomains = (config.browserAllowedDomains ?? []).map((domain) => domain.toLowerCase().trim()).filter(Boolean);
     this.allowBrowser = config.allowBrowser === true;
     this.allowComputerUse = config.allowComputerUse === true;
@@ -92,21 +123,25 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
     const normalizedRaw = raw.trim();
     const candidate = normalizeRelative(normalizedRaw);
     if (candidate === "__absolute__" || candidate === "." || candidate === ".." || candidate.startsWith("../")) return false;
-    const allowedRoot = this.safeWriteRoots.find((root) => insideRoot(candidate, root));
+    const workspaceWide = this.safeWriteRoots.includes("*");
+    const allowedRoot = workspaceWide ? "*" : this.safeWriteRoots.find((root) => insideRoot(candidate, root));
     // A configured safe-write root is a directory boundary, not a valid file-operation target itself.
-    if (!allowedRoot || candidate === allowedRoot) return false;
+    if (!allowedRoot || (!workspaceWide && candidate === allowedRoot)) return false;
+    // `*` means every non-root relative path in the configured workspace. It is
+    // still checked against the real path so symlinks cannot escape the workspace.
+    if (workspaceWide && !this.workspaceRoot) return false;
     if (this.workspaceRoot) {
       const absolute = path.resolve(this.workspaceRoot, candidate);
       const workspace = path.resolve(this.workspaceRoot);
       const relative = path.relative(workspace, absolute);
       if (!relative || relative === "." || relative.startsWith("..") || path.isAbsolute(relative)) return false;
-      const rootAbsolute = path.resolve(workspace, allowedRoot);
-      const relativeRoot = path.relative(workspace, rootAbsolute);
       let realWorkspace: string;
       try { realWorkspace = fs.realpathSync(workspace); } catch { return false; }
-      const expectedRealRoot = path.resolve(realWorkspace, relativeRoot);
+      const rootAbsolute = workspaceWide ? workspace : path.resolve(workspace, allowedRoot);
+      const relativeRoot = workspaceWide ? "." : path.relative(workspace, rootAbsolute);
+      const expectedRealRoot = workspaceWide ? realWorkspace : path.resolve(realWorkspace, relativeRoot);
       let realRoot = expectedRealRoot;
-      if (fs.existsSync(rootAbsolute)) {
+      if (!workspaceWide && fs.existsSync(rootAbsolute)) {
         try {
           realRoot = fs.realpathSync(rootAbsolute);
           // Configured safe roots (including their parent components) may not redirect through symlinks.
@@ -159,7 +194,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
             return { mode: "block", reason: "Browser navigation only permits HTTP or HTTPS URLs." };
           }
           const hostname = url.hostname.toLowerCase();
-          const allowed = this.browserAllowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+          const allowed = this.browserAllowedDomains.includes("*") || this.browserAllowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
           if (!allowed) return { mode: "block", reason: `Browser domain is not allowlisted: ${hostname}.` };
           this.activeBrowserHostname = hostname;
         } catch {
@@ -169,7 +204,7 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
         // Most browser actions (click/type/extract/screenshot) do not include a URL in
         // their tool schema. Require an allowlisted navigation in this run first.
         // High-impact browser interactions still need explicit side-effect opt-in below.
-        if (!this.activeBrowserHostname || !this.browserAllowedDomains.some((domain) => this.activeBrowserHostname === domain || this.activeBrowserHostname!.endsWith(`.${domain}`))) {
+        if (!this.activeBrowserHostname || !(this.browserAllowedDomains.includes("*") || this.browserAllowedDomains.some((domain) => this.activeBrowserHostname === domain || this.activeBrowserHostname!.endsWith(`.${domain}`)))) {
           return { mode: "block", reason: "Navigate to an allowlisted HTTP(S) domain before performing browser actions." };
         }
       }
@@ -177,15 +212,26 @@ export class AutonomyPolicy implements ToolApprovalPolicy {
     if (tool.name.startsWith("computer_") && !this.allowComputerUse) {
       return { mode: "block", reason: "Computer use is disabled by the autonomous capability policy." };
     }
-    if (EXTERNAL_SIDE_EFFECT_TOOLS.has(tool.name) && !this.allowedExternalSideEffectTools.has(tool.name)) {
-      return { mode: "block", reason: `Tool "${tool.name}" can cause external side effects and requires explicit allowed_external_side_effect_tools opt-in.` };
-    }
+    // Even no-confirmation mode must enforce filesystem scope. The wildcard
+    // root expands to the whole configured workspace, never to the host root.
     const pathEffect = PATH_EFFECTS[tool.name];
-    if (pathEffect) {
+    if (pathEffect && !this.allowAllPaths) {
       const targets = pathEffect.keys.map((key) => input[key]);
       if (targets.some((target) => !this.pathAllowed(target))) {
         return { mode: "block", reason: `Path access for "${tool.name}" is outside configured safe_write_roots (${this.safeWriteRoots.join(", ") || "none"}).` };
       }
+    }
+    if (this.autoApproveAll) {
+      return { mode: "auto", reason: `Tool "${tool.name}" is auto-approved by sandbox owner mode after capability and workspace checks.` };
+    }
+    if (["destructive", "install", "service"].includes(tool.risk)) {
+      return { mode: "approval", reason: `Tool "${tool.name}" has a high-impact risk classification; owner approval is required.` };
+    }
+    if (requiresOwnerConfirmation(tool, input)) {
+      return { mode: "approval", reason: `Tool "${tool.name}" appears to perform a sensitive or difficult-to-reverse action; owner approval is required.` };
+    }
+    if (EXTERNAL_SIDE_EFFECT_TOOLS.has(tool.name) && !this.allowedExternalSideEffectTools.has(tool.name)) {
+      return { mode: "approval", reason: `Tool "${tool.name}" can cause external side effects and requires owner approval or an explicit allowed_external_side_effect_tools opt-in.` };
     }
     return { mode: "auto", reason: `Tool "${tool.name}" is allowed by the autonomous capability policy.` };
   }

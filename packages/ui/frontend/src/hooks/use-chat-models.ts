@@ -21,25 +21,36 @@ function isLocalModel(model: ModelInfo): boolean {
   )
 }
 
+function createDefaultModelClientId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 export function useChatModels({ isConnected }: UseChatModelsOptions) {
   const { t } = useTranslation()
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
+  const [defaultModelIndex, setDefaultModelIndex] = useState("")
   const [defaultModelId, setDefaultModelId] = useState("")
   const [resolution, setResolution] = useState<ModelResolution | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const setDefaultRequestIdRef = useRef(0)
+  // Identifies this chat window so the backend can discard its own older, slower selections.
+  const [defaultModelClientId] = useState(createDefaultModelClientId)
 
   const syncDefaultModelName = useCallback(
-    (models: ModelInfo[], defaultModel: string, resolved?: ModelResolution | null) => {
-      const selected = models.find(
-        (model) =>
-          model.model_name === defaultModel ||
-          model.runtime_model === defaultModel ||
-          model.model === defaultModel,
-      )
+    (models: ModelInfo[], defaultModel: string, resolved?: ModelResolution | null, defaultModelIndex?: number | null) => {
+      const selected = typeof defaultModelIndex === "number"
+        ? models.find((model) => model.index === defaultModelIndex)
+        : models.find(
+            (model) => model.is_virtual !== true && (
+              model.model_name === defaultModel ||
+              model.runtime_model === defaultModel ||
+              model.model === defaultModel
+            ),
+          )
       if (selected) {
         setDefaultModelName(selected.model_name)
+        setDefaultModelIndex(String(selected.index))
         setDefaultModelId(
           selected.runtime_model || selected.model || selected.model_name,
         )
@@ -48,10 +59,12 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
       // Environment-only setups have no stored row; trust the backend's live resolution.
       if (resolved?.configured && resolved.model) {
         setDefaultModelName(resolved.model_name || resolved.model)
+        setDefaultModelIndex("")
         setDefaultModelId(resolved.model)
         return
       }
       setDefaultModelName("")
+      setDefaultModelIndex("")
       setDefaultModelId("")
     },
     [],
@@ -68,7 +81,7 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
         const data = await getModels()
         setModelList(data.models)
         setResolution(data.resolved ?? null)
-        syncDefaultModelName(data.models, data.default_model, data.resolved)
+        syncDefaultModelName(data.models, data.default_model, data.resolved, data.default_model_index)
         setLoadFailed(false)
         return
       } catch {
@@ -100,33 +113,45 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
   }, [loadModels])
 
   const handleSetDefault = useCallback(
-    async (modelName: string) => {
-      if (modelName === defaultModelName) return
+    async (modelIndex: number) => {
+      const selected = modelList.find((model) => model.index === modelIndex)
+      if (!selected || String(modelIndex) === defaultModelIndex) return
       const requestId = ++setDefaultRequestIdRef.current
 
       try {
-        await setDefaultModel(modelName)
+        const changeResult = await setDefaultModel(modelIndex, { clientId: defaultModelClientId, sequence: requestId })
+        if (requestId !== setDefaultRequestIdRef.current) return
         const data = await getModels()
-        if (requestId !== setDefaultRequestIdRef.current) {
-          return
-        }
+        if (requestId !== setDefaultRequestIdRef.current) return
 
         setModelList(data.models)
         setResolution(data.resolved ?? null)
-        syncDefaultModelName(data.models, data.default_model, data.resolved)
+        syncDefaultModelName(data.models, data.default_model, data.resolved, data.default_model_index)
         const gateway = await refreshGatewayState({ force: true })
+        if (requestId !== setDefaultRequestIdRef.current) return
         showSaveSuccessOrRestartToast(
           t,
           t("models.defaultChangeSuccess"),
-          modelName,
+          selected.model_name,
           gateway?.restartRequired === true,
         )
+        if (changeResult.applies === "next_run" && (changeResult.active_runs ?? 0) > 0) {
+          notify.info(
+            t("models.defaultChangeNextRun"),
+            {
+              description: t("models.defaultChangeNextRunDescription", { count: changeResult.active_runs }),
+              id: "use-chat-models:default-change-next-run",
+              duration: 6500,
+            },
+          )
+        }
       } catch (err) {
+        if (requestId !== setDefaultRequestIdRef.current) return
         console.error("Failed to set default model:", err)
         notify.error(err instanceof Error ? err.message : t("models.loadError"), { id: "use-chat-models:error:handleSetDefault" })
       }
     },
-    [defaultModelName, syncDefaultModelName, t],
+    [defaultModelClientId, defaultModelIndex, modelList, syncDefaultModelName, t],
   )
 
   const defaultSelectableModels = useMemo(
@@ -174,6 +199,7 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
 
   return {
     defaultModelName,
+    defaultModelIndex,
     defaultModelId,
     hasAvailableModels,
     hasAnyModels: defaultSelectableModels.length > 0,

@@ -31,3 +31,16 @@ export {
   synchronizeLocalRuntimeForModel,
 } from "./providers/llama-cpp/runtime/local-runtime.js";
 export type { LocalRuntimeTransition, LocalRuntimeHealth } from "./providers/llama-cpp/runtime/local-runtime.js";
+
+export {
+  executeRuntimePluginContract,
+  executeRuntimePluginTool,
+  loadRuntimePluginContracts,
+  readPluginContractsPolicy,
+} from "./plugin-contract-runtime.js";
+export type {
+  RuntimePluginContract,
+  RuntimePluginContractReadiness,
+  RuntimePluginContractsConfig,
+  RuntimePluginToolExecutionResult,
+} from "./plugin-contract-runtime.js";

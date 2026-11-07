@@ -81,6 +81,52 @@ describe("MemoryFileStore", () => {
     expect(fs.readFileSync(p2!, "utf-8")).toContain("second");
   });
 
+  it("allows an explicitly reaffirmed preference to be re-added after it was superseded", async () => {
+    await executeOp(store.planUserNote("Prefer concise answers"))
+    await store.supersedeUserNote("Prefer detailed answers", "Prefer concise answers")
+    expect(await store.hasActiveUserNote("Prefer concise answers")).toBe(false)
+    expect(await store.hasActiveUserNote("Prefer detailed answers")).toBe(true)
+    await executeOp(store.planUserNote("Prefer concise answers"))
+    const content = await store.readUserMd()
+    expect(content.match(/Prefer concise answers/g)).toHaveLength(2)
+    expect(content).toContain("status: superseded")
+    expect(content).toContain("status: active")
+  })
+
+  it("forgets the selected lifecycle version when the same preference text appears more than once", async () => {
+    await executeOp(store.planUserNote("Prefer concise answers"))
+    await store.supersedeUserNote("Prefer detailed answers", "Prefer concise answers")
+    await executeOp(store.planUserNote("Prefer concise answers"))
+    expect(await store.forgetEntry("user", "Prefer concise answers", "active")).toBe(true)
+    expect(await store.hasActiveUserNote("Prefer concise answers")).toBe(false)
+    expect(await store.readUserMd()).toContain("status: superseded")
+  })
+
+  it("marks conflicting preferences for review and lets an owner supersede or forget an exact entry", async () => {
+    await executeOp(store.planUserNote("Always use bullet points in answers"));
+    await store.recordUserPreferenceConflict("Never use bullet points in answers", [
+      "Always use bullet points in answers",
+      "Never use bullet points in answers",
+    ]);
+    const conflict = await store.readUserMd();
+    expect(conflict.match(/status: review/g)).toHaveLength(2);
+    expect(conflict).not.toMatch(/status: active/);
+
+    await store.supersedeUserNote("Use concise bullet points in answers", "Always use bullet points in answers");
+    const resolved = await store.readUserMd();
+    expect(resolved).toContain("status: superseded");
+    expect(resolved).toContain("status: active");
+    expect(await store.forgetEntry("user", "Use concise bullet points in answers", "active")).toBe(true);
+    expect(await store.readUserMd()).not.toContain("Use concise bullet points in answers");
+  });
+
+  it("deletes only an exact memory Markdown path and rejects traversal", async () => {
+    await executeOp(store.planLongTermNote("a removable fact"));
+    await expect(store.forget("../outside.md")).rejects.toThrow("safe relative memory file path");
+    await expect(store.forget("memory/../USER.md")).rejects.toThrow("safe relative memory file path");
+    await expect(store.forget("MEMORY.md")).resolves.toMatchObject({ path: "MEMORY.md", deleted: true });
+  });
+
   it("executeOpSync writes synchronously (shutdown path)", () => {
     const op = store.planDailyNote("sync write", "shutdown");
     const written = executeOpSync(op);

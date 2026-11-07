@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { AgentControlService } from "./service.js";
 
-function createHarness() {
+function createHarness(autoApproveAll = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "miki-control-"));
   let config: Record<string, unknown> = {
     agent: { name: "Miki", resource: { mode: "balanced" } },
@@ -39,6 +39,7 @@ function createHarness() {
   const service = new AgentControlService({
     controller,
     runtimePaths: { dataDir: path.join(root, "data") } as never,
+    autoApproveAll: () => autoApproveAll,
   });
   return { root, service, controller };
 }
@@ -92,6 +93,32 @@ describe("AgentControlService", () => {
     ).toBeUndefined();
   });
 
+  it("lets the agent patch schema-valid settings outside the dashboard allowlist in sandbox owner mode", async () => {
+    const { service, controller } = createHarness(true);
+    const outcome = await service.execute({
+      capability: "config",
+      action: "patch",
+      input: { patch: { agent: { security: { sandbox_mode: true } } } },
+      context: { origin: "api", actor: "agent" },
+    });
+    expect(outcome.ok).toBe(true);
+    expect(
+      (controller.getConfig() as Record<string, any>).agent.security.sandbox_mode,
+    ).toBe(true);
+  });
+
+  it("keeps the dashboard config-path allowlist even when sandbox owner mode is active", async () => {
+    const { service } = createHarness(true);
+    const outcome = await service.execute({
+      capability: "config",
+      action: "patch",
+      input: { patch: { agent: { security: { sandbox_mode: true } } } },
+      context: { origin: "dashboard", actor: "dashboard-operator" },
+    });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain("unsupported paths");
+  });
+
   it("applies a safe tool-state change and reads back state", async () => {
     const { service } = createHarness();
     const outcome = await service.execute({
@@ -124,6 +151,24 @@ describe("AgentControlService", () => {
     );
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toContain("does not match");
+  });
+
+  it("suppresses approval only for agent-originated control operations in sandbox owner mode", async () => {
+    const { service } = createHarness(true);
+    const agentPlan = await service.plan({
+      capability: "model_runtime",
+      action: "install",
+      input: { model: "local-test-model" },
+      context: { origin: "api", actor: "agent" },
+    });
+    const dashboardPlan = await service.plan({
+      capability: "model_runtime",
+      action: "install",
+      input: { model: "local-test-model" },
+      context: { origin: "dashboard", actor: "dashboard-operator" },
+    });
+    expect(agentPlan.approvalRequired).toBe(false);
+    expect(dashboardPlan.approvalRequired).toBe(true);
   });
 
   it("does not execute remote config writes without an approval adapter", async () => {

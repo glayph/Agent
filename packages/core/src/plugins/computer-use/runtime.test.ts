@@ -1,5 +1,6 @@
 import { normalizeBrowserUrl } from "../browser/runtime.js";
 import {
+  ComputerAgent,
   linuxX11UnavailableReason,
   normalizeHotkeyForSendKeys,
   normalizeHotkeyForXdotool,
@@ -43,6 +44,30 @@ describe("computer-use tools", () => {
         WAYLAND_DISPLAY: "wayland-0",
       }),
     ).toBeNull();
+  });
+
+  it("reports Linux desktop capabilities as unavailable when there is no display session", async () => {
+    if (process.platform !== "linux") return;
+    const previousDisplay = process.env.DISPLAY;
+    const previousWayland = process.env.WAYLAND_DISPLAY;
+    delete process.env.DISPLAY;
+    delete process.env.WAYLAND_DISPLAY;
+    try {
+      const result = JSON.parse(await new ComputerAgent().getCapabilities()) as {
+        ok?: boolean;
+        data?: { actions?: Record<string, boolean>; limitations?: string[]; backend?: string };
+      };
+      expect(result.ok).toBe(true);
+      expect(result.data?.backend).toBe("linux-x11-coordinate-window-metadata");
+      expect(result.data?.actions?.screenshot).toBe(false);
+      expect(result.data?.actions?.clickAt).toBe(false);
+      expect(result.data?.limitations?.join(" ")).toMatch(/DISPLAY is unset/);
+    } finally {
+      if (previousDisplay === undefined) delete process.env.DISPLAY;
+      else process.env.DISPLAY = previousDisplay;
+      if (previousWayland === undefined) delete process.env.WAYLAND_DISPLAY;
+      else process.env.WAYLAND_DISPLAY = previousWayland;
+    }
   });
 
   it("normalizes safe X11 shortcuts and rejects command-like key names", () => {

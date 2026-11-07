@@ -39,6 +39,26 @@ describe("resolveModel", () => {
     expect(resolveModel([gemini()], "Gemini Flash Lite", {}).matchedRequested).toBe(true)
     expect(resolveModel([gemini()], "gemini-3.5-flash-lite", {}).matchedRequested).toBe(true)
   })
+  it("uses the stable stored row id when model names are duplicated", () => {
+    const duplicateRows: StoredModelEntry[] = [
+      { id: 11, isDefault: true, payload: { model: "shared-model", model_name: "Shared model", provider: "openai-compatible", api_base: "http://127.0.0.1:8001/v1", enabled: true } },
+      { id: 12, isDefault: false, payload: { model: "shared-model", model_name: "Shared model", provider: "openai-compatible", api_base: "http://127.0.0.1:8002/v1", enabled: true } },
+    ]
+
+    const selected = resolveModel(duplicateRows, "shared-model", {}, 12)
+    expect(selected.configured).toBe(true)
+    expect(selected.entry?.id).toBe(12)
+    expect(selected.baseUrl).toBe("http://127.0.0.1:8002/v1")
+    expect(selected.matchedRequested).toBe(true)
+  })
+
+  it("fails closed when a stable model row id is deleted or no longer matches", () => {
+    const rows: StoredModelEntry[] = [
+      { id: 11, isDefault: true, payload: { model: "shared-model", model_name: "Shared model", provider: "openai-compatible", api_base: "http://127.0.0.1:8001/v1", enabled: true } },
+    ]
+    expect(resolveModel(rows, "shared-model", {}, 12)).toMatchObject({ configured: false, source: "none", model: "" })
+    expect(resolveModel(rows, "different-model", {}, 11)).toMatchObject({ configured: false, source: "none", model: "" })
+  })
   it("matches a provider-prefixed fallback to its stored provider and model id", () => {
     const local: StoredModelEntry = { isDefault: false, payload: { model: "lfm2.5-1.2b-instruct-q4_0", model_name: "Local LFM", provider: "llama.cpp", api_base: "http://127.0.0.1:39200/v1" } }
     const resolved = resolveModel([gemini(), local], "llama.cpp/lfm2.5-1.2b-instruct-q4_0", {})
@@ -46,11 +66,29 @@ describe("resolveModel", () => {
     expect(resolved.provider).toBe("llama.cpp")
     expect(resolved.model).toBe("lfm2.5-1.2b-instruct-q4_0")
   })
-  it("falls back to the default (no ghost client) when the requested name is unknown", () => {
-    const resolved = resolveModel([gemini()], "Test", {})
-    expect(resolved.configured).toBe(true)
-    expect(resolved.model).toBe("gemini-3.5-flash-lite")
+  it("fails closed when the requested name is unknown instead of silently running the default", () => {
+    const resolved = resolveModel([gemini()], "Test", { OPENAI_MODEL: "env-default", OPENAI_API_KEY: GOOD_KEY })
+    expect(resolved.configured).toBe(false)
+    expect(resolved.model).toBe("")
+    expect(resolved.source).toBe("none")
     expect(resolved.matchedRequested).toBe(false)
+    expect(resolved.reason).toMatch(/Requested model \"Test\" is not configured/)
+  })
+
+  it("does not fall back to an environment model when an explicit selection was deleted", () => {
+    const resolved = resolveModel([], "deleted-model", { MIKI_MODEL: "other-model", OPENAI_API_KEY: GOOD_KEY })
+    expect(resolved.configured).toBe(false)
+    expect(resolved.model).toBe("")
+    expect(resolved.reason).toMatch(/deleted-model/)
+  })
+  it("accepts the exact environment-only model id exposed by the virtual Models row", () => {
+    const resolved = resolveModel([], "gpt-5-mini", { MIKI_PROVIDER: "openai", OPENAI_MODEL: "gpt-5-mini", OPENAI_API_KEY: "sk-abcdefghijklmnop" })
+    expect(resolved).toMatchObject({ configured: true, source: "env", model: "gpt-5-mini", isDefault: true, matchedRequested: false })
+  })
+
+  it("accepts an explicit DEFAULT_MODEL id in environment-only deployments", () => {
+    const resolved = resolveModel([], "gemini-3.5-flash-lite", { DEFAULT_MODEL: "gemini/gemini-3.5-flash-lite", GEMINI_API_KEY: GOOD_KEY })
+    expect(resolved).toMatchObject({ configured: true, source: "env", model: "gemini-3.5-flash-lite", provider: "gemini", isDefault: true })
   })
   it("uses the provider environment key when the stored entry has none", () => {
     const resolved = resolveModel([gemini({ api_key: "" })], undefined, { GEMINI_API_KEY: GOOD_KEY })

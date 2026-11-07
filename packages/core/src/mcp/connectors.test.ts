@@ -35,6 +35,12 @@ describe("External MCP connectors", () => {
     );
   });
 
+  test("sandbox owner mode permits configured MCP side effects and unknown-annotation tools", () => {
+    expect(isExternalMcpToolExecutionAllowed(server(), "side_effect", true)).toBe(true);
+    expect(isExternalMcpToolExecutionAllowed(server(), "unknown", true)).toBe(true);
+    expect(isExternalMcpToolExecutionAllowed(server(), "unknown", false)).toBe(false);
+  });
+
   test("reconnects and retries a read-only call once", async () => {
     let attempts = 0;
     let reconnects = 0;

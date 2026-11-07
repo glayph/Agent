@@ -6,6 +6,7 @@ import type { MemoryWriter } from "./writer.js";
 import type { MemoryHooks } from "./hooks.js";
 import type { MemoryFileStore } from "./store.js";
 import { relFromRoot } from "./paths.js";
+import { charsPerToken } from "../token-budget-manager.js";
 
 /** Marks the synthetic rolling-summary message so it is recognised (and folded) next time. */
 export const SUMMARY_SENTINEL = "[CONTEXT SUMMARY — earlier turns compacted]";
@@ -131,9 +132,17 @@ export class CompactionManager {
       const systemMessages = messages.filter((m) => m.role === "system" && !isSummary(m));
       const conversational = messages.filter((m) => m.role !== "system");
       const keepRecent = Math.max(2, ctx.keepRecent ?? c.keepRecent);
+      // keepRecentTokens is a token count; convert it with the language-aware ratio of this conversation.
+      // A fixed 4 chars/token under-keeps non-Latin history by up to 4x.
+      const conversationCharsPerToken = charsPerToken(
+        conversational.map((m) => String(m.content ?? "")).join("\n"),
+      );
       const keepRecentChars = Math.max(
         1_000,
-        Math.min(c.keepRecentTokens * 4, Math.floor(ctx.budgetChars * 0.5)),
+        Math.min(
+          Math.floor(c.keepRecentTokens * conversationCharsPerToken),
+          Math.floor(ctx.budgetChars * 0.5),
+        ),
       );
       let tokenStart = conversational.length;
       let tailChars = 0;

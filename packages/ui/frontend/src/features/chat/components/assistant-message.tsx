@@ -11,7 +11,11 @@ import {
 import { Suspense, lazy, memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { visibleAssistantContent } from "@/features/chat/components/assistant-message-content"
-import { AttachmentCard } from "@/features/chat/components/attachment-card"
+import {
+  AttachmentCard,
+  MediaPlayerAttachment,
+} from "@/features/chat/components/attachment-card"
+import { isPlayableAttachment } from "@/features/chat/components/attachment-kind"
 import { LinkPreviewCards } from "@/features/chat/components/link-preview-cards"
 import { MessageActionBar } from "@/features/chat/components/message-action-bar"
 import { useMessageActionLabels } from "@/features/chat/components/use-message-action-labels"
@@ -101,12 +105,16 @@ function isBudgetError(content: string): boolean {
 }
 
 type ErrorCategory =
-  "rate-limit" | "credential" | "timeout" | "budget" | "generic"
+  "rate-limit" | "credential" | "authorization" | "entitlement" | "timeout" | "budget" | "generic"
 
 function classifyErrorContent(content: string): ErrorCategory {
-  if (content === "miki_error_provider_api_key") return "credential"
-  if (content === "miki_error_token_limit" || content === "miki_error_execution_limit") return "budget"
-  if (content === "miki_error_provider_network" || content === "miki_error_local_model_unavailable") return "timeout"
+  const code = content.split(/\r?\n/, 1)[0] || content
+  if (code === "miki_error_provider_api_key") return "credential"
+  if (code === "miki_error_provider_authorization") return "authorization"
+  if (code === "miki_error_provider_entitlement") return "entitlement"
+  if (code === "miki_error_provider_rate_limit") return "rate-limit"
+  if (code === "miki_error_token_limit" || code === "miki_error_execution_limit") return "budget"
+  if (code === "miki_error_run_timeout" || code === "miki_error_run_stalled" || code === "miki_error_queue_timeout") return "timeout"
   if (isRateLimitConnectionError(content)) return "rate-limit"
   if (isCredentialConnectionError(content)) return "credential"
   if (isTimeoutError(content)) return "timeout"
@@ -143,8 +151,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   const isError = kind === "error"
   const isCollapsedBlock = isThought || isToolCalls
   const trimmedContent = content.trim()
-  const errorCode = isError && trimmedContent.startsWith("miki_error_") ? trimmedContent.slice("miki_error_".length) : ""
-  const translatedSystemError = errorCode ? t(`chat.errors.codes.${errorCode}`, { defaultValue: t("chat.errors.genericTitle", { defaultValue: "Something went wrong" }) }) : trimmedContent
+  const errorLine = trimmedContent.split(/\r?\n/, 1)[0] || ""
+  const errorCode = isError && errorLine.startsWith("miki_error_") ? errorLine.slice("miki_error_".length) : ""
+  const errorContext = errorCode ? trimmedContent.split(/\r?\n/).slice(1).join("\n").trim() : ""
+  const translatedSystemError = errorCode
+    ? [t(`chat.errors.codes.${errorCode}`, { defaultValue: t("chat.errors.genericTitle", { defaultValue: "Something went wrong" }) }), errorContext].filter(Boolean).join("\n\n")
+    : trimmedContent
   const hasText = trimmedContent.length > 0
   const hasToolCalls = toolCalls.length > 0
   const toolSummary = useMemo(() => summarizeToolCalls(toolCalls), [toolCalls])
@@ -156,8 +168,16 @@ export const AssistantMessage = memo(function AssistantMessage({
     () => attachments.filter((attachment) => attachment.type === "image"),
     [attachments],
   )
+  const mediaAttachments = useMemo(
+    () => attachments.filter(isPlayableAttachment),
+    [attachments],
+  )
   const fileAttachments = useMemo(
-    () => attachments.filter((attachment) => attachment.type !== "image"),
+    () =>
+      attachments.filter(
+        (attachment) =>
+          attachment.type !== "image" && !isPlayableAttachment(attachment),
+      ),
     [attachments],
   )
   const [isExpanded, setIsExpanded] = useState(true)
@@ -425,6 +445,14 @@ export const AssistantMessage = memo(function AssistantMessage({
                       t("chat.errors.credentialsTitle", {
                         defaultValue: "Model needs credentials",
                       })}
+                    {errorCategory === "authorization" &&
+                      t("chat.errors.codes.provider_authorization", {
+                        defaultValue: "The provider rejected this model's authorization. Check its permissions on the Models page.",
+                      })}
+                    {errorCategory === "entitlement" &&
+                      t("chat.errors.codes.provider_entitlement", {
+                        defaultValue: "This provider needs billing or credits. Configure it on the Models page.",
+                      })}
                     {errorCategory === "timeout" &&
                       t("chat.errors.timeoutTitle", {
                         defaultValue: "Stopped — time limit reached",
@@ -473,6 +501,11 @@ export const AssistantMessage = memo(function AssistantMessage({
                       </a>
                     </Button>
                   )}
+                  {errorCategory === "entitlement" && (
+                    <Button asChild variant="ghost" size="sm" className="h-7 shrink-0 rounded-md px-2 text-[11px] font-semibold">
+                      <a href="/models">{t("chat.errors.configureModel", { defaultValue: "Configure model" })}</a>
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -496,7 +529,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                       <div className="animate-pulse py-1 text-sm opacity-50">
                         Loading format...
                       </div>
-                    }
+                  }
                   >
                     <MarkdownRenderer content={visibleContent} streaming={isStreaming} />
                   </Suspense>
@@ -548,6 +581,18 @@ export const AssistantMessage = memo(function AssistantMessage({
               />
               <div className="absolute inset-0 bg-black/0 transition-colors group-hover/img:bg-black/10 dark:group-hover/img:bg-black/20" />
             </a>
+          ))}
+        </div>
+      )}
+
+      {mediaAttachments.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2">
+          {mediaAttachments.map((attachment, index) => (
+            <MediaPlayerAttachment
+              key={`${attachment.url}-${index}`}
+              attachment={attachment}
+              downloadLabel={t("chat.downloadFile")}
+            />
           ))}
         </div>
       )}

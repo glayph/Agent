@@ -136,7 +136,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   },
   dmScope: "per-channel-peer",
   heartbeatEnabled: true,
-  heartbeatInterval: "15",
+  heartbeatInterval: "5",
   mcpEnabled: false,
   mcpDiscoveryEnabled: false,
   mcpDiscoveryTTL: "5",
@@ -381,10 +381,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
     dmScope: asString(session.dm_scope) || EMPTY_FORM.dmScope,
     heartbeatEnabled: proactive.enabled !== false && proactive.llm_when_idle !== false,
     heartbeatInterval: (() => {
-      const rawSeconds = asRecord(heartbeat.proactive).decision_interval_seconds ?? 900
+      const rawSeconds = asRecord(heartbeat.proactive).decision_interval_seconds ?? 5
       const num = typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds)
-      if (!Number.isFinite(num) || num < 15) return EMPTY_FORM.heartbeatInterval
-      return String(Math.max(0.25, Math.round((num / 60) * 100) / 100))
+      if (!Number.isFinite(num) || num < 5) return EMPTY_FORM.heartbeatInterval
+      return String(Math.min(86_400, Math.round(num)))
     })(),
     mcpEnabled:
       mcp.enabled === undefined ? EMPTY_FORM.mcpEnabled : asBool(mcp.enabled),

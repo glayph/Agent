@@ -102,6 +102,8 @@ export interface MikiProviderMessage {
   name?: string;
   tool_call_id?: string;
   tool_calls?: unknown[];
+  /** Provider-specific message metadata that must round-trip unchanged (for example Gemini thought signatures). */
+  extra_content?: Record<string, unknown>;
   image_urls?: string[];
   audio?: MikiProviderAudio;
 }

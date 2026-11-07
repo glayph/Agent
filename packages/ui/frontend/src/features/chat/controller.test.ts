@@ -358,6 +358,7 @@ describe("chat controller WebSocket dependency injection", () => {
     const sent = await sendChatMessage({
       content: "  Hello from the test  ",
       requestedModel: "google/gemini-3.5-flash-lite",
+      requestedModelIndex: 42,
     })
 
     expect(sent).toBe(true)
@@ -372,6 +373,7 @@ describe("chat controller WebSocket dependency injection", () => {
         content: "Hello from the test",
         media: [],
         requested_model: "google/gemini-3.5-flash-lite",
+        requested_model_index: 42,
       },
     })
     expect(
@@ -405,6 +407,39 @@ describe("chat controller WebSocket dependency injection", () => {
       getChatState().messages.some((message) => message.content === "Files"),
     ).toBe(false)
   })
+  it("queues a retry while disconnected and safely replays the same request after reconnect", async () => {
+    updateChatStore({
+      hasHydratedActiveSession: true,
+      messages: [
+        { id: "failed-prompt", role: "user", content: "Run my saved task", timestamp: 1, deliveryStatus: "failed" },
+        { id: "failed-error", role: "assistant", content: "The run failed.", kind: "error", timestamp: 2 },
+      ],
+    });
+
+    expect(await retryChatMessage("failed-prompt")).toBe(true);
+    expect(createdSockets).toHaveLength(1);
+    expect(getChatState().messages[0]).toMatchObject({ deliveryStatus: "retrying" });
+    expect(createdSockets[0].sentData.map((data) => JSON.parse(data)).some((frame) => frame.type === "message.retry")).toBe(false);
+
+    createdSockets[0].simulateOpen();
+    const firstFrame = createdSockets[0].sentData.map((data) => JSON.parse(data)).find((frame) => frame.type === "message.retry");
+    expect(firstFrame).toMatchObject({ type: "message.retry", payload: { message_id: "failed-prompt", prompt_message_id: "failed-prompt", content: "Run my saved task" } });
+    expect(firstFrame.id).not.toBe("failed-prompt");
+
+    createdSockets[0].close();
+    await connectChat();
+    expect(createdSockets).toHaveLength(2);
+    createdSockets[1].simulateOpen();
+    const replayedFrame = createdSockets[1].sentData.map((data) => JSON.parse(data)).find((frame) => frame.type === "message.retry");
+    expect(replayedFrame.id).toBe(firstFrame.id);
+
+    createdSockets[1].simulateMessage({
+      type: "message.accepted",
+      session_id: "session-1",
+      payload: { message_id: "failed-prompt", client_message_id: firstFrame.id, status: "processing", retry: true },
+    });
+  });
+
   it("retries with the original prompt attachments", async () => {
     updateChatStore({
       hasHydratedActiveSession: true,
@@ -443,6 +478,8 @@ describe("chat controller WebSocket dependency injection", () => {
     expect(retryFrame).toMatchObject({
       payload: {
         message_id: "assistant-failed",
+        prompt_message_id: "user-prompt",
+        content: "Inspect this file",
         attachments: [
           {
             type: "file",
@@ -453,22 +490,20 @@ describe("chat controller WebSocket dependency injection", () => {
         ],
       },
     })
+    createdSockets[0].simulateMessage({
+      type: "message.accepted",
+      session_id: "session-1",
+      payload: { message_id: "user-prompt", client_message_id: retryFrame.id, status: "processing", retry: true },
+    })
   })
 
-  it("clears run-specific state when switching sessions", async () => {
+  it("keeps the canonical single session when a legacy switch is requested", async () => {
     const store = getDefaultStore()
     store.set(gatewayAtom, {
       status: "stopped",
       canStart: true,
       restartRequired: false,
       pendingRestartFields: [],
-    })
-    mockedGetSessionHistory.mockResolvedValue({
-      id: "session-next",
-      messages: [],
-      summary: "",
-      created: "2026-08-25T00:00:00.000Z",
-      updated: "2026-08-25T00:00:00.000Z",
     })
     updateChatStore({
       activeRunId: "run-old",
@@ -491,25 +526,10 @@ describe("chat controller WebSocket dependency injection", () => {
     await switchChatSession("session-next")
 
     expect(getChatState()).toMatchObject({
-      activeSessionId: "session-next",
-      messages: [],
-      isTyping: false,
-      activeRunId: undefined,
-      runningRunIds: [],
-      recentRunIds: [],
-      activeRunModel: undefined,
-      activeRunProvider: undefined,
-      runStatus: undefined,
-      runError: undefined,
-      deliveryOutcome: undefined,
-    })
-
-    mockedGetSessionHistory.mockResolvedValue({
-      id: "session-1",
-      messages: [],
-      summary: "",
-      created: "2026-08-25T00:00:00.000Z",
-      updated: "2026-08-25T00:00:00.000Z",
+      activeSessionId: "session-1",
+      isTyping: true,
+      activeRunId: "run-old",
+      runningRunIds: ["run-old"],
     })
     await switchChatSession("session-1")
   })

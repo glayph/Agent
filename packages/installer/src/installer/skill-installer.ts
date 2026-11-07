@@ -195,6 +195,7 @@ export class SkillInstaller {
           description: manifest.description,
           author: manifest.author,
           license: manifest.license,
+          monitorIconKey: manifest.monitorIconKey,
           permissions: manifest.permissions,
           contracts: manifest.contracts,
           plugin: manifest.plugin,

@@ -17,6 +17,10 @@ const REGISTRY_VERSION = 1;
 const STATE_FILENAME = ".plugin-registry.json";
 const SAFE_NAME_REGEX = /^[A-Za-z0-9_-]+$/;
 const SOURCE_PROTOCOLS = new Set<string>(Object.values(SourceProtocol));
+const MONITOR_ICON_KEYS = new Set([
+  "plugin", "github", "slack", "gmail", "calendar", "notion", "linear",
+  "hubspot", "salesforce", "jira", "drive", "discord",
+]);
 const CONTRACT_KINDS: PluginContractKind[] = [
   "tools",
   "channels",
@@ -94,6 +98,8 @@ function isInstalledSkill(value: unknown): value is InstalledSkill {
     (skill.assetsPath === undefined ||
       (typeof skill.assetsPath === "string" &&
         skill.assetsPath.trim().length > 0)) &&
+    (skill.monitorIconKey === undefined ||
+      (typeof skill.monitorIconKey === "string" && MONITOR_ICON_KEYS.has(skill.monitorIconKey))) &&
     isOptionalStringArray(skill.permissions) &&
     isOptionalRecord(skill.contracts) &&
     isOptionalRecord(skill.plugin) &&
@@ -229,6 +235,9 @@ export class SkillRegistry {
       assetsPath: result.assetsPath || existing?.assetsPath,
       author: result.author || existing?.author,
       license: result.license || existing?.license,
+      monitorIconKey: result.monitorIconKey && MONITOR_ICON_KEYS.has(result.monitorIconKey)
+        ? result.monitorIconKey
+        : existing?.monitorIconKey,
       permissions: result.permissions || existing?.permissions,
       contracts: result.contracts || existing?.contracts,
       plugin: result.plugin || existing?.plugin,
@@ -336,6 +345,7 @@ export class SkillRegistry {
             path: skill.path,
             entrypoint: skill.entrypoint,
             assetsPath: skill.assetsPath,
+            monitorIconKey: skill.monitorIconKey,
           },
           kind,
           contract: cloneContract(contract),

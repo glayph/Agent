@@ -22,7 +22,6 @@ const DEFAULT_ALLOWED_CONFIG_PREFIXES = [
   "agent.persona",
   "agent.language",
   "agent.timezone",
-  "agent.max_tokens_per_cycle",
   "agent.browser",
   "agent.resource",
   "agent.memory",
@@ -111,14 +110,14 @@ const MUTABLE_CAPABILITIES: ControlCapabilityDescriptor[] = [
     id: "config",
     label: "Supported runtime configuration",
     description:
-      "Preview and apply a narrow, schema-validated configuration patch.",
+      "Preview and apply schema-validated configuration patches; sandbox owner mode lets the agent manage any supported setting.",
     risk: "config_write",
     platforms: ["all"],
     readOnly: false,
     actions: ["preview", "patch"],
     supportsApproval: true,
     limitations: [
-      "Arbitrary paths, credentials, factory reset, and destructive fields are excluded.",
+      "All configuration paths are available to the agent in sandbox owner mode; schema validation and the factory-reset hard deny remain enforced.",
     ],
   },
   {
@@ -232,6 +231,7 @@ export class AgentControlService {
   >;
   private readonly allowedConfigPrefixes: string[];
   private readonly modelAdapters: ModelRuntimeAdapterLike[];
+  private readonly autoApproveAll: () => boolean;
 
   constructor(options: AgentControlServiceOptions) {
     this.controller = options.controller;
@@ -243,6 +243,7 @@ export class AgentControlService {
     this.allowedConfigPrefixes =
       options.allowedConfigPrefixes || DEFAULT_ALLOWED_CONFIG_PREFIXES;
     this.modelAdapters = options.modelAdapters || [];
+    this.autoApproveAll = options.autoApproveAll || (() => false);
   }
 
   listCapabilities(): ControlCapabilityDescriptor[] {
@@ -273,16 +274,23 @@ export class AgentControlService {
     };
   }
 
-  previewConfigPatch(patch: Record<string, unknown>): {
+  previewConfigPatch(
+    patch: Record<string, unknown>,
+    context?: ControlContext,
+  ): {
     valid: boolean;
     unsupported_paths: string[];
     validation: Record<string, unknown>;
     sanitized_patch: Record<string, unknown>;
   } {
     const paths = flattenPaths(patch);
-    const unsupported = paths.filter(
-      (entry) => !matchesAllowedPrefix(entry, this.allowedConfigPrefixes),
-    );
+    const agentNoConfirm =
+      context?.actor === "agent" && this.autoApproveAll();
+    const unsupported = agentNoConfirm
+      ? []
+      : paths.filter(
+          (entry) => !matchesAllowedPrefix(entry, this.allowedConfigPrefixes),
+        );
     const validation = this.controller.validatePatch(patch);
     return {
       valid: unsupported.length === 0 && validation.valid === true,
@@ -322,9 +330,10 @@ export class AgentControlService {
     }
 
     const risk = descriptor.risk;
-    const approvalRequired = this.requiresApproval(
+    const context = contextFrom(request);
+    const approvalRequired = !(context.actor === "agent" && this.autoApproveAll()) && this.requiresApproval(
       risk,
-      contextFrom(request),
+      context,
       request.capability,
       request.action,
     );
@@ -427,12 +436,18 @@ export class AgentControlService {
     }
     const context = contextFrom(request);
     const completedAt = () => new Date().toISOString();
+    // Re-evaluate at execution time so a stale plan cannot preserve a bypass after
+    // sandbox owner mode has been turned off (or vice versa).
+    const approvalRequired = !(context.actor === "agent" && this.autoApproveAll()) && this.requiresApproval(
+      plan.risk, context, plan.capability, plan.action,
+    );
+    plan.approvalRequired = approvalRequired;
     if (plan.status === "failed")
       return this.failure(
         plan,
         "Cannot execute an unsupported control operation.",
       );
-    if (plan.approvalRequired && !(await this.isApproved(request, plan))) {
+    if (approvalRequired && !(await this.isApproved(request, plan))) {
       const approval = this.approvals.requestApproval
         ? await this.approvals.requestApproval({
             operationId: plan.operationId,
@@ -478,7 +493,7 @@ export class AgentControlService {
       };
     }
 
-    if (plan.approvalRequired && this.approvals.consumeApproval) {
+    if (approvalRequired && this.approvals.consumeApproval) {
       if (!request.approvalRequestId)
         return this.failure(
           plan,
@@ -678,7 +693,7 @@ export class AgentControlService {
         const patch = isRecord(request.input?.patch)
           ? (request.input!.patch as Record<string, unknown>)
           : {};
-        const preview = this.previewConfigPatch(patch);
+        const preview = this.previewConfigPatch(patch, context);
         evidence.push({
           id: "validation",
           kind: "validation",
@@ -707,7 +722,7 @@ export class AgentControlService {
         const patch = isRecord(request.input?.patch)
           ? (request.input!.patch as Record<string, unknown>)
           : {};
-        const preview = this.previewConfigPatch(patch);
+        const preview = this.previewConfigPatch(patch, context);
         if (!preview.valid)
           return {
             operationId: plan.operationId,

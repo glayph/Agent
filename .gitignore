@@ -99,3 +99,7 @@ skills-lock.json
 identity/.wal/
 identity/memory/20*.md
 .chaos-build/
+
+# Runtime agent state (personal, regenerated at runtime)
+identity/memory/
+identity/learned-rules.json

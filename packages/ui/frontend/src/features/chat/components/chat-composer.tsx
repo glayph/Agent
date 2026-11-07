@@ -28,6 +28,7 @@ import {
 } from "@/shared/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
 import type { ChatAttachment, ContextUsage } from "@/store/chat"
+import { CHAT_INPUT_LIMITS } from "@miki/config"
 
 export type ChatInputDisabledReason =
   | "gatewayUnknown"
@@ -40,6 +41,22 @@ export type ChatInputDisabledReason =
   | "websocketDisconnected"
   | "websocketError"
   | "noDefaultModel"
+
+const gatewayInputBlockers = new Set<ChatInputDisabledReason>([
+  "gatewayUnknown",
+  "gatewayStarting",
+  "gatewayRestarting",
+  "gatewayStopping",
+  "gatewayStopped",
+  "gatewayError",
+])
+
+/** A connection outage blocks delivery, not drafting. */
+export function canEditChatInput(
+  reason: ChatInputDisabledReason | null,
+): boolean {
+  return reason === null || !gatewayInputBlockers.has(reason)
+}
 
 const disabledShortFallback: Record<ChatInputDisabledReason, string> = {
   gatewayUnknown: "Checking gateway status…",
@@ -145,13 +162,15 @@ export function ChatComposer({
   contextUsage,
 }: ChatComposerProps) {
   const { t } = useTranslation()
-  const canInput = inputDisabledReason === null
+  const canUseChatActions = inputDisabledReason === null
+  const canEditInput = canEditChatInput(inputDisabledReason)
   const resolvedVoiceState = voiceState ?? "idle"
   const isRecording = resolvedVoiceState === "recording"
   const isTranscribing = resolvedVoiceState === "transcribing"
   const hasMessageInput = input.trim().length > 0 || attachments.length > 0
   // The mic takes the send button's place only while there is nothing to send.
-  const showVoiceAction = canInput && !hasMessageInput && Boolean(onStartVoice)
+  const showVoiceAction =
+    canUseChatActions && !hasMessageInput && Boolean(onStartVoice)
   const composingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const sendHintId = useId()
@@ -177,7 +196,7 @@ export function ChatComposer({
   const actionsMenuLabel = t("chat.actionsMenu", {
     defaultValue: "Composer actions",
   })
-  const textareaDescription = canInput ? sendHintId : disabledMessageId
+  const textareaDescription = canEditInput ? sendHintId : disabledMessageId
   const voiceLabel = isTranscribing
     ? t("chat.transcribingVoice", { defaultValue: "Transcribing…" })
     : isRecording
@@ -186,7 +205,7 @@ export function ChatComposer({
   const actionLabel = showVoiceAction ? voiceLabel : t("chat.sendMessage")
   const actionDisabled = showVoiceAction
     ? isTranscribing || !onStartVoice
-    : !canInput || !canSend
+    : !canSend
   const onAction = showVoiceAction
     ? isRecording
       ? onStopVoice
@@ -205,7 +224,7 @@ export function ChatComposer({
     ) {
       return
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && canSend) {
       e.preventDefault()
       onSend()
     }
@@ -246,11 +265,12 @@ export function ChatComposer({
           </div>
         )}
 
-        {canInput ? (
+        {canEditInput ? (
           <TextareaAutosize
             ref={textareaRef}
             id={textareaId}
             name="message"
+            maxLength={CHAT_INPUT_LIMITS.textCharacters}
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onCompositionStart={() => {
@@ -261,7 +281,7 @@ export function ChatComposer({
             }}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            disabled={!canInput}
+            disabled={!canEditInput}
             aria-label={t("chat.messageInput", { defaultValue: "Message" })}
             aria-describedby={textareaDescription}
             autoComplete="off"
@@ -292,7 +312,7 @@ export function ChatComposer({
           className="flex min-h-12 items-center gap-1 px-2 pt-1 pb-2"
         >
           <ComposerActionsMenu
-            attachEnabled={canInput}
+            attachEnabled={canUseChatActions}
             onAddImages={onAddImages}
             onAddAudio={onAddAudio}
             attachLabel={t("chat.attachImage")}
@@ -385,7 +405,7 @@ export function ChatComposer({
           </Tooltip>
         </div>
 
-        {!canInput && (
+        {!canUseChatActions && (
           <p
             id={disabledMessageId}
             role="status"

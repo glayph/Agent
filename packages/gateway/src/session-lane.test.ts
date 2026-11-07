@@ -1,4 +1,4 @@
-import { createKeyedLane, LaneWaitTimeoutError } from "./session-lane.js";
+import { createKeyedLane, LaneWaitAbortedError, LaneWaitTimeoutError } from "./session-lane.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -47,13 +47,59 @@ describe("createKeyedLane", () => {
     expect(lane.pending("stuck")).toBe(1);
   });
 
-  it("counts waiting holders", async () => {
+  it("waits without a deadline when maxWaitMs is zero", async () => {
+    const lane = createKeyedLane();
+    const releaseFirst = await lane.acquire("unbounded");
+    let entered = false;
+    const second = lane.acquire("unbounded", { maxWaitMs: 0 }).then((release) => {
+      entered = true;
+      return release;
+    });
+    await tick();
+    expect(entered).toBe(false);
+    releaseFirst();
+    const releaseSecond = await second;
+    expect(entered).toBe(true);
+    releaseSecond();
+  });
+
+  it("counts active and waiting holders without applying a task deadline", async () => {
     const lane = createKeyedLane();
     const first = await lane.acquire("q");
     const second = lane.acquire("q");
     expect(lane.pending("q")).toBe(2);
+    expect(lane.snapshot()).toMatchObject({ conversations: 1, active: 1, waiting: 1, total: 2 });
+    expect(lane.snapshot().oldestActiveAgeMs).toBeGreaterThanOrEqual(0);
+    expect(lane.snapshot().oldestWaitingAgeMs).toBeGreaterThanOrEqual(0);
     first();
     (await second)();
     expect(lane.pending("q")).toBe(0);
+    expect(lane.snapshot()).toMatchObject({ conversations: 0, active: 0, waiting: 0, total: 0, oldestActiveAgeMs: 0, oldestWaitingAgeMs: 0 });
+  });
+
+  it("cancels a queued waiter without releasing or corrupting the active holder", async () => {
+    const lane = createKeyedLane();
+    const first = await lane.acquire("q");
+    const controller = new AbortController();
+    const second = lane.acquire("q", { signal: controller.signal });
+    let thirdEntered = false;
+    const third = lane.acquire("q").then((release) => { thirdEntered = true; return release; });
+    expect(lane.snapshot()).toMatchObject({ conversations: 1, active: 1, waiting: 2, total: 3 });
+    controller.abort();
+    await expect(second).rejects.toBeInstanceOf(LaneWaitAbortedError);
+    await tick();
+    expect(thirdEntered).toBe(false);
+    expect(lane.snapshot()).toMatchObject({ conversations: 1, active: 1, waiting: 1, total: 2 });
+    first();
+    (await third)();
+    expect(lane.snapshot()).toMatchObject({ conversations: 0, active: 0, waiting: 0, total: 0, oldestActiveAgeMs: 0, oldestWaitingAgeMs: 0 });
+  });
+
+  it("rejects an already-aborted waiter without adding a ghost queue entry", async () => {
+    const lane = createKeyedLane();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(lane.acquire("q", { signal: controller.signal })).rejects.toBeInstanceOf(LaneWaitAbortedError);
+    expect(lane.snapshot()).toMatchObject({ conversations: 0, active: 0, waiting: 0, total: 0, oldestActiveAgeMs: 0, oldestWaitingAgeMs: 0 });
   });
 });

@@ -84,6 +84,18 @@ describe("skill tools", () => {
       expect(byName[name].approval).not.toBe("required");
   });
 
+  it("sandbox owner mode ignores a restrictive per-turn skill allowlist", async () => {
+    const ownerTools = createSkillTools({
+      store,
+      workspaceRoot: path.join(root, "workspace"),
+      allowedSkills: () => [],
+      allowAllSkills: () => true,
+    });
+    const listed = await ownerTools.find((tool) => tool.name === "skill_list")!.execute({}, ctx()) as { skills: Array<{ name: string }> };
+    expect(listed.skills.map((skill) => skill.name)).toContain("demo-skill");
+    await expect(ownerTools.find((tool) => tool.name === "skill_read")!.execute({ name: "demo-skill" }, ctx())).resolves.toMatchObject({ skill: "demo-skill" });
+  });
+
   it("skill_list and skill_search find installed skills", async () => {
     expect((await call("skill_list")).skills[0]).toMatchObject({
       name: "demo-skill",
@@ -193,7 +205,7 @@ describe("buildSkillsContext", () => {
 });
 
 describe("agent engine with skills", () => {
-  it("advertises skills, lets the model read one, and runs the skill without an interactive approval pause", async () => {
+  it("advertises skills, lets the model read one, and waits for owner approval before running a skill", async () => {
     const registry = new ToolRegistry();
     registry.registerAll(tools);
     const llm = scriptedLLM([
@@ -232,7 +244,7 @@ describe("agent engine with skills", () => {
     const system = String(llm.requests[0].messages[0].content);
     expect(system).toContain("Installed skills");
     expect(system).toContain("demo-skill: Greets people from a script.");
-    expect(approvalsSeen).toEqual([]);
+    expect(approvalsSeen).toEqual(["skill_run"]);
     const toolMessages = llm.requests[1].messages.filter(
       (message) => message.role === "tool",
     );

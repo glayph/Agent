@@ -25,7 +25,7 @@ const BENGALI_SUFFIXES = [
 const ENGLISH_STOP_WORDS = new Set((
   'a an the and or but if then so of to in on at by for with from as into about is are was were be been being am ' +
   'do does did doing have has had will would can could should may might must it its this that these those ' +
-  'i me my we our you your he she they them his her their what when where which who whom why how not no yes ' +
+  'i me my we our you your he she they them his her their what when where which who whom why how yes ' +
   'there here than too very just also please tell give show let'
 ).split(' '));
 
@@ -33,15 +33,25 @@ const BENGALI_STOP_WORDS = new Set([
   'আমি', 'আমার', 'আমাকে', 'আমরা', 'তুমি', 'তোমার', 'তোমাকে', 'আপনি', 'আপনার',
   'এই', 'এটি', 'এটা', 'এটাই', 'ওই', 'ওটা', 'সেই', 'সেটা', 'এবং', 'বা', 'কিন্তু',
   'যে', 'যদি', 'তাহলে', 'জন্য', 'থেকে', 'মধ্যে', 'সাথে', 'সঙ্গে', 'করো', 'করুন',
-  'করা', 'করে', 'করি', 'করবো', 'করতে', 'হবে', 'হয়', 'হয়ে', 'হচ্ছে', 'আছে', 'নেই',
-  'না', 'কী', 'কি', 'কে', 'কেন', 'কখন', 'কোথায়', 'কিভাবে', 'কীভাবে', 'তার', 'তাদের',
+  'করা', 'করে', 'করি', 'করবো', 'করতে', 'হবে', 'হয়', 'হয়ে', 'হচ্ছে', 'আছে',
+  'তার', 'তাদের',
   'তাকে', 'এর', 'ওর', 'কোনো', 'সব', 'আর', 'তো', 'যাতে', 'যেন', 'দাও', 'দিন',
 ]);
 
-function splitWords(text) {
+function normalizeUnicode(text) {
   return String(text || '')
-    .toLowerCase()
     .normalize('NFKC')
+    // Join controls are orthographic/typing artifacts for retrieval purposes.
+    .replace(/[\u200c\u200d\ufeff]/g, '')
+    // Common Bengali Unicode spelling variants: য়/ড়/ঢ় versus y+nukta forms.
+    .replace(/\u09df/g, '\u09af\u09bc')
+    .replace(/\u09dc/g, '\u09a1\u09bc')
+    .replace(/\u09dd/g, '\u09a2\u09bc')
+    .toLowerCase();
+}
+
+function splitWords(text) {
+  return normalizeUnicode(text)
     .split(WORD_SPLIT)
     .map((token) => token.replace(/^[-_]+|[-_]+$/g, ''))
     .filter(Boolean);
@@ -57,6 +67,14 @@ function stem(token) {
   return token;
 }
 
+function normalizeBengaliVariant(token) {
+  if (token === 'কী' || token === 'কি') return 'কি';
+  if (token === 'কীভাবে' || token === 'কিভাবে') return 'কিভাবে';
+  if (token === 'মেমরি') return 'মেমোরি';
+  if (token === 'ইন্সটল') return 'ইনস্টল';
+  return token;
+}
+
 /** Unique, stemmed, stop-word-free tokens (at most `max`). */
 function tokenize(text, options = {}) {
   const stopWords = options.stopWords || new Set();
@@ -64,7 +82,7 @@ function tokenize(text, options = {}) {
   const out = new Set();
   for (const raw of splitWords(text)) {
     if (raw.length < 2 || stopWords.has(raw) || ENGLISH_STOP_WORDS.has(raw) || BENGALI_STOP_WORDS.has(raw)) continue;
-    const token = stem(raw);
+    let token = normalizeBengaliVariant(stem(raw));
     if (token.length < 2 || stopWords.has(token) || ENGLISH_STOP_WORDS.has(token) || BENGALI_STOP_WORDS.has(token)) continue;
     out.add(token);
     if (out.size >= max) break;
@@ -72,4 +90,4 @@ function tokenize(text, options = {}) {
   return [...out];
 }
 
-module.exports = { splitWords, stem, tokenize, BENGALI_STOP_WORDS, ENGLISH_STOP_WORDS };
+module.exports = { splitWords, stem, tokenize, normalizeUnicode, normalizeBengaliVariant, BENGALI_STOP_WORDS, ENGLISH_STOP_WORDS };

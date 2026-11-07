@@ -116,6 +116,7 @@ describe("SkillRegistry", () => {
       description: "GitHub operations",
       author: "Miki",
       license: "MIT",
+      monitorIconKey: "github",
       permissions: ["network.http"],
       contracts: {
         tools: [
@@ -141,6 +142,7 @@ describe("SkillRegistry", () => {
     const installed = await reloaded.getSkill("github_ops");
     expect(installed?.description).toBe("GitHub operations");
     expect(installed?.author).toBe("Miki");
+    expect(installed?.monitorIconKey).toBe("github");
     expect(installed?.contracts?.tools?.[0]?.name).toBe("github_pr_review");
     expect(installed?.plugin?.contracts?.hooks?.[0]?.name).toBe("after_run");
 
@@ -149,7 +151,7 @@ describe("SkillRegistry", () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: "tools",
-          plugin: expect.objectContaining({ name: "github_ops" }),
+          plugin: expect.objectContaining({ name: "github_ops", monitorIconKey: "github" }),
           contract: expect.objectContaining({ name: "github_pr_review" }),
           permissions: ["network.http", "secrets.github"],
         }),
@@ -164,6 +166,21 @@ describe("SkillRegistry", () => {
     const channelCatalog = await reloaded.listPluginContracts("channels");
     expect(channelCatalog).toHaveLength(1);
     expect(channelCatalog[0].contract.name).toBe("ms_teams");
+  });
+
+  it("rejects non-bundled monitor icon keys from persisted registry data", async () => {
+    fs.writeFileSync(statePath, JSON.stringify({
+      version: 1,
+      skills: [{
+        name: "bad_icon", version: "1.0.0", description: "Bad icon",
+        source: path.join(tmpDir, "bad_icon.ts"), sourceProtocol: SourceProtocol.LOCAL,
+        installedAt: new Date().toISOString(), path: path.join(tmpDir, "bad_icon.ts"),
+        entrypoint: "bad_icon.ts", monitorIconKey: "https://example.com/icon.svg",
+      }],
+    }), "utf-8");
+    const registry = new SkillRegistry(tmpDir, statePath);
+    await registry.init();
+    expect(await registry.listInstalled()).toHaveLength(0);
   });
 
   it("rejects unsafe names during registration", async () => {

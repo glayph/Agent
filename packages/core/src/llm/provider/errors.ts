@@ -11,6 +11,9 @@ export interface LLMProviderDiagnostic {
   model?: string;
   endpoint?: string;
   status?: number;
+  /** Structured, provider-supplied error identifiers; never populated from free-form prose. */
+  providerCode?: string;
+  providerType?: string;
   requestShape?: {
     messageCount: number;
     toolCount: number;
@@ -22,6 +25,8 @@ export class LLMProviderError extends Error {
   readonly providerId?: string;
   readonly status?: number;
   readonly retryable: boolean;
+  /** Provider-specified minimum delay before retrying, when supplied. */
+  readonly retryAfterMs?: number;
   readonly diagnostic?: LLMProviderDiagnostic;
 
   constructor(
@@ -30,6 +35,7 @@ export class LLMProviderError extends Error {
       providerId?: string;
       status?: number;
       retryable?: boolean;
+      retryAfterMs?: number;
       cause?: unknown;
       diagnostic?: LLMProviderDiagnostic;
     } = {},
@@ -39,6 +45,9 @@ export class LLMProviderError extends Error {
     this.providerId = options.providerId;
     this.status = options.status;
     this.retryable = options.retryable === true;
+    this.retryAfterMs = Number.isFinite(options.retryAfterMs) && Number(options.retryAfterMs) >= 0
+      ? Math.ceil(Number(options.retryAfterMs))
+      : undefined;
     this.diagnostic = options.diagnostic;
   }
 }
@@ -76,6 +85,20 @@ export class LLMAPIError extends LLMProviderError {
   ) {
     super(message, options);
     this.name = "LLMAPIError";
+  }
+}
+
+/** Provider explicitly rejected the caller's authorization, distinct from billing entitlement. */
+export class LLMAuthorizationError extends LLMProviderError {
+  constructor(
+    message: string,
+    options: Omit<
+      ConstructorParameters<typeof LLMProviderError>[1],
+      "retryable"
+    > = {},
+  ) {
+    super(message, { ...options, retryable: false });
+    this.name = "LLMAuthorizationError";
   }
 }
 

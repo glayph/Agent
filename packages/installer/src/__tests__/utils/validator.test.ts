@@ -145,6 +145,20 @@ describe("validatePluginManifest", () => {
     );
   });
 
+  it("keeps only bundled Monitoring icon keys from plugin manifests", async () => {
+    const valid = await validatePluginManifest({
+      name: "icon_plugin", version: "1.0.0", description: "test", monitorIconKey: "GitHub",
+    }, tmpDir)
+    expect(valid.valid).toBe(true)
+    expect(valid.manifest?.monitorIconKey).toBe("github")
+
+    const invalid = await validatePluginManifest({
+      name: "remote_icon_plugin", version: "1.0.0", description: "test", monitorIconKey: "https://example.invalid/icon.svg",
+    }, tmpDir)
+    expect(invalid.valid).toBe(false)
+    expect(invalid.errors.some((error) => error.includes("monitorIconKey"))).toBe(true)
+  })
+
   it("rejects malformed contract blocks", async () => {
     const result = await validatePluginManifest(
       {

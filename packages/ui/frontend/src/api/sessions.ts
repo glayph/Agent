@@ -73,25 +73,6 @@ export interface SessionDetail {
   pinned?: boolean
 }
 
-export async function getSessions(
-  offset: number = 0,
-  limit: number = 20,
-): Promise<SessionSummary[]> {
-  const params = new URLSearchParams({
-    offset: offset.toString(),
-    limit: limit.toString(),
-  })
-
-  const res = await launcherFetch(`/api/sessions?${params.toString()}`)
-  if (!res.ok) {
-    throw new SessionApiError(
-      `Failed to fetch sessions: ${res.status}`,
-      res.status,
-    )
-  }
-  return res.json()
-}
-
 export async function getSessionHistory(id: string): Promise<SessionDetail> {
   const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`)
   if (!res.ok) {
@@ -105,30 +86,6 @@ export async function getSessionHistory(id: string): Promise<SessionDetail> {
 
 export function isSessionNotFoundError(error: unknown): boolean {
   return error instanceof SessionApiError && error.status === 404
-}
-
-export async function updateSessionMetadata(
-  id: string,
-  patch: { title?: string; pinned?: boolean },
-): Promise<{
-  id: string
-  created: string
-  updated: string
-  title?: string
-  pinned?: boolean
-}> {
-  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  })
-  if (!res.ok) {
-    throw new SessionApiError(
-      `Failed to update session ${id}: ${res.status}`,
-      res.status,
-    )
-  }
-  return res.json()
 }
 
 export async function updateSessionMessage(

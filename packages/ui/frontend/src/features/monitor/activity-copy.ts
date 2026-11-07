@@ -5,6 +5,7 @@ import type {
 } from "@/features/monitor/store"
 
 const TYPE_LABEL: Record<MonitorNodeType, string> = {
+  agent: "Agent",
   tool: "Tool",
   skill: "Skill",
   plugin: "Plugin",
@@ -12,11 +13,19 @@ const TYPE_LABEL: Record<MonitorNodeType, string> = {
   command: "Command",
   pattern: "Workflow",
   system: "System",
+  browser: "Browser",
+  computer: "Computer",
+  terminal: "Terminal",
+  memory: "Memory",
+  mcp: "MCP",
+  search: "Web Search",
+  goal: "Goal",
+  workflow: "Workflow",
 }
 
 export function humanizeActivityLabel(value: string): string {
   const normalized = value
-    .replace(/^(skill|plugin|file|command|pattern|system|tool):/i, "")
+    .replace(/^(agent|skill|plugin|file|command|pattern|system|tool|browser|computer|terminal|memory|mcp|search|goal|workflow):/i, "")
     .replace(/[_-]+/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")

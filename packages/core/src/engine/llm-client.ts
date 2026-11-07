@@ -44,15 +44,28 @@ function combineSignals(signals: AbortSignal[]): AbortSignal {
 }
 
 
-/** Seconds or HTTP-date from a Retry-After header, in ms; capped so a bad header cannot stall a run. */
+/** Maximum single setTimeout delay supported reliably by Node.js runtimes. */
+const MAX_TIMER_DELAY_MS = 2_147_000_000;
+
+/** Seconds or HTTP-date from a Retry-After header, in ms. Preserve the provider's requested delay. */
 export function parseRetryAfterMs(value: string | null | undefined, now = Date.now()): number | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const seconds = Number(trimmed);
   const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(trimmed) - now;
-  if (!Number.isFinite(ms) || ms < 0) return undefined;
-  return Math.min(ms, 30_000);
+  if (!Number.isFinite(ms) || ms < 0 || !Number.isSafeInteger(Math.ceil(ms))) return undefined;
+  return Math.ceil(ms);
+}
+
+/** Wait through long provider Retry-After periods without overflowing Node's timer range. */
+async function sleepFor(ms: number, signal?: AbortSignal): Promise<void> {
+  let remaining = Math.max(0, Math.ceil(ms));
+  while (remaining > 0) {
+    const slice = Math.min(remaining, MAX_TIMER_DELAY_MS);
+    await sleep(slice, signal);
+    remaining -= slice;
+  }
 }
 
 /** Exponential backoff with +/-25% jitter so parallel runs do not retry in lockstep. */
@@ -69,6 +82,8 @@ function backoffDelayMs(baseMs: number, attempt: number, retryAfterMs?: number):
 async function readChatCompletionStream(
   response: Response,
   onTextDelta: (delta: string) => void,
+  idleTimeoutMs: number,
+  requestController: AbortController,
 ): Promise<LLMResponse> {
   if (!response.body) throw new EngineLLMError("The model provider returned an empty stream.", { retryable: true });
   const reader = response.body.getReader();
@@ -77,6 +92,7 @@ async function readChatCompletionStream(
   let content = "";
   let finishReason: string | undefined;
   let usage: LLMResponse["usage"];
+  let messageExtraContent: Record<string, unknown> | undefined;
   const toolCalls: Array<{ id: string; type: "function"; function: { name: string; arguments: string }; extra_content?: Record<string, unknown> }> = [];
 
   /** The parts of an OpenAI-style streaming chunk this parser reads. */
@@ -87,6 +103,7 @@ async function readChatCompletionStream(
       finish_reason?: string;
       delta?: {
         content?: unknown;
+        extra_content?: unknown;
         tool_calls?: Array<{
           index?: number;
           id?: string;
@@ -113,6 +130,9 @@ async function readChatCompletionStream(
       content += delta.content;
       try { onTextDelta(delta.content); } catch { /* a broken listener must never break the run */ }
     }
+    if (delta.extra_content && typeof delta.extra_content === "object" && !Array.isArray(delta.extra_content)) {
+      messageExtraContent = { ...(messageExtraContent ?? {}), ...(delta.extra_content as Record<string, unknown>) };
+    }
     if (Array.isArray(delta.tool_calls)) {
       for (const part of delta.tool_calls) {
         const index = typeof part.index === "number" ? part.index : toolCalls.length;
@@ -125,25 +145,41 @@ async function readChatCompletionStream(
     }
   };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let newline: number;
-    while ((newline = buffer.search(/\r?\n/)) >= 0) {
-      const line = buffer.slice(0, newline).trimEnd();
-      buffer = buffer.slice(buffer[newline] === "\r" ? newline + 2 : newline + 1);
-      if (line.startsWith("data:")) handleData(line.slice(5).trim());
+  try {
+    for (;;) {
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const idleRead = reader.read();
+      const timedRead = new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
+        idleTimer = setTimeout(() => {
+          const timeoutError = new DOMException(`Model stream idle timeout after ${idleTimeoutMs} ms.`, "TimeoutError");
+          requestController.abort(timeoutError);
+          reject(new EngineLLMError(timeoutError.message, { retryable: true }));
+        }, idleTimeoutMs);
+      });
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try { chunk = await Promise.race([idleRead, timedRead]); }
+      finally { if (idleTimer) clearTimeout(idleTimer); }
+      const { done, value } = chunk;
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline: number;
+      while ((newline = buffer.search(/\r?\n/)) >= 0) {
+        const line = buffer.slice(0, newline).trimEnd();
+        buffer = buffer.slice(buffer[newline] === "\r" ? newline + 2 : newline + 1);
+        if (line.startsWith("data:")) handleData(line.slice(5).trim());
+      }
     }
+    buffer += decoder.decode();
+    for (const line of buffer.split(/\r?\n/)) if (line.startsWith("data:")) handleData(line.slice(5).trim());
+  } finally {
+    try { reader.releaseLock(); } catch { /* stream may already be cancelled */ }
   }
-  buffer += decoder.decode();
-  for (const line of buffer.split(/\r?\n/)) if (line.startsWith("data:")) handleData(line.slice(5).trim());
 
   const completeCalls = toolCalls.filter((call) => call && call.function.name).map((call, i) => ({ ...call, id: call.id || `call_${i}_${Date.now().toString(36)}` }));
   return {
     choices: [{
       index: 0,
-      message: { role: "assistant", content: content || (completeCalls.length ? null : ""), ...(completeCalls.length ? { tool_calls: completeCalls } : {}) },
+      message: { role: "assistant", content: content || (completeCalls.length ? null : ""), ...(completeCalls.length ? { tool_calls: completeCalls } : {}), ...(messageExtraContent ? { extra_content: messageExtraContent } : {}) },
       finish_reason: finishReason ?? (completeCalls.length ? "tool_calls" : "stop"),
     }],
     ...(usage ? { usage } : {}),
@@ -155,10 +191,25 @@ async function readChatCompletionStream(
  * gateway can talk to OpenAI, Gemini's compatibility endpoint, OpenRouter,
  * Ollama, llama.cpp and similar servers without any vendor SDK.
  */
+function reportsUnsupportedField(payload: unknown, field: string): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const root = payload as Record<string, unknown>;
+  const nested = root.error && typeof root.error === "object" && !Array.isArray(root.error)
+    ? root.error as Record<string, unknown>
+    : {};
+  const reportedField = nested.param ?? nested.parameter ?? nested.field ?? nested.target
+    ?? root.param ?? root.parameter ?? root.field ?? root.target;
+  return typeof reportedField === "string" && reportedField === field;
+}
+
+function reportsUnsupportedStreaming(payload: unknown): boolean {
+  return reportsUnsupportedField(payload, "stream") || reportsUnsupportedField(payload, "stream_options");
+}
+
 export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMClient {
   const base = options.baseUrl.replace(/\/$/, "");
   const doFetch = options.fetchImpl ?? fetch;
-  const retries = options.retries ?? 2;
+  const retries = options.retries ?? 1;
   const retryDelayMs = options.retryDelayMs ?? 600;
 
   return {
@@ -194,7 +245,10 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
       let retryAfterMs: number | undefined;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
         retryAfterMs = undefined;
-        const signals = [AbortSignal.timeout(options.timeoutMs ?? 120_000)];
+        const timeoutMs = callOptions.timeoutMs ?? options.timeoutMs ?? 120_000;
+        const requestController = new AbortController();
+        const requestTimer = setTimeout(() => requestController.abort(new DOMException(`Model request timed out after ${timeoutMs} ms.`, "TimeoutError")), timeoutMs);
+        const signals = [requestController.signal];
         if (callOptions.signal) signals.push(callOptions.signal);
         try {
           const response = await doFetch(`${base}/chat/completions`, {
@@ -210,13 +264,18 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
             signal: combineSignals(signals),
           });
           if (streaming && response.ok && /text\/event-stream/i.test(response.headers.get("content-type") ?? "")) {
-            return await readChatCompletionStream(response, callOptions.onTextDelta!);
+            // Connection establishment is bounded separately. Once headers arrive,
+            // only a silent stream times out; a long stream of valid chunks may finish.
+            clearTimeout(requestTimer);
+            return await readChatCompletionStream(response, callOptions.onTextDelta!, timeoutMs, requestController);
           }
           const payload = (await response.json().catch(() => ({}))) as LLMResponse & {
-            error?: { message?: string } | string;
+            error?: { message?: string; code?: string; type?: string; param?: string; parameter?: string; field?: string } | string;
+            code?: string; type?: string; param?: string; parameter?: string; field?: string;
           };
-          if (streaming && !response.ok && response.status === 400 && /stream/i.test(typeof payload.error === "string" ? payload.error : payload.error?.message || "")) {
+          if (streaming && !response.ok && response.status === 400 && reportsUnsupportedStreaming(payload)) {
             // Provider rejects streaming options: fall back to a normal completion.
+            clearTimeout(requestTimer);
             streaming = false;
             delete body.stream;
             delete body.stream_options;
@@ -228,14 +287,12 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
               throw new EngineLLMError(
                 "The model provider returned a response without choices.",
               );
+            clearTimeout(requestTimer);
             return payload;
           }
-          const unsupportedThinking =
-            Boolean(callOptions.thinkingLevel) &&
-            response.status === 400 &&
-            /thinking[_ ]level|reasoning[_ ]effort|unknown (field|parameter)|unrecognized.*thinking/i.test(
-              typeof payload.error === "string" ? payload.error : payload.error?.message || "",
-            );
+          const unsupportedThinking = Boolean(callOptions.thinkingLevel)
+            && response.status === 400
+            && reportsUnsupportedField(payload, "thinking_level");
           if (unsupportedThinking) {
             delete body.thinking_level;
             // Retry once immediately without the optional provider-specific field.
@@ -250,7 +307,10 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
               signal: combineSignals(signals),
             });
             const fallbackPayload = (await fallback.json().catch(() => ({}))) as LLMResponse & { error?: { message?: string } | string };
-            if (fallback.ok && Array.isArray(fallbackPayload.choices)) return fallbackPayload;
+            if (fallback.ok && Array.isArray(fallbackPayload.choices)) {
+              clearTimeout(requestTimer);
+              return fallbackPayload;
+            }
             const fallbackDetail = typeof fallbackPayload.error === "string" ? fallbackPayload.error : fallbackPayload.error?.message;
             throw new EngineLLMError(fallbackDetail || `Model provider returned HTTP ${fallback.status}.`, { status: fallback.status, retryable: fallback.status === 429 || fallback.status >= 500 });
           }
@@ -266,6 +326,7 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
           );
           if (!retryable) throw lastError;
         } catch (error) {
+          clearTimeout(requestTimer);
           if (callOptions.signal?.aborted) throw new Error("aborted");
           if (error instanceof EngineLLMError && !error.retryable) throw error;
           if (!(error instanceof EngineLLMError)) {
@@ -280,9 +341,10 @@ export function createFetchLLMClient(options: FetchLLMClientOptions): EngineLLMC
             );
           }
         }
+        clearTimeout(requestTimer);
         if (attempt < retries) {
           try {
-            await sleep(backoffDelayMs(retryDelayMs, attempt, retryAfterMs), callOptions.signal);
+            await sleepFor(backoffDelayMs(retryDelayMs, attempt, retryAfterMs), callOptions.signal);
           } catch {
             throw new Error("aborted");
           }
@@ -304,7 +366,7 @@ export interface RegistryLike {
       tool_call_id?: string;
       tool_calls?: unknown[];
     }>,
-    options?: { extra?: Record<string, unknown>; timeoutMs?: number; onTextDelta?: (delta: string) => void; signal?: AbortSignal; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>> },
+    options?: { extra?: Record<string, unknown>; timeoutMs?: number; onTextDelta?: (delta: string) => void; signal?: AbortSignal; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>>; credentialProfile?: string },
   ): Promise<LLMResponse>;
 }
 
@@ -312,10 +374,13 @@ export interface RegistryLike {
 export function createRegistryLLMClient(
   registry: RegistryLike,
   model: string,
-  options: { timeoutMs?: number; extra?: Record<string, unknown>; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>> } = {},
+  options: { timeoutMs?: number; extra?: Record<string, unknown>; providerId?: string; baseUrl?: string; credentials?: Readonly<Record<string, string>>; credentialProfile?: string; supportsVision?: boolean } = {},
 ): EngineLLMClient {
   return {
     model,
+    routeKey: options.credentialProfile ? `${model}::credential:${options.credentialProfile}` : `${model}::credential:default`,
+    ...(options.credentialProfile ? { credentialProfile: options.credentialProfile } : {}),
+    supportsVision: options.supportsVision,
     complete(messages, callOptions = {}) {
       const extra: Record<string, unknown> = { ...(options.extra ?? {}) };
       if (callOptions.tools?.length) {
@@ -328,12 +393,13 @@ export function createRegistryLLMClient(
       if (callOptions.thinkingLevel) extra.thinking_level = callOptions.thinkingLevel;
       return registry.complete(model, messages, {
         extra,
-        timeoutMs: options.timeoutMs,
+        timeoutMs: callOptions.timeoutMs ?? options.timeoutMs,
         onTextDelta: callOptions.json ? undefined : callOptions.onTextDelta,
         signal: callOptions.signal,
         providerId: options.providerId,
         baseUrl: options.baseUrl,
-        credentials: options.credentials,
+        credentials: options.credentialProfile ? undefined : options.credentials,
+        credentialProfile: options.credentialProfile,
       });
     },
   };

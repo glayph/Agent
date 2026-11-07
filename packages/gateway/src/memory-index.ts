@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import type Database from "better-sqlite3";
 import type { FileMemoryService, SearchHit } from "@miki/core/memory-files";
@@ -30,7 +31,7 @@ interface ChunkRow {
   provenance: string;
 }
 
-const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const sha256 = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const EMBEDDING_COOLDOWN_MS = 60_000;
 const EMBEDDING_CONCURRENCY = 4;
 const semanticProvider = (name: string) =>
@@ -46,7 +47,7 @@ export class SqliteMemoryIndex {
   private syncPromise?: Promise<void>;
   private lastEmbeddingFailureAt = 0;
   private lastEmbeddingError?: string;
-  private readonly pendingProvenance = new Map<string, "owner" | "agent">();
+  private readonly pendingProvenance = new Map<string, { provenance: "owner" | "agent" | "untrusted"; contentHash: string }>();
   private trustFileSignature?: string;
   private trustBootstrapPromise?: Promise<{ user: boolean; memory: boolean }>;
 
@@ -96,6 +97,10 @@ export class SqliteMemoryIndex {
         legacy_id TEXT PRIMARY KEY,
         imported_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS memory_file_deletions (
+        legacy_id TEXT PRIMARY KEY,
+        deleted_at TEXT NOT NULL
+      );
     `);
     try {
       this.db.exec(`
@@ -122,12 +127,51 @@ export class SqliteMemoryIndex {
     return "unknown";
   }
 
-  markProvenance(relPath: string, provenance: "owner" | "agent"): void {
+  markProvenance(
+    relPath: string,
+    provenance: "owner" | "agent" | "untrusted",
+    hadExistingContent = false,
+  ): void {
     const rel = path.normalize(relPath).split(path.sep).join("/");
     if (rel.startsWith("../") || path.isAbsolute(relPath)) return;
-    this.pendingProvenance.set(rel, provenance);
-    this.db.prepare("UPDATE memory_file_sources SET provenance=? WHERE scope_id=? AND path=?")
-      .run(provenance, this.scopeId, rel);
+    let contentHash: string;
+    try {
+      const absolute = path.resolve(this.memory.memoryPaths().root, rel);
+      const root = path.resolve(this.memory.memoryPaths().root) + path.sep;
+      if (!absolute.startsWith(root)) return;
+      contentHash = sha256(readFileSync(absolute));
+    } catch {
+      // A path is only attributable after its durable bytes exist.
+      return;
+    }
+
+    // File provenance represents every byte in an append-only source. A later
+    // owner append must not bless older agent/imported/unknown text in the same
+    // file. Keep the least-trusted provenance observed across the prior source,
+    // pending writes and this write. Unknown pre-existing files fail closed.
+    const prior = this.db.prepare(
+      "SELECT provenance FROM memory_file_sources WHERE scope_id=? AND path=?",
+    ).get(this.scopeId, rel) as { provenance: string } | undefined;
+    const pending = this.pendingProvenance.get(rel);
+    const rank = (value: string): number => value === "owner" ? 2 : value === "agent" ? 1 : 0;
+    const normalize = (value: string): "owner" | "agent" | "untrusted" =>
+      value === "owner" || value === "agent" ? value : "untrusted";
+    let effective: "owner" | "agent" | "untrusted" = provenance;
+    if (prior) effective = rank(normalize(prior.provenance)) < rank(effective) ? normalize(prior.provenance) : effective;
+    if (pending) effective = rank(pending.provenance) < rank(effective) ? pending.provenance : effective;
+    if (hadExistingContent && !prior && !pending) effective = "untrusted";
+
+    this.pendingProvenance.set(rel, { provenance: effective, contentHash });
+    // Metadata can be marked immediately only when it describes the exact bytes
+    // on disk. The chunk table is updated alongside the source to keep filters aligned.
+    this.db.prepare("UPDATE memory_file_sources SET provenance=? WHERE scope_id=? AND path=? AND content_hash=?")
+      .run(effective, this.scopeId, rel, contentHash);
+    // Do not promote stale derived chunks when the source file changed since
+    // the previous index sync. The pending content hash is applied by syncFiles
+    // to the newly parsed chunks only when it matches the bytes on disk.
+    this.db.prepare(`UPDATE memory_file_chunks SET provenance=? WHERE scope_id=? AND path=? AND EXISTS (
+      SELECT 1 FROM memory_file_sources WHERE scope_id=? AND path=? AND content_hash=?
+    )`).run(effective, this.scopeId, rel, this.scopeId, rel, contentHash);
     if (rel === "USER.md" || rel === "MEMORY.md") this.trustFileSignature = undefined;
   }
 
@@ -143,20 +187,15 @@ export class SqliteMemoryIndex {
   }
 
   private async bootstrapTrustInner(): Promise<{ user: boolean; memory: boolean }> {
-    // A full sync can already be underway from startup or a memory-search call.
-    // Wait for it before trusting the metadata signature it may have just recorded.
-    if (this.syncPromise) await this.syncPromise;
-    // Trust only depends on USER.md and MEMORY.md. A full recursive index sync on
-    // every chat turn also scans all daily notes, which is unnecessary when these
-    // two files have not changed. Search/reindex still performs a complete sync.
-    let trustFiles = await this.memory.store.listTrustFiles();
-    let signature = this.trustSignature(trustFiles);
-    if (this.trustFileSignature !== signature) {
-      await this.syncFiles(false);
-      trustFiles = await this.memory.store.listTrustFiles();
-      signature = this.trustSignature(trustFiles);
-      this.trustFileSignature = signature;
-    }
+    // USER.md and MEMORY.md are injected directly into prompts, so their trust
+    // must be checked against their current bytes every time. mtime + size are
+    // only a performance hint and can be held constant by an external edit.
+    // Force only these two sources through content hashing; other daily files
+    // remain on the normal incremental index path.
+    await this.syncFiles(false, new Set(["USER.md", "MEMORY.md"]));
+    const trustFiles = await this.memory.store.listTrustFiles();
+    const signature = this.trustSignature(trustFiles);
+    this.trustFileSignature = signature;
     const rows = this.db.prepare("SELECT path,provenance FROM memory_file_sources WHERE scope_id=? AND path IN ('USER.md','MEMORY.md')")
       .all(this.scopeId) as Array<{ path: string; provenance: string }>;
     const byPath = new Map(rows.map((row) => [row.path, row.provenance]));
@@ -174,15 +213,22 @@ export class SqliteMemoryIndex {
       .join("|");
   }
 
-  private async syncFiles(includeEmbeddings = true): Promise<void> {
-    if (this.syncPromise) return this.syncPromise;
-    this.syncPromise = this.syncFilesInner(includeEmbeddings).finally(() => {
+  private async syncFiles(includeEmbeddings = true, forcePaths: ReadonlySet<string> = new Set()): Promise<void> {
+    if (this.syncPromise) {
+      await this.syncPromise;
+      // A regular sync may have started just before a security-sensitive forced
+      // read. Run the requested verification after it rather than treating the
+      // in-flight scan as satisfying the force request.
+      if (forcePaths.size > 0) return this.syncFiles(includeEmbeddings, forcePaths);
+      return;
+    }
+    this.syncPromise = this.syncFilesInner(includeEmbeddings, forcePaths).finally(() => {
       this.syncPromise = undefined;
     });
     return this.syncPromise;
   }
 
-  private async syncFilesInner(includeEmbeddings: boolean): Promise<void> {
+  private async syncFilesInner(includeEmbeddings: boolean, forcePaths: ReadonlySet<string>): Promise<void> {
     const infos = await this.memory.store.listFiles();
     this.trustFileSignature = this.trustSignature(infos);
     const seen = new Set<string>();
@@ -260,7 +306,8 @@ export class SqliteMemoryIndex {
       const prior = readSource.get(this.scopeId, info.rel) as
         | { mtime_ms: number; size: number; content_hash: string; provenance: string }
         | undefined;
-      if (prior?.mtime_ms === info.mtimeMs && prior.size === info.size) continue;
+      const pending = this.pendingProvenance.get(info.rel);
+      if (prior?.mtime_ms === info.mtimeMs && prior.size === info.size && !pending && !forcePaths.has(info.rel)) continue;
       let content: string;
       try {
         content = await fs.readFile(info.abs, "utf8");
@@ -268,8 +315,20 @@ export class SqliteMemoryIndex {
         continue;
       }
       const hash = sha256(content);
-      if (prior?.content_hash === hash) continue;
-      const provenance = this.pendingProvenance.get(info.rel) || prior?.provenance || this.initialProvenance(info.rel);
+      if (prior?.content_hash === hash) {
+        if (pending) {
+          const provenance = pending.contentHash === hash ? pending.provenance : prior.provenance;
+          this.db.transaction(() => {
+            this.db.prepare("UPDATE memory_file_sources SET provenance=? WHERE scope_id=? AND path=?").run(provenance, this.scopeId, info.rel);
+            this.db.prepare("UPDATE memory_file_chunks SET provenance=? WHERE scope_id=? AND path=?").run(provenance, this.scopeId, info.rel);
+          })();
+          this.pendingProvenance.delete(info.rel);
+        }
+        continue;
+      }
+      const provenance = pending?.contentHash === hash
+        ? pending.provenance
+        : this.initialProvenance(info.rel);
       const chunks = chunkMarkdown(info.rel, content);
       const observed = new Date(info.mtimeMs).toISOString();
       replaceFile({
@@ -283,6 +342,9 @@ export class SqliteMemoryIndex {
       });
       this.pendingProvenance.delete(info.rel);
     }
+    // Drop stale provenance intents. They must never attribute later external
+    // edits to the actor who wrote an earlier version of the same path.
+    for (const rel of this.pendingProvenance.keys()) if (!seen.has(rel)) this.pendingProvenance.delete(rel);
 
     const oldSources = this.db
       .prepare("SELECT path FROM memory_file_sources WHERE scope_id=?")
@@ -304,6 +366,159 @@ export class SqliteMemoryIndex {
     if (includeEmbeddings) await this.embedMissingChunks();
   }
 
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Memory embedding timed out.")), timeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async trustedPaths(): Promise<string[]> {
+    const infos = await this.memory.store.listFiles();
+    await this.syncFiles(false, new Set(infos.map((info) => info.rel)));
+    return (this.db.prepare("SELECT path FROM memory_file_sources WHERE scope_id=? AND provenance IN ('owner','agent') ORDER BY path")
+      .all(this.scopeId) as Array<{ path: string }>).map((row) => row.path);
+  }
+
+  /**
+   * Build an immutable, hash-verified snapshot for system-prompt memory context.
+   * The context builder consumes these exact bytes instead of reopening paths
+   * after the trust decision (which would introduce a TOCTOU trust bypass).
+   */
+  async trustedContextSnapshot(): Promise<{
+    user?: string;
+    memory?: string;
+    files: Array<{ path: string; text: string }>;
+  }> {
+    const infos = await this.memory.store.listFiles();
+    await this.withTimeout(this.syncFiles(false, new Set(infos.map((info) => info.rel))), 15_000);
+    const rows = this.db.prepare(
+      "SELECT path,content_hash,provenance FROM memory_file_sources WHERE scope_id=? AND provenance IN ('owner','agent')",
+    ).all(this.scopeId) as Array<{ path: string; content_hash: string; provenance: string }>;
+    const trusted = new Map(rows.map((row) => [row.path, row]));
+    const present = new Set(infos.map((info) => info.rel));
+
+    const infoByPath = new Map(infos.map((info) => [info.rel, info]));
+    const readVerified = async (rel: string): Promise<string | undefined> => {
+      const source = trusted.get(rel);
+      const info = infoByPath.get(rel);
+      if (!source || !present.has(rel) || !info || info.size > 2_000_000) return undefined;
+      try {
+        const read = await this.memory.getFull(rel);
+        if (read.error || sha256(read.text) !== source.content_hash) {
+          // Fail closed now; a later index pass will mark the changed file unknown.
+          await this.syncFiles(false, new Set([rel]));
+          trusted.delete(rel);
+          return undefined;
+        }
+        return read.text;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const userSource = trusted.get("USER.md");
+    const memorySource = trusted.get("MEMORY.md");
+    const [userText, memoryText] = await Promise.all([
+      userSource?.provenance === "owner" ? readVerified("USER.md") : Promise.resolve(undefined),
+      memorySource ? readVerified("MEMORY.md") : Promise.resolve(undefined),
+    ]);
+
+    const recentDays = Math.max(1, Math.min(30, this.memory.config().recentDays));
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - (recentDays - 1));
+    const recent = infos
+      .filter((info) => {
+        if (!trusted.has(info.rel) || info.rel === "MEMORY.md" || info.rel.includes("/compactions/") || info.rel.includes("/legacy-import/") || info.rel.includes("/untrusted/")) return false;
+        const name = path.posix.basename(info.rel);
+        const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(name);
+        if (!match) return false;
+        const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        return date.getTime() >= cutoff.getTime();
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs || b.rel.localeCompare(a.rel))
+      .slice(0, Math.max(0, Math.min(30, this.memory.config().indexMaxEntries)));
+
+    const files: Array<{ path: string; text: string }> = [];
+    for (const info of recent) {
+      const text = await readVerified(info.rel);
+      if (text !== undefined) files.push({ path: info.rel, text });
+    }
+    return {
+      ...(userText !== undefined ? { user: userText } : {}),
+      ...(memoryText !== undefined ? { memory: memoryText } : {}),
+      files,
+    };
+  }
+
+  /**
+   * Read a trusted memory file only after rechecking its current bytes against
+   * the canonical source hash. A path retrieved earlier in a run is not proof
+   * that the file still contains the same trusted content.
+   */
+  async readTrustedFile(requested: string, from?: number, lines?: number): Promise<{
+    path: string; text: string; startLine?: number; endLine?: number; error?: string;
+  }> {
+    const raw = typeof requested === "string" ? requested.trim().replace(/\\/g, "/") : "";
+    const rel = path.posix.normalize(raw.replace(/^\.\//, ""));
+    if (!raw || raw.length > 512 || rel === "." || rel.startsWith("../") || rel.startsWith("/") || rel !== raw.replace(/^\.\//, "")) {
+      return { path: raw.slice(0, 512), text: "", error: "memory_get requires a safe relative memory file path." };
+    }
+    if (from !== undefined && (!Number.isSafeInteger(from) || from < 1)) {
+      return { path: rel, text: "", error: "from must be a positive line number." };
+    }
+    if (lines !== undefined && (!Number.isSafeInteger(lines) || lines < 1 || lines > 500)) {
+      return { path: rel, text: "", error: "lines must be between 1 and 500." };
+    }
+
+    try {
+      const currentInfo = (await this.memory.store.listFiles()).find((item) => item.rel === rel);
+      if (!currentInfo || currentInfo.size > 2_000_000) {
+        return { path: rel, text: "", error: currentInfo ? "Memory file exceeds the safe read limit." : "Memory file was not found." };
+      }
+      await this.withTimeout(this.syncFiles(false, new Set([rel])), 15_000);
+      const source = this.db.prepare(
+        "SELECT content_hash,provenance FROM memory_file_sources WHERE scope_id=? AND path=?",
+      ).get(this.scopeId, rel) as { content_hash: string; provenance: string } | undefined;
+      if (!source || (source.provenance !== "owner" && source.provenance !== "agent")) {
+        return { path: rel, text: "", error: "Memory file is not trusted for agent retrieval." };
+      }
+
+      // FileMemoryService.get applies the same memory-root, extension and
+      // symlink checks as the normal memory_get path. Hash the exact bytes it
+      // returned, then slice that verified buffer instead of reopening it.
+      const read = await this.memory.getFull(rel);
+      if (read.error) return read;
+      if (sha256(read.text) !== source.content_hash) {
+        // A concurrent edit raced the sync/read window. Fail closed; the next
+        // search/get will rebuild this source as unknown provenance.
+        await this.syncFiles(false, new Set([rel]));
+        return { path: rel, text: "", error: "Memory file changed during authorization; search it again before reading." };
+      }
+      if (from === undefined && lines === undefined) {
+        return read.text.length > 20_000
+          ? { path: rel, text: `${read.text.slice(0, 20_000)}\n…[truncated; pass from/lines for the rest]` }
+          : { path: rel, text: read.text };
+      }
+      const all = read.text.split(/\r?\n/);
+      const start = from ?? 1;
+      const count = Math.max(1, Math.min(500, lines ?? 80));
+      const slice = all.slice(start - 1, start - 1 + count);
+      return { path: rel, text: slice.join("\n"), startLine: start, endLine: start + slice.length - 1 };
+    } catch (error) {
+      return { path: rel, text: "", error: error instanceof Error ? error.message : "Memory file could not be read safely." };
+    }
+  }
+
   private async embedMissingChunks(): Promise<void> {
     if (!semanticProvider(this.embeddings.name)) return;
     if (Date.now() - this.lastEmbeddingFailureAt < EMBEDDING_COOLDOWN_MS) return;
@@ -320,7 +535,8 @@ export class SqliteMemoryIndex {
       const batch = rows.slice(offset, offset + EMBEDDING_CONCURRENCY);
       const results = await Promise.all(batch.map(async (row) => {
         try {
-          return { row, vector: Array.from(await this.embeddings.embed(row.text), Number) };
+          const vector = await this.withTimeout(this.embeddings.embed(row.text.slice(0, 1_600)), 8_000);
+          return { row, vector: Array.from(vector, Number) };
         } catch (error) {
           return { row, error };
         }
@@ -341,9 +557,9 @@ export class SqliteMemoryIndex {
 
   private ftsScores(query: string, limit: number): Array<{ path: string; score: number }> {
     if (!this.ftsReady) return [];
-    const terms = [...new Set(query.normalize("NFKC").match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])]
+    const terms = [...new Set(query.normalize("NFKC").replace(/[\u200c\u200d\ufeff]/g, "").match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])]
       .filter((term) => term.length > 1)
-      .slice(0, 16);
+      .slice(0, 24);
     if (!terms.length) return [];
     const match = terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(" OR ");
     try {
@@ -362,12 +578,26 @@ export class SqliteMemoryIndex {
   }
 
   async search(query: string, limit = 5): Promise<SearchHit[]> {
-    const clean = query.trim();
+    if (typeof query !== "string") throw new Error("Memory search query must be text.");
+    if (query.length > 2_000) throw new Error("Memory search query is limited to 2000 characters.");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new Error("Memory search result limit must be an integer between 1 and 20.");
+    const clean = query.normalize("NFKC").trim();
     if (!clean) return [];
-    await this.syncFiles();
+    const boundedLimit = limit;
+    // Re-hash current Markdown bytes before exposing indexed snippets. This also
+    // catches same-size/same-mtime edits and prevents deleted notes resurfacing.
+    const infos = await this.memory.store.listFiles();
+    await this.withTimeout(this.syncFiles(false, new Set(infos.map((info) => info.rel))), 15_000);
+    // Index-time vectors are best-effort. Keyword results remain available if
+    // an embedding provider is slow or offline.
+    try { await this.withTimeout(this.embedMissingChunks(), 10_000); }
+    catch (error) { this.lastEmbeddingFailureAt = Date.now(); this.lastEmbeddingError = this.safeError(error); }
+    // Unknown/imported provenance is not eligible for agent retrieval. The
+    // provenance is copied from the canonical source record at indexing time.
     const rows = this.db.prepare(`
       SELECT id,path,start_line,end_line,text,observed_at,importance,provenance
-      FROM memory_file_chunks WHERE scope_id=?
+      FROM memory_file_chunks
+      WHERE scope_id=? AND provenance IN ('owner','agent')
     `).all(this.scopeId) as ChunkRow[];
     if (!rows.length) return [];
     const vectors = this.db.prepare(
@@ -389,12 +619,15 @@ export class SqliteMemoryIndex {
       ...(vectorsById.has(row.id) ? { vector: vectorsById.get(row.id) } : {}),
       ...(row.importance !== null ? { importance: row.importance } : {}),
     }));
-    let keyword = this.ftsScores(clean, limit);
-    if (!keyword.length) keyword = scoreBm25(clean, documents);
+    const keywordFts = this.ftsScores(clean, boundedLimit);
+    const keywordBm25 = scoreBm25(clean, documents);
+    // FTS5 supplies exact indexed matches; the shared Unicode/Bengali stemmer
+    // catches suffix and spelling variants. RRF prevents either path dominating.
+    const keyword = fuseRankedPaths(keywordFts, keywordBm25, { mode: "rrf", keywordWeight: 1, vectorWeight: 1 });
     let vector: Array<{ path: string; score: number }> = [];
     if (semanticProvider(this.embeddings.name) && Date.now() - this.lastEmbeddingFailureAt >= EMBEDDING_COOLDOWN_MS) {
       try {
-        const queryVector = Array.from(await this.embeddings.embed(clean), Number);
+        const queryVector = Array.from(await this.withTimeout(this.embeddings.embed(clean.slice(0, 1_600)), 8_000), Number);
         vector = scoreCosine(queryVector, documents);
         this.lastEmbeddingError = undefined;
       } catch (error) {
@@ -405,7 +638,7 @@ export class SqliteMemoryIndex {
     }
     const fused = fuseRankedPaths(keyword, vector, { mode: "rrf", keywordWeight: 1, vectorWeight: 1 });
     const adjusted = applyRankingAdjustments(fused, documents, clean);
-    const diversified = diversifyWithMmr(adjusted, documents, { lambda: 0.7, limit: Math.min(20, Math.max(1, limit)) });
+    const diversified = diversifyWithMmr(adjusted, documents, { lambda: 0.7, limit: boundedLimit });
     const byId = new Map(rows.map((row) => [row.id, row]));
     return diversified.flatMap((item) => {
       const row = byId.get(item.path);
@@ -415,6 +648,9 @@ export class SqliteMemoryIndex {
         startLine: row.start_line,
         endLine: row.end_line,
         score: item.score,
+        provenance: row.provenance,
+        sourceReference: row.path,
+        timestamp: row.observed_at,
         snippet: row.text.length > 400 ? `${row.text.slice(0, 399)}…` : row.text,
       }];
     });
@@ -440,6 +676,8 @@ export class SqliteMemoryIndex {
       "SELECT legacy_id FROM memory_file_imports",
     ).all() as Array<{ legacy_id: string }>;
     const importedIds = new Set(imported.map((row) => row.legacy_id));
+    const deleted = this.db.prepare("SELECT legacy_id FROM memory_file_deletions").all() as Array<{ legacy_id: string }>;
+    const deletedIds = new Set(deleted.map((row) => row.legacy_id));
     const rows = this.db.prepare(`
       SELECT id,region,content,summary,provenance,confidence,importance,created_at,updated_at
       FROM memory_chunks ORDER BY created_at
@@ -450,7 +688,7 @@ export class SqliteMemoryIndex {
     );
     for (const row of rows) {
       const legacyId = String(row.id);
-      if (importedIds.has(legacyId)) continue;
+      if (importedIds.has(legacyId) || deletedIds.has(legacyId)) continue;
       const filename = `${sha256(legacyId).slice(0, 32)}.md`;
       const rel = `memory/legacy-import/${filename}`;
       const abs = path.join(this.memory.memoryPaths().root, rel);
@@ -482,6 +720,30 @@ export class SqliteMemoryIndex {
     }
     if (count) await this.syncFiles();
     return count;
+  }
+
+  /** Delete a legacy chunk and its derived Markdown/index copy idempotently. */
+  async forgetLegacyChunk(legacyId: string): Promise<boolean> {
+    const id = typeof legacyId === "string" ? legacyId.trim() : "";
+    if (!id || id.length > 200) return false;
+    const filename = `${sha256(id).slice(0, 32)}.md`;
+    const rel = `memory/legacy-import/${filename}`;
+    const absolute = path.resolve(this.memory.memoryPaths().root, rel);
+    const root = path.resolve(this.memory.memoryPaths().root) + path.sep;
+    if (!absolute.startsWith(root)) return false;
+    const timestamp = new Date().toISOString();
+    const removeRows = this.db.transaction(() => {
+      this.db.prepare("INSERT OR IGNORE INTO memory_file_deletions(legacy_id,deleted_at) VALUES(?,?)").run(id, timestamp);
+      this.db.prepare("DELETE FROM memory_file_imports WHERE legacy_id=?").run(id);
+      this.db.prepare("DELETE FROM memory_vectors WHERE chunk_id=?").run(id);
+      return this.db.prepare("DELETE FROM memory_chunks WHERE id=?").run(id).changes > 0;
+    });
+    const removedLegacy = removeRows();
+    try { await fs.rm(absolute, { force: true }); }
+    catch (error) { this.log(`Legacy memory file cleanup deferred (${this.safeError(error)}).`); }
+    // This also removes FTS and semantic vectors for the now-absent source file.
+    await this.syncFiles(false);
+    return removedLegacy;
   }
 
   status(): Record<string, unknown> {

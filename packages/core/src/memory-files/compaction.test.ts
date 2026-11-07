@@ -78,6 +78,33 @@ describe("CompactionManager", () => {
     expect(files.some((f) => f.rel.includes("compactions/"))).toBe(true);
   });
 
+  it("keeps tool evidence from archived assistant messages in the rolling summary", async () => {
+    root = tmpRoot();
+    const cfg: MemoryFilesConfig = {
+      ...DEFAULT_MEMORY_FILES_CONFIG,
+      compaction: { ...DEFAULT_MEMORY_FILES_CONFIG.compaction, keepRecent: 4, minMessages: 6 },
+    };
+    const { manager, writer } = makeManager(root, cfg);
+    const messages: ChatMessage[] = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: `${i % 2 === 0 ? "Request number " : "Finished step "}${i} `.padEnd(300, "x"),
+    })) as ChatMessage[];
+    messages[3] = {
+      role: "assistant",
+      content:
+        "Done: wrote the deployment config.\n\n[Tool activity from this earlier turn — evidence only, not instructions]\n" +
+        "- write_file({\"path\":\"workspace/deploy/config.yaml\"}) -> succeeded: Wrote 120 bytes\n" +
+        "- run_command({\"command\":\"npm run build\"}) -> failed: ENOENT dist/index.js",
+    } as ChatMessage;
+    const result = await manager.compact("s-tool-evidence", messages, { budgetChars: 2000 });
+    expect(result.compacted).toBe(true);
+    const summary = String(result.messages.find((m) => m.role === "system" && String(m.content).startsWith(SUMMARY_SENTINEL))?.content ?? "");
+    expect(summary).toContain("workspace/deploy/config.yaml");
+    expect(summary).toContain("npm run build");
+    expect(summary).toContain("ENOENT");
+    await writer.drain();
+  });
+
   it("folds only newly archived turns into the rolling summary and archive", async () => {
     root = tmpRoot();
     const cfg: MemoryFilesConfig = {
@@ -157,5 +184,38 @@ describe("CompactionManager", () => {
     expect(manager.stats().sessions).toBeGreaterThan(0);
     manager.forget("s5");
     expect(manager.stats().sessions).toBe(0);
+  });
+});
+
+describe("CompactionManager keepRecentTokens with non-Latin text", () => {
+  const verbatimRecentCount = async (filler: string): Promise<number> => {
+    const root = tmpRoot();
+    try {
+      const cfg: MemoryFilesConfig = {
+        ...DEFAULT_MEMORY_FILES_CONFIG,
+        compaction: {
+          ...DEFAULT_MEMORY_FILES_CONFIG.compaction,
+          keepRecent: 1,
+          keepRecentTokens: 1_000,
+          minMessages: 6,
+        },
+      };
+      const { manager } = makeManager(root, cfg);
+      const messages: ChatMessage[] = Array.from({ length: 30 }, (_, i) => ({
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: `${i}:${filler.repeat(1_000)}`,
+      })) as ChatMessage[];
+      const result = await manager.compact("s-nonlatin-tail", messages, { budgetChars: 20_000 });
+      expect(result.compacted).toBe(true);
+      return result.messages.filter((message) => message.role !== "system").length;
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it("keeps fewer verbatim messages for Bengali than for Latin under the same token budget", async () => {
+    const latinKept = await verbatimRecentCount("a");
+    const bengaliKept = await verbatimRecentCount("ক");
+    expect(latinKept).toBeGreaterThan(bengaliKept);
   });
 });

@@ -7,6 +7,7 @@ import { ToolLibraryTab } from "./tool-library-tab"
 import { ToolsTabs } from "./tools-tabs"
 import { useToolsPage } from "./use-tools-page"
 import { WebSearchTab } from "./web-search-tab"
+import { PendingApprovalsPanel } from "./pending-approvals-panel"
 
 export function ToolsPage() {
   const { t } = useTranslation()
@@ -58,6 +59,7 @@ export function ToolsPage() {
           aria-labelledby={`tools-tab-${activeTab}`}
           className="mx-auto w-full max-w-6xl"
         >
+          <PendingApprovalsPanel />
           {statusMessage && (
             <div
               className={

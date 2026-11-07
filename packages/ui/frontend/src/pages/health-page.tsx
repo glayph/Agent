@@ -20,6 +20,8 @@ import {
   createBackup,
   getFullHealthReport,
   getRuntimeDeliveries,
+  getSystemHealthSamples,
+  type SystemHealthSample,
   restartWatchdog,
   retryRuntimeJob,
   rollbackBackup,
@@ -135,6 +137,7 @@ export function HealthPage() {
     receipts: DeliveryReceipt[]
     stats: Record<string, number>
   } | null>(null)
+  const [systemHealth, setSystemHealth] = useState<SystemHealthSample[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<{
@@ -148,9 +151,10 @@ export function HealthPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [reportResult, deliveriesResult] = await Promise.allSettled([
+      const [reportResult, deliveriesResult, systemHealthResult] = await Promise.allSettled([
         getFullHealthReport(),
         getRuntimeDeliveries(),
+        getSystemHealthSamples(),
       ])
       const failures: string[] = []
       if (reportResult.status === "fulfilled") {
@@ -162,6 +166,12 @@ export function HealthPage() {
         setDeliveryReport(deliveriesResult.value)
       } else {
         failures.push(`Runtime deliveries: ${deliveriesResult.reason instanceof Error ? deliveriesResult.reason.message : String(deliveriesResult.reason)}`)
+      }
+      if (systemHealthResult.status === "fulfilled") {
+        setSystemHealth(systemHealthResult.value.samples)
+      } else {
+        setSystemHealth([])
+        failures.push(`System telemetry: ${systemHealthResult.reason instanceof Error ? systemHealthResult.reason.message : String(systemHealthResult.reason)}`)
       }
       if (failures.length > 0) {
         const message = failures.join(" · ")
@@ -189,6 +199,15 @@ export function HealthPage() {
         : 0,
     [report],
   )
+  const latestSystemHealth = systemHealth.at(-1)
+  const formatBytes = (value: number | null | undefined) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "—"
+    const units = ["B", "KB", "MB", "GB", "TB"]
+    let amount = value; let unit = 0
+    while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit += 1 }
+    return `${amount.toFixed(amount >= 100 ? 0 : 1)} ${units[unit]}`
+  }
+
   const deadLetterJobs = useMemo(
     () =>
       report
@@ -361,6 +380,26 @@ export function HealthPage() {
             </SectionPanel>
 
             <FlowStatusPanel />
+
+            <SectionPanel
+              title="System resource telemetry"
+              description={latestSystemHealth ? `Latest sample ${formatDateTime(new Date(latestSystemHealth.sampledAt).toISOString())} · ${systemHealth.length} retained samples` : "No persisted system-health samples yet"}
+            >
+              {latestSystemHealth ? (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <StatCard label="Host load / CPU" value={latestSystemHealth.host.loadAvailable === false || latestSystemHealth.host.loadPerCpu == null ? "—" : `${latestSystemHealth.host.loadPerCpu.toFixed(2)}×`} status={latestSystemHealth.host.loadPerCpu != null && latestSystemHealth.host.loadPerCpu >= 2 ? "degraded" : "healthy"} />
+                  <StatCard label="Free memory" value={latestSystemHealth.host.freeMemoryRatio == null ? "—" : `${(latestSystemHealth.host.freeMemoryRatio * 100).toFixed(1)}%`} status={latestSystemHealth.host.freeMemoryRatio != null && latestSystemHealth.host.freeMemoryRatio < 0.08 ? "degraded" : "healthy"} />
+                  <StatCard label="Free disk" value={latestSystemHealth.host.freeDiskRatio == null ? "—" : `${(latestSystemHealth.host.freeDiskRatio * 100).toFixed(1)}%`} status={latestSystemHealth.host.freeDiskRatio != null && latestSystemHealth.host.freeDiskRatio < 0.05 ? "degraded" : "healthy"} />
+                  <StatCard label="Resource waiters" value={`${latestSystemHealth.resources.waiting ?? 0} · oldest ${Math.round((latestSystemHealth.resources.oldestWaiterAgeMs ?? 0) / 1000)}s`} status={(latestSystemHealth.resources.waiting ?? 0) > 0 && (latestSystemHealth.resources.oldestWaiterAgeMs ?? 0) > 60_000 ? "degraded" : "healthy"} />
+                  <div className="text-muted-foreground text-sm">Process RSS: {formatBytes(latestSystemHealth.process.rssBytes)} · Heap: {formatBytes(latestSystemHealth.process.heapUsedBytes)}</div>
+                  <div className="text-muted-foreground text-sm">Process CPU: {latestSystemHealth.process.cpuPercentOfOneCore == null ? "warming up" : `${latestSystemHealth.process.cpuPercentOfOneCore.toFixed(1)}% of one core`}</div>
+                  <div className="text-muted-foreground text-sm">Event-loop p99: {latestSystemHealth.eventLoopP99Ms == null ? "—" : `${latestSystemHealth.eventLoopP99Ms} ms`}</div>
+                  <div className="text-muted-foreground text-sm">Active runs: {latestSystemHealth.runs.active ?? 0} · Active leases: {latestSystemHealth.resources.activeLeases ?? 0}</div>
+                </div>
+              ) : (
+                <div className="text-muted-foreground text-sm">Telemetry will appear after the first Gateway health sample is stored.</div>
+              )}
+            </SectionPanel>
 
             <div className="grid gap-4 xl:grid-cols-2">
               <SectionPanel

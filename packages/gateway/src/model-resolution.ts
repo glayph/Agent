@@ -16,6 +16,8 @@
  */
 
 export interface StoredModelEntry {
+  /** Stable SQLite row identifier; absent only in legacy/test callers. */
+  id?: number
   payload: Record<string, unknown>
   isDefault: boolean
 }
@@ -161,18 +163,30 @@ export function interpretDefaultModel(raw: unknown): { provider?: string; model:
   return { model: value }
 }
 
-export function resolveModel(stored: StoredModelEntry[], requested?: string, env: Env = process.env): ResolvedModel {
+export function resolveModel(stored: StoredModelEntry[], requested?: string, env: Env = process.env, requestedIndex?: number): ResolvedModel {
   const wanted = (requested ?? "").trim()
-  const matched = wanted ? stored.find((item) => matchesRequested(item, wanted)) : undefined
-  // An unknown requested name must NOT produce a ghost client built from an
-  // empty payload: fall back to the configured default instead.
-  const entry = matched ?? pickDefaultEntry(stored)
-  const payload: Record<string, unknown> = entry?.payload ?? {}
-  const source: ResolvedModel["source"] = entry ? "stored" : "env"
-
+  const hasRequestedIndex = requestedIndex !== undefined
+  const matchedByIndex = hasRequestedIndex && Number.isSafeInteger(requestedIndex) && requestedIndex > 0
+    ? stored.find((item) => item.id === requestedIndex)
+    : undefined
+  const requestedIndexMismatch = hasRequestedIndex && (!matchedByIndex || (wanted && !matchesRequested(matchedByIndex, wanted)))
+  const matched = requestedIndexMismatch
+    ? undefined
+    : matchedByIndex ?? (wanted ? stored.find((item) => matchesRequested(item, wanted)) : undefined)
   const envModel = (env.MIKI_MODEL || env.OPENAI_MODEL || "").trim()
-  const fromDefaultEnv = !entry && !envModel ? interpretDefaultModel(env.DEFAULT_MODEL) : undefined
-  const model = String(payload.model || payload.model_name || (!entry ? wanted : "") || envModel || fromDefaultEnv?.model || "").trim()
+  const defaultEnvModel = !envModel ? interpretDefaultModel(env.DEFAULT_MODEL) : undefined
+  const configuredEnvModel = envModel || defaultEnvModel?.model || ""
+  // Environment-only deployments expose their single configured model as a virtual
+  // row in the UI. Selecting that exact id is valid even though it is not in SQLite.
+  // Any other explicit, stale id fails closed rather than running a different model.
+  const matchesEnvironment = stored.length === 0 && Boolean(wanted) && wanted === configuredEnvModel
+  const unknownRequested = requestedIndexMismatch || (Boolean(wanted) && !matched && !matchesEnvironment)
+  const entry = unknownRequested ? undefined : matched ?? pickDefaultEntry(stored)
+  const payload: Record<string, unknown> = entry?.payload ?? {}
+  const source: ResolvedModel["source"] = entry ? "stored" : !unknownRequested && configuredEnvModel ? "env" : "none"
+
+  const fromDefaultEnv = !entry && !unknownRequested && !envModel ? defaultEnvModel : undefined
+  const model = String(payload.model || payload.model_name || (!entry && !unknownRequested ? wanted : "") || (!unknownRequested ? envModel : "") || fromDefaultEnv?.model || "").trim()
   const provider = String(payload.provider || env.MIKI_PROVIDER || fromDefaultEnv?.provider || "openai-compatible").trim()
   const defaults = providerDefaults(provider, env)
   const baseUrl = String(payload.api_base || defaults.baseUrl || env.OPENAI_API_BASE || "https://api.openai.com/v1").trim()
@@ -183,7 +197,8 @@ export function resolveModel(stored: StoredModelEntry[], requested?: string, env
   const keyCheck = localConfigured ? ({ status: "not_required" } as ApiKeyCheck) : checkApiKey(provider, apiKey, { baseUrl })
 
   let reason: string | undefined
-  if (!model) reason = "No model name is configured: the Models page has no default model and MIKI_MODEL / OPENAI_MODEL / DEFAULT_MODEL are not set."
+  if (unknownRequested) reason = `Requested model "${wanted}" is not configured. Refresh the model list and select an available model.`
+  else if (!model) reason = "No model name is configured: the Models page has no default model and MIKI_MODEL / OPENAI_MODEL / DEFAULT_MODEL are not set."
   else if (entry && entry.payload.enabled === false) reason = `Model "${modelName}" is disabled.`
   else if (keyCheck.status === "missing" || keyCheck.status === "placeholder" || keyCheck.status === "malformed") reason = keyCheck.reason
 
@@ -196,7 +211,7 @@ export function resolveModel(stored: StoredModelEntry[], requested?: string, env
     baseUrl,
     apiKey,
     keyCheck,
-    isDefault: entry?.isDefault ?? !entry,
+    isDefault: entry?.isDefault ?? ((!wanted && !hasRequestedIndex) || matchesEnvironment),
     matchedRequested: Boolean(matched),
     ...(reason ? { reason } : {}),
     ...(entry ? { entry } : {}),

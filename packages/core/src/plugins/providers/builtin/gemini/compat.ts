@@ -76,55 +76,23 @@ export function normalizeGeminiSchema(value: unknown): JsonObject {
 export function normalizeGeminiMessages(
   messages: MikiProviderMessage[],
 ): MikiProviderMessage[] {
-  return messages.flatMap((message) => {
-    const candidate = message as unknown as Record<string, unknown>;
-    const role =
-      candidate.role === "system" ||
-      candidate.role === "user" ||
-      candidate.role === "assistant"
-        ? candidate.role
-        : candidate.role === "tool"
-          ? "user"
-          : "user";
-
-    if (candidate.role === "tool") {
-      const toolName =
-        typeof candidate.name === "string" && candidate.name.trim()
-          ? ` (${candidate.name.trim()})`
-          : "";
-      return [
-        {
-          role: "user",
-          content: `Tool result${toolName}: ${String(candidate.content ?? "")}`,
-        } as MikiProviderMessage,
-      ];
-    }
-
-    // Gemini's OpenAI-compatible endpoint can reject a continuation that
-    // contains OpenAI-style assistant.tool_calls followed by role=tool. Keep
-    // the execution trace as ordinary assistant text; the next request still
-    // includes the available tools, so Gemini can select the next operation.
-    if (role === "assistant" && Array.isArray(candidate.tool_calls)) {
-      const content = String(candidate.content ?? "").trim();
-      return [
-        {
-          role: "assistant",
-          content: content || "The requested tool operation was executed.",
-          ...(Array.isArray(candidate.image_urls) ? { image_urls: candidate.image_urls } : {}),
-          ...(candidate.audio ? { audio: candidate.audio } : {}),
-        } as MikiProviderMessage,
-      ];
-    }
-
-    return [
-      {
-        role,
-        content: candidate.content ?? "",
-        ...(Array.isArray(candidate.image_urls) ? { image_urls: candidate.image_urls } : {}),
-        ...(candidate.audio ? { audio: candidate.audio } : {}),
-      } as MikiProviderMessage,
-    ];
-  });
+  // Keep the exact assistant function-call / tool-result pairing. Gemini 3 may
+  // attach a thought signature to a function call in extra_content; removing or
+  // moving that metadata makes the next tool continuation invalid. The adapter
+  // is responsible for serializing multimodal fields, not rewriting the trace.
+  return messages.map((message) => ({
+    ...message,
+    ...(Array.isArray(message.tool_calls)
+      ? { tool_calls: message.tool_calls.map((call) =>
+          call && typeof call === "object" && !Array.isArray(call)
+            ? { ...(call as Record<string, unknown>) }
+            : call,
+        ) }
+      : {}),
+    ...(message.extra_content && typeof message.extra_content === "object"
+      ? { extra_content: { ...message.extra_content } }
+      : {}),
+  }));
 }
 
 export function normalizeGeminiTools(tools: unknown): ToolDefinition[] {

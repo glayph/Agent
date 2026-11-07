@@ -106,7 +106,7 @@ export function isAllowedDomain(hostname: string, allowedDomains: string[] = [])
   if (!allowedDomains.length) return true;
   return allowedDomains.some((domain) => {
     const normalized = normalizeDomain(domain);
-    return normalized && (host === normalized || host.endsWith(`.${normalized}`));
+    return normalized === "*" || (normalized && (host === normalized || host.endsWith(`.${normalized}`)));
   });
 }
 

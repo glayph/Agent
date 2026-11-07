@@ -83,6 +83,7 @@ type LearningStore = {
   getActivePolicySnapshot?(scope: Scope | undefined): Record<string, unknown> | null;
   promotePolicySnapshot?(scope: Scope | undefined, id: string, approvalId?: string): Record<string, unknown> | null;
   pruneExperiences?(scope: Scope | undefined, retentionDays?: number): number;
+  pruneLearningData?(scope: Scope | undefined, retentionDays?: number): Record<string, number>;
 };
 
 type MemoryIntegration = {
@@ -760,14 +761,33 @@ export class SelfImprovementEngine {
     return this.config.auto_apply_optimizations === true && modeOf(this.config) === "apply";
   }
 
-  /** Approves and applies a proposal under the config switch. A store that refuses leaves it pending; the cycle still completes. */
+  /**
+   * Auto-apply only well-supported, low-drift proposals. Prompt-tuning proposals always
+   * remain review-only; policy changes need minimum evidence for both the winner and a comparator.
+   */
   private autoApplyProposal(store: LearningStore, proposal: Record<string, unknown> | null, snapshotId?: string): boolean {
     if (!proposal || !this.autoApplyEnabled()) return false;
+    const minSamples = positiveInt(this.config.behavior_learning?.min_samples, 3);
+    const evidenceIds = Array.isArray(proposal.evidenceIds) ? [...new Set(proposal.evidenceIds.map(String))] : [];
+    if (evidenceIds.length < minSamples) return false;
+    if (proposal.kind === "prompt_tuning") return false;
+    const drift = Number(proposal.driftPercent ?? proposal.drift_percent ?? 0);
+    const maxDrift = Math.max(0, Number(this.config.guardrails?.max_prompt_drift_percent ?? 10));
+    if (this.config.guardrails?.enabled !== false && Number.isFinite(drift) && drift > maxDrift) return false;
+    if (proposal.kind === "policy") {
+      const payload = proposal.payload && typeof proposal.payload === "object" ? proposal.payload as Record<string, unknown> : {};
+      const stats = payload.actionStats && typeof payload.actionStats === "object" ? payload.actionStats as Record<string, { count?: unknown }> : {};
+      const eligible = Object.entries(stats).filter(([, value]) => Number(value?.count || 0) >= minSamples);
+      const winner = String(payload.recommendedAction || "");
+      if (eligible.length < 2 || !winner || Number(stats[winner]?.count || 0) < minSamples) return false;
+    }
     try {
       const proposalId = String(proposal.id);
-      store.approveProposal?.(this.scope, proposalId, "auto-approved-by-config");
-      store.applyProposal?.(this.scope, proposalId);
-      if (snapshotId) store.promotePolicySnapshot?.(this.scope, snapshotId, "auto-approved-by-config");
+      const approved = store.approveProposal?.(this.scope, proposalId, "auto-approved-by-config");
+      if (!approved || approved.status !== "approved") return false;
+      const applied = store.applyProposal?.(this.scope, proposalId);
+      if (!applied || applied.status !== "applied") return false;
+      if (snapshotId && !store.promotePolicySnapshot?.(this.scope, snapshotId, "auto-approved-by-config")) return false;
       return true;
     } catch {
       return false;

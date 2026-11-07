@@ -72,6 +72,59 @@ async function request<T>(
   return payload
 }
 
+
+export type GovernedMemoryRecord = {
+  id: string
+  kind: string
+  content: string
+  provenance: string
+  sourceType: string
+  sourceReference: string | null
+  confidence: number
+  status: "active" | "draft" | "review" | "superseded"
+  conflictKey: string | null
+  supersedesId: string | null
+  evidenceIds: string[]
+  createdAt: string
+  updatedAt: string
+  expiresAt: string | null
+  metadata: Record<string, unknown>
+}
+
+export async function listGovernedMemory(options: { kind?: string; status?: string; limit?: number } = {}) {
+  const params = new URLSearchParams()
+  if (options.kind) params.set("kind", options.kind)
+  if (options.status) params.set("status", options.status)
+  if (options.limit) params.set("limit", String(options.limit))
+  return request<{ records: GovernedMemoryRecord[] }>(`/api/memory/records?${params}`)
+}
+
+export async function listMemoryProcedures() {
+  return request<{ procedures: GovernedMemoryRecord[] }>("/api/memory/procedures")
+}
+
+export async function confirmMemoryPreference(record: GovernedMemoryRecord) {
+  return request<{ stored: boolean; conflict: boolean; record: GovernedMemoryRecord }>("/api/memory/records", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "preference", content: record.content, supersedes_id: record.id }),
+  })
+}
+
+export async function approveMemoryProcedure(id: string) {
+  return request<{ approved: boolean; procedure: GovernedMemoryRecord }>(`/api/memory/procedures/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  })
+}
+
+export async function forgetGovernedMemory(id: string) {
+  return request<{ deleted: boolean; id: string }>(`/api/memory/records/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
+}
+
 export async function getMemoryStats(): Promise<{
   scope: Record<string, string>
   stats: MemoryStats

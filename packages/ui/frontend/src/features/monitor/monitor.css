@@ -11,6 +11,22 @@
   background: transparent;
 }
 
+/* React Flow can calculate a zero-sized edge layer when the canvas is first
+ * hydrated from a compact or historical graph. The SVG paths still exist in
+ * the DOM, but the layer clips their visible stroke. Keep the edge plane
+ * pinned to the full canvas so connections remain visible after hydration and
+ * fitView. */
+.agent-monitor-flow .react-flow__edges {
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.agent-monitor-flow .react-flow__edges > svg {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .agent-monitor-flow .react-flow__selection {
   background: color-mix(in srgb, var(--primary) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent);

@@ -415,6 +415,13 @@ export async function validatePluginManifest(
     );
   }
 
+  const rawMonitorIconKey = stringField(m, "monitorIconKey")
+  const monitorIconKey = rawMonitorIconKey?.trim().toLowerCase()
+  const supportedMonitorIcons = new Set(["plugin", "github", "slack", "gmail", "calendar", "notion", "linear", "hubspot", "salesforce", "jira", "drive", "discord"])
+  if (m.monitorIconKey !== undefined && (!monitorIconKey || !supportedMonitorIcons.has(monitorIconKey))) {
+    errors.push('Manifest "monitorIconKey" must use a bundled local icon key')
+  }
+
   const permissions = validatePermissionList(
     m.permissions,
     errors,
@@ -475,6 +482,7 @@ export async function validatePluginManifest(
     description: stringField(m, "description") || "",
     author: stringField(m, "author"),
     license: stringField(m, "license"),
+    ...(monitorIconKey && supportedMonitorIcons.has(monitorIconKey) ? { monitorIconKey } : {}),
     main: stringField(m, "main"),
     permissions,
     contracts,

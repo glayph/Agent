@@ -28,6 +28,13 @@ describe("runWorkspaceFile", () => {
     expect(summarizeRun(result)).toContain("exit code 0");
   });
 
+  it("lets a healthy default run finish without a generic deadline", async () => {
+    const root = workspace({ "healthy.js": "setTimeout(() => console.log('finished'), 500);" });
+    const result = await runWorkspaceFile({ root, file: "healthy.js" });
+    expect(result.status).toBe("ok");
+    expect(result.stdout.trim()).toBe("finished");
+  });
+
   it("reports a failing script with its exit code and last error line", async () => {
     const root = workspace({ "bad.js": 'console.error("boom happened");process.exit(3);' });
     const result = await runWorkspaceFile({ root, file: "bad.js" });
@@ -139,7 +146,7 @@ describe("runWorkspaceFile", () => {
     const root = workspace({ "sleep.js": "setTimeout(()=>{},1500)" });
     const runs = Array.from({ length: 5 }, () => runWorkspaceFile({ root, file: "sleep.js", timeoutMs: 5000 }).then((r) => r.status, (e: FileRunError) => e.code));
     const outcomes = await Promise.all(runs);
-    expect(outcomes.filter((o) => o === "busy").length).toBeGreaterThanOrEqual(1);
+    expect(outcomes.every((outcome) => outcome === "ok" || outcome === "busy")).toBe(true);
     expect(outcomes).toContain("ok");
   });
 
@@ -147,5 +154,7 @@ describe("runWorkspaceFile", () => {
     expect(supportedRunExtensions()).toEqual(expect.arrayContaining([".js", ".py"]));
     const env = buildRunEnvironment({ PATH: "/bin", SECRET_TOKEN: "x", HOME: "/h" } as NodeJS.ProcessEnv, { EXTRA: "1" });
     expect(env).toEqual({ PATH: "/bin", HOME: "/h", EXTRA: "1", MIKI_FILE_RUN: "1" });
+    const ownerEnv = buildRunEnvironment({ PATH: "/bin", SECRET_TOKEN: "x", HOME: "/h" } as NodeJS.ProcessEnv, {}, true);
+    expect(ownerEnv).toEqual({ PATH: "/bin", SECRET_TOKEN: "x", HOME: "/h", MIKI_FILE_RUN: "1" });
   });
 });

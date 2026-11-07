@@ -16,6 +16,12 @@ describe("autonomous network security without built-in restrictions", () => {
     ).rejects.toThrow(/allowlist/);
   });
 
+  it("wildcard domains permit public hosts but do not permit private or reserved addresses", async () => {
+    await expect(validateNetworkUrl("https://8.8.8.8/", { allowedDomains: ["*"], allowPrivateNetworks: false })).resolves.toBeInstanceOf(URL);
+    await expect(validateNetworkUrl("http://192.168.1.10/", { allowedDomains: ["*"], allowPrivateNetworks: false })).rejects.toThrow(/private or reserved/i);
+    await expect(validateNetworkUrl("http://127.0.0.1/", { allowedDomains: ["*"], allowPrivateNetworks: false })).rejects.toThrow(/private or reserved/i);
+  });
+
   it("blocks localhost and private ranges only when explicitly turned off", async () => {
     await expect(validateNetworkUrl("http://localhost:8080/", { allowLocalhost: false })).rejects.toThrow(/localhost/i);
     await expect(validateNetworkUrl("http://10.0.0.1/", { allowPrivateNetworks: false })).rejects.toThrow(

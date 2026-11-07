@@ -20,11 +20,11 @@ function fixtureArchive(manifest: Record<string, unknown>, entry = "export funct
   return { archiveBase64: bytes.toString("base64"), sha256: createHash("sha256").update(bytes).digest("hex") }
 }
 
-async function appFor(dataRoot: string) {
+async function appFor(dataRoot: string, allowUnrestrictedGuestPlugins = false) {
   const db = new Database(":memory:")
   const app = express()
   app.use(express.json({ limit: "12mb" }))
-  const manager = createPluginManagementRouter({ db, dataRoot, configDir: dataRoot, requireAuth: (_req, _res, next) => next(), now: () => new Date().toISOString(), builtinIds: new Set(["tools.core-registry"]) })
+  const manager = createPluginManagementRouter({ db, dataRoot, configDir: dataRoot, requireAuth: (_req, _res, next) => next(), now: () => new Date().toISOString(), builtinIds: new Set(["tools.core-registry"]), allowUnrestrictedGuestPlugins: () => allowUnrestrictedGuestPlugins })
   app.use("/api/plugins", manager.router)
   const server = app.listen(0, "127.0.0.1")
   await new Promise<void>((resolve, reject) => { server.once("listening", resolve); server.once("error", reject) })
@@ -93,6 +93,64 @@ describe("external plugin lifecycle API", () => {
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); db.close() }
   }, 20_000)
 
+
+
+  it("runs plugins with all declared permissions and no extra confirmation inside the isolated guest mode", async () => {
+    const dataRoot = mkdtempSync(path.join(os.tmpdir(), "miki-plugin-auto-grant-data-")); temporary.push(dataRoot)
+    const { db, server, base, manager } = await appFor(dataRoot, true)
+    try {
+      const pluginEntry = "export function createPlugin(){ return { start(){}, handle(method, payload){ return { method, payload, invoked: true } } } }"
+      const archive = fixtureArchive(manifest("test.fs-auto", ["filesystem-write", "network", "shell", "secrets"]), pluginEntry)
+      const installed = await fetch(`${base}/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ archive_base64: archive.archiveBase64, sha256: archive.sha256 }) })
+      expect(installed.status).toBe(201)
+      const enabled = await fetch(`${base}/test.fs-auto`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) })
+      expect(enabled.status, await enabled.clone().text()).toBe(200)
+      expect((await enabled.json() as { plugin: { enabled: boolean; granted_permissions: string[]; execution_mode: string } }).plugin).toMatchObject({ enabled: true, granted_permissions: ["filesystem-write", "network", "shell", "secrets"], execution_mode: "guest_unrestricted" })
+      const installedList = await fetch(`${base}/installed`)
+      expect(await installedList.json()).toMatchObject({ execution_mode: "guest_unrestricted", sandbox_supported: false })
+      await expect(manager.invokeAgentPlugin("test.fs-auto", "browser.navigate", { url: "http://127.0.0.1/" })).resolves.toEqual({
+        plugin: "test.fs-auto", method: "browser.navigate", result: { method: "browser.navigate", payload: { url: "http://127.0.0.1/" }, invoked: true },
+      })
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); db.close() }
+  }, 20_000)
+
+  it("exposes enabled sandboxed plugins to the autonomous agent and audits invocations", async () => {
+    const dataRoot = mkdtempSync(path.join(os.tmpdir(), "miki-plugin-agent-data-")); temporary.push(dataRoot)
+    const { db, server, base, manager } = await appFor(dataRoot)
+    try {
+      if (!manager.sandboxAvailable) return
+      const entry = "export function createPlugin(){ return { start(){}, handle(method, payload){ return { method, payload, invoked: true } } } }"
+      const archive = fixtureArchive({ ...manifest("test.agent", [], [], "1.0.0"), monitorIconKey: "gmail" }, entry)
+      const installed = await fetch(`${base}/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ archive_base64: archive.archiveBase64, sha256: archive.sha256 }) })
+      expect(installed.status).toBe(201)
+      const enabled = await fetch(`${base}/test.agent`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true, granted_permissions: [] }) })
+      expect(enabled.status).toBe(200)
+      const catalog = manager.listAgentPlugins()
+      expect(catalog).toEqual([expect.objectContaining({ id: "test.agent", capabilities: ["tool"], monitorIconKey: "gmail" })])
+      await expect(manager.invokeAgentPlugin("test.agent", "tool.echo", { value: "hello" })).resolves.toEqual({
+        plugin: "test.agent", method: "tool.echo", result: { method: "tool.echo", payload: { value: "hello" }, invoked: true },
+      })
+      await expect(manager.invokeAgentPlugin("test.agent", "browser.navigate", {})).rejects.toThrow("plugin_capability_not_declared")
+      expect((db.prepare("SELECT COUNT(*) AS n FROM plugin_audit WHERE plugin_id='test.agent' AND event='agent_invoke' AND status='success'").get() as { n: number }).n).toBe(1)
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); db.close() }
+  }, 20_000)
+
+
+
+  it("accepts only bundled local Monitoring icon keys in plugin manifests", async () => {
+    const dataRoot = mkdtempSync(path.join(os.tmpdir(), "miki-plugin-monitor-icons-")); temporary.push(dataRoot)
+    const { db, server, base } = await appFor(dataRoot)
+    try {
+      const invalid = fixtureArchive({ ...manifest("test.bad-icon"), monitorIconKey: "https://example.invalid/icon.svg" })
+      const rejected = await fetch(`${base}/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ archive_base64: invalid.archiveBase64, sha256: invalid.sha256 }) })
+      expect(rejected.status).toBe(400)
+      expect(await rejected.json()).toMatchObject({ error: "manifest_monitor_icon_invalid" })
+
+      const valid = fixtureArchive({ ...manifest("test.good-icon"), monitorIconKey: "github" })
+      const accepted = await fetch(`${base}/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ archive_base64: valid.archiveBase64, sha256: valid.sha256 }) })
+      expect(accepted.status).toBe(201)
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); db.close() }
+  })
 
   it("lists and installs only registry packages with a valid Ed25519 signature", async () => {
     const dataRoot = mkdtempSync(path.join(os.tmpdir(), "miki-plugin-data-")); temporary.push(dataRoot)
