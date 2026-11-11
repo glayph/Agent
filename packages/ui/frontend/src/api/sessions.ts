@@ -26,6 +26,7 @@ export interface SessionDetail {
     id?: string
     role: "user" | "assistant"
     content: string
+    context_id?: string | null
     created_at?: string
     kind?: "normal" | "thought" | "tool_calls" | "action_update" | "error"
     run_id?: string

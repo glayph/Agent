@@ -4,6 +4,7 @@ export interface CoreConfigForm {
   workspace: string
   restrictToWorkspace: boolean
   bypassRestrictions: boolean
+  autoApproveAll: boolean
   splitOnMarker: boolean
   toolFeedbackEnabled: boolean
   toolFeedbackMaxArgsLength: string
@@ -20,6 +21,7 @@ export interface CoreConfigForm {
   summarizeTokenPercent: string
   turnProfile: TurnProfileForm
   dmScope: string
+  preActionDoubleCheck: boolean
   heartbeatEnabled: boolean
   heartbeatInterval: string
   mcpEnabled: boolean
@@ -111,6 +113,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   workspace: "",
   restrictToWorkspace: true,
   bypassRestrictions: false,
+  autoApproveAll: false,
   splitOnMarker: false,
   toolFeedbackEnabled: true,
   toolFeedbackMaxArgsLength: "300",
@@ -135,6 +138,7 @@ export const EMPTY_FORM: CoreConfigForm = {
     toolsAllowText: "",
   },
   dmScope: "per-channel-peer",
+  preActionDoubleCheck: false,
   heartbeatEnabled: true,
   heartbeatInterval: "5",
   mcpEnabled: false,
@@ -322,6 +326,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       security.bypass_restrictions === undefined
         ? EMPTY_FORM.bypassRestrictions
         : asBool(security.bypass_restrictions),
+    autoApproveAll:
+      tools.auto_approve_all === undefined
+        ? EMPTY_FORM.autoApproveAll
+        : asBool(tools.auto_approve_all),
     splitOnMarker:
       defaults.split_on_marker === undefined
         ? EMPTY_FORM.splitOnMarker
@@ -379,6 +387,9 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
     ),
     turnProfile: mapTurnProfile(defaults.turn_profile),
     dmScope: asString(session.dm_scope) || EMPTY_FORM.dmScope,
+    preActionDoubleCheck: agent.pre_action_double_check === undefined
+      ? EMPTY_FORM.preActionDoubleCheck
+      : asBool(agent.pre_action_double_check),
     heartbeatEnabled: proactive.enabled !== false && proactive.llm_when_idle !== false,
     heartbeatInterval: (() => {
       const rawSeconds = asRecord(heartbeat.proactive).decision_interval_seconds ?? 5

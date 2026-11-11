@@ -59,9 +59,8 @@ fi
 for runtime_file in \
   packages/gateway/dist/index.js \
   packages/core/dist/api/index.js \
+  packages/core/dist/plugins/skills/index.js \
   packages/config/dist/index.js \
-  packages/installer/dist/index.js \
-  packages/skills/dist/index.js \
   packages/ui/frontend/dist/index.html; do
   [[ -f "$APP_ROOT/$runtime_file" ]] ||
     fail "missing build artifact: $APP_ROOT/$runtime_file; run npm run build:all first"

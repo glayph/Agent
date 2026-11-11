@@ -32,6 +32,7 @@ export interface SkillRegistrySearchResult {
 export interface SkillsResponse {
   skills: SkillSupportItem[]
   total?: number
+  warnings?: string[]
 }
 
 type SkillApiEnvelope<T> = {
@@ -56,6 +57,8 @@ function unwrapSkillApiResponse<T>(response: T | SkillApiEnvelope<T>): T {
 
 export interface SkillSearchResponse {
   results: SkillRegistrySearchResult[]
+  registries_configured?: number
+  warnings?: string[]
   limit: number
   offset: number
   next_offset?: number

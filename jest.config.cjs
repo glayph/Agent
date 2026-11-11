@@ -14,9 +14,9 @@ module.exports = {
     "/dist/",
     "/packages/ui/frontend/",
     // This spec is run by the dedicated Vitest command, not Jest.
-    "/packages/gateway/src/model-retry[.]test[.]ts$",
-    "/packages/gateway/src/session-cookie[.]test[.]ts$",
-    "/packages/gateway/src/agent-runtime-stream-retry[.]test[.]ts$",
+    "/packages/gateway/src/providers/model-retry[.]test[.]ts$",
+    "/packages/gateway/src/security/session-cookie[.]test[.]ts$",
+    "/packages/gateway/src/agent/agent-runtime-stream-retry[.]test[.]ts$",
     "/*.d.ts",
   ],
   transformIgnorePatterns: [
@@ -41,14 +41,12 @@ module.exports = {
     ],
   },
   moduleNameMapper: {
+    "^@miki/memory/file-memory$":
+      "<rootDir>/packages/memory/src/file-memory/index.ts",
     "^@miki/config$":
       "<rootDir>/packages/config/src/index.ts",
     "^@miki/config/security$":
       "<rootDir>/packages/config/src/security.ts",
-    "^@miki/installer$":
-      "<rootDir>/packages/installer/src/index.ts",
-    "^@miki/skills$":
-      "<rootDir>/packages/skills/src/index.ts",
     "^@miki/core$":
       "<rootDir>/packages/core/src/index.ts",
     "^@miki/gateway$":

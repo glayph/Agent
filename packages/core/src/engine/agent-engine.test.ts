@@ -14,7 +14,7 @@ function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   };
 }
 
-function setup(replies: Parameters<typeof scriptedLLM>[0], tools: EngineTool[], extra = {}) {
+function setup(replies: Parameters<typeof scriptedLLM>[0], tools: EngineTool[], extra: any = {}) {
   const registry = new ToolRegistry();
   registry.registerAll(tools);
   const llm = scriptedLLM(replies);
@@ -33,6 +33,74 @@ describe("AgentEngine", () => {
     expect(llm.requests).toHaveLength(1);
     expect(llm.requests[0].options?.json).not.toBe(true);
   });
+
+  it("refreshes task-aware memory before every model turn with current tool status", async () => {
+    const snapshots: Array<{ turn: number; recentActivity: Array<{ tool: string; status: string }> }> = []
+    const decisions: string[] = []
+    const { engine, llm } = setup(
+      [
+        { calls: [{ name: "available_action", args: {} }] },
+        { text: "The action is complete." },
+      ],
+      [tool({ name: "available_action", execute: () => ({ ok: true, result: "current workspace verified" }) })],
+      {
+        logger: (event: string, details?: Record<string, unknown>) => {
+          if (event === "agent.post_llm_decision") decisions.push(String(details?.decision))
+        },
+        turnContextProvider: async (info: { turn: number; recentActivity: Array<{ tool: string; status: string }> }) => {
+          snapshots.push({ turn: info.turn, recentActivity: info.recentActivity })
+          return `memory-context-for-turn-${info.turn}`
+        },
+      },
+    )
+
+    const result = await engine.run({ history: user("Check the workspace and report the next correct step."), plan: false })
+    expect(result.status).toBe("completed")
+    expect(snapshots.map((item) => item.turn)).toEqual([1, 2])
+    expect(snapshots[0].recentActivity).toHaveLength(0)
+    expect(snapshots[1].recentActivity.some((item) => item.tool === "available_action" && item.status === "succeeded")).toBe(true)
+    expect(decisions).toEqual(["ACT", "NOTIFY"])
+    expect(llm.requests[0].messages.some((message) => String(message.content).includes("memory-context-for-turn-1"))).toBe(true)
+    expect(llm.requests[1].messages.some((message) => String(message.content).includes("memory-context-for-turn-2"))).toBe(true)
+  })
+
+  it("removes stale turn memory when the next retrieval fails and records its status", async () => {
+    const decisionLogs: Array<Record<string, unknown>> = []
+    const { engine, llm } = setup(
+      [
+        { calls: [{ name: "available_action", args: {} }] },
+        { text: "The current state is verified." },
+      ],
+      [tool({ name: "available_action", execute: () => ({ ok: true }) })],
+      {
+        logger: (event: string, details?: Record<string, unknown>) => {
+          if (event === "agent.post_llm_decision" && details) decisionLogs.push(details)
+        },
+        turnContextProvider: async (info: { turn: number }) => {
+          if (info.turn === 1) return "stale-memory-from-turn-one"
+          throw new Error("memory store unavailable")
+        },
+      },
+    )
+    const result = await engine.run({ history: user("Verify the workspace."), plan: false })
+    expect(result.status).toBe("completed")
+    expect(llm.requests).toHaveLength(2)
+    expect(llm.requests[0].messages.some((message) => String(message.content).includes("stale-memory-from-turn-one"))).toBe(true)
+    expect(llm.requests[1].messages.some((message) => String(message.content).includes("stale-memory-from-turn-one"))).toBe(false)
+    expect(decisionLogs.map((entry) => entry.memoryStatus)).toEqual(["recalled", "failed"])
+  })
+
+  it("records NO_OP for empty model completions instead of inventing a user message or action", async () => {
+    const decisions: string[] = []
+    const { engine } = setup([{ text: "" }], [tool({ name: "available_action" })], {
+      logger: (event: string, details?: Record<string, unknown>) => {
+        if (event === "agent.post_llm_decision") decisions.push(String(details?.decision))
+      },
+    })
+    const result = await engine.run({ history: user("Check whether any action is needed."), plan: false })
+    expect(result.status).toBe("failed")
+    expect(decisions).toEqual(["NO_OP", "NO_OP"])
+  })
 
   it("omits both generated and history system prompts when system prompts are disabled", async () => {
     const registry = new ToolRegistry();
@@ -526,6 +594,97 @@ describe("AgentEngine", () => {
     expect(result.plan?.steps[0].status).toBe("done");
     expect(events).toContainEqual(expect.objectContaining({ type: "run.phase", phase: "verification", status: "started" }));
     expect(events).toContainEqual(expect.objectContaining({ type: "run.phase", phase: "verification", status: "completed" }));
+  });
+
+  it("runs two current-intent checks before executing any tool step", async () => {
+    const execute = jest.fn(async () => ({ sent: true }));
+    const { engine, llm } = setup([
+      { calls: [{ name: "send_owner_update", args: { message: "The requested report is ready." } }] },
+      { text: JSON.stringify({ decision: "proceed", reason: "The update is directly relevant to the current request." }) },
+      { text: JSON.stringify({ decision: "proceed", reason: "A concise completion notice is timely." }) },
+      { text: "The report is ready." },
+    ], [tool({
+      name: "send_owner_update",
+      risk: "config_write",
+      execute,
+      parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] },
+    })], { preActionDoubleCheck: true });
+
+    const result = await engine.run({ history: user("Prepare the report and let me know when it is ready."), plan: false });
+
+    expect(result.status).toBe("completed");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.toolCalls[0].preActionVerification).toMatchObject({
+      status: "passed",
+      checks: [
+        { pass: 1, status: "proceed" },
+        { pass: 2, status: "proceed" },
+      ],
+    });
+    expect(llm.requests).toHaveLength(4);
+    expect(String(llm.requests[1].messages[0].content)).toContain("CHECK 1");
+    expect(String(llm.requests[2].messages[0].content)).toContain("CHECK 2");
+  });
+
+  it("checks ordinary work steps as well as outbound-message steps", async () => {
+    const execute = jest.fn(async () => ({ content: "The target file exists." }));
+    const { engine, llm } = setup([
+      { calls: [{ name: "inspect_workspace" }] },
+      { text: JSON.stringify({ decision: "proceed", reason: "Inspecting the workspace is the first requested task step." }) },
+      { text: JSON.stringify({ decision: "proceed", reason: "The read remains aligned with the active request." }) },
+      { text: "I checked the workspace." },
+    ], [tool({ name: "inspect_workspace", risk: "read", execute })], { preActionDoubleCheck: true });
+
+    const result = await engine.run({ history: user("Inspect the workspace and report the current project state."), plan: false });
+
+    expect(result.status).toBe("completed");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.toolCalls[0].preActionVerification?.status).toBe("passed");
+    expect(llm.requests).toHaveLength(4);
+  });
+
+  it("does not execute a step when either current-intent check blocks it", async () => {
+    const execute = jest.fn(async () => ({ sent: true }));
+    const { engine } = setup([
+      { calls: [{ name: "send_owner_update", args: { message: "A routine update" } }] },
+      { text: JSON.stringify({ decision: "proceed", reason: "The general task is active." }) },
+      { text: JSON.stringify({ decision: "block", reason: "The owner asked not to receive routine status messages." }) },
+      { text: "I held the message because the latest context says not to send routine updates." },
+    ], [tool({
+      name: "send_owner_update",
+      risk: "config_write",
+      execute,
+      parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] },
+    })], { preActionDoubleCheck: true });
+
+    const result = await engine.run({ history: user("Complete the report, but do not send routine updates."), plan: false });
+
+    expect(result.status).toBe("completed");
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolCalls[0]).toMatchObject({
+      status: "blocked",
+      preActionVerification: { status: "blocked", checks: [{ status: "proceed" }, { status: "block" }] },
+    });
+    expect(String(result.toolCalls[0].error)).toContain("No tool action was executed");
+  });
+
+  it("uses one pre-action verification by default when double-check is off", async () => {
+    const execute = jest.fn(async () => ({ ok: true }));
+    const { engine, llm } = setup([
+      { calls: [{ name: "safe_action" }] },
+      { text: JSON.stringify({ decision: "proceed", reason: "The action directly matches the latest request." }) },
+      { text: "Completed after one pre-action verification." },
+    ], [tool({ name: "safe_action", execute })], { preActionDoubleCheck: false });
+
+    const result = await engine.run({ history: user("Run the action."), plan: false });
+
+    expect(result.status).toBe("completed");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.toolCalls[0].preActionVerification).toMatchObject({
+      status: "passed",
+      checks: [{ pass: 1, status: "proceed" }],
+    });
+    expect(llm.requests).toHaveLength(3);
   });
 
   it("does not mark an action done when independent verification needs more evidence", async () => {

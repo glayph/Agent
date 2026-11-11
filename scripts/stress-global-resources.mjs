@@ -25,7 +25,7 @@ function readInt(name, fallback, min, max) {
 }
 
 function compileArbiter() {
-  const sourcePath = path.join(root, "packages/gateway/src/global-resource-arbiter.ts");
+  const sourcePath = path.join(root, "packages/gateway/src/runtime/global-resource-arbiter.ts");
   const source = fs.readFileSync(sourcePath, "utf8");
   const result = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, esModuleInterop: true },

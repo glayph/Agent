@@ -15,7 +15,6 @@ import {
   type MikiWsClientMessage,
   type MikiWsServerMessage,
   handlemikiMessage,
-  parseAttachments,
 } from "@/features/chat/protocol"
 import {
   findFailedUserTurn,
@@ -412,47 +411,7 @@ export async function connectChat() {
         }
         if (message.type !== "message.delta") flushPendingDeltas()
         if (message.type === "proactive.message") {
-          const payload = message.payload || {}
-          const content =
-            typeof payload.content === "string" ? payload.content.trim() : ""
-          // Files the agent sent from a background run arrive as a message that may have no text.
-          const proactiveAttachments = parseAttachments(payload)
-          const hasProactiveAttachments = (proactiveAttachments?.length ?? 0) > 0
-          const messageId =
-            typeof payload.message_id === "string"
-              ? payload.message_id
-              : `proactive-${Date.now()}`
-          // A background notice belongs to one session; do not show it in another one.
-          const belongsHere =
-            typeof payload.session_id !== "string" ||
-            payload.session_id === activeSessionIdRef
-          if ((content || hasProactiveAttachments) && belongsHere) {
-            updateChatStore((prev) => ({
-              messages: prev.messages.some(
-                (candidate) => candidate.id === messageId,
-              )
-                ? prev.messages
-                : [
-                    ...prev.messages,
-                    {
-                      id: messageId,
-                      role: "assistant" as const,
-                      content,
-                      kind: "normal" as const,
-                      ...(typeof payload.run_id === "string"
-                        ? { runId: payload.run_id }
-                        : {}),
-                      ...(typeof payload.notification_kind === "string"
-                        ? { notificationKind: payload.notification_kind }
-                        : {}),
-                      ...(hasProactiveAttachments
-                        ? { attachments: proactiveAttachments }
-                        : {}),
-                      timestamp: message.timestamp ?? Date.now(),
-                    },
-                  ],
-            }))
-          }
+          // Background notices belong outside the conversation transcript.
           return
         }
         if (message.type === "auth.ok") {

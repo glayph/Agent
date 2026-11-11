@@ -1,0 +1,309 @@
+/**
+ * Single source of truth for "which model will actually run, and can it?".
+ *
+ * Before this module existed the Models page / health endpoints (index.ts) and
+ * the chat runtime (agent-runtime.ts `llmFor`) each had their own copy of the
+ * logic and they disagreed:
+ *   - an `openai-compatible` model with no key counted as "configured" on the
+ *     Models page but `llmFor` returned undefined for any non-local base URL,
+ *     so chat said "No model is configured" while the Models page said healthy;
+ *   - a request for an unknown model name built a ghost client from an empty
+ *     payload instead of falling back to the default model;
+ *   - key checks only tested presence, so "your_api_key" counted as valid.
+ *
+ * Everything here is pure (no I/O) except `probeModelProvider`, which is only
+ * used by the explicit "verify" endpoint and never on the chat hot path.
+ */
+
+export interface StoredModelEntry {
+  /** Stable SQLite row identifier; absent only in legacy/test callers. */
+  id?: number
+  payload: Record<string, unknown>
+  isDefault: boolean
+}
+
+export type ApiKeyStatus = "valid" | "missing" | "malformed" | "placeholder" | "not_required"
+
+export interface ApiKeyCheck {
+  status: ApiKeyStatus
+  /** Human readable explanation for non-valid states. Never contains the key. */
+  reason?: string
+}
+
+export interface ResolvedModel {
+  /** True when a client can be built and the credentials are structurally usable. */
+  configured: boolean
+  source: "stored" | "env" | "none"
+  /** Provider-facing model identifier (e.g. gemini-3.5-flash-lite). */
+  model: string
+  /** UI label; may differ from `model`. */
+  modelName: string
+  provider: string
+  baseUrl: string
+  /** Server-side only. Never serialise this to the client. */
+  apiKey: string
+  keyCheck: ApiKeyCheck
+  isDefault: boolean
+  /** The caller asked for a specific model and it matched a stored entry. */
+  matchedRequested: boolean
+  /** Why `configured` is false. */
+  reason?: string
+  entry?: StoredModelEntry
+}
+
+type Env = Record<string, string | undefined>
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+export const normalizeProvider = (provider: unknown): string => String(provider ?? "").trim().toLowerCase()
+
+const isGemini = (p: string) => p === "gemini" || p === "google"
+const isOpenRouter = (p: string) => p === "openrouter" || p === "open-router"
+const isCompatible = (p: string) => p === "openai-compatible" || p === "compatible" || p === "openai_compatible"
+const isLocalProvider = (p: string) => ["llama.cpp", "llama-cpp", "llamacpp", "local"].includes(p)
+
+export function isLocalUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]"
+  } catch {
+    return false
+  }
+}
+
+export function providerDefaults(provider: string, env: Env = process.env): { baseUrl: string; apiKey: string } {
+  const p = normalizeProvider(provider)
+  if (isGemini(p)) return { baseUrl: env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/", apiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "" }
+  if (isOpenRouter(p)) return { baseUrl: "https://openrouter.ai/api/v1", apiKey: env.OPENROUTER_API_KEY || "" }
+  if (isCompatible(p)) return { baseUrl: env.OPENAI_COMPATIBLE_BASE_URL || env.OPENAI_API_BASE || "http://127.0.0.1:8000/v1", apiKey: env.OPENAI_COMPATIBLE_API_KEY || env.OPENAI_API_KEY || "" }
+  if (isLocalProvider(p)) return { baseUrl: env.MIKI_LLAMA_BASE_URL || "http://127.0.0.1:39200/v1", apiKey: "" }
+  return { baseUrl: env.OPENAI_API_BASE || "https://api.openai.com/v1", apiKey: env.OPENAI_API_KEY || "" }
+}
+
+/** Providers that can legitimately run without a key. */
+export function providerKeyOptional(provider: unknown, baseUrl = ""): boolean {
+  const p = normalizeProvider(provider)
+  return isLocalProvider(p) || isCompatible(p) || (baseUrl !== "" && isLocalUrl(baseUrl))
+}
+
+const PLACEHOLDER = /^(?:your[\w-]*|changeme|change[_-]?me|replace[\w-]*|insert[\w-]*|paste[\w-]*|put[_-]?your[\w-]*|x{3,}|\.{3,}|todo|dummy|example|sample|none|null|undefined|test|<.*>|\[.*\]|\$\{.*\})$/i
+
+/**
+ * Structural validation of an API key. This deliberately stays provider
+ * agnostic (new key formats appear often) and only rejects keys that cannot
+ * possibly work: empty, placeholders, whitespace/quotes, absurd length or
+ * characters that are never valid in an HTTP bearer token.
+ */
+export function checkApiKey(provider: unknown, rawKey: unknown, options: { baseUrl?: string } = {}): ApiKeyCheck {
+  const key = typeof rawKey === "string" ? rawKey.trim() : ""
+  const optional = providerKeyOptional(provider, options.baseUrl)
+  if (!key) {
+    return optional
+      ? { status: "not_required" }
+      : { status: "missing", reason: `No API key is set for provider "${normalizeProvider(provider) || "openai"}".` }
+  }
+  if (PLACEHOLDER.test(key) || /^sk-?x{3,}/i.test(key) || /your[_-]?(?:api[_-]?)?key/i.test(key)) {
+    return { status: "placeholder", reason: "The API key looks like a placeholder, not a real key." }
+  }
+  if (/\s/.test(key) || /["'`]/.test(key)) {
+    return { status: "malformed", reason: "The API key contains whitespace or quote characters (copy/paste error?)." }
+  }
+  if (!/^[\x21-\x7e]+$/.test(key)) {
+    return { status: "malformed", reason: "The API key contains characters that are not valid in an HTTP header." }
+  }
+  if (key.length < 8 || key.length > 4096) {
+    return { status: "malformed", reason: "The API key has an implausible length." }
+  }
+  return { status: "valid" }
+}
+
+function matchesRequested(entry: StoredModelEntry, requested: string): boolean {
+  if (entry.payload.model === requested || entry.payload.model_name === requested) return true
+  const interpreted = interpretDefaultModel(requested)
+  if (!interpreted?.provider) return false
+  const aliases: Record<string, string> = {
+    google: "gemini", "open-router": "openrouter", compatible: "openai-compatible",
+    openai_compatible: "openai-compatible", "llama-cpp": "llama.cpp", llamacpp: "llama.cpp", local: "llama.cpp",
+    gpt: "openai", chatgpt: "openai",
+  }
+  const provider = normalizeProvider(entry.payload.provider)
+  const wantedProvider = aliases[normalizeProvider(interpreted.provider)] || normalizeProvider(interpreted.provider)
+  const actualProvider = aliases[provider] || provider
+  const storedModel = String(entry.payload.model || "")
+  const storedLabel = String(entry.payload.model_name || "")
+  return actualProvider === wantedProvider && (storedModel === interpreted.model || storedLabel === interpreted.model)
+}
+
+/** Entry that should run when the caller did not (or could not) pick one. */
+export function pickDefaultEntry(stored: StoredModelEntry[]): StoredModelEntry | undefined {
+  const enabled = stored.filter((item) => item.payload.enabled !== false)
+  return enabled.find((item) => item.isDefault) ?? enabled[0] ?? stored.find((item) => item.isDefault) ?? stored[0]
+}
+
+const DEFAULT_MODEL_PREFIXES: Array<[RegExp, string]> = [
+  [/^(?:gemini|google)\//i, "gemini"],
+  [/^(?:llama\.cpp|llama-cpp|llamacpp|local)\//i, "llama.cpp"],
+  [/^openrouter\//i, "openrouter"],
+  [/^openai\//i, "openai"],
+]
+
+/**
+ * `.env.example` and the Config class document `DEFAULT_MODEL` (e.g. "gemini/gemini-3.5-flash-lite"), but
+ * the runtime used to read only MIKI_MODEL / OPENAI_MODEL, so a user who followed the template got
+ * "No model name is configured". An explicit provider prefix selects the provider (it is only used when
+ * MIKI_PROVIDER is unset and no model is stored); anything else is passed through untouched.
+ */
+export function interpretDefaultModel(raw: unknown): { provider?: string; model: string } | undefined {
+  const value = typeof raw === "string" ? raw.trim() : ""
+  if (!value) return undefined
+  for (const [pattern, provider] of DEFAULT_MODEL_PREFIXES) {
+    if (pattern.test(value)) return { provider, model: value.replace(pattern, "") }
+  }
+  return { model: value }
+}
+
+export function resolveModel(stored: StoredModelEntry[], requested?: string, env: Env = process.env, requestedIndex?: number): ResolvedModel {
+  const wanted = (requested ?? "").trim()
+  const hasRequestedIndex = requestedIndex !== undefined
+  const matchedByIndex = hasRequestedIndex && Number.isSafeInteger(requestedIndex) && requestedIndex > 0
+    ? stored.find((item) => item.id === requestedIndex)
+    : undefined
+  const requestedIndexMismatch = hasRequestedIndex && (!matchedByIndex || (wanted && !matchesRequested(matchedByIndex, wanted)))
+  const matched = requestedIndexMismatch
+    ? undefined
+    : matchedByIndex ?? (wanted ? stored.find((item) => matchesRequested(item, wanted)) : undefined)
+  const envModel = (env.MIKI_MODEL || env.OPENAI_MODEL || "").trim()
+  const defaultEnvModel = !envModel ? interpretDefaultModel(env.DEFAULT_MODEL) : undefined
+  const configuredEnvModel = envModel || defaultEnvModel?.model || ""
+  // Environment-only deployments expose their single configured model as a virtual
+  // row in the UI. Selecting that exact id is valid even though it is not in SQLite.
+  // Any other explicit, stale id fails closed rather than running a different model.
+  const matchesEnvironment = stored.length === 0 && Boolean(wanted) && wanted === configuredEnvModel
+  const unknownRequested = requestedIndexMismatch || (Boolean(wanted) && !matched && !matchesEnvironment)
+  const entry = unknownRequested ? undefined : matched ?? pickDefaultEntry(stored)
+  const payload: Record<string, unknown> = entry?.payload ?? {}
+  const source: ResolvedModel["source"] = entry ? "stored" : !unknownRequested && configuredEnvModel ? "env" : "none"
+
+  const fromDefaultEnv = !entry && !unknownRequested && !envModel ? defaultEnvModel : undefined
+  const model = String(payload.model || payload.model_name || (!entry && !unknownRequested ? wanted : "") || (!unknownRequested ? envModel : "") || fromDefaultEnv?.model || "").trim()
+  const provider = String(payload.provider || env.MIKI_PROVIDER || fromDefaultEnv?.provider || "openai-compatible").trim()
+  const defaults = providerDefaults(provider, env)
+  const baseUrl = String(payload.api_base || defaults.baseUrl || env.OPENAI_API_BASE || "https://api.openai.com/v1").trim()
+  const apiKey = String(payload.api_key || defaults.apiKey || "").trim()
+  const modelName = String(payload.model_name || model)
+  const local = isRecord(payload.local) ? payload.local : undefined
+  const localConfigured = normalizeProvider(provider).includes("llama") && Boolean(local?.model_path)
+  const keyCheck = localConfigured ? ({ status: "not_required" } as ApiKeyCheck) : checkApiKey(provider, apiKey, { baseUrl })
+
+  let reason: string | undefined
+  if (unknownRequested) reason = `Requested model "${wanted}" is not configured. Refresh the model list and select an available model.`
+  else if (!model) reason = "No model name is configured: the Models page has no default model and MIKI_MODEL / OPENAI_MODEL / DEFAULT_MODEL are not set."
+  else if (entry && entry.payload.enabled === false) reason = `Model "${modelName}" is disabled.`
+  else if (keyCheck.status === "missing" || keyCheck.status === "placeholder" || keyCheck.status === "malformed") reason = keyCheck.reason
+
+  return {
+    configured: reason === undefined,
+    source: model ? source : "none",
+    model,
+    modelName,
+    provider,
+    baseUrl,
+    apiKey,
+    keyCheck,
+    isDefault: entry?.isDefault ?? ((!wanted && !hasRequestedIndex) || matchesEnvironment),
+    matchedRequested: Boolean(matched),
+    ...(reason ? { reason } : {}),
+    ...(entry ? { entry } : {}),
+  }
+}
+
+export interface ConfiguredModelFallbackCandidate {
+  model: string
+  /** Stable SQLite model row id, required to disambiguate identical names across providers. */
+  modelIndex: number
+}
+
+/**
+ * Discover usable alternatives from the live model catalog without knowing
+ * provider names in advance. Explicit router fallbacks remain ahead of these.
+ */
+export function buildConfiguredModelFallbackCandidates(
+  stored: StoredModelEntry[],
+  resolveEntry: (entry: StoredModelEntry) => ResolvedModel,
+  primary?: ResolvedModel,
+): ConfiguredModelFallbackCandidate[] {
+  const routeKey = (resolved: ResolvedModel) =>
+    [normalizeProvider(resolved.provider), resolved.baseUrl, resolved.model].join("|")
+  const seen = new Set<string>()
+  if (primary?.configured) seen.add(routeKey(primary))
+
+  const candidates: ConfiguredModelFallbackCandidate[] = []
+  for (const entry of stored) {
+    if (!Number.isSafeInteger(entry.id) || (entry.id ?? 0) <= 0 || entry.payload.enabled === false) continue
+    const model = String(entry.payload.model || entry.payload.model_name || "").trim()
+    if (!model) continue
+    const resolved = resolveEntry(entry)
+    if (!resolved.configured || resolved.entry?.id !== entry.id) continue
+    const key = routeKey(resolved)
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push({ model, modelIndex: entry.id! })
+  }
+  return candidates
+}
+
+/** Client-safe summary (no key material). */
+export function describeResolution(resolved: ResolvedModel) {
+  return {
+    configured: resolved.configured,
+    source: resolved.source,
+    model: resolved.model,
+    model_name: resolved.modelName,
+    provider: resolved.provider,
+    api_base: resolved.baseUrl,
+    is_default: resolved.isDefault,
+    key_status: resolved.keyCheck.status,
+    ...(resolved.reason ? { reason: resolved.reason } : {}),
+  }
+}
+
+export interface ProbeResult {
+  reachable: boolean
+  /** HTTP status of the provider's model list endpoint, if any response was received. */
+  status?: number
+  /** "ok" | "key_rejected" | "unreachable" | "unexpected_status" */
+  state: "ok" | "key_rejected" | "unreachable" | "unexpected_status"
+  detail?: string
+}
+
+/**
+ * Availability probe: asks the provider's cheap `GET /models` endpoint. Used
+ * only by the explicit verify endpoint (never during chat) with a hard timeout.
+ */
+export async function probeModelProvider(
+  resolved: Pick<ResolvedModel, "baseUrl" | "apiKey">,
+  options: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<ProbeResult> {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000)
+  try {
+    const url = `${resolved.baseUrl.replace(/\/+$/, "")}/models`
+    const response = await fetchImpl(url, {
+      method: "GET",
+      headers: resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {},
+      signal: controller.signal,
+    })
+    if (response.status === 401 || response.status === 403) {
+      return { reachable: true, status: response.status, state: "key_rejected", detail: "The provider rejected the API key." }
+    }
+    // 404/405 on /models still proves the host is reachable and the key was not rejected.
+    if (response.ok || response.status === 404 || response.status === 405) return { reachable: true, status: response.status, state: "ok" }
+    return { reachable: true, status: response.status, state: "unexpected_status", detail: `Provider answered HTTP ${response.status}.` }
+  } catch (error) {
+    return { reachable: false, state: "unreachable", detail: error instanceof Error ? error.message : String(error) }
+  } finally {
+    clearTimeout(timer)
+  }
+}

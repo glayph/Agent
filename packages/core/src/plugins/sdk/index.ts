@@ -105,20 +105,85 @@ export interface PluginRegistrationError {
   message: string;
 }
 
+const PLUGIN_CAPABILITIES = new Set<PluginCapability>([
+  "ai-provider", "channel", "mcp", "tool", "memory", "search", "browser",
+  "computer-use", "knowledge", "storage", "authentication", "security",
+  "scheduler", "workflow", "code-execution", "integration", "notification",
+  "model-router", "observability", "guardrail", "agent-to-agent",
+]);
+const PLUGIN_STATUSES = new Set<PluginRuntimeStatus>([
+  "functional", "partial", "metadata_only", "config_only", "disabled", "unsupported",
+]);
+const PLUGIN_PERMISSIONS = new Set<PluginPermission>([
+  "network", "filesystem-read", "filesystem-write", "secrets", "shell",
+  "browser", "computer-use", "mcp", "agent-delegation",
+]);
+const PLUGIN_PLATFORMS = new Set(["win32", "linux", "darwin", "any"]);
+
 function cloneManifest(manifest: PluginManifest): PluginManifest {
   return {
     ...manifest,
-    capabilities: [...manifest.capabilities],
-    requiredConfig: manifest.requiredConfig
-      ? [...manifest.requiredConfig]
-      : undefined,
-    secretFields: manifest.secretFields
-      ? [...manifest.secretFields]
-      : undefined,
+    capabilities: [...(manifest.capabilities ?? [])],
+    requiredConfig: manifest.requiredConfig ? [...manifest.requiredConfig] : undefined,
+    secretFields: manifest.secretFields ? [...manifest.secretFields] : undefined,
     permissions: manifest.permissions ? [...manifest.permissions] : undefined,
     platform: manifest.platform ? [...manifest.platform] : undefined,
     metadata: manifest.metadata ? { ...manifest.metadata } : undefined,
   };
+}
+
+function uniqueStrings(values: readonly unknown[]): boolean {
+  return values.every((value) => typeof value === "string" && value.trim().length > 0)
+    && new Set(values).size === values.length;
+}
+
+/** Runtime validation protects the plugin boundary even when manifests come from untyped JS. */
+export function validatePluginManifest(manifest: PluginManifest): string[] {
+  const errors: string[] = [];
+  const id = typeof manifest?.id === "string" ? manifest.id : "";
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) errors.push("id must be a lowercase slug of 1–64 characters.");
+  if (typeof manifest?.displayName !== "string" || !manifest.displayName.trim() || manifest.displayName.length > 120) {
+    errors.push("displayName must contain 1–120 characters.");
+  }
+  if (typeof manifest?.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(manifest.version)) {
+    errors.push("version must be a valid semantic version.");
+  }
+  if (manifest?.apiVersion !== MIKI_PLUGIN_API_VERSION) errors.push("apiVersion is unsupported.");
+  if (!Array.isArray(manifest?.capabilities) || manifest.capabilities.length === 0
+    || !uniqueStrings(manifest.capabilities)
+    || manifest.capabilities.some((value) => !PLUGIN_CAPABILITIES.has(value as PluginCapability))) {
+    errors.push("capabilities must be a non-empty list of unique supported values.");
+  }
+  if (!PLUGIN_STATUSES.has(manifest?.runtimeStatus)) errors.push("runtimeStatus is unsupported.");
+  if (manifest?.requiredConfig && (!Array.isArray(manifest.requiredConfig) || !uniqueStrings(manifest.requiredConfig))) {
+    errors.push("requiredConfig must contain unique non-empty strings.");
+  }
+  if (manifest?.secretFields && (!Array.isArray(manifest.secretFields) || !uniqueStrings(manifest.secretFields))) {
+    errors.push("secretFields must contain unique non-empty strings.");
+  }
+  if (manifest?.permissions && (!Array.isArray(manifest.permissions) || !uniqueStrings(manifest.permissions)
+    || manifest.permissions.some((value) => !PLUGIN_PERMISSIONS.has(value as PluginPermission)))) {
+    errors.push("permissions contains an unsupported value or duplicate.");
+  }
+  if (manifest?.platform && (!Array.isArray(manifest.platform) || !uniqueStrings(manifest.platform)
+    || manifest.platform.some((value) => !PLUGIN_PLATFORMS.has(value)))) {
+    errors.push("platform contains an unsupported value or duplicate.");
+  }
+  if (manifest?.configKey !== undefined && (typeof manifest.configKey !== "string" || !manifest.configKey.trim())) {
+    errors.push("configKey must be a non-empty string when supplied.");
+  }
+  return errors;
+}
+
+function freezeManifest(manifest: PluginManifest): PluginManifest {
+  const copy = cloneManifest(manifest);
+  if (copy.metadata) Object.freeze(copy.metadata);
+  Object.freeze(copy.capabilities);
+  if (copy.requiredConfig) Object.freeze(copy.requiredConfig);
+  if (copy.secretFields) Object.freeze(copy.secretFields);
+  if (copy.permissions) Object.freeze(copy.permissions);
+  if (copy.platform) Object.freeze(copy.platform);
+  return Object.freeze(copy);
 }
 
 export class PluginRegistry<
@@ -135,15 +200,26 @@ export class PluginRegistry<
   }
 
   register(descriptor: PluginDescriptor<Config, Runtime>): void {
-    const id = descriptor.manifest.id.trim();
-    if (!id) throw new Error("Plugin manifest id is required.");
-    if (descriptor.manifest.apiVersion !== MIKI_PLUGIN_API_VERSION) {
-      throw new Error(`Unsupported plugin API version for ${id}.`);
+    if (!descriptor || typeof descriptor !== "object" || typeof descriptor.create !== "function") {
+      throw new Error("Plugin descriptor must provide a create() function.");
+    }
+    const manifest = descriptor.manifest;
+    const id = typeof manifest?.id === "string" ? manifest.id.trim() : "";
+    if (manifest?.apiVersion !== MIKI_PLUGIN_API_VERSION) {
+      throw new Error(`Unsupported plugin API version for ${id || "unknown plugin"}.`);
+    }
+    const validationErrors = validatePluginManifest(manifest);
+    if (validationErrors.length > 0) {
+      throw new Error(`Invalid plugin manifest for ${id || "unknown plugin"}: ${validationErrors.join("; ")}`);
     }
     if (this.descriptorsById.has(id)) {
       throw new Error(`Duplicate plugin registration: ${id}`);
     }
-    this.descriptorsById.set(id, descriptor);
+    const stableDescriptor = Object.freeze({
+      ...descriptor,
+      manifest: freezeManifest(manifest),
+    }) as PluginDescriptor<Config, Runtime>;
+    this.descriptorsById.set(id, stableDescriptor);
   }
 
   unregister(id: string): boolean {
@@ -171,23 +247,30 @@ export class PluginRegistry<
     configs: Readonly<Record<string, Config>> = {},
   ): Promise<Map<string, Runtime>> {
     const runtimes = new Map<string, Runtime>();
-    for (const descriptor of this.descriptorsById.values()) {
-      const config =
-        configs[descriptor.manifest.configKey || descriptor.manifest.id];
-      if (descriptor.validateConfig) {
-        const errors = descriptor.validateConfig(config as Config);
-        if (errors.length > 0) {
-          throw new Error(
-            `${descriptor.manifest.id} configuration is invalid: ${errors.join("; ")}`,
-          );
+    try {
+      for (const descriptor of this.descriptorsById.values()) {
+        const config = configs[descriptor.manifest.configKey || descriptor.manifest.id];
+        if (descriptor.validateConfig) {
+          const errors = descriptor.validateConfig(config as Config);
+          if (errors.length > 0) {
+            throw new Error(`${descriptor.manifest.id} configuration is invalid: ${errors.join("; ")}`);
+          }
+        }
+        runtimes.set(descriptor.manifest.id, await descriptor.create(context, config));
+      }
+      return runtimes;
+    } catch (error) {
+      const cleanupErrors: string[] = [];
+      for (const [pluginId, runtime] of [...runtimes.entries()].reverse()) {
+        try { await runtime.stop?.(); }
+        catch (cleanupError) {
+          cleanupErrors.push(`${pluginId}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
         }
       }
-      runtimes.set(
-        descriptor.manifest.id,
-        await descriptor.create(context, config),
-      );
+      const reason = error instanceof Error ? error.message : String(error);
+      const cleanup = cleanupErrors.length ? ` Cleanup failures: ${cleanupErrors.join("; ")}` : "";
+      throw new Error(`Plugin runtime creation failed: ${reason}.${cleanup}`);
     }
-    return runtimes;
   }
 }
 

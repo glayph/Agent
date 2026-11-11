@@ -10,6 +10,7 @@ import { MarketSkillCard } from "./market-skill-card"
 
 export function ResultsPanel({
   canSearchMarketplace,
+  marketplaceUnavailableReason,
   hasSubmittedQuery,
   submittedQuery,
   marketResults,
@@ -23,6 +24,7 @@ export function ResultsPanel({
   onViewInstalled,
 }: {
   canSearchMarketplace: boolean
+  marketplaceUnavailableReason?: string
   hasSubmittedQuery: boolean
   submittedQuery: string
   marketResults: SkillRegistrySearchResult[]
@@ -118,7 +120,7 @@ export function ResultsPanel({
         ) : !canSearchMarketplace ? (
           <div className="border-border/40 bg-muted/10 flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed">
             <span className="text-muted-foreground text-sm font-medium">
-              {t("pages.agent.skills.marketplace_unavailable")}
+              {marketplaceUnavailableReason || t("pages.agent.skills.marketplace_unavailable")}
             </span>
           </div>
         ) : (

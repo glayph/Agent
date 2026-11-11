@@ -7,10 +7,10 @@ const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 
 const form = read("packages/ui/frontend/src/features/config/components/form-model.ts");
 const page = read("packages/ui/frontend/src/pages/config-page.tsx");
-const runtime = read("packages/gateway/src/agent-runtime.ts");
-const settings = read("packages/gateway/src/runtime-settings.ts");
+const runtime = read("packages/gateway/src/agent/agent-runtime.ts");
+const settings = read("packages/gateway/src/runtime/runtime-settings.ts");
 const schema = read("packages/config/src/schema.ts");
-const dashboard = read("packages/gateway/src/dashboard-extended.ts");
+const dashboard = read("packages/gateway/src/monitoring/dashboard-extended.ts");
 const config = read("config/agent.yaml");
 
 assert.match(form, /max_completion_tokens/);

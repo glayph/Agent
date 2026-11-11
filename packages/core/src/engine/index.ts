@@ -12,12 +12,6 @@ export type {
   ApprovalStoreOptions,
 } from "./approval-store.js";
 export {
-  createFetchLLMClient,
-  createRegistryLLMClient,
-  EngineLLMError,
-} from "./llm-client.js";
-export type { FetchLLMClientOptions, RegistryLike } from "./llm-client.js";
-export {
   createPlan,
   describePlan,
   parsePlanJson,
@@ -52,6 +46,7 @@ export type { SkillToolsOptions } from "./skill-tools.js";
 export { redactSecrets, stableStringify } from "./util.js";
 export type * from "./types.js";
 export { assessProgress } from "./budget.js";
+export { neverStopRetryOptions, NEVER_STOP_RETRY_DELAY_MS, calculateTransientRetryDelayMs } from "./retry-policy.js";
 export type { ProgressAssessment, ProgressOptions } from "./budget.js";
 export {
   InvalidTaskTransitionError,
@@ -60,11 +55,11 @@ export {
   taskStatusTransitions,
   transitionTask,
   isRunnableTaskStatus,
-} from "../task-state.js";
-export type { TaskLifecycle, TaskStatus } from "../task-state.js";
-export { TaskExecutionError, classifyTaskError } from "../task-errors.js";
-export type { TaskErrorCategory, TaskErrorOptions, ClassifiedTaskError } from "../task-errors.js";
-export { DurableTaskStore } from "../task-store.js";
+} from "../tasks/task-state.js";
+export type { TaskLifecycle, TaskStatus } from "../tasks/task-state.js";
+export { TaskExecutionError, classifyTaskError } from "../tasks/task-errors.js";
+export type { TaskErrorCategory, TaskErrorOptions, ClassifiedTaskError } from "../tasks/task-errors.js";
+export { DurableTaskStore } from "../tasks/task-store.js";
 export type {
   CreateTaskInput,
   DurableTask,
@@ -76,11 +71,13 @@ export type {
   ReplannedTaskPlan,
   TaskDependency,
   TaskTreeNode,
-} from "../task-store.js";
-export { DurableTaskWorker } from "../task-worker.js";
+} from "../tasks/task-store.js";
+export { DurableTaskWorker } from "../tasks/task-worker.js";
 export type {
   DurableTaskHandler,
   DurableTaskWorkerOptions,
   DurableTaskVerifier,
   TaskVerificationOutcome,
-} from "../task-worker.js";
+} from "../tasks/task-worker.js";
+
+export { TokenBudgetManager, charsPerToken } from "./token-budget-manager.js";

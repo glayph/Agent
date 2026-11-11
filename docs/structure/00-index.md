@@ -17,8 +17,8 @@ Miki-এর পরবর্তী implementation কাজের ধারাব
 | [02-packages-overview.md](02-packages-overview.md) | packages/ top-level overview and inter-package relationships |
 | [03-core-engine.md](03-core-engine.md) | packages/core — agent engine, plugins, tools, autonomy, LLM |
 | [04-memory.md](04-memory.md) | packages/memory — Temporal Knowledge Graph and related modules |
-| [05-gateway-config-installer.md](05-gateway-config-installer.md) | packages/gateway, packages/config, packages/installer |
-| [06-cli-skills.md](06-cli-skills.md) | packages/cli and packages/skills |
+| [05-gateway-config-installer.md](05-gateway-config-installer.md) | packages/gateway, packages/config |
+| [06-cli-skills.md](06-cli-skills.md) | packages/cli and core plugin skills |
 | [07-ui-dashboard.md](07-ui-dashboard.md) | packages/ui — frontend dashboard + backend |
 | [08-build-and-ci.md](08-build-and-ci.md) | scripts/, .github/, test configs, build tooling |
 

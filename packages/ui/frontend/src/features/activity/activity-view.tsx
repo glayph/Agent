@@ -1,4 +1,4 @@
-import { IconActivity, IconLoader2, IconPlayerStop, IconRefresh, IconScreenShare, IconTrash } from "@tabler/icons-react"
+import { IconActivity, IconAlertTriangle, IconBolt, IconBrain, IconCircleCheck, IconClock, IconLoader2, IconPlayerStop, IconRefresh, IconScreenShare, IconTrash } from "@tabler/icons-react"
 import { useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -53,6 +53,31 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
+function MetricTile({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  tone = "text-foreground",
+}: {
+  label: string
+  value: string
+  detail: string
+  icon: typeof IconActivity
+  tone?: string
+}) {
+  return (
+    <div className="border-border/60 bg-card/70 rounded-xl border p-3 shadow-sm">
+      <div className="text-muted-foreground flex items-center gap-2 text-[11px] font-semibold tracking-[0.12em] uppercase">
+        <Icon className={cn("size-4", tone)} aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      <div className={cn("mt-2 text-xl font-semibold tracking-tight", tone)}>{value}</div>
+      <div className="text-muted-foreground mt-1 truncate text-xs">{detail}</div>
+    </div>
+  )
+}
+
 const DECISION_STYLE: Record<LearnedRule["decision"], string> = {
   act: "bg-emerald-500/15 text-emerald-600",
   ask: "bg-amber-500/15 text-amber-600",
@@ -77,12 +102,22 @@ function scheduleTypeOf(task: ScheduledTask): "once" | "interval" | "cron" {
 /** Operational activity console for goals, jobs, schedules, triggers, screen sharing, and learned rules. */
 export function ActivityView() {
   const { t, i18n } = useTranslation()
-  const localStatus = (value?: string) => {
-    if (!value) return t("pages.activity.statuses.unknown", { defaultValue: "Unknown" })
-    const key = value.toLowerCase().replaceAll("-", "_")
-    return t(`pages.activity.statuses.${key}`, {
-      defaultValue: value.replaceAll("_", " "),
-    })
+  const localStatus = (value?: unknown) => {
+    if (typeof value !== "string" || !value.trim() || value.length > 80 || /[\u0000-\u001f]/.test(value))
+      return t("pages.activity.statuses.unknown", { defaultValue: "Unknown" })
+    const normalized = value.trim().replace(/([a-z])([A-Z])/g, "$1_$2").replace(/[\s-]+/g, "_")
+    const key = normalized.toLowerCase()
+    const fallback = normalized.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    return t(`pages.activity.statuses.${key}`, { defaultValue: fallback })
+  }
+  const safeJsonPreview = (value: unknown, maxChars = 12_000) => {
+    let serialized = ""
+    try {
+      serialized = typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? String(value ?? "")
+    } catch {
+      serialized = "[Unable to render this activity payload]"
+    }
+    return serialized.length > maxChars ? `${serialized.slice(0, maxChars)}\n…[preview truncated]` : serialized
   }
   const [status, setStatus] = useState<AutonomyStatus | null>(null)
   const [statusError, setStatusError] = useState<string>()
@@ -638,24 +673,62 @@ export function ActivityView() {
     : ["idleBackingOff", "idleRecovering"].includes(idleModeKey)
       ? "bg-amber-500"
       : "bg-muted-foreground"
+  const systemOnline = Boolean(status?.running && !status.paused)
+  const providerLabel = localStatus(autonomousActivity?.provider.state ?? (status ? "ready" : "loading"))
+  const latestRun = status?.recent_runs?.[0]
+  const lastDecision = idleLoop?.last_decision_at
+    ? new Date(idleLoop.last_decision_at).toLocaleTimeString(i18n.resolvedLanguage)
+    : "Not yet"
+  const lastRefresh = autonomousActivity?.fetched_at
+    ? new Date(autonomousActivity.fetched_at).toLocaleTimeString(i18n.resolvedLanguage)
+    : "Waiting for data"
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-miki-page="activity">
       <PageHeader title={t("pages.activity.title", { defaultValue: "Activity" })} titleLevel={1} />
-      <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6" data-miki-page-body="true">
-      <div className="flex flex-wrap items-center gap-2">
-        <IconActivity className="text-primary size-5" aria-hidden="true" />
-        {status && (
-          <span className="text-muted-foreground text-xs">
-            {t("pages.activity.runningSummary", { count: running.length, max: status.max_concurrent_tasks ?? 1, defaultValue: "{{count}} / {{max}} running" })}{status.paused ? ` · ${t("pages.activity.paused", { defaultValue: "Paused" })}` : ""}
-          </span>
-        )}
-        <button type="button" onClick={() => void refreshAll()} disabled={refreshBusy} className="border-border ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs disabled:opacity-50">
-          <IconRefresh className={cn("size-3.5", refreshBusy && "animate-spin")} />
-          {refreshBusy ? "Refreshing…" : "Refresh activity"}
-        </button>
+      <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-screen-2xl flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-3 sm:p-5 lg:p-6" data-miki-page-body="true">
+      <section className="border-border/60 from-primary/[0.12] via-card/80 to-card/50 relative overflow-hidden rounded-2xl border bg-gradient-to-br p-5 shadow-sm">
+        <div className="bg-primary/20 absolute -top-16 -right-12 size-40 rounded-full blur-3xl" aria-hidden="true" />
+        <div className="relative flex min-w-0 flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-muted-foreground flex items-center gap-2 text-xs font-semibold tracking-[0.16em] uppercase">
+              <IconActivity className="text-primary size-4" aria-hidden="true" />
+              Mission control
+            </div>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight">Miki is {systemOnline ? "online" : "not active"}</h2>
+            <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
+              {status?.paused
+                ? "Autonomous work is paused. Resume it to let Miki continue making progress."
+                : running.length > 0
+                  ? `${running.length} goal${running.length === 1 ? "" : "s"} currently in progress.`
+                  : "No active goals right now. Miki is monitoring events and waiting for the next useful decision."}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium", systemOnline ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600" : "border-amber-500/30 bg-amber-500/10 text-amber-600")}>
+              <span className={cn("size-2 rounded-full", systemOnline ? "bg-emerald-500" : "bg-amber-500")} aria-hidden="true" />
+              {status?.paused ? "Paused" : systemOnline ? "Live" : "Stopped"}
+            </span>
+            <button type="button" onClick={() => void refreshAll()} disabled={refreshBusy} className="border-border bg-background/70 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs shadow-sm transition-colors hover:bg-background disabled:opacity-50">
+              <IconRefresh className={cn("size-3.5", refreshBusy && "animate-spin")} />
+              {refreshBusy ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <div className="relative mt-5 grid grid-cols-2 gap-2 border-t border-border/50 pt-4 text-xs sm:grid-cols-4">
+          <div><span className="text-muted-foreground block">Idle loop</span><strong className="mt-1 block">{idleLoop?.llm_when_idle ? "Enabled" : "Goal-only"}</strong></div>
+          <div><span className="text-muted-foreground block">Provider</span><strong className="mt-1 block capitalize">{providerLabel}</strong></div>
+          <div><span className="text-muted-foreground block">Last decision</span><strong className="mt-1 block">{lastDecision}</strong></div>
+          <div><span className="text-muted-foreground block">Updated</span><strong className="mt-1 block">{lastRefresh}</strong></div>
+        </div>
+      </section>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <MetricTile label="Active goals" value={String(running.length)} detail={status ? `${status.max_concurrent_tasks ?? 1} concurrent slots` : "Loading status"} icon={running.length > 0 ? IconBolt : IconCircleCheck} tone={running.length > 0 ? "text-blue-600" : "text-emerald-600"} />
+        <MetricTile label="Autonomy" value={status?.paused ? "Paused" : status?.running ? "Running" : "Offline"} detail={idleModeLabel} icon={IconBrain} tone={status?.paused ? "text-amber-600" : "text-primary"} />
+        <MetricTile label="Provider" value={autonomousActivity?.provider.failure_streak ? `${autonomousActivity.provider.failure_streak} failures` : "Healthy"} detail={providerLabel} icon={autonomousActivity?.provider.failure_streak ? IconAlertTriangle : IconCircleCheck} tone={autonomousActivity?.provider.failure_streak ? "text-amber-600" : "text-emerald-600"} />
+        <MetricTile label="Last run" value={latestRun ? localStatus(latestRun.status) : "None yet"} detail={latestRun ? new Date(latestRun.started_at).toLocaleTimeString(i18n.resolvedLanguage) : "Waiting for work"} icon={IconClock} tone="text-muted-foreground" />
       </div>
-      {statusError && <p role="alert" className="text-destructive text-sm">{statusError}</p>}
+      {statusError && <p role="alert" className="text-destructive break-words text-sm">{statusError}</p>}
 
       <Card title={t("pages.activity.idleMode", { defaultValue: "Always-active Idle Mode" })}>
         <div className="flex flex-wrap items-center gap-2">
@@ -679,23 +752,23 @@ export function ActivityView() {
 
       <Card title="Autonomous provider activity">
         {autonomousActivityError ? (
-          <p role="alert" className="text-destructive text-sm">Autonomous activity is unavailable: {autonomousActivityError}</p>
+          <p role="alert" className="text-destructive break-words text-sm">Autonomous activity is unavailable: {autonomousActivityError}</p>
         ) : !autonomousActivity ? (
           <p className="text-muted-foreground text-sm">Loading autonomous activity…</p>
         ) : (
           <>
             <div className="text-muted-foreground grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
-              <span>Provider state: <strong className="text-foreground">{autonomousActivity.provider.state}</strong></span>
+              <span>Provider state: <strong className="text-foreground">{providerLabel}</strong></span>
               <span>Failure streak: {autonomousActivity.provider.failure_streak}</span>
               <span>Next attempt: {autonomousActivity.provider.next_attempt_at ? new Date(autonomousActivity.provider.next_attempt_at).toLocaleString(i18n.resolvedLanguage) : "Not scheduled"}</span>
               <span>Last success: {autonomousActivity.provider.last_success_at ? new Date(autonomousActivity.provider.last_success_at).toLocaleString(i18n.resolvedLanguage) : "Not yet"}</span>
             </div>
-            {autonomousActivity.provider.last_failure && <p className="text-muted-foreground mt-2 text-xs">Last failure ({autonomousActivity.provider.last_failure.kind}): {autonomousActivity.provider.last_failure.message}</p>}
+            {autonomousActivity.provider.last_failure && <p className="text-muted-foreground mt-2 break-words whitespace-pre-wrap text-xs">Last failure ({localStatus(autonomousActivity.provider.last_failure.kind)}): {autonomousActivity.provider.last_failure.message}</p>}
             {autonomousActivity.ambient.length === 0 ? (
               <p className="text-muted-foreground mt-3 text-sm">No ambient autonomous runs have been recorded yet.</p>
             ) : (
               <ul className="text-muted-foreground mt-3 flex flex-col gap-1 border-t pt-2 text-xs">
-                {autonomousActivity.ambient.slice(0, 6).map((run) => <li key={run.run_id}>{new Date(run.created_at).toLocaleString(i18n.resolvedLanguage)} · {run.trigger_source} · {localStatus(run.status)}{run.result ? ` · ${run.result.slice(0, 120)}` : ""}</li>)}
+                {autonomousActivity.ambient.slice(0, 6).map((run) => <li key={run.run_id} className="break-words">{new Date(run.created_at).toLocaleString(i18n.resolvedLanguage)} · {localStatus(run.trigger_source)} · {localStatus(run.status)}{typeof run.result === "string" && run.result.trim() ? ` · ${run.result.slice(0, 120)}` : ""}</li>)}
               </ul>
             )}
             <p className="text-muted-foreground mt-2 text-[11px]">Updated {new Date(autonomousActivity.fetched_at).toLocaleTimeString(i18n.resolvedLanguage)}. This lane reports host-side autonomous decisions; it does not claim provider success unless a model run actually completed.</p>
@@ -724,7 +797,7 @@ export function ActivityView() {
         {(status?.recent_runs?.length ?? 0) > 0 && (
           <ul className="text-muted-foreground mt-3 flex flex-col gap-1 border-t pt-2 text-xs">
             {status!.recent_runs!.slice(0, 5).map((run) => (
-              <li key={run.run_id}>
+              <li key={run.run_id} className="break-words">
                 {t("pages.activity.goalLabel", { defaultValue: "Goal" })} #{run.goal_id} · {localStatus(run.status)} · {new Date(run.started_at).toLocaleTimeString(i18n.resolvedLanguage)}
                 {run.error ? ` · ${run.error.slice(0, 80)}` : ""}
               </li>
@@ -737,7 +810,7 @@ export function ActivityView() {
         <p className="text-muted-foreground mb-2 text-xs">
           {t("pages.activity.backgroundJobsInfo", { defaultValue: "Long-running work continues independently and is restored after a Gateway restart." })}
         </p>
-        {backgroundJobsError && <p role="alert" className="text-destructive mb-2 text-xs">{backgroundJobsError}</p>}
+        {backgroundJobsError && <p role="alert" className="text-destructive mb-2 break-words text-xs">{backgroundJobsError}</p>}
         {backgroundJobs.length === 0 ? (
           <p className="text-muted-foreground text-sm">{backgroundJobsError ? "Background jobs are unavailable because the API request failed." : t("pages.activity.noBackgroundJobs", { defaultValue: "No background jobs yet." })}</p>
         ) : (
@@ -774,8 +847,8 @@ export function ActivityView() {
                     </div>
                   )}
                   {job.needsReconciliation && <p className="mt-2 text-xs text-amber-600">{t("pages.activity.needsReconciliation", { defaultValue: "An external action needs manual verification before this job can be retried." })}</p>}
-                  {job.error && <p className="text-destructive mt-2 text-xs">{job.error}</p>}
-                  {job.result && <p className="text-muted-foreground mt-2 line-clamp-3 text-xs">{job.result}</p>}
+                  {job.error && <p className="text-destructive mt-2 break-words whitespace-pre-wrap text-xs">{job.error}</p>}
+                  {job.result && <p className="text-muted-foreground mt-2 line-clamp-3 break-words text-xs">{job.result}</p>}
                   {selectedJobId === job.id && (
                     <div className="border-border mt-3 space-y-2 border-t pt-3">
                       {jobDetailBusy && <p className="text-muted-foreground text-xs">Loading job history…</p>}
@@ -783,9 +856,9 @@ export function ActivityView() {
                       {selectedJobDetail && (
                         <>
                           <div className="text-xs font-medium">Task tree</div>
-                          <pre className="bg-muted max-h-48 overflow-auto rounded-md p-2 text-[10px]">{JSON.stringify(selectedJobDetail.tree, null, 2)}</pre>
+                          <pre className="bg-muted max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md p-2 text-[10px] leading-4">{safeJsonPreview(selectedJobDetail.tree)}</pre>
                           <div className="text-xs font-medium">Execution events ({selectedJobDetail.events.length})</div>
-                          <pre className="bg-muted max-h-48 overflow-auto rounded-md p-2 text-[10px]">{JSON.stringify(selectedJobDetail.events, null, 2)}</pre>
+                          <pre className="bg-muted max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md p-2 text-[10px] leading-4">{safeJsonPreview(selectedJobDetail.events)}</pre>
                           {reconcileResult && <div className="rounded-md border p-2 text-xs"><div className="font-medium">Last reconciliation result</div><div className="mt-1">Resumed tasks: {reconcileResult.resumedTaskIds.length} · Remaining unsettled actions: {reconcileResult.remainingUnsettledActions.length}</div></div>}
                         </>
                       )}
@@ -970,7 +1043,7 @@ export function ActivityView() {
                       {t("pages.activity.next", { defaultValue: "Next" })}: {task.next_run_at ? new Date(task.next_run_at).toLocaleString(i18n.resolvedLanguage) : new Date(task.due_at).toLocaleString(i18n.resolvedLanguage)} · {t("pages.activity.status", { defaultValue: "Status" })}: {localStatus(task.status)} · {t("pages.activity.missed", { defaultValue: "Missed" })}: {task.missed_runs ?? 0}
                     </div>
                     {task.last_run_at && <div className="text-muted-foreground mt-1 text-xs">{t("pages.activity.lastRun", { defaultValue: "Last run" })}: {new Date(task.last_run_at).toLocaleString(i18n.resolvedLanguage)} · {localStatus(task.last_outcome ?? "unknown")}</div>}
-                    {task.last_error && <div className="mt-1 text-xs text-red-600">{task.last_error}</div>}
+                    {task.last_error && <div className="mt-1 break-words whitespace-pre-wrap text-xs text-red-600">{task.last_error}</div>}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {task.status === "paused" ? (
@@ -1016,7 +1089,7 @@ export function ActivityView() {
       </Card>
 
       <Card title={t("pages.activity.learnedRules", { defaultValue: "Learned rules" })}>
-        {rulesError && <p role="alert" className="text-destructive mb-2 text-xs">Could not load or update learned rules: {rulesError}</p>}
+        {rulesError && <p role="alert" className="text-destructive mb-2 break-words text-xs">Could not load or update learned rules: {rulesError}</p>}
         {rulesLoading ? <p className="text-muted-foreground text-sm">Loading learned rules…</p> : rules.length === 0 ? (
           <p className="text-muted-foreground text-sm">{rulesError ? "Rules are unavailable because the API request failed." : t("pages.activity.noRules", { defaultValue: "No rules yet. Everything is allowed until you teach Miki otherwise." })}</p>
         ) : (

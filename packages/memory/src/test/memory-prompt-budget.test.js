@@ -76,3 +76,19 @@ test('getPromptContext reports whether anything was actually recalled', () => {
   // The legacy single-argument API keeps working.
   assert.match(filled.getEnhancedSystemPrompt('where do I deploy?'), /VirtualBox/);
 });
+
+
+test('AgentMemoryIntegration accepts bounded runtime retrieval options for diagnostic search', () => {
+  let selectiveOptions;
+  const integration = new AgentMemoryIntegration({
+    getWorkingAnchor: () => ({ current_timestamp: '2026-11-11T00:00:00.000Z', current_situation: null, key_entities: '[]' }),
+    getSelectiveContext: (_query, options) => { selectiveOptions = options; return { items: [], text: '' }; },
+  });
+  integration.preExecutionHook('Find my current project memory', {
+    memoryScope: { agentId: 'miki', ownerId: 'owner', workspaceId: 'workspace' },
+    memoryOptions: { maxSelected: 13, maxDepth: 2, maxTokens: 2400 },
+  });
+  assert.equal(selectiveOptions.maxSelected, 13);
+  assert.equal(selectiveOptions.maxDepth, 2);
+  assert.equal(selectiveOptions.maxTokens, 2400);
+});

@@ -1,0 +1,17 @@
+import type { AgentMemoryIntegration, TemporalKnowledgeGraph } from "./types.js";
+export declare function initMemory(dataDir: string): AgentMemoryIntegration;
+export declare function getMemory(): AgentMemoryIntegration | null;
+export declare function getTKG(): TemporalKnowledgeGraph | null;
+export declare function backupMemory(destinationPath: string): Promise<void>;
+export declare function restoreMemory(backupPath: string, dataDir: string): AgentMemoryIntegration;
+export declare function multiHopRetrieve(opts?: Record<string, unknown>): unknown;
+export declare function getSelectiveContext(query?: string, options?: Record<string, unknown>): unknown;
+export declare function getSelectiveMemoryStats(scope?: Record<string, string>): unknown;
+export declare function listSelectiveMemory(scope?: Record<string, string>, options?: Record<string, unknown>): unknown[];
+export declare function inspectSelectiveMemory(scope?: Record<string, string>, chunkId?: string): unknown;
+export declare function forgetSelectiveMemory(scope: Record<string, string>, chunkId: string): unknown;
+export declare function reindexSelectiveMemory(scope?: Record<string, string>): unknown;
+export declare function getNodeGraphContext(query?: string, limit?: number): unknown[];
+export declare function getNodeGraphSnapshot(limit?: number): unknown;
+export declare function getTemporaryMemory(): unknown | null;
+export declare function closeMemory(): void;

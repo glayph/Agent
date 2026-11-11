@@ -1,0 +1,49 @@
+export { SkillStore, SkillStoreError } from "./skill-store.js";
+export type {
+  InstallMeta,
+  InstallOutcome,
+  SkillDetail,
+  SkillOrigin,
+  SkillRecord,
+  SkillStoreOptions,
+} from "./skill-store.js";
+export {
+  SkillRegistryClient,
+  parseRegistryList,
+  resolveGithubSource,
+} from "./registry-client.js";
+export type {
+  RegistryClientOptions,
+  RegistryInstallRequest,
+  RegistryInstallResult,
+  RegistrySearchResponse,
+  RegistrySearchResult,
+  SkillRegistryConfig,
+} from "./registry-client.js";
+export { parseSkillMarkdown, readFrontmatterFields } from "./frontmatter.js";
+export { scanSkillFiles, summarizeFindings } from "./scan.js";
+export type { SkillScanFinding } from "./scan.js";
+export { readZip, ZipError } from "./zip.js";
+export { createSkillsRouter } from "../../../api/skills-router.js";
+export type {
+  SkillAuditEvent,
+  SkillsRouterOptions,
+} from "../../../api/skills-router.js";
+export { createSkillsService } from "./service.js";
+export type { SkillsService, SkillsServiceOptions } from "./service.js";
+export { createPluginBridge } from "./plugin-bridge.js";
+export * from "./skill-loader.js";
+export * from "./skill-search.js";
+export {
+  createSuccessResponse,
+  createErrorResponse,
+  validateSkillName,
+  normalizeSkillName,
+  validateSkillMetadata,
+  debounce,
+  safeJsonParse,
+} from "./skill-utils.js";
+export type {
+  ApiResponse,
+  SkillMetadata as SkillMetadataValidation,
+} from "./skill-utils.js";

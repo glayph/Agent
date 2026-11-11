@@ -1,4 +1,4 @@
-import { MetricsCollector } from "../src/metrics-collector";
+import { MetricsCollector } from "../src/observability/metrics-collector.ts";
 
 describe("MetricsCollector optimizations", () => {
   it("records total operation counters with latency samples", () => {

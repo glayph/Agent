@@ -53,9 +53,8 @@ if (process.env.MIKI_ALLOW_REMOTE_SETUP === undefined) {
 const requiredRuntimeFiles = [
   ["gateway", "packages/gateway/dist/index.js"],
   ["core API", "packages/core/dist/api/index.js"],
+  ["skills plugin", "packages/core/dist/plugins/skills/index.js"],
   ["config", "packages/config/dist/index.js"],
-  ["installer", "packages/installer/dist/index.js"],
-  ["skills", "packages/skills/dist/index.js"],
   ["dashboard", "packages/ui/frontend/dist/index.html"],
 ];
 

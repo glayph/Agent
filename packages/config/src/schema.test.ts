@@ -498,6 +498,14 @@ describe("runtime config schema", () => {
     expect(invalid.errors).toContainEqual(expect.objectContaining({ path: "agent.verify_actions" }));
   });
 
+  it("accepts a boolean agent.pre_action_double_check setting", () => {
+    expect(validateRuntimeConfig({ agent: { pre_action_double_check: true } }).valid).toBe(true);
+    expect(validateRuntimeConfig({ agent: { pre_action_double_check: false } }).valid).toBe(true);
+    const invalid = validateRuntimeConfig({ agent: { pre_action_double_check: "sometimes" } });
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors).toContainEqual(expect.objectContaining({ path: "agent.pre_action_double_check" }));
+  });
+
   it("accepts agent.dynamic_budget and rejects out-of-range values", () => {
     expect(validateRuntimeConfig({ agent: { dynamic_budget: { enabled: true, extension_turns: 8, max_extensions: 3 } } }).valid).toBe(true);
     expect(validateRuntimeConfig({ agent: { dynamic_budget: { max_extensions: 50 } } }).valid).toBe(false);

@@ -28,13 +28,13 @@ Make the Monitoring Page a true **Live Execution Graph**:
 - Level zero nodes always receive no edge. Multiple tool calls in one model turn are emitted at the same level, so they appear as disconnected peers.
 - The all-to-all previous-level heuristic can also invent relationships that are not present in the plan.
 
-**Backend emitter:** `packages/gateway/src/agent-runtime.ts`
+**Backend emitter:** `packages/gateway/src/agent/agent-runtime.ts`
 
 - `emitMonitorPlan()` (around lines 2683–2723) computes real dependency depths and sends explicit `depends_on` for plan-step nodes.
 - `emitMonitorToolCall()` (around lines 2633–2681) emits the tool node's `level` but does not emit a parent/dependency ID.
 - Consequently, tool activities in the same turn have no real dependency information in the event contract.
 
-**Backend persistence:** `packages/gateway/src/monitor-history.ts`
+**Backend persistence:** `packages/gateway/src/monitoring/monitor-history.ts`
 
 - `safeEvent("node.spawn")` accepts and sanitizes `depends_on` (around lines 125–133).
 - `persistMonitorEvent()` inserts `monitor_edges` only for supplied `depends_on` IDs (around lines 184–194).
@@ -56,7 +56,7 @@ Therefore, a graph can appear connected during one live session due to the Front
 - Local history persists metadata for recent runs/nodes.
 - These are history-retention rules, not a live-canvas lifecycle.
 
-**Backend:** `packages/gateway/src/monitor-history.ts`
+**Backend:** `packages/gateway/src/monitoring/monitor-history.ts`
 
 - Terminal history is retained by `pruneMonitorHistory()` (30-day default and per-session run cap).
 - `/api/monitor/history` returns historical runs and their nodes/edges.
@@ -270,10 +270,10 @@ The same icon resolver must be used in both minimized and expanded node states a
 
 ### Gateway event production and persistence
 
-- `packages/gateway/src/agent-runtime.ts` — emit run-root/plan/tool nodes with explicit parents and presentation metadata; map tool names to their registered metadata rather than frontend prefix guesses.
-- `packages/gateway/src/chat-turn-runner.ts` — pass an explicit metadata resolver into the WebSocket event mapper if that is the cleanest ownership boundary.
-- `packages/gateway/src/monitor-history.ts` — sanitize, persist and return canonical relationships/presentation fields; preserve history when live UI nodes expire.
-- `packages/gateway/src/monitor-history.test.ts` — verify dependency edge persistence, icon metadata validation, history hydration and pruning compatibility.
+- `packages/gateway/src/agent/agent-runtime.ts` — emit run-root/plan/tool nodes with explicit parents and presentation metadata; map tool names to their registered metadata rather than frontend prefix guesses.
+- `packages/gateway/src/chat/chat-turn-runner.ts` — pass an explicit metadata resolver into the WebSocket event mapper if that is the cleanest ownership boundary.
+- `packages/gateway/src/monitoring/monitor-history.ts` — sanitize, persist and return canonical relationships/presentation fields; preserve history when live UI nodes expire.
+- `packages/gateway/src/monitoring/monitor-history.test.ts` — verify dependency edge persistence, icon metadata validation, history hydration and pruning compatibility.
 
 ### Frontend monitor
 
@@ -290,7 +290,7 @@ Existing tests to extend:
 - `packages/ui/frontend/src/features/monitor/protocol.test.ts`
 - `packages/ui/frontend/src/features/monitor/store.test.ts`
 - `packages/ui/frontend/src/features/monitor/history-api.test.ts`
-- `packages/gateway/src/monitor-history.test.ts`
+- `packages/gateway/src/monitoring/monitor-history.test.ts`
 
 ---
 

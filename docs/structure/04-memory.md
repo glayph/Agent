@@ -7,6 +7,11 @@ packages/memory/
 ├── package.json                 # @miki/memory v2.0.0 — multiple named exports
 ├── src/
 │   ├── index.js                 # Public API re-exports
+│   ├── core/                    # Core bridge, global memory and shared contracts
+│   │   ├── index.ts             # Core memory boundary
+│   │   ├── runtime.ts           # TKG lifecycle, backup and restore
+│   │   ├── global-memory.ts     # Owner-scoped cross-channel memory adapter
+│   │   └── types.d.ts           # Shared memory contracts
 │   ├── temporal-knowledge-graph.js   # Core TKG implementation
 │   ├── graph-cognitive-memory.js     # Cognitive / graph memory layer
 │   ├── working-memory-anchor.js      # Working-memory anchors
@@ -39,6 +44,8 @@ packages/memory/
 - **Selective engine + learning store** — control what is retained and learned.
 
 **Comments**
+- All persistent memory engine and core integration code is owned by `packages/memory`; core and gateway import it through `@miki/memory` and `@miki/memory/core`.
+- File-note storage, search, compaction, and memory tools live alongside TKG under `packages/memory/src/file-memory`; this is a complementary subsystem, not a second TKG engine.
 - Exported as multiple entry points so core can import only the pieces it needs.
 - Designed for long-running agents (24/7 policy scripts exist at repo root).
 - Tests cover graph integrity, consolidation, retrieval and prompt-budget limits.

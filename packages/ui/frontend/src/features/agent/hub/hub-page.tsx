@@ -33,6 +33,7 @@ export function HubPage() {
             <SearchPanel
               marketQuery={hub.marketQuery}
               canSearchMarketplace={hub.canSearchMarketplace}
+              marketplaceUnavailableReason={hub.marketplaceUnavailableReason}
               isMarketSearchInitialLoading={hub.isMarketSearchInitialLoading}
               unavailableToolMessages={hub.unavailableToolMessages}
               onMarketQueryChange={hub.setMarketQuery}
@@ -45,6 +46,7 @@ export function HubPage() {
               submittedQuery={hub.submittedMarketQuery}
               marketResults={hub.marketResults}
               marketSearchError={hub.marketSearchError}
+              marketplaceUnavailableReason={hub.marketplaceUnavailableReason}
               isMarketSearchInitialLoading={hub.isMarketSearchInitialLoading}
               isMarketSearchLoadingMore={hub.isMarketSearchLoadingMore}
               canInstallFromMarketplace={hub.canInstallFromMarketplace}

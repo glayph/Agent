@@ -59,10 +59,17 @@ function splitWords(text) {
 
 function stem(token) {
   if (!BENGALI_CHAR.test(token)) return token;
+  // Genitive র after ই/ঈ is a one-character suffix (e.g. মেমোরির -> মেমোরি).
+  // Keep this narrow: removing every final র would corrupt ordinary nouns.
+  if (token.length >= 4 && /[িী]র$/u.test(token)) return token.slice(0, -1);
   for (const suffix of BENGALI_SUFFIXES) {
-    if (token.length - suffix.length >= 3 && token.endsWith(suffix)) {
-      return token.slice(0, token.length - suffix.length);
-    }
+    if (token.length - suffix.length < 3 || !token.endsWith(suffix)) continue;
+    const root = token.slice(0, token.length - suffix.length);
+    // In words such as পছন্দের, the দ belongs to পছন্দ; treating দের as a
+    // plural suffix produced the invalid root পছন্. Leave that conjunct intact
+    // and let the shorter genitive suffix ের be removed on the next iteration.
+    if ((suffix === 'দের' || suffix === 'দেরকে') && root.endsWith('্')) continue;
+    return root;
   }
   return token;
 }

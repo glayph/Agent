@@ -9,6 +9,31 @@ export interface TransientRetryDelayOptions {
   continueRetryingEveryMs?: number;
   /** Disable jitter when a caller requires exact retry intervals. Defaults to enabled. */
   jitter?: boolean;
+  /**
+   * Also wait and retry (instead of failing the run) when the provider rejects the key (401/403) or
+   * reports a billing/quota block (402 / insufficient_quota). The owner can fix a key or top up credit
+   * at any moment and quotas reset, so an always-on agent keeps trying. A provider-supplied
+   * Retry-After is still honoured as a floor. Never applies to a bad request or an unknown model:
+   * repeating the identical request cannot fix those.
+   */
+  retryPermanentFailures?: boolean;
+}
+
+/** Fixed pause between model attempts for an always-on agent. */
+export const NEVER_STOP_RETRY_DELAY_MS = 3_000;
+
+/**
+ * Retry options for runs that must never give up: unlimited attempts, one fixed delay (default 3 s,
+ * `MIKI_MODEL_RETRY_DELAY_MS` or the `delayMs` argument overrides it), no jitter, and provider
+ * quota/auth blocks are waited out instead of ending the run.
+ */
+export function neverStopRetryOptions(delayMs?: number): Required<Pick<TransientRetryDelayOptions,
+  "baseDelayMs" | "maxDelayMs" | "maxRetries" | "continueRetryingEveryMs" | "jitter" | "retryPermanentFailures">> {
+  const fromEnv = Number(process.env.MIKI_MODEL_RETRY_DELAY_MS);
+  const requested = Number.isFinite(Number(delayMs)) && Number(delayMs) > 0 ? Number(delayMs)
+    : Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : NEVER_STOP_RETRY_DELAY_MS;
+  const ms = Math.max(250, Math.floor(requested));
+  return { baseDelayMs: ms, maxDelayMs: ms, maxRetries: 0, continueRetryingEveryMs: ms, jitter: false, retryPermanentFailures: true };
 }
 
 /**

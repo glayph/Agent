@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist/file-memory",
+    "rootDir": "src/file-memory",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": [
+      "node"
+    ],
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".file-memory.tsbuildinfo",
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "noEmitOnError": true
+  },
+  "include": [
+    "src/file-memory/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/file-memory/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../config"
+    }
+  ]
+}

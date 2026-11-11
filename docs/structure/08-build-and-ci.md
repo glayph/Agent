@@ -45,7 +45,7 @@ scripts/
 ```
 
 **Comments**
-- `npm run build:all` orchestrates the full monorepo build (llama → config → installer → skills → memory → core → Node Gateway → frontend → cli). The Go compatibility stub is separate legacy packaging and is not the primary Web UI backend.
+- `npm run build:all` orchestrates the full monorepo build (config → installer → skills → memory → Core (llama.cpp source build + TypeScript compile) → Node Gateway → frontend → cli). The Go compatibility stub is separate legacy packaging and is not the primary Web UI backend.
 - Model scripts allow installing approved GGUF models (default local target: gemma-4-E2B style) and verifying health.
 - 24/7 scripts support continuous operation with policy checks.
 - Soak and benchmark scripts are used for reliability and quality gating.
@@ -69,3 +69,6 @@ scripts/
 - `turbo.json` — task pipeline and caching for the monorepo.
 
 These files ensure consistent code quality, unit/integration coverage, and reproducible releases.
+
+
+**Native provider build:** `packages/core` build command runs `scripts/build-llama.mjs` before TypeScript compilation. Every Core/Agent build configures and builds the vendored `packages/core/src/plugins/providers/builtin/llama.cpp/source` CMake project and stages `llama-server` under `packages/core/dist/plugins/providers/builtin/llama.cpp/native`. The Turbo task for `@miki/core#build` is non-cacheable so a cache hit cannot skip this native build step. Standalone direct-`tsc` build entrypoints invoke the same script explicitly.

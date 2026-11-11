@@ -27,6 +27,7 @@ describe("config page form model", () => {
         },
       },
       agent: {
+        pre_action_double_check: false,
         security: {
           bypass_restrictions: true,
         },
@@ -61,6 +62,7 @@ describe("config page form model", () => {
     expect(form.workspace).toBe("D:/work")
     expect(form.restrictToWorkspace).toBe(false)
     expect(form.bypassRestrictions).toBe(true)
+    expect(form.preActionDoubleCheck).toBe(false)
     expect(form.maxCompletionTokens).toBe("64000")
     expect(form.contextWindow).toBe("")
     expect(form.heartbeatEnabled).toBe(false)
@@ -83,10 +85,21 @@ describe("config page form model", () => {
     })
   })
 
+  it("maps the second pre-action verification switch while keeping one check as the default", () => {
+    const defaultForm = buildFormFromConfig({})
+    const enabledForm = buildFormFromConfig({ agent: { pre_action_double_check: true } })
+    const disabledForm = buildFormFromConfig({ agent: { pre_action_double_check: false } })
+
+    expect(defaultForm.preActionDoubleCheck).toBe(false)
+    expect(enabledForm.preActionDoubleCheck).toBe(true)
+    expect(disabledForm.preActionDoubleCheck).toBe(false)
+  })
+
   it("treats a zero context window as the default unset value", () => {
     const defaultForm = buildFormFromConfig({
       agents: { defaults: { context_window: 0 } },
     })
+    expect(defaultForm.preActionDoubleCheck).toBe(false)
     const customForm = buildFormFromConfig({
       agents: { defaults: { context_window: 131072 } },
     })

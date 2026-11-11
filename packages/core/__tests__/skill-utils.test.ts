@@ -10,8 +10,8 @@ import {
   validateSkillMetadata,
   debounce,
   safeJsonParse,
-} from "../src/skill-utils.js";
-import type { SkillMetadata } from "../src/skill-utils.js";
+} from "../src/plugins/skills/manager/skill-utils.js";
+import type { SkillMetadata } from "../src/plugins/skills/manager/skill-utils.js";
 
 describe("skill-utils", () => {
   describe("createSuccessResponse", () => {

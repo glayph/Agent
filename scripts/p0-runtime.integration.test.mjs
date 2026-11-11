@@ -4,12 +4,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { AgentEngine } from '../packages/core/src/engine/agent-engine.ts'
-import { TokenBudgetManager } from '../packages/core/src/token-budget-manager.ts'
+import { TokenBudgetManager } from '../packages/core/src/engine/token-budget-manager.ts'
 import { ToolRegistry } from '../packages/core/src/engine/tool-registry.ts'
 import { createWorkspaceTools } from '../packages/core/src/engine/builtin-tools.ts'
 import { createFileManagementTools } from '../packages/core/src/engine/file-tools.ts'
 import { BrowserTool } from '../packages/core/src/plugins/browser/runtime.ts'
-import { resolveSessionContextId } from '../packages/gateway/src/session-scope.ts'
+import { resolveSessionContextId } from '../packages/gateway/src/channels/session-scope.ts'
 
 const ctx = () => ({ runId:'r1', callId:'c1', signal:new AbortController().signal })
 

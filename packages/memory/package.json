@@ -4,7 +4,11 @@
   "description": "Miki Temporal Knowledge Graph & Event-Driven Stream Architecture — fully local persistent memory",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "require": "./src/index.js",
+      "default": "./src/index.js"
+    },
     "./temporal-knowledge-graph": "./src/temporal-knowledge-graph.js",
     "./working-memory-anchor": "./src/working-memory-anchor.js",
     "./special-event-highlighter": "./src/special-event-highlighter.js",
@@ -13,11 +17,24 @@
     "./regions": "./src/regions.js",
     "./temporary-memory": "./src/temporary-memory.js",
     "./multi-hop-retriever": "./src/multi-hop-retriever.js",
-    "./graph-cognitive-memory": "./src/graph-cognitive-memory.js"
+    "./graph-cognitive-memory": "./src/graph-cognitive-memory.js",
+    "./core": {
+      "types": "./src/core/index.d.ts",
+      "require": "./src/core/index.js",
+      "import": "./src/core/index.js",
+      "default": "./src/core/index.js"
+    },
+    "./file-memory": {
+      "types": "./dist/file-memory/index.d.ts",
+      "import": "./dist/file-memory/index.js",
+      "default": "./dist/file-memory/index.js"
+    }
   },
   "scripts": {
-    "build": "echo 'No build step needed'",
-    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js && node src/test/selective-memory-engine.test.js && node src/test/retrieval-quality.test.js && node src/test/paragraph-memory.test.js && node src/test/graph-extraction.test.js && node src/test/learning-store.test.js && node --test src/test/memory-prompt-budget.test.js"
+    "build": "node scripts/build.mjs",
+    "test": "node src/test/tkg-test-runner.js && node src/test/integration-phase1.test.js && node src/test/deep-audit.test.js && node src/test/graph-cognitive-memory.test.js && node src/test/selective-memory-engine.test.js && node src/test/retrieval-quality.test.js && node src/test/paragraph-memory.test.js && node src/test/graph-extraction.test.js && node src/test/learning-store.test.js && node --test src/test/memory-prompt-budget.test.js && npm run test:file-memory",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist/file-memory',{recursive:true,force:true});fs.rmSync('.file-memory.tsbuildinfo',{force:true})\"",
+    "test:file-memory": "node ../../node_modules/jest/bin/jest.js --config=../../jest.config.cjs --runInBand --testPathPattern=packages/memory/src/file-memory"
   },
   "keywords": [
     "miki",
@@ -31,7 +48,8 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "@miki/config": "file:../config"
   },
   "turbo": {
     "outputs": []

@@ -16,6 +16,7 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
+  SidebarTrigger,
   useSidebar,
 } from "@/shared/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip"
@@ -25,6 +26,17 @@ function isActivePath(pathname: string, url: string): boolean {
 }
 
 const WORKSPACE_SIDEBAR_TOGGLE_EVENT = "Miki:toggle-workspace-sidebar"
+
+const navigationById = new Map(
+  secondaryNavigation.map((item) => [item.id, item] as const),
+)
+const resolvedSidebarGroups = sidebarNavigationGroups.map((group) => ({
+  ...group,
+  items: group.itemIds.flatMap((id) => {
+    const item = navigationById.get(id)
+    return item ? [item] : []
+  }),
+}))
 
 function NavList({
   items,
@@ -85,16 +97,18 @@ function NavList({
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const routerState = useRouterState()
+  const currentPath = useRouterState({
+    select: (state) => state.location.pathname,
+  })
   const { t } = useTranslation()
-  const { isMobile, setOpenMobile } = useSidebar()
-  const currentPath = routerState.location.pathname
+  const { isMobile, setOpenMobile, state } = useSidebar()
+  const showLabels = isMobile || state === "expanded"
 
-  const closeMobileSidebar = () => {
+  const closeMobileSidebar = React.useCallback(() => {
     if (isMobile) setOpenMobile(false)
-  }
+  }, [isMobile, setOpenMobile])
 
-  const handleNavClick = (
+  const handleNavClick = React.useCallback((
     item: AppNavigationItem,
     event: React.MouseEvent<HTMLAnchorElement>,
   ) => {
@@ -105,22 +119,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
 
     closeMobileSidebar()
-  }
+  }, [closeMobileSidebar, currentPath, isMobile])
 
   return (
     <Sidebar
       {...props}
-      collapsible={isMobile ? "offcanvas" : "none"}
-      style={
-        { "--sidebar-width": isMobile ? "17rem" : "15rem" } as React.CSSProperties
-      }
+      collapsible={isMobile ? "offcanvas" : "icon"}
+      style={isMobile ? ({ "--sidebar-width": "17rem" } as React.CSSProperties) : undefined}
       className="miki-sidebar border-r"
     >
-      <SidebarHeader className="miki-sidebar__header flex h-[var(--app-topbar-height)] items-center justify-start border-b px-4">
+      <SidebarHeader className={cn("miki-sidebar__header relative flex h-[var(--app-topbar-height)] items-center border-b px-2", showLabels ? "justify-between" : "justify-center")}>
         <Link
           to="/"
           onClick={closeMobileSidebar}
-          className="miki-sidebar__brand-row flex min-w-0 items-center gap-2.5 rounded-md p-0 transition-colors"
+          className={cn("miki-sidebar__brand-row flex min-w-0 items-center gap-2 rounded-md p-0 transition-colors", showLabels ? "justify-start" : "justify-center")}
           aria-label="Miki"
           title="Miki"
         >
@@ -134,15 +146,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="size-full rounded-[inherit] object-cover"
             />
           </span>
-          <span className="miki-sidebar__brand-label">Agent Miki</span>
+          {showLabels && (
+            <span className="miki-sidebar__brand-label">
+              <strong>Agent Miki</strong>
+              <small>{t("navigation.control")}</small>
+            </span>
+          )}
         </Link>
+        <SidebarTrigger className={cn("miki-sidebar__toggle shrink-0", !showLabels && "absolute top-1.5 right-1")} aria-label="Toggle sidebar" title="Toggle sidebar" />
       </SidebarHeader>
 
-      <SidebarContent className="miki-sidebar__content px-3 py-3">
-        {sidebarNavigationGroups.map((group) => {
-          const items = group.itemIds
-            .map((id) => secondaryNavigation.find((item) => item.id === id))
-            .filter((item): item is AppNavigationItem => Boolean(item))
+      <SidebarContent className="miki-sidebar__content px-2 py-3">
+        {resolvedSidebarGroups.map((group) => {
+          const items = group.items
           if (items.length === 0) return null
           const groupLabel = t(group.titleKey)
           return (
@@ -151,13 +167,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="miki-sidebar__group"
               aria-label={groupLabel}
             >
-              <div className="miki-sidebar__group-title">{groupLabel}</div>
+              {showLabels && (
+                <div className="miki-sidebar__group-title">{groupLabel}</div>
+              )}
               <NavList
                 items={items}
                 currentPath={currentPath}
                 onClick={handleNavClick}
                 t={t}
-                showLabels
+                showLabels={showLabels}
               />
             </section>
           )
@@ -171,7 +189,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             currentPath={currentPath}
             onClick={handleNavClick}
             t={t}
-            showLabels
+            showLabels={showLabels}
           />
         </SidebarFooter>
       )}

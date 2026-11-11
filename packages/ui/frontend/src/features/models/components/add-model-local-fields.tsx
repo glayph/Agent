@@ -55,16 +55,20 @@ export function AddModelLocalFields({
         </div>
       </FormRow>
       <FormRow
-        label={t("models.local.llamaServer", { defaultValue: "llama-server" })}
+        label={t("models.local.llamaServer", {
+          defaultValue: "Custom llama-server (optional)",
+        })}
       >
         <div className="flex gap-2">
           <Input
             value={form.localExecutablePath}
             onChange={setField("localExecutablePath")}
-            placeholder="/usr/local/bin/llama-server"
+            placeholder={t("models.local.llamaServerPlaceholder", {
+              defaultValue: "Built-in server selected automatically",
+            })}
             className={`${inputClass} min-w-0 flex-1 font-mono text-sm`}
             aria-label={t("models.local.llamaServer", {
-              defaultValue: "llama-server",
+              defaultValue: "Custom llama-server (optional)",
             })}
           />
           <Button
@@ -83,6 +87,12 @@ export function AddModelLocalFields({
             <IconFolderOpen className="size-4" aria-hidden="true" />
           </Button>
         </div>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {t("models.local.llamaServerHelp", {
+            defaultValue:
+              "Leave blank to use the llama.cpp server bundled by the build. Choose a path only to override it.",
+          })}
+        </p>
       </FormRow>
       <div className="grid grid-cols-3 gap-3">
         <FormRow label={t("models.local.port", { defaultValue: "Port" })}>

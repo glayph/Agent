@@ -15,20 +15,8 @@
       "types": "./dist/errors.d.ts"
     },
     "./error-handler": {
-      "import": "./dist/error-handler.js",
-      "types": "./dist/error-handler.d.ts"
-    },
-    "./llm/provider": {
-      "import": "./dist/llm/provider/index.js",
-      "types": "./dist/llm/provider/index.d.ts"
-    },
-    "./llm/provider/sdk": {
-      "import": "./dist/llm/provider/sdk/index.js",
-      "types": "./dist/llm/provider/sdk/index.d.ts"
-    },
-    "./llm/model-router": {
-      "import": "./dist/llm/model-router.js",
-      "types": "./dist/llm/model-router.d.ts"
+      "import": "./dist/observability/error-handler.js",
+      "types": "./dist/observability/error-handler.d.ts"
     },
     "./control": {
       "import": "./dist/control/index.js",
@@ -55,12 +43,12 @@
       "types": "./dist/permissions/permission-ledger.d.ts"
     },
     "./skills": {
-      "import": "./dist/skills-manager/index.js",
-      "types": "./dist/skills-manager/index.d.ts"
+      "import": "./dist/plugins/skills/index.js",
+      "types": "./dist/plugins/skills/index.d.ts"
     },
     "./web-search-service": {
-      "import": "./dist/web-search-service.js",
-      "types": "./dist/web-search-service.d.ts"
+      "import": "./dist/services/web-search-service.js",
+      "types": "./dist/services/web-search-service.d.ts"
     },
     "./api/goals": {
       "import": "./dist/api/goals-router.js",
@@ -71,24 +59,16 @@
       "types": "./dist/api/link-preview.d.ts"
     },
     "./speech-to-text": {
-      "import": "./dist/speech-to-text.js",
-      "types": "./dist/speech-to-text.d.ts"
+      "import": "./dist/services/speech-to-text.js",
+      "types": "./dist/services/speech-to-text.d.ts"
     },
     "./self-improvement": {
       "import": "./dist/self-improvement/index.js",
       "types": "./dist/self-improvement/index.d.ts"
     },
     "./token-budget-manager": {
-      "import": "./dist/token-budget-manager.js",
-      "types": "./dist/token-budget-manager.d.ts"
-    },
-    "./memory-files": {
-      "import": "./dist/memory-files/index.js",
-      "types": "./dist/memory-files/index.d.ts"
-    },
-    "./memory": {
-      "import": "./dist/memory/index.js",
-      "types": "./dist/memory/index.d.ts"
+      "import": "./dist/engine/token-budget-manager.js",
+      "types": "./dist/engine/token-budget-manager.d.ts"
     },
     "./autonomy": {
       "import": "./dist/autonomy/autonomous-supervisor.js",
@@ -99,8 +79,8 @@
       "types": "./dist/autonomy/autonomy-policy.d.ts"
     },
     "./messaging": {
-      "import": "./dist/messaging-adaptive.js",
-      "types": "./dist/messaging-adaptive.d.ts"
+      "import": "./dist/messaging/index.js",
+      "types": "./dist/messaging/index.d.ts"
     },
     "./hooks": {
       "import": "./dist/hooks/index.js",
@@ -115,12 +95,44 @@
       "types": "./dist/mcp/types.d.ts"
     },
     "./task-coordinator": {
-      "import": "./dist/task-coordinator.js",
-      "types": "./dist/task-coordinator.d.ts"
+      "import": "./dist/tasks/task-coordinator.js",
+      "types": "./dist/tasks/task-coordinator.d.ts"
+    },
+    "./plugins/providers": {
+      "import": "./dist/plugins/providers/index.js",
+      "types": "./dist/plugins/providers/index.d.ts"
+    },
+    "./plugins/providers/sdk": {
+      "import": "./dist/plugins/providers/sdk/index.js",
+      "types": "./dist/plugins/providers/sdk/index.d.ts"
+    },
+    "./plugins/providers/model-router": {
+      "import": "./dist/plugins/providers/model-router.js",
+      "types": "./dist/plugins/providers/model-router.d.ts"
+    },
+    "./tasks": {
+      "import": "./dist/tasks/index.js",
+      "types": "./dist/tasks/index.d.ts"
+    },
+    "./services": {
+      "import": "./dist/services/index.js",
+      "types": "./dist/services/index.d.ts"
+    },
+    "./observability": {
+      "import": "./dist/observability/index.js",
+      "types": "./dist/observability/index.d.ts"
+    },
+    "./sessions": {
+      "import": "./dist/sessions/session-history-store.js",
+      "types": "./dist/sessions/session-history-store.d.ts"
+    },
+    "./plugins/tools": {
+      "import": "./dist/plugins/tools/index.js",
+      "types": "./dist/plugins/tools/index.d.ts"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/build-llama.mjs && tsc -p tsconfig.json && node scripts/build-skill-catalog.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --max-warnings=0",
     "test": "node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config=../../jest.core.config.cjs --runInBand --forceExit",
@@ -129,9 +141,7 @@
   },
   "dependencies": {
     "@miki/config": "file:../config",
-    "@miki/installer": "file:../installer",
     "@miki/memory": "file:../memory",
-    "@miki/skills": "file:../skills",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
     "express": "^4.19.0",

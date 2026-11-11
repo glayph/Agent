@@ -2,10 +2,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { SkillSearchEngine } from "../packages/core/dist/skill-search.js";
-import { SkillLoader } from "../packages/core/dist/skill-loader.js";
+import { SkillSearchEngine } from "../packages/core/dist/plugins/skills/manager/skill-search.js";
+import { SkillLoader } from "../packages/core/dist/plugins/skills/manager/skill-loader.js";
 import { normalizeRuntimePaths } from "../packages/core/dist/paths.js";
-import { bundledSkillsRoot } from "@miki/skills";
+import { bundledSkillsRoot } from "../packages/core/dist/plugins/skills/catalog/index.js";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const catalogRoot = bundledSkillsRoot();

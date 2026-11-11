@@ -1,25 +1,25 @@
 import express from "express"
-import type { LooseConfig } from "./loose-config.js"
-import { StreamHub, sendSocketEvent } from "./stream-hub.js"
-import { findIgnoredConfigKeys, heartbeatLaneModel } from "./ignored-config.js"
-import { factualNoticeFromEvent } from "./notice-fallback.js"
-import { webhookAuthorized, webhookEventName, webhookSecret } from "./webhook-ingress.js"
-import { CHAT_QUEUE_WAIT_MS, createChatTurnRunner } from "./chat-turn-runner.js"
-import { ensureToolTraceColumn } from "./chat-tool-trace.js"
-import { createKeyedLane } from "./session-lane.js"
-import { classifyProviderHttpError, ProviderRequestError, type ProviderErrorCategory } from "./provider-error.js"
-import { createGlobalMemory, initMemory } from "@miki/core/memory"
+import type { LooseConfig } from "./config/loose-config.js"
+import { StreamHub, sendSocketEvent } from "./chat/stream-hub.js"
+import { findIgnoredConfigKeys, heartbeatLaneModel } from "./config/ignored-config.js"
+import { factualNoticeFromEvent } from "./monitoring/notice-fallback.js"
+import { webhookAuthorized, webhookEventName, webhookSecret } from "./channels/webhook-ingress.js"
+import { CHAT_QUEUE_WAIT_MS, createChatTurnRunner } from "./chat/chat-turn-runner.js"
+import { ensureToolTraceColumn } from "./chat/chat-tool-trace.js"
+import { createKeyedLane } from "./channels/session-lane.js"
+import { classifyProviderHttpError, ProviderRequestError, type ProviderErrorCategory } from "./providers/provider-error.js"
+import { createGlobalMemory, initMemory } from "@miki/memory/core"
 import http from "node:http"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync as makeDirSync, copyFileSync, chmodSync, appendFileSync } from "node:fs"
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto"
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto"
 import { isIP } from "node:net"
 import Database from "better-sqlite3"
 import { WebSocketServer, type WebSocket } from "ws"
 import * as yaml from "js-yaml"
-import { createAgentRuntime, createWsEventMapper } from "./agent-runtime.js"
-import { testCommandPatterns } from "./terminal-tool.js"
+import { createAgentRuntime, createWsEventMapper } from "./agent/agent-runtime.js"
+import { testCommandPatterns } from "@miki/core/plugins/tools"
 import { createFileManagerRouter, FileManagerError } from "@miki/core/file-manager"
 import { DurableTaskStore, FileRunError, runWorkspaceFile, summarizeRun } from "@miki/core/engine"
 import { normalizeRuntimePaths } from "@miki/core/paths"
@@ -31,39 +31,40 @@ import { globalErrorHandler } from "@miki/core/error-handler"
 import { getLifecycleBus } from "@miki/core/hooks"
 import { planAdaptiveOutput } from "@miki/core"
 import { calculateReward } from "@miki/core/self-improvement"
-import { appMcpConfig, createDashboardExtendedRouter } from "./dashboard-extended.js"
+import { appMcpConfig, createDashboardExtendedRouter } from "./monitoring/dashboard-extended.js"
 import { ExternalMcpConnectorManager } from "@miki/core/mcp/connectors"
-import { createMonitorHistoryRouter, ensureMonitorHistorySchema, markInterruptedMonitorRuns, persistMonitorEvent, persistSystemHealthSample, pruneMonitorHistory, pruneSystemHealthSamples } from "./monitor-history.js"
-import { createPluginManagementRouter } from "./plugin-management-router.js"
-import { MEDIA_ROUTE, describeFile } from "./chat-attachments.js"
-import { createChatMediaHandler } from "./chat-media-route.js"
-import { createChatMediaDelivery } from "./chat-media-delivery.js"
+import { createMonitorHistoryRouter, ensureMonitorHistorySchema, markInterruptedMonitorRuns, persistMonitorEvent, persistSystemHealthSample, pruneMonitorHistory, pruneSystemHealthSamples } from "./monitoring/monitor-history.js"
+import { createPluginManagementRouter } from "./plugins/plugin-management-router.js"
+import { MEDIA_ROUTE, describeFile } from "./chat/chat-attachments.js"
+import { createChatMediaHandler } from "./chat/chat-media-route.js"
+import { createChatMediaDelivery } from "./chat/chat-media-delivery.js"
 import { validateRuntimeConfig, migrateRuntimeConfig, createWorkspaceSecretVault, stripChannelSecrets as stripChannelSecretsFromConfig, hydrateChannelSecrets as hydrateChannelSecretsFromConfig } from "@miki/config"
-import { ChannelRuntimeManager } from "./channel-runtime.js"
+import { ChannelRuntimeManager } from "./channels/channel-runtime.js"
 import { AutonomousSupervisor } from "@miki/core/autonomy"
-import { normalizeSessionScope, resolveSessionContextId } from "./session-scope.js"
-import { resolveToolGroupKey } from "./tool-groups.js"
-import { resolveContextWindowTokens } from "./runtime-settings.js"
-import { FileMemoryService, retrieveRelevantTurns } from "@miki/core/memory-files"
-import { createLearnedBehavior } from "./learned-behavior.js"
-import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, followUpClassifierMessages, mayBeFollowUpFeedback, parseFollowUpClassification, previousAnswerFor, requestContextHash, isDurablePreferenceFeedback, type AnswerFeedbackTarget, type AnswerRating, type StoredFeedback } from "./answer-feedback.js"
-import { SqliteMemoryIndex } from "./memory-index.js"
-import { MemoryGovernanceStore } from "./memory-governance.js"
-import { wrapAsyncRoutes } from "./async-route.js"
-import { describeResolution, interpretDefaultModel, normalizeProvider, probeModelProvider, resolveModel } from "./model-resolution.js"
-import { createLocalRuntimeGate } from "./local-runtime-gate.js"
-import { configureLocalModels, synchronizeLocalRuntimeForModel, listBuiltinPluginManifests } from "@miki/core/plugins"
-import { createGatewayErrorMiddleware } from "./error-middleware.js"
-import { isWsOriginAllowed, parseAllowedOrigins } from "./ws-origin.js"
-import { isLocalDirectRequest, isRemoteSetupAllowed, parseAllowedHosts } from "./local-request.js"
-import { createHealthMonitor, type ModelProbeResult } from "./health.js"
-import { RecoveryManager } from "./recovery-manager.js"
-import { ReplaySweeper } from "./replay-sweeper.js"
-import { RecoveryLearning } from "./recovery-learning.js"
-import { DatabaseBackups, beginBoot, ensureHealthyDatabase, installCrashHandlers, installRejectionGuard, markCleanExit, recordDatabaseIncident, recoveryV2Enabled, type BootInfo } from "./process-safety.js"
-import { sessionCookie } from "./session-cookie.js"
-import { fuseMemoryHitLists } from "./memory-ranking.js"
-import { validateIncomingChatMessage } from "./chat-input.js"
+import { normalizeSessionScope, resolveSessionContextId } from "./channels/session-scope.js"
+import { resolveToolGroupKey } from "@miki/core/plugins/tools"
+import { resolveContextWindowTokens } from "./runtime/runtime-settings.js"
+import { FileMemoryService, retrieveRelevantTurns } from "@miki/memory/file-memory"
+import { createLearnedBehavior } from "./agent/learned-behavior.js"
+import { consumeFeedbackRateLimit, feedbackLearningInput, feedbackNoteFor, findAnswerForFeedback, followUpClassifierMessages, mayBeFollowUpFeedback, parseFollowUpClassification, previousAnswerFor, requestContextHash, isDurablePreferenceFeedback, type AnswerFeedbackTarget, type AnswerRating, type StoredFeedback } from "./agent/answer-feedback.js"
+import { SqliteMemoryIndex } from "./memory/memory-index.js"
+import { MemoryGovernanceStore } from "./memory/memory-governance.js"
+import { wrapAsyncRoutes } from "./runtime/async-route.js"
+import { describeResolution, interpretDefaultModel, normalizeProvider, probeModelProvider, resolveModel } from "./providers/model-resolution.js"
+import { createLocalRuntimeGate } from "./runtime/local-runtime-gate.js"
+import { listBuiltinPluginManifests } from "@miki/core/plugins"
+import { providerGateway } from "./providers/provider-gateway.js"
+import { createGatewayErrorMiddleware } from "./security/error-middleware.js"
+import { isWsOriginAllowed, parseAllowedOrigins } from "./security/ws-origin.js"
+import { isLocalDirectRequest, isRemoteSetupAllowed, parseAllowedHosts } from "./security/local-request.js"
+import { createHealthMonitor, type ModelProbeResult } from "./monitoring/health.js"
+import { RecoveryManager } from "./runtime/recovery-manager.js"
+import { ReplaySweeper } from "./runtime/replay-sweeper.js"
+import { RecoveryLearning } from "./runtime/recovery-learning.js"
+import { DatabaseBackups, beginBoot, ensureHealthyDatabase, installCrashHandlers, installRejectionGuard, markCleanExit, recordDatabaseIncident, recoveryV2Enabled, type BootInfo } from "./runtime/process-safety.js"
+import { sessionCookie } from "./security/session-cookie.js"
+import { fuseMemoryHitLists } from "./memory/memory-ranking.js"
+import { validateIncomingChatMessage } from "./chat/chat-input.js"
 import { CHAT_INPUT_LIMITS } from "@miki/config"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -280,7 +281,7 @@ const ensureSession = (id: string) => {
 }
 const sessionSummary = (id: string) => {
   ensureSession(id)
-  const row = db.prepare(`SELECT s.id,s.title,s.created_at created,s.updated_at updated,COUNT(CASE WHEN (m.context_id IS NULL OR m.context_id NOT LIKE 'proactive:%' OR m.context_id LIKE 'proactive:discovery:%' OR m.context_id LIKE 'proactive:result:%') THEN m.id END) message_count,COALESCE((SELECT content FROM chat_messages WHERE session_id=s.id AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%' OR context_id LIKE 'proactive:discovery:%' OR context_id LIKE 'proactive:result:%') ORDER BY created_at DESC LIMIT 1),'') preview,s.pinned FROM chat_sessions s LEFT JOIN chat_messages m ON m.session_id=s.id WHERE s.id=? GROUP BY s.id`).get(id) as Record<string, unknown>
+  const row = db.prepare(`SELECT s.id,s.title,s.created_at created,s.updated_at updated,COUNT(CASE WHEN (m.context_id IS NULL OR m.context_id NOT LIKE 'proactive:%') THEN m.id END) message_count,COALESCE((SELECT content FROM chat_messages WHERE session_id=s.id AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') ORDER BY created_at DESC LIMIT 1),'') preview,s.pinned FROM chat_sessions s LEFT JOIN chat_messages m ON m.session_id=s.id WHERE s.id=? GROUP BY s.id`).get(id) as Record<string, unknown>
   return row
 }
 const workspaceRoot = path.resolve(process.env.MIKI_WORKSPACE_DIR || projectRoot)
@@ -511,7 +512,7 @@ app.get("/api/sessions", (_req, res) => {
 app.get("/api/sessions/:id", (req, res) => {
   const id = req.params.id; ensureSession(id)
   const summary = sessionSummary(id)
-  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,reply_to_message_id,status,status_detail FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%' OR context_id LIKE 'proactive:discovery:%' OR context_id LIKE 'proactive:result:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
+  const messages = (db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id,image_urls,attachments_json,reply_to_message_id,status,status_detail FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(id) as Array<Record<string, unknown>>).map((message) => {
     let attachments: unknown
     try { attachments = message.attachments_json ? JSON.parse(String(message.attachments_json)) : undefined } catch { attachments = undefined }
     const { attachments_json: _attachmentsJson, ...rest } = message
@@ -560,7 +561,7 @@ app.post("/api/sessions/:id/fork", (req, res) => {
   const sessionId = req.params.id
   ensureSession(sessionId)
   const targetId = String(req.body?.message_id || "")
-  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%' OR context_id LIKE 'proactive:discovery:%' OR context_id LIKE 'proactive:result:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(sessionId) as Array<Record<string, unknown>>
+  const messages = db.prepare("SELECT id,role,content,created_at,kind,model_name,context_id FROM chat_messages WHERE session_id=? AND (context_id IS NULL OR context_id NOT LIKE 'proactive:%') AND NOT (role='assistant' AND (content LIKE 'Autonomous goal %' OR content LIKE 'Background autonomy %')) ORDER BY created_at ASC").all(sessionId) as Array<Record<string, unknown>>
   const targetIndex = messages.findIndex((message) => message.id === targetId)
   if (targetIndex < 0) return res.status(404).json({ error: "Message not found" })
   const forkId = randomUUID()
@@ -788,7 +789,7 @@ const effectiveModel = () => {
 // change, and it starts or stops the server for the default model. Starts run in the background; the result is logged.
 const refreshLocalRuntimeConfig = (): void => {
   try {
-    configureLocalModels(storedModels().map((row) => JSON.parse(row.payload) as Record<string, unknown>))
+    providerGateway.configureLocalModels(storedModels().map((row) => JSON.parse(row.payload) as Record<string, unknown>))
   } catch (error) {
     appendGatewayLog(`Local model list not updated: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -809,7 +810,7 @@ const syncLocalRuntimeForDefault = (reason: string): void => {
       if (generation !== localRuntimeSyncGeneration) return
     }
     if (generation !== localRuntimeSyncGeneration) return
-    const transition = await synchronizeLocalRuntimeForModel(model)
+    const transition = await providerGateway.synchronizeLocalRuntimeForModel(model)
     appendGatewayLog(`Local runtime (${reason}): ${transition.action}${transition.error ? ` - ${transition.error}` : ""}`)
   }).catch((error: unknown) => {
     appendGatewayLog(`Local runtime (${reason}) failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -865,6 +866,15 @@ app.post("/api/models", (req, res) => {
   const payload = { ...(req.body as Record<string, unknown>) }
   const model = String(payload.model || payload.model_name || "").trim()
   if (!model) return res.status(400).json({ error: "model is required" })
+  // A GGUF/local runtime is self-describing. Do not make callers repeat the
+  // provider or bundled llama-server endpoint when the local model config is
+  // present; an explicit provider/base URL still wins for advanced use cases.
+  const localPayload = isRecord(payload.local) && String(payload.local.runtime || "").toLowerCase() === "llama.cpp"
+  const providerFromModel = /^(?:llama\.cpp|llama-cpp|llamacpp|local)\//i.test(model)
+  if (payload.provider === undefined && (localPayload || providerFromModel)) payload.provider = "llama.cpp"
+  if (isLocalProvider(String(payload.provider || ""), String(payload.api_base || "")) && !payload.api_base) {
+    payload.api_base = providerDefaultApiBase("llama.cpp")
+  }
   const key = typeof payload.api_key === "string" ? payload.api_key.trim() : ""
   delete payload.api_key
   delete payload.api_key_ref
@@ -1118,6 +1128,7 @@ const fileMemory = new FileMemoryService({
   identityDir: path.join(workspaceRoot, "identity"),
   agentMemoryConfig: (getAppConfig() as LooseConfig)?.agent?.memory,
   seed: { summarizeTokenPercent: 75, summarizeMessageThreshold: 8 },
+  emitLifecycleEvent: (event, payload) => getLifecycleBus().emit(event, payload),
 })
 const memoryGovernance = new MemoryGovernanceStore(db)
 const memoryIndex = new SqliteMemoryIndex(db, fileMemory, embeddingProvider, (message) => console.warn(`[miki] ${message}`))
@@ -1399,6 +1410,24 @@ const agent = createAgentRuntime({
   mcpManager: externalMcpManager,
   pluginHost: {
     listAgentPlugins: () => pluginManagement?.listAgentPlugins() ?? [],
+    listInstalledPlugins: () => pluginManagement?.listInstalledPlugins() ?? [],
+    listTrustedPluginPackages: () => pluginManagement?.listTrustedPluginPackages() ?? { configured: false, packages: [], total: 0, unavailable_reason: "plugin_management_not_initialized" },
+    installTrustedPluginPackage: (registryId) => {
+      if (!pluginManagement) throw new Error("Plugin management runtime is not initialized.")
+      return pluginManagement.installTrustedPluginPackage(registryId)
+    },
+    setPluginEnabled: (pluginId, enabled) => {
+      if (!pluginManagement) throw new Error("Plugin management runtime is not initialized.")
+      return pluginManagement.setPluginEnabled(pluginId, enabled)
+    },
+    uninstallPlugin: (pluginId) => {
+      if (!pluginManagement) throw new Error("Plugin management runtime is not initialized.")
+      return pluginManagement.uninstallPlugin(pluginId)
+    },
+    describeAgentPlugin: (pluginId) => {
+      if (!pluginManagement) throw new Error("Plugin management runtime is not initialized.")
+      return pluginManagement.describeAgentPlugin(pluginId)
+    },
     invokeAgentPlugin: (pluginId, method, payload) => {
       if (!pluginManagement) throw new Error("Plugin management runtime is not initialized.")
       return pluginManagement.invokeAgentPlugin(pluginId, method, payload)
@@ -1431,24 +1460,83 @@ const agent = createAgentRuntime({
     };
   },
   getTrustedMemoryFile: (file, from, lines) => memoryIndex.readTrustedFile(file, from, lines),
-  notifyBackgroundJob: (job) => broadcastProactive({
-    event: {
-      type: `background_job.${job.status}`,
-      job_id: job.taskId,
-      goal: job.goal.slice(0, 2_000),
-      ...(job.result ? { result: job.result.slice(0, 4_000) } : {}),
-      ...(job.error ? { error: job.error.slice(0, 1_000) } : {}),
-    },
-    ...(job.error ? { detail: job.error.slice(0, 500) } : {}),
-    runId: job.taskId,
-    kind: job.status === "completed" ? "result" : "warning",
-    ...(job.sessionId ? { sessionId: job.sessionId } : {}),
-    sendChannels: false,
-  }),
+  notifyBackgroundJob: async (job) => {
+    await broadcastProactive({
+      event: {
+        type: `background_job.${job.status}`,
+        job_id: job.taskId,
+        goal: job.goal.slice(0, 2_000),
+        ...(job.result ? { result: job.result.slice(0, 4_000) } : {}),
+        ...(job.error ? { error: job.error.slice(0, 1_000) } : {}),
+      },
+      ...(job.error ? { detail: job.error.slice(0, 500) } : {}),
+      runId: job.taskId,
+      kind: job.status === "completed" ? "result" : "warning",
+      ...(job.sessionId ? { sessionId: job.sessionId } : {}),
+      sendChannels: false,
+    });
+  },
   log: (message, details) => console.warn(`[miki] ${message}`, details ?? {}),
 })
 const proactiveSockets = new Set<WebSocket>()
 let channelRuntime: ChannelRuntimeManager | undefined
+type DashboardNoticeDelivery = { attempted: number; delivered: number; failed: number; queued: number }
+let proactiveDashboardOutboxInitialized = false
+
+/**
+ * Dashboard notices survive a gateway restart and an offline browser. `sending` is a short-lived
+ * lease: after a crash it is reset to pending, while a successful socket write is recorded once.
+ */
+const ensureProactiveDashboardOutbox = () => {
+  db.exec(`CREATE TABLE IF NOT EXISTS proactive_dashboard_outbox (
+    message_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    delivered_at TEXT
+  );`)
+  if (!proactiveDashboardOutboxInitialized) {
+    db.prepare("UPDATE proactive_dashboard_outbox SET status='pending' WHERE status='sending'").run()
+    proactiveDashboardOutboxInitialized = true
+  }
+}
+
+const sendDashboardNotice = async (
+  messageId: string,
+  payloadJson: string,
+  targets: WebSocket[] = [...proactiveSockets],
+): Promise<DashboardNoticeDelivery> => {
+  ensureProactiveDashboardOutbox()
+  const existing = db.prepare("SELECT status FROM proactive_dashboard_outbox WHERE message_id=?").get(messageId) as { status?: string } | undefined
+  if (existing?.status === "sent") return { attempted: 0, delivered: 1, failed: 0, queued: 0 }
+  if (!targets.length) return { attempted: 0, delivered: 0, failed: 0, queued: 1 }
+  const claimed = db.prepare("UPDATE proactive_dashboard_outbox SET status='sending' WHERE message_id=? AND status='pending'").run(messageId)
+  if (claimed.changes === 0) return { attempted: 0, delivered: 0, failed: 0, queued: 1 }
+  const frame = JSON.stringify({ type: "proactive.message", timestamp: Date.now(), payload: JSON.parse(payloadJson) as Record<string, unknown> })
+  const outcomes = await Promise.all(targets.map((socket) => new Promise<boolean>((resolve) => {
+    if (socket.readyState !== socket.OPEN) return resolve(false)
+    try {
+      socket.send(frame, (error) => resolve(!error))
+    } catch { resolve(false) }
+  })))
+  const delivered = outcomes.filter(Boolean).length
+  if (delivered > 0) {
+    db.prepare("UPDATE proactive_dashboard_outbox SET status='sent',delivered_at=? WHERE message_id=? AND status='sending'").run(now(), messageId)
+    return { attempted: targets.length, delivered, failed: targets.length - delivered, queued: 0 }
+  }
+  db.prepare("UPDATE proactive_dashboard_outbox SET status='pending' WHERE message_id=? AND status='sending'").run(messageId)
+  return { attempted: targets.length, delivered: 0, failed: targets.length, queued: 1 }
+}
+
+const flushPendingProactiveDashboardNotices = async (socket: WebSocket): Promise<void> => {
+  ensureProactiveDashboardOutbox()
+  const pending = db.prepare("SELECT message_id,payload_json FROM proactive_dashboard_outbox WHERE status='pending' ORDER BY created_at,message_id")
+    .all() as Array<{ message_id: string; payload_json: string }>
+  for (const row of pending) {
+    await sendDashboardNotice(row.message_id, row.payload_json, [socket])
+    if (socket.readyState !== socket.OPEN) return
+  }
+}
 /**
  * Notices about background work carry facts, never wording. The model writes the message itself, in the
  * language the user writes in. If no model can write it, the only text shown is the raw provider/model
@@ -1490,14 +1578,23 @@ const deliverChatMedia = createChatMediaDelivery({
   ensureSession,
   proactiveSockets,
 })
-const broadcastProactive = async (input: { text?: string; event?: Record<string, unknown>; detail?: string; runId?: string; goalId?: number; kind?: string; sessionId?: string; sendChannels?: boolean }) => {
+const broadcastProactive = async (input: { text?: string; event?: Record<string, unknown>; detail?: string; runId?: string; goalId?: number; kind?: string; sessionId?: string; sendChannels?: boolean; idempotencyKey?: string }) => {
   const text = await composeNotice(input)
-  if (!text) return
+  if (!text) return {
+    delivered: 0,
+    dashboard: { attempted: 0, delivered: 0, failed: 0 },
+    channels: { attempted: 0, delivered: 0, queued: 0, failed: 0 },
+    queued: 0,
+    failures: ["No notice text could be composed."],
+  }
   const createdAt = now()
-  const messageId = `proactive-${randomUUID()}`
+  const stableId = input.idempotencyKey
+    ? createHash("sha256").update(input.idempotencyKey).digest("hex").slice(0, 40)
+    : randomUUID()
+  const messageId = `proactive-${stableId}`
   const sessionId = input.sessionId || "miki-main-chat"
   ensureSession(sessionId)
-  db.prepare("INSERT INTO chat_messages(id,session_id,role,content,created_at,kind,model_name,context_id) VALUES(?,?,?,?,?,?,?,?)").run(
+  db.prepare("INSERT OR IGNORE INTO chat_messages(id,session_id,role,content,created_at,kind,model_name,context_id) VALUES(?,?,?,?,?,?,?,?)").run(
     messageId, sessionId, "assistant", text, createdAt, "normal", null,
     // `proactive:<kind>:<id>`: discovery and result notices stay in the chat history (visible after a refresh);
     // progress and warning notices (and older `proactive:<id>` rows) are hidden from it.
@@ -1514,14 +1611,29 @@ const broadcastProactive = async (input: { text?: string; event?: Record<string,
     ...(input.goalId !== undefined ? { goal_id: input.goalId } : {}),
     ...(input.kind ? { notification_kind: input.kind } : {}),
   }
-  let socketsReached = 0
-  for (const socket of proactiveSockets) {
-    if (socket.readyState !== socket.OPEN) continue
-    try { socket.send(JSON.stringify({ type: "proactive.message", timestamp: Date.now(), payload })); socketsReached += 1 } catch {}
+  ensureProactiveDashboardOutbox()
+  db.prepare("INSERT OR IGNORE INTO proactive_dashboard_outbox(message_id,payload_json,status,created_at) VALUES(?,?,'pending',?)")
+    .run(messageId, JSON.stringify(payload), createdAt)
+  const dashboard = await sendDashboardNotice(messageId, JSON.stringify(payload))
+  const channelResult = input.sendChannels !== false && channelRuntime
+    ? await channelRuntime.sendProactiveNoticeWithResult(text, messageId)
+    : undefined
+  const channels = {
+    attempted: channelResult?.attemptedRecipients ?? 0,
+    delivered: channelResult?.deliveredRecipients ?? 0,
+    queued: channelResult?.queuedRecipients ?? (channelResult?.queuedWithoutRecipients ? 1 : 0),
+    failed: channelResult?.failedRecipients ?? 0,
   }
-  // The notice is stored in the chat history either way; the log records whether a live client actually received it.
-  appendGatewayLog(`Proactive notice ${messageId} stored; delivered to ${socketsReached} live client(s).`)
-  if (input.sendChannels !== false) await channelRuntime?.sendProactiveNotice(text)
+  const failures = [
+    ...(dashboard.failed ? [`Dashboard socket delivery failed for ${dashboard.failed} client(s).`] : []),
+    ...(dashboard.queued ? ["Dashboard notice is saved in the durable outbox until a client connects."] : []),
+    ...(channelResult?.failures ?? []),
+    ...(!channelRuntime && input.sendChannels !== false ? ["Channel runtime is not initialized; channel delivery was not attempted."] : []),
+  ]
+  const delivered = dashboard.delivered + channels.delivered
+  const queued = dashboard.queued + channels.queued
+  appendGatewayLog(`Proactive notice ${messageId}: dashboard ${dashboard.delivered}/${dashboard.attempted} delivered; channel recipients ${channels.delivered}/${channels.attempted} delivered; ${queued} queued.`)
+  return { delivered, dashboard, channels, queued, failures }
 }
 let warnedLaneModel = ""
 const autonomy = new AutonomousSupervisor({
@@ -1999,22 +2111,28 @@ app.get("/api/tools", async (_req, res) => {
   const autonomy = appConfig.autonomy as { tool_policy?: { allow_computer_use?: boolean } } | undefined
   const computerAllowed = autonomy?.tool_policy?.allow_computer_use === true
   // Members come from the full tool list, so a disabled group still shows what it would provide.
-  const known = new Set(agent.allToolNames())
+  const allToolNames = agent.allToolNames()
+  const known = new Set(allToolNames)
   const group = (key: string, name: string, description: string, category: string, defaultEnabled: boolean, members: string[], blockedReason?: string) => {
-    const enabled = typeof state[key] === "boolean" ? state[key] : defaultEnabled
-    const status = enabled && blockedReason ? "blocked" : enabled ? "enabled" : "disabled"
-    return { name, description, category, config_key: key, status, config_enabled: enabled, ...(enabled && blockedReason ? { reason_code: blockedReason } : {}), tools: members.filter((m) => known.has(m)) }
+    const configEnabled = typeof state[key] === "boolean" ? state[key] : defaultEnabled
+    const policyReason = key === "computer" && !computerAllowed ? "computer_use_disabled_by_autonomy_policy" : blockedReason
+    const enabled = configEnabled && !policyReason
+    const status = policyReason && configEnabled ? "blocked" : enabled ? "enabled" : "disabled"
+    return { name, description, category, config_key: key, status, config_enabled: configEnabled, ...(policyReason ? { reason_code: policyReason } : {}), tools: members.filter((m) => known.has(m)) }
   }
   const browserBlocked = (await browserReady()) ? undefined : "browser_not_installed"
   res.json({ tools: [
     group("filesystem", "filesystem", "Read, search, organize and (with approval) write, delete or run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run", "chat_send_file"]),
-    group("memory", "memory", "Search and store long-term memory notes.", "memory", true, ["memory_search", "memory_add"]),
-    group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, ["skill_list", "skill_read", "skill_search", "skill_run", "skill_install", "skill_delete"]),
-    group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, ["agent_control_capabilities", "agent_control_state", "agent_control_plan", "agent_control_execute"]),
+    group("memory", "memory", "Search and store long-term memory notes.", "memory", true, allToolNames.filter((name) => name.startsWith("memory_"))),
+    group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, allToolNames.filter((name) => name.startsWith("skill_"))),
+    group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, allToolNames.filter((name) => name.startsWith("agent_control_"))),
+    group("goals", "goals", "Create, inspect, update, pause and complete persistent user goals.", "autonomy", true, allToolNames.filter((name) => name.startsWith("goal_"))),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
-    group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, ["browser_navigate", "browser_click", "browser_type", "browser_extract", "browser_screenshot"], browserBlocked),
-    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to block catastrophic commands, keep the working directory in the workspace and hide secrets from the environment).", "system", true, ["terminal_run", "terminal_status", "terminal_kill", "delegate_coding_agent"]),
-    group("computer", "computer-use", "Operate desktop windows with platform-supported screenshots, mouse, keyboard, clipboard and app controls; element-level automation varies by platform.", "system", computerAllowed, ["computer_observe", "computer_focus", "computer_invoke", "computer_set_text", "computer_hotkey", "computer_clipboard", "computer_launch", "computer_verify", "computer_screenshot", "computer_click_at", "computer_drag", "computer_scroll", "computer_terminate_app", "computer_list_processes", "computer_get_system_info", "computer_list_displays"]),
+    group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, allToolNames.filter((name) => name.startsWith("browser_")), browserBlocked),
+    group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to block catastrophic commands, keep the working directory in the workspace and hide secrets from the environment).", "system", true, allToolNames.filter((name) => name.startsWith("terminal_") || name === "delegate_coding_agent")),
+    group("computer", "computer-use", "Operate desktop windows with platform-supported screenshots, mouse, keyboard, clipboard and app controls; element-level automation varies by platform.", "system", computerAllowed, allToolNames.filter((name) => name.startsWith("computer_"))),
+    group("plugins", "plugins", "Manage and invoke installed contract and isolated ZIP plugins; installation, enablement and invocation remain permission-gated.", "extensions", true, allToolNames.filter((name) => name.startsWith("plugin_"))),
+    group("mcp", "mcp", "Use configured external Model Context Protocol servers. Read-only tools are the default; side effects require server policy approval.", "extensions", true, allToolNames.filter((name) => name.includes("__"))),
   ] })
 })
 app.put("/api/tools/:name/state", requireAuth, async (req, res) => {
@@ -2182,98 +2300,243 @@ app.post("/api/memory/files/forget", async (req, res) => {
     return res.json({ ...forgotten, governedRecordsDeleted, index })
   } catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : String(error) }) }
 })
-app.get("/api/memory/stats", (_req, res) => { const rows = memoryRows(); const byRegion = [...new Set(rows.map((row) => String(row.region)))].map((region) => ({ region, count: rows.filter((row) => String(row.region) === region).length })); const vectorCount = Number((db.prepare("SELECT COUNT(*) AS count FROM memory_vectors").get() as { count?: number })?.count || 0); res.json({ scope: {}, stats: { chunks: rows.length, edges: 0, postings: rows.length, retrievals: 0, vector_indexed: vectorCount, embedding_provider: embeddingProvider.name, byRegion } }) })
+app.get("/api/memory/stats", (_req, res) => {
+  try {
+    const scope = learningScope()
+    const tkg = initMemory(dataRoot).tkg as any
+    const stats = tkg.getSelectiveMemoryStats(scope)
+    return res.json({ scope, stats: { ...stats, provider: "local-tkg", primary: true, localPersistence: true } })
+  } catch (error) {
+    return res.status(503).json({ error: `Selective memory is unavailable: ${error instanceof Error ? error.message : String(error)}` })
+  }
+})
 app.get("/api/memory/chunks", (req, res) => {
   const rawRegion = req.query.region
-  if (rawRegion !== undefined && (typeof rawRegion !== "string" || !["user", "long_term", "daily", "untrusted"].includes(rawRegion))) return res.status(400).json({ error: "Invalid memory region." })
+  const validRegions = ["all", "long_term", "day_to_day", "daily", "static", "skill", "rule_emotion", "temporary"]
+  if (rawRegion !== undefined && (typeof rawRegion !== "string" || !validRegions.includes(rawRegion))) return res.status(400).json({ error: "Invalid memory region." })
   const rawLimit = req.query.limit
   const limit = rawLimit === undefined ? 80 : typeof rawLimit === "string" && /^\d+$/.test(rawLimit) ? Number(rawLimit) : NaN
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) return res.status(400).json({ error: "limit must be an integer between 1 and 200." })
-  const chunks = memoryRows(typeof rawRegion === "string" ? rawRegion : undefined).slice(0, limit).map((row) => ({ ...row, access_count: 0, status: "active", metadata: {} }))
-  return res.json({ scope: {}, chunks })
+  try {
+    const scope = learningScope()
+    const tkg = initMemory(dataRoot).tkg as any
+    const chunks = tkg.listSelectiveMemory(scope, {
+      ...(typeof rawRegion === "string" && rawRegion !== "all" ? { region: rawRegion } : {}),
+      limit,
+    }).map((row: Record<string, unknown>) => ({
+      ...row,
+      summary: typeof row.summary === "string" && row.summary ? row.summary : String(row.content || ""),
+      access_count: Number(row.access_count || 0),
+      status: typeof row.status === "string" ? row.status : "active",
+      metadata: isRecord(row.metadata) ? row.metadata : {},
+    }))
+    return res.json({ scope, chunks })
+  } catch (error) {
+    return res.status(503).json({ error: `Could not read selective memory: ${error instanceof Error ? error.message : String(error)}` })
+  }
 })
 app.post("/api/memory/chunks", (req, res) => {
   if (!isRecord(req.body) || Object.keys(req.body).some((key) => !["content", "summary", "region", "confidence", "importance"].includes(key))) return res.status(400).json({ error: "Invalid memory payload." })
   const { content, summary, region, confidence, importance } = req.body
   if (typeof content !== "string" || !content.trim() || content.length > 4_000) return res.status(400).json({ error: "content must contain 1–4000 characters." })
   if (summary !== undefined && (typeof summary !== "string" || summary.length > 500)) return res.status(400).json({ error: "summary must be text up to 500 characters." })
-  if (region !== undefined && (typeof region !== "string" || !["user", "long_term", "daily", "untrusted"].includes(region))) return res.status(400).json({ error: "Invalid memory region." })
+  const validRegions = ["long_term", "day_to_day", "daily", "static", "skill", "rule_emotion", "temporary"]
+  if (region !== undefined && (typeof region !== "string" || !validRegions.includes(region))) return res.status(400).json({ error: "Invalid memory region." })
   if (confidence !== undefined && (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1)) return res.status(400).json({ error: "confidence must be between 0 and 1." })
   if (importance !== undefined && (typeof importance !== "number" || !Number.isFinite(importance) || importance < 0 || importance > 1)) return res.status(400).json({ error: "importance must be between 0 and 1." })
-  const id = randomUUID(); const timestamp = now()
-  db.prepare("INSERT INTO memory_chunks(id,region,content,summary,provenance,confidence,importance,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(id, region ?? "long_term", content.trim(), summary ?? content.trim().slice(0, 160), "owner", confidence ?? 1, importance ?? 0.5, timestamp, timestamp)
-  return res.json({ status: "created", id })
+  try {
+    const tkg = initMemory(dataRoot).tkg as any
+    const scope = learningScope()
+    const event = tkg.writeEvent({
+      content: content.trim(),
+      source: "user",
+      event_type: "memory_note",
+      importance: importance ?? 0.7,
+      confidence: confidence ?? 1,
+      summary: summary ?? content.trim().slice(0, 500),
+      scope,
+      metadata: { trust: "owner", memory_category: region === "daily" ? "day_to_day" : (region ?? "long_term"), origin: "memory_page" },
+      skipNoiseFilter: true,
+    })
+    if (event?.filtered) return res.status(422).json({ error: "Memory note was filtered and was not stored." })
+    return res.status(201).json({ status: "created", id: event?.eventId ?? randomUUID(), chunkId: event?.chunkId ?? null })
+  } catch (error) {
+    return res.status(503).json({ error: `Could not save memory: ${error instanceof Error ? error.message : String(error)}` })
+  }
 })
 app.get("/api/memory/search", async (req, res) => {
   const started = Date.now()
   if (req.query.q !== undefined && typeof req.query.q !== "string") return res.status(400).json({ error: "q must be a string." })
   const query = typeof req.query.q === "string" ? req.query.q.normalize("NFKC").trim().slice(0, 2_000) : ""
   if (typeof req.query.q === "string" && req.query.q.length > 2_000) return res.status(400).json({ error: "q is limited to 2000 characters." })
-  const rawLimit = req.query.maxSelected
-  const limit = rawLimit === undefined ? 12 : typeof rawLimit === "string" && /^\d+$/.test(rawLimit) ? Number(rawLimit) : NaN
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) return res.status(400).json({ error: "maxSelected must be an integer between 1 and 20." })
-  const rawMaxTokens = req.query.maxTokens
-  const maxTokens = rawMaxTokens === undefined ? 1200 : typeof rawMaxTokens === "string" && /^\d+$/.test(rawMaxTokens) ? Number(rawMaxTokens) : NaN
-  if (!Number.isSafeInteger(maxTokens) || maxTokens < 100 || maxTokens > 8_000) return res.status(400).json({ error: "maxTokens must be an integer between 100 and 8000." })
-  const serviceName = `memory-embedding:${embeddingProvider.name}`
-  const outcome = await globalErrorHandler.executeWithFallback(
-    () => query ? vectorMemorySearch(query, limit) : Promise.resolve({ items: [], mode: "lexical" as const }),
-    async () => ({ items: lexicalMemorySearch(query, limit), mode: "lexical" as const }),
-    serviceName,
-  )
-  const rowsById = new Map(memoryRows().map((row) => [String(row.id), row]))
-  const legacyItems = outcome.items.map((item) => {
-    const row = rowsById.get(String(item.id))
-    return {
-      ...item,
-      provenance: typeof row?.provenance === "string" ? row.provenance : "untrusted",
-      confidence: Number(row?.confidence ?? 1),
-      importance: Number(row?.importance ?? 0.5),
-      lexical: outcome.mode === "lexical" ? item.score : 0,
-      semantic: outcome.mode === "vector" ? item.score : 0,
+  if (query.length < 2) return res.status(400).json({ error: "q must contain at least 2 characters." })
+  const readInt = (key: string, fallback: number, min: number, max: number) => {
+    const raw = req.query[key]
+    const value = raw === undefined ? fallback : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN
+    return Number.isSafeInteger(value) && value >= min && value <= max ? value : NaN
+  }
+  const limit = readInt("maxSelected", 12, 1, 20)
+  const maxDepth = readInt("maxDepth", 2, 0, 5)
+  const maxTokens = readInt("maxTokens", 1200, 100, 8_000)
+  if (![limit, maxDepth, maxTokens].every(Number.isFinite)) return res.status(400).json({ error: "maxSelected, maxDepth, or maxTokens is outside its supported range." })
+  try {
+    const scope = learningScope()
+    const integration = initMemory(dataRoot) as any
+    const hook = integration.preExecutionHook(query, {
+      memoryScope: scope,
+      memoryOptions: { maxSelected: limit, maxDepth, maxTokens },
+    })
+    const selectiveItems = (hook.selectiveContext?.items ?? []).map((item: Record<string, unknown>) => ({
+      id: String(item.id),
+      text: String(item.text ?? ""),
+      summary: typeof item.summary === "string" ? item.summary : undefined,
+      region: String(item.region ?? "long_term"),
+      provenance: String(item.provenance ?? "untrusted"),
+      confidence: Number(item.confidence ?? 0.7),
+      importance: Number(item.importance ?? 0.5),
+      score: Number(item.score ?? 0),
+      lexical: Number(item.lexical ?? 0),
+      semantic: Number(item.semantic ?? 0),
+      depth: Number(item.depth ?? 0),
+      sourceType: typeof item.sourceType === "string" ? item.sourceType : "selective",
+      sourceReference: typeof item.sourceReference === "string" ? item.sourceReference : null,
+      source: "graph",
+      via: item.via ?? null,
+    }))
+    const graphItems = (hook.graphContext?.items ?? []).map((item: Record<string, unknown>) => ({
+      id: `cognitive:${String(item.id ?? randomUUID())}`,
+      text: String(item.text ?? ""),
+      summary: String(item.text ?? "").slice(0, 500),
+      region: String(item.category ?? "graph"),
+      provenance: String(item.provenance ?? "untrusted"),
+      confidence: Number(item.confidence ?? 0.7),
+      importance: 0.5,
+      score: Number(item.score ?? 0),
+      lexical: 0,
+      semantic: 0,
+      depth: 1,
+      sourceType: "cognitive_graph",
+      sourceReference: typeof item.sourceReference === "string" ? item.sourceReference : null,
+      source: "graph",
+    }))
+    const fileHits = await fileMemory.search(query, Math.min(20, limit * 3)).catch((error) => {
+      appendGatewayLog(`Markdown memory search degraded: ${error instanceof Error ? error.message : String(error)}`)
+      return []
+    })
+    const fileItems = fileHits.map((hit) => ({
+      id: `file:${hit.path}:${hit.startLine}`,
+      text: hit.snippet,
+      summary: hit.snippet.slice(0, 500),
+      region: hit.path === "USER.md" ? "rule_emotion" : hit.path === "MEMORY.md" ? "long_term" : "day_to_day",
+      provenance: hit.provenance ?? "untrusted",
+      confidence: 1,
+      importance: 0.5,
+      score: hit.score,
+      lexical: hit.score,
+      semantic: 0,
       depth: 0,
-      sourceType: "sqlite",
-    }
-  })
-  const fileHits = query ? await fileMemory.search(query, limit).catch((error) => {
-    appendGatewayLog(`Markdown memory search degraded: ${error instanceof Error ? error.message : String(error)}`)
-    return []
-  }) : []
-  const fileItems = fileHits.map((hit) => ({
-    id: `file:${hit.path}:${hit.startLine}`,
-    text: hit.snippet,
-    path: hit.path,
-    startLine: hit.startLine,
-    endLine: hit.endLine,
-    score: hit.score,
-    provenance: hit.provenance ?? "untrusted",
-    confidence: 1,
-    importance: 0.5,
-    lexical: hit.score,
-    semantic: 0,
-    depth: 0,
-    sourceType: "markdown",
-  }))
-  const items = fuseMemoryHitLists([
-    fileItems.map((item) => ({ ...item, id: item.id, source: "file" })),
-    legacyItems.map((item) => ({ ...item, id: item.id, source: "legacy" })),
-  ], { limit })
-  return res.json({ query, scope: {}, index: memoryIndex.status(), result: { items, text: items.map((item) => item.text).join("\n"), trace: {}, stats: { candidateCount: fileItems.length + legacyItems.length, selectedCount: items.length, tokensUsed: 0, maxTokens, latencyMs: Date.now() - started } } })
+      sourceType: "markdown",
+      sourceReference: hit.path,
+      source: "file",
+      path: hit.path,
+      startLine: hit.startLine,
+      endLine: hit.endLine,
+    }))
+    const governedItems = memoryGovernance.search(scope, query, Math.min(10, limit * 2)).map((record) => ({
+      id: `governed:${record.id}`,
+      text: record.content,
+      summary: record.content.slice(0, 500),
+      region: record.kind === "preference" ? "rule_emotion" : record.kind === "procedure" ? "skill" : "long_term",
+      provenance: record.provenance,
+      confidence: record.confidence,
+      importance: 0.75,
+      score: record.score,
+      lexical: record.score,
+      semantic: 0,
+      depth: 0,
+      sourceType: "governed",
+      sourceReference: record.sourceReference,
+      source: "graph",
+    }))
+    const items = fuseMemoryHitLists([
+      selectiveItems as any,
+      graphItems as any,
+      governedItems as any,
+      fileItems as any,
+    ], { limit })
+    const selectiveStats = hook.selectiveContext?.stats ?? {}
+    const stats = initMemory(dataRoot).tkg.getSelectiveMemoryStats(scope) as Record<string, unknown>
+    return res.json({
+      query,
+      scope,
+      index: memoryIndex.status(),
+      result: {
+        items,
+        text: items.map((item) => item.text).join("\n"),
+        trace: { selective: hook.selectiveContext?.trace ?? {}, graphCount: graphItems.length, governedCount: governedItems.length, fileCount: fileItems.length },
+        stats: {
+          candidateCount: Number(selectiveStats.candidateCount ?? 0) + graphItems.length + governedItems.length + fileItems.length,
+          selectedCount: items.length,
+          tokensUsed: Number(selectiveStats.tokensUsed ?? 0),
+          maxTokens,
+          latencyMs: Date.now() - started,
+          fallbackReason: items.length === 0 ? "no_trusted_relevant_memories" : null,
+          totalActiveChunks: Number(stats.chunks ?? 0),
+        },
+      },
+    })
+  } catch (error) {
+    appendGatewayLog(`Selective memory search failed: ${error instanceof Error ? error.message : String(error)}`)
+    return res.status(503).json({ error: `Memory search unavailable: ${error instanceof Error ? error.message : String(error)}` })
+  }
+})
+app.get("/api/memory/files", async (_req, res) => {
+  try {
+    const files = await fileMemory.store.listFiles()
+    const visible = await Promise.all(files.slice(0, 80).map(async (file) => {
+      const content = await fileMemory.getFull(file.rel).catch(() => null)
+      return {
+        path: file.rel,
+        updatedAt: new Date(file.mtimeMs).toISOString(),
+        size: file.size,
+        content: typeof content?.text === "string" ? content.text.slice(0, 12_000) : "",
+        truncated: Boolean(typeof content?.text === "string" && content.text.length > 12_000),
+      }
+    }))
+    return res.json({ files: visible })
+  } catch (error) {
+    return res.status(503).json({ error: `Could not list memory files: ${error instanceof Error ? error.message : String(error)}` })
+  }
 })
 app.post("/api/memory/reindex", async (_req, res) => {
   try {
     const imported = await memoryIndex.importLegacyChunks()
     const index = await memoryIndex.reindex()
-    return res.json({ result: { imported, index, legacyRowsPreserved: memoryRows().length } })
+    const selective = initMemory(dataRoot).tkg.reindexSelectiveMemory(learningScope())
+    return res.json({ result: { reindexed: selective.reindexed, selective, imported, index, legacyRowsPreserved: memoryRows().length } })
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) })
   }
 })
-app.get("/api/memory/chunks/:id", (req, res) => { const row = db.prepare("SELECT * FROM memory_chunks WHERE id=?").get(req.params.id) as Record<string, unknown> | undefined; if (!row) return res.status(404).json({ error: "Memory chunk not found" }); return res.json({ scope: {}, chunk: { ...row, edges: [] } }) })
+app.get("/api/memory/chunks/:id", (req, res) => {
+  if (typeof req.params.id !== "string" || req.params.id.length > 200) return res.status(400).json({ error: "Invalid memory chunk id." })
+  try {
+    const scope = learningScope()
+    const chunk = initMemory(dataRoot).tkg.inspectSelectiveMemory(scope, req.params.id)
+    if (!chunk) return res.status(404).json({ error: "Memory chunk not found in the active memory scope." })
+    return res.json({ scope, chunk })
+  } catch (error) {
+    return res.status(503).json({ error: `Could not inspect memory: ${error instanceof Error ? error.message : String(error)}` })
+  }
+})
 app.post("/api/memory/chunks/:id/forget", async (req, res) => {
   if (typeof req.params.id !== "string" || req.params.id.length > 200) return res.status(400).json({ error: "Invalid memory chunk id." })
-  const forgotten = await memoryIndex.forgetLegacyChunk(req.params.id)
-  return res.json({ result: { forgotten, chunkId: req.params.id } })
+  try {
+    const result = initMemory(dataRoot).tkg.forgetSelectiveMemory(learningScope(), req.params.id)
+    return res.json({ result: { ...result, chunkId: req.params.id } })
+  } catch (error) {
+    return res.status(503).json({ error: `Could not forget memory: ${error instanceof Error ? error.message : String(error)}` })
+  }
 })
 const mikiInfo = (req: express.Request) => {
   const config = getAppConfig()
@@ -2536,7 +2799,7 @@ const detectFollowUpFeedback = async (input: { sessionId: string; contextId: str
   }
 }
 const learnedBehavior = createLearnedBehavior({
-  getLearningStore: () => initMemory(dataRoot).tkg.learningStore,
+  getLearningStore: () => initMemory(dataRoot).tkg.learningStore as any,
   getAppConfig,
   resolveModel: (model) => agent.llmFor(model),
   scope: learningScope,
@@ -2659,7 +2922,20 @@ app.post("/api/chat/feedback", requireAuth, feedbackRateLimit, (req, res) => {
   }
   return res.status(201).json({ recorded: true, rating })
 })
-channelRuntime = new ChannelRuntimeManager({ db, chatTurns, getAppConfig, log: appendGatewayLog })
+channelRuntime = new ChannelRuntimeManager({
+  db,
+  chatTurns,
+  getAppConfig,
+  log: appendGatewayLog,
+  onEmptyAllowFrom: (channel) => {
+    void broadcastProactive({
+      text: `${channel}: allow_from is empty. Miki can receive no trusted messages or send proactive notices on this channel until your owner ID is added to allow_from.`,
+      kind: "warning",
+      sendChannels: false,
+      idempotencyKey: `channel-allow-from-empty:${channel}`,
+    })
+  },
+})
 channelRuntime.start()
 shutdownHandlers.push(() => channelRuntime.close())
 healthMonitor = createHealthMonitor({
@@ -2850,7 +3126,10 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
   // Without a dashboard password there is nothing to authenticate, so commands are accepted at once.
   let authenticatedMessage = !setting("dashboard_password")
   ws.on("error", (error) => appendGatewayLog(`WebSocket transport error for session ${sessionId}: ${error.message}`))
-  if (!setting("dashboard_password")) proactiveSockets.add(ws)
+  if (!setting("dashboard_password")) {
+    proactiveSockets.add(ws)
+    void flushPendingProactiveDashboardNotices(ws).catch((error) => appendGatewayLog(`Could not flush queued dashboard notices: ${error instanceof Error ? error.message : String(error)}`))
+  }
   sendRawEvent(ws, "connection.ready", sessionId, { session_id: sessionId, backend: "persistent-node", protocol: "miki.ws.v1", authenticated: !Boolean(setting("dashboard_password")) })
   streamHub.attach(sessionId, ws)
   ws.on("close", () => {
@@ -2906,6 +3185,7 @@ wss.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) =
       }
       sendRawEvent(ws, "auth.ok", sessionId, { session_id: sessionId, authenticated: true })
       proactiveSockets.add(ws)
+      void flushPendingProactiveDashboardNotices(ws).catch((error) => appendGatewayLog(`Could not flush queued dashboard notices: ${error instanceof Error ? error.message : String(error)}`))
       if (message.payload?.resume_active !== false) streamHub.resumeActiveForSession(sessionId, ws)
       return
     }

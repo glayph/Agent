@@ -67,18 +67,6 @@ packages/config/
 - Security helpers enforce public-bind policy, origin checks and timing-safe comparisons.
 - Secret vault supports loading credentials without hard-coding them.
 
-## packages/installer
+## Skill installer (core plugin)
 
-Workspace and runtime installation helpers.
-
-```
-packages/installer/
-├── package.json
-├── jest.config.cjs
-├── __tests__/
-└── src/
-    └── (installer logic for registering data/logs/config dirs)
-```
-
-**Comments**
-- Used by `miki install` / `miki uninstall` to create or remove the on-disk workspace layout while optionally preserving user data.
+Installer implementation now lives in `packages/core/src/plugins/skills/installer/`. It is built and exported by `@miki/core`; it is no longer a standalone workspace package.

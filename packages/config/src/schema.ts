@@ -321,7 +321,7 @@ const AgentMemorySchema = z
  * bindings, credential-rotation profiles and the failover switch.
  *
  * Validation here is deliberately shallow. The router's own resolver
- * `resolveModelRouterConfig` in packages/core/src/llm/model-router.ts parses
+ * `resolveModelRouterConfig` in packages/core/src/plugins/providers/model-router.ts parses
  * the nested values defensively and drops malformed entries, so a typo in one
  * lane never rejects the whole agent config. Shape (all optional):
  *
@@ -340,7 +340,7 @@ const AgentBlockSchema = z
     persona: z.string().optional(),
     // Overrides where the SOUL/AGENTS/USER identity files live
     // (default: RuntimePaths.identityDir,
-    // i.e. <sourceDir>/identity in dev mode). See packages/gateway/src/identity-prompt.ts.
+    // i.e. <sourceDir>/identity in dev mode). See packages/gateway/src/agent/identity-prompt.ts.
     identity: z
       .object({
         path: z.string().optional(),
@@ -350,6 +350,7 @@ const AgentBlockSchema = z
     language: z.string().optional(),
     timezone: z.string().optional(),
     verify_actions: z.boolean().optional(),
+    pre_action_double_check: z.boolean().optional(),
     browser: z
       .object({
         clear_state_every_n_navigations: z.number().int().min(1).optional(),

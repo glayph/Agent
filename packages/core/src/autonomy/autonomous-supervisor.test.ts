@@ -8,6 +8,14 @@ import { AutonomousSupervisor, classifyFailure, similarFailure } from "./autonom
 import { ToolRegistry } from "../engine/tool-registry.js";
 
 
+/** The second-check / next-step / request-audit features add model calls; these legacy-mechanics tests count calls, so they run with the features off (autonomous-supervisor-verification.test.ts covers them on). */
+const LEGACY_PROACTIVE = { double_check: false, next_step_goals: false, user_request_audit: false };
+
+function withLegacyProactive(cfg: Record<string, unknown>): Record<string, unknown> {
+  const heartbeat = (cfg.heartbeat ?? {}) as Record<string, unknown>;
+  return { ...cfg, heartbeat: { ...heartbeat, proactive: { ...LEGACY_PROACTIVE, ...((heartbeat.proactive ?? {}) as Record<string, unknown>) } } };
+}
+
 function makeTools() {
   const registry = new ToolRegistry();
   for (const name of ["workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write"]) {
@@ -51,7 +59,7 @@ describe("AutonomousSupervisor", () => {
       agent: { run },
       tools: makeTools(),
       activeRunCount,
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message),
       now: () => "2026-01-01T00:00:00.000Z",
     });
@@ -147,7 +155,7 @@ describe("AutonomousSupervisor", () => {
       agent: { run, plan: planAgent },
       tools: makeTools(),
       activeRunCount,
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message),
       now: () => "2026-01-01T00:00:00.000Z",
     });
@@ -179,7 +187,7 @@ describe("AutonomousSupervisor", () => {
       agent: { run },
       tools,
       activeRunCount,
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message),
       now: () => "2026-01-01T00:00:00.000Z",
     });
@@ -204,7 +212,8 @@ describe("AutonomousSupervisor", () => {
       "workspace_list", "file_info", "file_read", "workspace_search", "memory_search", "memory_add", "goal_status", "file_mkdir", "file_write", "autonomy_share_discovery", "autonomy_drive_done",
     ]);
     expect(run.mock.calls[0][0].approvalPolicy).toBeDefined();
-    // A goal run waits for its own model during an outage; it never fails over to a fallback model.
+    // Goal runs permit configured fallback routes during provider outages. `undefined`
+    // is intentional: only `true` disables the engine's configured fallback chain.
     expect(run.mock.calls[0][0].disableModelFallback).toBeUndefined();
     // Autonomous goal cycles do not impose per-cycle tool-call or completion-token budgets.
     expect(run.mock.calls[0][0].maxToolCalls).toBeUndefined();
@@ -332,7 +341,7 @@ describe("AutonomousSupervisor", () => {
       agent: { run },
       tools,
       activeRunCount,
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message),
       now: () => "2026-01-01T00:00:00.000Z",
     });
@@ -354,8 +363,8 @@ describe("AutonomousSupervisor", () => {
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const firstRun = jest.fn().mockImplementation(async () => { await pending; return makeResult("complete"); });
     const secondRun = jest.fn().mockResolvedValue(makeResult("should not execute"));
-    const first = new AutonomousSupervisor({ db, agent: { run: firstRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => config, log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
-    const second = new AutonomousSupervisor({ db, agent: { run: secondRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => config, log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
+    const first = new AutonomousSupervisor({ db, agent: { run: firstRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => withLegacyProactive(config), log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
+    const second = new AutonomousSupervisor({ db, agent: { run: secondRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => withLegacyProactive(config), log: () => undefined, now: () => "2026-01-01T00:00:00.000Z" });
     goals.create({ title: "Shared goal", steps: ["Inspect"], replaceExisting: false });
     const firstTick = first.tick("process-a");
     await new Promise((resolve) => setImmediate(resolve));
@@ -464,7 +473,7 @@ describe("AutonomousSupervisor", () => {
     new AutonomousSupervisor({
       db: migrationDb,
       agent: { run: jest.fn().mockResolvedValue(makeResult()) }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: () => undefined,
       now: () => "2026-01-01T00:00:00.000Z",
     });
@@ -496,7 +505,7 @@ describe("AutonomousSupervisor", () => {
     const restarted = new AutonomousSupervisor({
       db,
       agent: { run: recoveredRun }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: () => undefined,
       now: () => "2026-01-01T00:00:30.000Z",
     });
@@ -547,7 +556,7 @@ describe("AutonomousSupervisor", () => {
       agent: { run },
       tools: makeTools(),
       activeRunCount,
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message),
       now: () => "2026-01-01T00:00:30.000Z",
     });
@@ -634,7 +643,7 @@ describe("AutonomousSupervisor", () => {
     fs.mkdirSync(path.join(workspace, "identity"));
     fs.writeFileSync(path.join(workspace, "identity", "HEARTBEAT.md"), "- [notify] Check for stuck tasks in the command queue\n");
     supervisor = new AutonomousSupervisor({
-      db, agent: { run }, tools: makeTools(), activeRunCount, getConfig: () => config,
+      db, agent: { run }, tools: makeTools(), activeRunCount, getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message), now: () => "2026-01-01T00:00:00.000Z", workspaceRoot: workspace,
     });
     const heartbeat = await supervisor.tick("heartbeat");
@@ -700,7 +709,7 @@ describe("AutonomousSupervisor", () => {
     const recovered = new AutonomousSupervisor({
       db,
       agent: { run }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
-      getConfig: () => config,
+      getConfig: () => withLegacyProactive(config),
       log: () => undefined,
       now: () => "2026-01-01T00:00:00.000Z",
     });
@@ -730,7 +739,7 @@ describe("AutonomousSupervisor", () => {
     function restart() {
       return new AutonomousSupervisor({
         db, agent: { run }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
-        getConfig: () => config, log: (message) => logs.push(message), now: () => NOW,
+        getConfig: () => withLegacyProactive(config), log: (message) => logs.push(message), now: () => NOW,
       });
     }
 
@@ -790,7 +799,7 @@ describe("AutonomousSupervisor", () => {
         request.onEvent(call("c3", "terminal_run", "execute", "running", '{"command":"deploy.sh"}'));
         return new Promise(() => undefined);
       });
-      const first = new AutonomousSupervisor({ db, agent: { run: hanging }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => config, log: () => undefined, now: () => NOW });
+      const first = new AutonomousSupervisor({ db, agent: { run: hanging }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0), getConfig: () => withLegacyProactive(config), log: () => undefined, now: () => NOW });
       void first.tick("process-a");
       await new Promise((resolve) => setImmediate(resolve));
       expect(db.prepare("SELECT COUNT(*) AS count FROM autonomy_goal_tool_calls WHERE goal_id=?").get(goal.id)).toEqual({ count: 3 });
@@ -1047,12 +1056,24 @@ describe("AutonomousSupervisor", () => {
       expect(run).toHaveBeenCalledTimes(1);
     });
 
+    it("does not count future retry-wait tasks as runnable work that blocks idle activation", () => {
+      supervisor.enqueueTask({ title: "Retry after backoff", dueAt: "2026-01-01T00:00:00.000Z" });
+      const task = db.prepare("SELECT task_id FROM autonomy_task_queue ORDER BY task_id DESC LIMIT 1").get() as { task_id: number };
+      db.prepare("UPDATE autonomy_task_queue SET status='queued',retry_at=? WHERE task_id=?")
+        .run("2026-01-01T00:00:30.000Z", task.task_id);
+      expect((supervisor as any).hasRunnableAutonomyTask()).toBe(false);
+
+      db.prepare("UPDATE autonomy_task_queue SET retry_at=? WHERE task_id=?")
+        .run("2025-12-31T23:59:59.000Z", task.task_id);
+      expect((supervisor as any).hasRunnableAutonomyTask()).toBe(true);
+    });
+
     describe("curiosity cycle, drives and first-run bootstrap", () => {
       let workspace: string;
       const write = (rel: string, text: string) => { const f = path.join(workspace, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
       const build = (tools: ToolRegistry = makeTools(), releaseInteractiveResources?: (runId: string) => void) => {
         supervisor = new AutonomousSupervisor({
-          db, agent: { run }, tools, activeRunCount, getConfig: () => config, workspaceRoot: workspace,
+          db, agent: { run }, tools, activeRunCount, getConfig: () => withLegacyProactive(config), workspaceRoot: workspace,
           log: (message) => logs.push(message), now: () => new Date(nowMs).toISOString(),
           ...(releaseInteractiveResources ? { releaseInteractiveResources } : {}),
         });
@@ -1388,7 +1409,7 @@ describe("AutonomousSupervisor", () => {
       // A fresh supervisor has no in-memory cooldown, but must retain the SQLite guard.
       const restarted = new AutonomousSupervisor({
         db, agent: { run }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
-        getConfig: () => config, log: () => undefined, now: () => new Date(nowMs).toISOString(),
+        getConfig: () => withLegacyProactive(config), log: () => undefined, now: () => new Date(nowMs).toISOString(),
       });
       nowMs += 20_000; // a restarted supervisor resumes autonomously before the old quiet interval expires
       expect(await (restarted as any).runAmbientDecision("idle")).toBe(false);
@@ -1409,7 +1430,7 @@ describe("AutonomousSupervisor", () => {
       nowMs = t0 + 10 * 60_000; // ten minutes later, chat/goals/tasks/memory unchanged
       const restarted = new AutonomousSupervisor({
         db, agent: { run }, tools: makeTools(), activeRunCount: jest.fn().mockReturnValue(0),
-        getConfig: () => config, log: () => undefined, now: () => new Date(nowMs).toISOString(),
+        getConfig: () => withLegacyProactive(config), log: () => undefined, now: () => new Date(nowMs).toISOString(),
       });
       await (restarted as any).runAmbientDecision("idle");
       expect(run).toHaveBeenCalledTimes(2);
@@ -1439,7 +1460,7 @@ describe("AutonomousSupervisor", () => {
   describe("parallel goal runner", () => {
     const makeSup = (maxConcurrentTasks?: number) => new AutonomousSupervisor({
       db, agent: { run }, tools: makeTools(), activeRunCount,
-      getConfig: () => ({ autonomy: { enabled: true, tool_policy: { require_acceptance_contract: false } }, heartbeat: { enabled: true }, ...(maxConcurrentTasks ? { concurrency: { maxConcurrentTasks } } : {}) }),
+      getConfig: () => withLegacyProactive({ autonomy: { enabled: true, tool_policy: { require_acceptance_contract: false } }, heartbeat: { enabled: true }, ...(maxConcurrentTasks ? { concurrency: { maxConcurrentTasks } } : {}) }),
       log: (m) => logs.push(m), now: () => new Date().toISOString(),
     });
 
@@ -1488,7 +1509,7 @@ describe("AutonomousSupervisor", () => {
       config = { autonomy: { enabled: true, tool_policy: { require_acceptance_contract: false } }, heartbeat: { enabled: true, checklist_path: "identity/HEARTBEAT.md", checklist_tasks: { interval_seconds: 120 } } };
       supervisor = new AutonomousSupervisor({
         db, agent: { run }, tools: makeTools(), activeRunCount, workspaceRoot: dir,
-        getConfig: () => config, log: (m) => logs.push(m), now: () => "2026-01-01T00:00:00.000Z",
+        getConfig: () => withLegacyProactive(config), log: (m) => logs.push(m), now: () => "2026-01-01T00:00:00.000Z",
       });
     });
     afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -1584,7 +1605,7 @@ describe("AutonomousSupervisor", () => {
       expect(Number((db.prepare("SELECT COUNT(*) AS count FROM autonomy_goal_replans WHERE goal_id=?").get(goal.id) as { count: number }).count)).toBe(1);
     });
     const build = () => new AutonomousSupervisor({
-      db, agent: { run }, tools: makeTools(), activeRunCount, getConfig: () => config,
+      db, agent: { run }, tools: makeTools(), activeRunCount, getConfig: () => withLegacyProactive(config),
       log: (message) => logs.push(message), now: () => new Date(nowMs).toISOString(), notify,
     });
     const decide = (trigger: "startup" | "idle") => (supervisor as any).runAmbientDecision(trigger) as Promise<boolean>;
@@ -1603,7 +1624,16 @@ describe("AutonomousSupervisor", () => {
         heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, failure_threshold: 3, failure_backoff_base_seconds: 2, failure_backoff_max_seconds: 12 } },
       };
       notes = [];
-      notify = jest.fn(async (n: { text?: string; kind?: string }) => { notes.push(n); });
+      notify = jest.fn(async (n: { text?: string; kind?: string }) => {
+        notes.push(n);
+        return {
+          delivered: 1,
+          dashboard: { attempted: 1, delivered: 1, failed: 0 },
+          channels: { attempted: 0, delivered: 0, queued: 0, failed: 0 },
+          queued: 0,
+          failures: [],
+        };
+      });
       supervisor = build();
     });
 
@@ -1633,9 +1663,31 @@ describe("AutonomousSupervisor", () => {
         });
         nowMs += 1_300_000;
         await (supervisor as any).runAmbientDecision("idle");
-        expect(out).toEqual({ sent: true, channel: "main_chat_and_configured_channels" });
+        expect(out).toMatchObject({ delivered: true, sent: true, delivery: { delivered: 1 } });
         expect(notes).toEqual(expect.arrayContaining([
           expect.objectContaining({ text: "আমি একটি গুরুত্বপূর্ণ আপডেট পেয়েছি।", kind: "result" }),
+        ]));
+      });
+
+      it("can send multiple useful messages in one autonomous decision", async () => {
+        const outcomes: unknown[] = [];
+        run.mockImplementationOnce(async (request: { tools: ToolRegistry }) => {
+          const tool = request.tools.get("autonomy_send_message");
+          expect(tool).toBeDefined();
+          outcomes.push(await tool!.execute({ message: "প্রথম দরকারি আপডেট।" }, {} as never));
+          outcomes.push(await tool!.execute({ message: "আরেকটি গুরুত্বপূর্ণ তথ্য।" }, {} as never));
+          return makeResult("Sent two useful updates.");
+        });
+        nowMs += 1_300_000;
+        await (supervisor as any).runAmbientDecision("idle");
+        expect(outcomes).toHaveLength(2);
+        expect(outcomes).toEqual(expect.arrayContaining([
+          expect.objectContaining({ delivered: true, sent: true }),
+          expect.objectContaining({ delivered: true, sent: true }),
+        ]));
+        expect(notes).toEqual(expect.arrayContaining([
+          expect.objectContaining({ text: "প্রথম দরকারি আপডেট।", kind: "result" }),
+          expect.objectContaining({ text: "আরেকটি গুরুত্বপূর্ণ তথ্য।", kind: "result" }),
         ]));
       });
 
@@ -1646,6 +1698,19 @@ describe("AutonomousSupervisor", () => {
         expect(sent).toMatchObject({ kind: "discovery", event: { type: "discovery_shared", title: "New local model released", importance: 4, source_urls: ["https://example.org/a"], why_interesting: "It changes what I can run locally." } });
         expect(sent.text).toBeUndefined(); // the gateway composes the wording in the user's language
         expect(db.prepare("SELECT notified_at IS NOT NULL AS n FROM autonomy_discoveries WHERE id=?").get(out.id)).toEqual({ n: 1 });
+      });
+
+      it("does not mark a discovery notified when every destination is still pending or unavailable", async () => {
+        notify.mockResolvedValueOnce({
+          delivered: 0,
+          dashboard: { attempted: 0, delivered: 0, failed: 0 },
+          channels: { attempted: 0, delivered: 0, queued: 0, failed: 0 },
+          queued: 1,
+          failures: ["No dashboard client or channel recipient is connected."],
+        });
+        const out = await share({ ...base, title: "Queued but not yet delivered" });
+        expect(out).toMatchObject({ saved: true, notified: false, queued: true });
+        expect(db.prepare("SELECT notified_at FROM autonomy_discoveries WHERE id=?").get(out.id)).toEqual({ notified_at: null });
       });
 
       it("saves quietly when importance is below share_min_importance", async () => {
@@ -1912,7 +1977,7 @@ describe("AutonomousSupervisor", () => {
     });
 
     it("never schedules a retry more than 12 seconds ahead, for outages or for logic failures", async () => {
-      config = { ...config, autonomy: { enabled: true, tool_policy: { retry_backoff_seconds: 60, max_retries: 10, require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, failure_threshold: 3, failure_backoff_base_seconds: 2, failure_backoff_max_seconds: 12 } } };
+      config = { ...config, autonomy: { enabled: true, tool_policy: { retry_backoff_seconds: 60, max_retries: 10, require_acceptance_contract: false } }, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, failure_threshold: 3, model_retry_seconds: 2, failure_backoff_base_seconds: 2, failure_backoff_max_seconds: 12 } } };
       supervisor = build();
       for (const message of ["fetch failed: ECONNRESET", "Run exceeded the maximum number of turns."]) {
         const goal = goals.create({ title: `Capped ${message}`, steps: ["Inspect"], replaceExisting: false });
@@ -1929,20 +1994,17 @@ describe("AutonomousSupervisor", () => {
       }
     });
 
-    it("lets a goal run resume in place during an outage and reports provider health", async () => {
-      (supervisor as any).loopAbort = new AbortController();
-      run.mockImplementation(async (request: { onEvent?: (event: unknown) => void; retryTransient?: unknown }) => {
-        request.onEvent?.({ type: "model.retrying", runId: "r", turn: 1, retry: 1, delayMs: 1, reason: "fetch failed: ECONNRESET" });
-        expect(supervisor.status().proactive_loop).toMatchObject({ failure_streak: 1, last_failure: expect.objectContaining({ kind: "network" }) });
-        request.onEvent?.({ type: "model.resumed", runId: "r", turn: 1, retries: 1 });
-        return makeResult("Inspection complete.");
+    it("uses one short in-run retry before bounded exponential failed-run backoff", () => {
+      config = { ...config, heartbeat: { enabled: true, auto_actions: { enabled: true, max_actions_per_cycle: 1 }, proactive: { enabled: true, decision_interval_seconds: 900, model_retry_seconds: 2, model_retry_max_retries: 1, failure_backoff_base_seconds: 30, failure_backoff_max_seconds: 60 } } };
+      const retryOptions = (supervisor as any).modelRetryOptions((supervisor as any).config());
+      expect(retryOptions).toMatchObject({
+        baseDelayMs: 2_000,
+        maxDelayMs: 2_000,
+        maxRetries: 1,
+        jitter: false,
       });
-      goals.create({ title: "Resume in place", steps: ["Inspect"], replaceExisting: false });
-      const result = await supervisor.tick("test");
-      expect(result.status).toBe("completed");
-      // The in-place wait is always between 2s and 12s.
-      expect(run.mock.calls[0][0].retryTransient).toMatchObject({ baseDelayMs: 2_000, maxDelayMs: 12_000 });
-      expect(supervisor.status().proactive_loop.failure_streak).toBe(0);
+      expect((supervisor as any).logicRetrySeconds((supervisor as any).config(), 1)).toBe(30);
+      expect((supervisor as any).logicRetrySeconds((supervisor as any).config(), 2)).toBe(60);
     });
   });
 });

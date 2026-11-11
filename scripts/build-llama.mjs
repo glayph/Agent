@@ -7,7 +7,6 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -18,14 +17,6 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, "..");
-const localRoot = path.join(
-  projectRoot,
-  "packages",
-  "core",
-  "src",
-  "llm",
-  "local",
-);
 const providerRuntimeRoot = path.join(
   projectRoot,
   "packages",
@@ -33,20 +24,12 @@ const providerRuntimeRoot = path.join(
   "src",
   "plugins",
   "providers",
-  "llama-cpp",
-  "runtime",
+  "builtin",
+  "llama.cpp",
 );
 const sourceCandidates = [
   process.env.MIKI_LLAMA_SOURCE_DIR,
-  path.join(localRoot, "miki-native-runtime"),
-  path.join(
-    localRoot,
-    "miki-native-runtime (keep it Always for windows build)",
-  ),
-  path.join(
-    providerRuntimeRoot,
-    "miki-native-runtime (keep it Always for windows build)",
-  ),
+  path.join(providerRuntimeRoot, "source"),
 ].filter(Boolean);
 const sourceRoot =
   sourceCandidates.find((candidate) => existsSync(candidate)) ||
@@ -55,7 +38,6 @@ const platformKey = `${process.platform}-${process.arch}`;
 const executableName =
   process.platform === "win32" ? "llama-server.exe" : "llama-server";
 const bundledExecutableCandidates = [
-  path.join(localRoot, "native", platformKey, executableName),
   path.join(
     providerRuntimeRoot,
     "native",
@@ -71,8 +53,10 @@ const distRoot = path.join(
   "packages",
   "core",
   "dist",
-  "llm",
-  "local",
+  "plugins",
+  "providers",
+  "builtin",
+  "llama.cpp",
   "native",
   platformKey,
 );
@@ -84,7 +68,6 @@ const buildRoot = path.join(
   platformKey,
 );
 const metadataPath = path.join(distRoot, "build-metadata.json");
-const forceRebuild = process.env.MIKI_LLAMA_FORCE_REBUILD === "1";
 
 function log(message) {
   console.log(`[miki:llama] ${message}`);
@@ -163,17 +146,24 @@ function persistArtifact(sourceExecutable, mode) {
         architecture: process.arch,
         mode,
         source_commit: null,
-        web_ui: "disabled",
+        web_ui: "removed",
+        runtime_scope: "single-model-text-chat-server",
+        multimodal_input: "disabled",
+        router_mode: "disabled",
+        child_process_mode: "disabled",
         build_flags: [
           "LLAMA_BUILD_SERVER=ON",
-          "LLAMA_BUILD_UI=OFF",
-          "LLAMA_USE_PREBUILT_UI=OFF",
           "LLAMA_BUILD_TESTS=OFF",
           "LLAMA_BUILD_EXAMPLES=OFF",
-          "LLAMA_BUILD_TOOLS=ON",
+          "LLAMA_BUILD_TOOLS=OFF",
           "LLAMA_BUILD_APP=OFF",
           "LLAMA_OPENSSL=OFF",
+          "LLAMA_SUBPROCESS=OFF",
           "GGML_NATIVE=OFF",
+          "GGML_BUILD_TESTS=OFF",
+          "GGML_BUILD_EXAMPLES=OFF",
+          "LLAMA_BUILD_MTMD=ON (internal server-context dependency; not exposed)",
+          "MTMD_VIDEO=OFF",
         ],
         generated_at: new Date().toISOString(),
       },
@@ -183,52 +173,14 @@ function persistArtifact(sourceExecutable, mode) {
   );
 }
 
-if (!forceRebuild && existsSync(bundledExecutable)) {
-  persistArtifact(bundledExecutable, "bundled");
-  log(
-    `Using bundled ${platformKey} llama-server artifact; no separate server command is required.`,
-  );
-  process.exit(0);
-}
-
-if (!forceRebuild && existsSync(distExecutable) && existsSync(metadataPath)) {
-  try {
-    const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-    if (
-      metadata.platform === process.platform &&
-      metadata.architecture === process.arch &&
-      metadata.web_ui === "disabled"
-    ) {
-      log(
-        `llama-server is already built for ${platformKey}; keeping the existing artifact.`,
-      );
-      process.exit(0);
-    }
-  } catch {}
-}
-
-const llamaRequired = process.env.MIKI_LLAMA_REQUIRE === "1";
-
-function skipOrFail(message) {
-  if (llamaRequired) {
-    fail(message);
-  }
-  log(
-    `WARNING: ${message} Skipping local llama.cpp build; cloud providers (Gemini, OpenAI-compatible, etc.) remain available. Set MIKI_LLAMA_REQUIRE=1 to make this a hard failure.`,
-  );
-  process.exit(0);
-}
-
+// Every Agent/Core build configures and builds the vendored llama.cpp source.
+// A previously built executable is only an output artifact; it never skips compilation.
 if (!existsSync(sourceRoot)) {
-  skipOrFail(
-    `Miki native runtime source is unavailable at ${sourceRoot}. Provide a platform-native source bundle or configure an executable_path for ${platformKey}.`,
-  );
+  fail(`Vendored llama.cpp source is missing: ${sourceRoot}`);
 }
 
 if (!commandExists(process.platform === "win32" ? "cmake.exe" : "cmake")) {
-  skipOrFail(
-    `CMake is required to build the Miki native runtime on ${platformKey}. Install CMake and a C/C++ compiler once, then rerun npm run build:all, or configure an executable_path for a prebuilt runtime.`,
-  );
+  fail(`CMake is required to build llama.cpp on ${platformKey}. Install CMake and a C/C++ compiler, then rerun the Agent build.`);
 }
 
 mkdirSync(path.dirname(buildRoot), { recursive: true });
@@ -240,16 +192,19 @@ const configureArgs = [
   "-DCMAKE_BUILD_TYPE=Release",
   "-DBUILD_SHARED_LIBS=OFF",
   "-DLLAMA_BUILD_SERVER=ON",
-  "-DLLAMA_BUILD_UI=OFF",
-  "-DLLAMA_USE_PREBUILT_UI=OFF",
   "-DLLAMA_BUILD_TESTS=OFF",
   "-DLLAMA_BUILD_EXAMPLES=OFF",
-  "-DLLAMA_BUILD_TOOLS=ON",
+  "-DLLAMA_BUILD_TOOLS=OFF",
   "-DLLAMA_BUILD_APP=OFF",
   "-DLLAMA_BUILD_COMMON=ON",
   "-DLLAMA_TOOLS_INSTALL=OFF",
   "-DLLAMA_OPENSSL=OFF",
+  "-DLLAMA_SUBPROCESS=OFF",
   "-DGGML_NATIVE=OFF",
+  "-DGGML_BUILD_TESTS=OFF",
+  "-DGGML_BUILD_EXAMPLES=OFF",
+  "-DLLAMA_BUILD_MTMD=ON",
+  "-DMTMD_VIDEO=OFF",
 ];
 const extraArgs = process.env.MIKI_LLAMA_CMAKE_ARGS?.trim();
 if (extraArgs) configureArgs.push(...extraArgs.split(/\s+/));
@@ -279,4 +234,4 @@ if (!built || !statSync(built).isFile())
     `The native runtime build completed but ${executableName} was not found below ${buildRoot}.`,
   );
 persistArtifact(built, "source-build");
-log(`Built headless Miki native runtime server for ${platformKey}.`);
+log(`Built single-model text-only Miki llama-server for ${platformKey}.`);

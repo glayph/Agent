@@ -62,7 +62,7 @@ A full dependency-backed build and Jest/Vitest suite could not be completed in t
 
 - `packages/core/src/engine`: monitor presentation types, tool classification, tool/plan association.
 - `packages/core/src/plugins/sdk`: plugin manifest icon metadata.
-- `packages/installer/src`: allowlisted icon validation and persisted plugin metadata.
+- `packages/core/src/plugins/skills/installer/src`: allowlisted icon validation and persisted plugin metadata.
 - `packages/gateway/src`: graph event generation, plugin metadata resolution, SQLite history migration/persistence and API snapshot output.
 - `packages/ui/frontend/src/features/monitor`: semantic edges, graph hydration, terminal cleanup, continuity edges, node visuals and metadata types.
 - Corresponding tests were updated or added in the affected packages.

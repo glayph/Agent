@@ -1,5 +1,5 @@
-import { builtinProviderPlugins } from "../../src/llm/provider/sdk/builtin.js";
-import { validateProviderManifest } from "../../src/llm/provider/sdk/loader.js";
+import { builtinProviderPlugins } from "../../src/plugins/providers/sdk/builtin.js";
+import { validateProviderManifest } from "../../src/plugins/providers/sdk/loader.js";
 
 describe("legacy provider policy", () => {
   it("exposes only the supported built-in providers", () => {

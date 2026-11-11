@@ -17,3 +17,5 @@ export {
   setLifecycleBus,
   createEventBus,
 } from "./event-bus.js";
+
+export * from "./event-envelope.js";

@@ -4,13 +4,13 @@ import {
   SkillInstaller,
   type InstalledSkill,
   type PluginContractKind,
-} from "@miki/installer";
+} from "./skills/installer/src/index.js";
 import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths.js";
 import {
   SqliteAuditLog,
   type AuditEvent,
   type AuditEventType,
-} from "../audit-log.js";
+} from "../observability/audit-log.js";
 import {
   loadRuntimePluginContracts,
   type RuntimePluginContract,

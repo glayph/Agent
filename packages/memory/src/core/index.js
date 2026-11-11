@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isOwnerOrigin = exports.createGlobalMemory = exports.closeMemory = exports.getTKG = exports.getMemory = exports.initMemory = void 0;
+var runtime_js_1 = require("./runtime.js");
+Object.defineProperty(exports, "initMemory", { enumerable: true, get: function () { return runtime_js_1.initMemory; } });
+Object.defineProperty(exports, "getMemory", { enumerable: true, get: function () { return runtime_js_1.getMemory; } });
+Object.defineProperty(exports, "getTKG", { enumerable: true, get: function () { return runtime_js_1.getTKG; } });
+Object.defineProperty(exports, "closeMemory", { enumerable: true, get: function () { return runtime_js_1.closeMemory; } });
+var global_memory_js_1 = require("./global-memory.js");
+Object.defineProperty(exports, "createGlobalMemory", { enumerable: true, get: function () { return global_memory_js_1.createGlobalMemory; } });
+Object.defineProperty(exports, "isOwnerOrigin", { enumerable: true, get: function () { return global_memory_js_1.isOwnerOrigin; } });

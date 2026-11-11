@@ -6,6 +6,9 @@ export type MemoryStats = {
   postings: number
   retrievals: number
   byRegion: Array<{ region: string; count: number }>
+  provider?: string
+  primary?: boolean
+  localPersistence?: boolean
 }
 
 export type MemoryChunk = {
@@ -21,6 +24,10 @@ export type MemoryChunk = {
   updated_at: string
   access_count: number
   status: string
+  source_type?: string | null
+  source_reference?: string | null
+  last_accessed_at?: string | null
+  expires_at?: string | null
   metadata?: Record<string, unknown>
 }
 
@@ -161,6 +168,18 @@ export async function inspectMemoryChunk(chunkId: string) {
     scope: Record<string, string>
     chunk: MemoryChunk & { edges: Array<Record<string, unknown>> }
   }>(`/api/memory/chunks/${encodeURIComponent(chunkId)}`)
+}
+
+export type MemoryFileRecord = {
+  path: string
+  updatedAt: string
+  size: number
+  content: string
+  truncated: boolean
+}
+
+export async function listMemoryFiles() {
+  return request<{ files: MemoryFileRecord[] }>("/api/memory/files")
 }
 
 export async function reindexMemory() {

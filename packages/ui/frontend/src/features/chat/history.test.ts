@@ -14,7 +14,7 @@ describe("chat history log filtering", () => {
     getSessionHistoryMock.mockReset()
   })
 
-  it("hides stored system logs but keeps user and proactive assistant messages", async () => {
+  it("hides stored system logs and proactive notices from the conversation", async () => {
     getSessionHistoryMock.mockResolvedValue({
       id: "session-1",
       summary: "",
@@ -22,7 +22,8 @@ describe("chat history log filtering", () => {
       updated: "2026-01-01T00:00:00.000Z",
       messages: [
         { id: "user-1", role: "user", content: "Quota limits are useful to track." },
-        { id: "proactive-1", role: "assistant", content: "I found a useful update for you." },
+        { id: "proactive-1", role: "assistant", content: "A background task failed.", context_id: "proactive:warning:run-1" },
+        { id: "proactive-result", role: "assistant", content: "A background task completed.", context_id: "proactive:result:run-2" },
         { id: "quota-log", role: "assistant", content: "Quota limit reached.", kind: "error" },
         { id: "provider-log", role: "assistant", content: "[ProviderPlugin] provider.plugin.ready" },
       ],
@@ -32,7 +33,6 @@ describe("chat history log filtering", () => {
 
     expect(messages.map((message) => message.id)).toEqual([
       "user-1",
-      "proactive-1",
     ])
   })
 })

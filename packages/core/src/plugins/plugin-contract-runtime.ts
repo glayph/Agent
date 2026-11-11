@@ -2,12 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { spawn } from "child_process";
-import { SqliteAuditLog } from "../audit-log.js";
+import { SqliteAuditLog } from "../observability/audit-log.js";
 import {
   SkillInstaller,
   type PluginContractCatalogEntry,
   type PluginContractKind,
-} from "@miki/installer";
+} from "./skills/installer/src/index.js";
 import {
   normalizeRuntimePaths,
   resolveDownloadedSkillsDir,

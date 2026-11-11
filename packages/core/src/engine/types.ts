@@ -247,6 +247,8 @@ export interface ToolCallRecord {
   actionGoal?: string;
   /** Independent semantic check of whether this action achieved its intended result. */
   actionVerification?: { status: "verified" | "needs_more_evidence" | "failed"; reason: string; evidence: string[] };
+  /** Two independent intent checks completed before this action was allowed to execute. */
+  preActionVerification?: { status: "passed" | "blocked" | "unavailable"; checks: Array<{ pass: 1 | 2; status: "proceed" | "block" | "unavailable"; reason: string }> };
   id: string;
   name: string;
   /** Raw JSON arguments as sent by the model. */
@@ -399,6 +401,8 @@ export interface RunRequest {
     continueRetryingEveryMs?: number;
     /** Disable jitter when a caller requires exact retry intervals. Defaults to enabled. */
     jitter?: boolean;
+    /** Also wait and retry on 401/403 and billing/quota blocks instead of failing the run. */
+    retryPermanentFailures?: boolean;
   };
   /**
    * Never switch to a fallback model during this run. A transient failure is then handled by

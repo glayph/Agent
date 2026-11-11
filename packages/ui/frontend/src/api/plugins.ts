@@ -164,7 +164,7 @@ export interface TrustedPluginPackage {
   trusted: true
 }
 
-export async function getTrustedPluginMarketplace(): Promise<{ packages: TrustedPluginPackage[]; total: number; source: string; unavailable_reason?: string }> {
+export async function getTrustedPluginMarketplace(): Promise<{ packages: TrustedPluginPackage[]; total: number; source: string; unavailable_reason?: string; warnings?: string[] }> {
   return request("/api/plugins/marketplace")
 }
 

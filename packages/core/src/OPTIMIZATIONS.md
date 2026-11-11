@@ -3,7 +3,7 @@
 > **Status note (2026-10-08).** This document is a plan, not a verified record.
 > The "COMPLETE" markers and the percentage figures below were never measured, and
 > 17 of the 25 file paths listed here do not exist at those locations (a few may
-> live elsewhere, e.g. hybrid search is `memory-files/hybrid-search.ts`).
+> live elsewhere, e.g. hybrid search is `packages/memory/src/file-memory/hybrid-search.ts`).
 > Treat every item as unverified unless the file is present.
 >
 > What the agent loop actually has today (all covered by tests):

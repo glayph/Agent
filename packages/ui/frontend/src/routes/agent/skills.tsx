@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { SkillsPage } from "@/features/agent/skills/skills-page"
+import { SkillsPage } from "@/features/agent/plugins/skills/skills-page"
 
 export const Route = createFileRoute("/agent/skills")({
   validateSearch: (search: Record<string, unknown>) => ({

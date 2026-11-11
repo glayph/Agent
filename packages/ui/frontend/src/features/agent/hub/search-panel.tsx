@@ -9,6 +9,7 @@ import type { UnavailableToolMessage } from "./tool-support"
 export function SearchPanel({
   marketQuery,
   canSearchMarketplace,
+  marketplaceUnavailableReason,
   isMarketSearchInitialLoading,
   unavailableToolMessages,
   onMarketQueryChange,
@@ -16,6 +17,7 @@ export function SearchPanel({
 }: {
   marketQuery: string
   canSearchMarketplace: boolean
+  marketplaceUnavailableReason?: string
   isMarketSearchInitialLoading: boolean
   unavailableToolMessages: UnavailableToolMessage[]
   onMarketQueryChange: (value: string) => void
@@ -75,6 +77,13 @@ export function SearchPanel({
           </Button>
         </div>
       </form>
+
+      {!canSearchMarketplace && marketplaceUnavailableReason ? (
+        <div className="mx-auto w-full max-w-3xl rounded-xl border border-amber-200/80 bg-amber-50/70 px-4 py-3 text-left text-sm text-amber-900">
+          <div className="font-semibold">{t("pages.agent.skills.marketplace_unavailable", { defaultValue: "Marketplace unavailable" })}</div>
+          <div className="mt-1 leading-6">{marketplaceUnavailableReason}</div>
+        </div>
+      ) : null}
 
       {unavailableToolMessages.length ? (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 pt-2">

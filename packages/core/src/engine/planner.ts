@@ -82,31 +82,43 @@ export function parsePlanJson(
   const rawSteps = (parsed as { steps?: unknown })?.steps;
   if (!Array.isArray(rawSteps)) return null;
   const steps: Array<{ title: string; tool?: string; dependsOn?: number[] }> = [];
+  const limit = Number.isFinite(maxSteps) ? Math.max(1, Math.floor(maxSteps)) : Number.POSITIVE_INFINITY;
   for (const item of rawSteps) {
-    const entry = item as { title?: unknown; tool?: unknown; depends_on?: unknown } | string;
-    const title =
-      typeof entry === "string"
-        ? entry
-        : typeof entry?.title === "string"
-          ? entry.title
-          : "";
-    if (!title.trim()) continue;
-    const tool =
-      typeof entry === "object" &&
-      typeof entry.tool === "string" &&
-      knownTools.has(entry.tool)
-        ? entry.tool
-        : undefined;
-    const dependsOn =
-      typeof entry === "object" && Array.isArray(entry.depends_on)
-        ? entry.depends_on.filter((value): value is number => Number.isInteger(value))
-        : undefined;
+    if (steps.length >= limit) break;
+    if (typeof item !== "string" && (!item || typeof item !== "object" || Array.isArray(item))) return null;
+    const entry = typeof item === "string"
+      ? undefined
+      : item as { title?: unknown; tool?: unknown; depends_on?: unknown };
+    const title = typeof item === "string"
+      ? item
+      : typeof entry?.title === "string" ? entry.title : "";
+    if (!title.trim()) return null;
+
+    let tool: string | undefined;
+    if (entry && Object.prototype.hasOwnProperty.call(entry, "tool")) {
+      if (entry.tool !== null && entry.tool !== undefined) {
+        if (typeof entry.tool !== "string" || !knownTools.has(entry.tool)) return null;
+        tool = entry.tool;
+      }
+    }
+
+    let dependsOn: number[] | undefined;
+    if (entry && Object.prototype.hasOwnProperty.call(entry, "depends_on")) {
+      if (!Array.isArray(entry.depends_on)) return null;
+      const dependencies = entry.depends_on as unknown[];
+      const currentStep = steps.length + 1;
+      if (dependencies.some((value) => !Number.isInteger(value) || (value as number) < 1 || (value as number) >= currentStep)) {
+        return null;
+      }
+      if (new Set(dependencies).size !== dependencies.length) return null;
+      dependsOn = dependencies as number[];
+    }
+
     steps.push({
       title: title.trim().slice(0, 160),
       ...(tool ? { tool } : {}),
-      ...(dependsOn?.length ? { dependsOn } : {}),
+      ...(dependsOn !== undefined ? { dependsOn } : {}),
     });
-    if (steps.length >= maxSteps) break;
   }
   return steps.length ? steps : null;
 }
@@ -115,6 +127,7 @@ export interface CreatePlanInput {
   goal: string;
   llm?: EngineLLMClient;
   toolNames: string[];
+  toolDescriptions?: Array<{ name: string; description: string; parameters?: string[] }>;
   signal?: AbortSignal;
   maxSteps?: number;
   /** Called when the LLM planner fails and the fallback plan is used instead. */
@@ -140,7 +153,9 @@ export async function createPlan(input: CreatePlanInput): Promise<AgentPlan> {
             `You are the planning module of an autonomous agent. Understand what the goal requires, then break it into ${stepRange} concrete steps and identify dependencies so independent work can run in parallel. Never omit necessary work merely to keep the plan short. Use a single step when the request needs only one action or a direct conversational answer. ` +
             `Reply with ONLY a JSON object: {"steps":[{"title":"short imperative step","tool":"tool name or null","depends_on":[1,2]}]}. ` +
             `depends_on uses 1-based step numbers and may be [] for an independent step. Do not invent dependencies; add one when the step needs another step's result. ` +
-            `Available tools: ${input.toolNames.join(", ") || "none"}. Use null when no tool is needed.`,
+            `Available tool names: ${input.toolNames.join(", ") || "none"}. Use null when no tool is needed. ` +
+            `Capability catalogue: ${JSON.stringify((input.toolDescriptions ?? []).map((tool) => ({ name: tool.name, description: tool.description.slice(0, 260), parameters: tool.parameters ?? [] })))}. ` +
+            `Use the descriptions and required inputs to identify a genuinely suitable tool; do not infer suitability from tool names alone. If no tool is suitable, use null.`,
         },
         { role: "user", content: input.goal },
       ],

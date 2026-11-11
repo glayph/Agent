@@ -50,8 +50,6 @@ function main() {
     "@miki/config", 
     "@miki/core",
     "@miki/gateway",
-    "@miki/installer",
-    "@miki/skills",
   ];
 
   log("Fixing workspace protocol dependencies...");

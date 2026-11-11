@@ -23,7 +23,8 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src/plugins/providers/llama-cpp/runtime/vendor",
+    "src/plugins/providers/builtin/llama.cpp/source/vendor",
+    "src/plugins/providers/builtin/llama.cpp/source",
     "src/**/__tests__",
     "src/**/*.test.ts",
     "src/**/__mocks__/**"
@@ -31,12 +32,6 @@
   "references": [
     {
       "path": "../config"
-    },
-    {
-      "path": "../installer"
-    },
-    {
-      "path": "../skills"
     }
   ]
 }

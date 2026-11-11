@@ -251,13 +251,21 @@ class SelectiveMemoryEngine {
   }
 
   inferRegions(query) {
-    const text = String(query || '').toLowerCase();
+    const text = String(query || '').normalize('NFKC').toLowerCase();
     const regions = new Set();
-    if (/(schedule|calendar|task|todo|deadline|tomorrow|today|পরিকল্পনা|সময়|কাজ|শিডিউল)/iu.test(text)) regions.add('day_to_day');
-    if (/(skill|tool|ability|workflow|how to|কীভাবে|দক্ষতা|টুল)/iu.test(text)) regions.add('skill');
-    if (/(rule|always|never|prefer|behavior|emotion|guideline|নিয়ম|পছন্দ|আচরণ)/iu.test(text)) regions.add('rule_emotion');
-    if (/(config|core|static|identity|stable|version|কনফিগ|স্থায়ী)/iu.test(text)) regions.add('static');
-    if (regions.size === 0) return new Set(CANONICAL_REGIONS);
+    // Region inference is deliberately additive: a task can need both a stable
+    // preference and the current project/task context. Bengali and English
+    // variants are handled together so translated requests do not silently fall
+    // back to an unrelated default region.
+    if (/(schedule|calendar|task|todo|deadline|tomorrow|today|next step|পরিকল্পনা|সময়|সময়|কাজ|শিডিউল|পরবর্তী কাজ|পরের ধাপ|আজ|আগামীকাল)/iu.test(text)) regions.add('day_to_day');
+    if (/(skill|tool|ability|workflow|how to|কীভাবে|কিভাবে|দক্ষতা|টুল|ক্ষমতা|প্রক্রিয়া|প্রক্রিয়া)/iu.test(text)) regions.add('skill');
+    if (/(rule|always|never|prefer|preference|behavior|behaviour|emotion|guideline|নিয়ম|নিয়ম|পছন্দ|আচরণ|নির্দেশনা|সবসময়|কখনোই)/iu.test(text)) regions.add('rule_emotion');
+    if (/(config|core|static|identity|stable|version|কনফিগ|স্থায়ী|স্থায়ী|পরিচয়|পরিচয়)/iu.test(text)) regions.add('static');
+    if (/(project|workspace|ongoing|current work|in progress|continue|resume|চলমান|প্রজেক্ট|প্রকল্প|বর্তমান কাজ|চালিয়ে|চালিয়ে|অব্যাহত)/iu.test(text)) regions.add('temporary');
+    if (/(remember|memory|আগে বলেছি|মনে রাখ|স্মৃতি|মেমোরি|মেমরি|তথ্য|সিদ্ধান্ত|ঘটনা)/iu.test(text)) regions.add('long_term');
+    if (regions.size === 0) return new Set([...CANONICAL_REGIONS, 'temporary']);
+    // Durable facts/preferences are frequently needed to interpret an otherwise
+    // procedural request, but do not force all unrelated regions into every query.
     regions.add('long_term');
     return regions;
   }
@@ -343,7 +351,8 @@ class SelectiveMemoryEngine {
 
   _linkRecent(scope, chunkId, region, tokens, relationType) {
     const recent = this.db.prepare(`SELECT id, content, region, metadata FROM memory_chunk_index
-      WHERE scope_key = ? AND status = 'active' AND provenance IN ('owner','agent') AND id <> ? ORDER BY updated_at DESC LIMIT 12`).all(scope.scopeKey, chunkId);
+      WHERE scope_key = ? AND status = 'active' AND provenance IN ('owner','agent')
+        AND (expires_at IS NULL OR expires_at > ?) AND id <> ? ORDER BY updated_at DESC LIMIT 12`).all(scope.scopeKey, nowIso(), chunkId);
     const tokenSet = new Set(tokens);
     for (const candidate of recent) {
       const candidateTokens = parseJson(candidate.metadata, {}).tokens || this.normalizeTokens(candidate.content);
@@ -377,8 +386,10 @@ class SelectiveMemoryEngine {
     if (rare.length < 2) return;
     const rows = this.db.prepare(`SELECT p.chunk_id AS id, c.region AS region, COUNT(*) AS overlap
       FROM memory_chunk_postings p JOIN memory_chunk_index c ON c.id = p.chunk_id
-      WHERE p.scope_key = ? AND p.token IN (${rare.map(() => '?').join(',')}) AND p.chunk_id <> ? AND c.status = 'active'
-      GROUP BY p.chunk_id HAVING COUNT(*) >= 2 ORDER BY overlap DESC LIMIT 8`).all(scope.scopeKey, ...rare, chunkId);
+      WHERE p.scope_key = ? AND p.token IN (${rare.map(() => '?').join(',')}) AND p.chunk_id <> ?
+        AND c.scope_key = ? AND c.status = 'active' AND c.provenance IN ('owner','agent')
+        AND (c.expires_at IS NULL OR c.expires_at > ?)
+      GROUP BY p.chunk_id HAVING COUNT(*) >= 2 ORDER BY overlap DESC LIMIT 8`).all(scope.scopeKey, ...rare, chunkId, scope.scopeKey, nowIso());
     for (const row of rows) {
       if (alreadyLinked.has(row.id)) continue;
       const weight = clamp(0.12 + Math.min(0.65, row.overlap * 0.12) + (row.region === region ? 0.12 : 0), 0, 1);
@@ -573,9 +584,11 @@ class SelectiveMemoryEngine {
       CASE WHEN e.source_chunk_id = ? THEN e.target_chunk_id ELSE e.source_chunk_id END AS neighbor_id
       FROM memory_chunk_edges e JOIN memory_chunk_index c ON c.id = CASE WHEN e.source_chunk_id = ? THEN e.target_chunk_id ELSE e.source_chunk_id END
       WHERE e.scope_key = ? AND (e.source_chunk_id = ? OR e.target_chunk_id = ?)
-        AND c.scope_key = ? AND c.status = 'active' AND c.region IN (${[...regions].map(() => '?').join(',')})
+        AND c.scope_key = ? AND c.status = 'active' AND c.provenance IN ('owner','agent')
+        AND (c.expires_at IS NULL OR c.expires_at > ?)
+        AND c.region IN (${[...regions].map(() => '?').join(',')})
       ORDER BY e.weight DESC LIMIT ?`)
-      .all(chunkId, chunkId, scope.scopeKey, chunkId, chunkId, scope.scopeKey, ...regions, maxNeighbors);
+      .all(chunkId, chunkId, scope.scopeKey, chunkId, chunkId, scope.scopeKey, nowIso(), ...regions, maxNeighbors);
     return rows;
   }
 
@@ -698,11 +711,24 @@ class SelectiveMemoryEngine {
 
   stats(scopeInput) {
     const scope = this.normalizeScope(scopeInput);
-    const count = this.db.prepare('SELECT COUNT(*) AS count FROM memory_chunk_index WHERE scope_key = ? AND status = \'active\'').get(scope.scopeKey).count;
-    const edges = this.db.prepare('SELECT COUNT(*) AS count FROM memory_chunk_edges WHERE scope_key = ?').get(scope.scopeKey).count;
-    const postings = this.db.prepare('SELECT COUNT(*) AS count FROM memory_chunk_postings WHERE scope_key = ?').get(scope.scopeKey).count;
+    const now = nowIso();
+    const active = `scope_key = ? AND status = 'active' AND provenance IN ('owner','agent') AND (expires_at IS NULL OR expires_at > ?)`;
+    const count = this.db.prepare(`SELECT COUNT(*) AS count FROM memory_chunk_index WHERE ${active}`).get(scope.scopeKey, now).count;
+    const edges = this.db.prepare(`SELECT COUNT(*) AS count FROM memory_chunk_edges e
+      JOIN memory_chunk_index s ON s.id = e.source_chunk_id
+      JOIN memory_chunk_index t ON t.id = e.target_chunk_id
+      WHERE e.scope_key = ? AND s.scope_key = ? AND t.scope_key = ?
+        AND s.status = 'active' AND t.status = 'active'
+        AND s.provenance IN ('owner','agent') AND t.provenance IN ('owner','agent')
+        AND (s.expires_at IS NULL OR s.expires_at > ?) AND (t.expires_at IS NULL OR t.expires_at > ?)`)
+      .get(scope.scopeKey, scope.scopeKey, scope.scopeKey, now, now).count;
+    const postings = this.db.prepare(`SELECT COUNT(*) AS count FROM memory_chunk_postings p
+      JOIN memory_chunk_index c ON c.id = p.chunk_id WHERE p.scope_key = ?
+        AND c.status = 'active' AND c.provenance IN ('owner','agent')
+        AND (c.expires_at IS NULL OR c.expires_at > ?)`).get(scope.scopeKey, now).count;
     const retrievals = this.db.prepare('SELECT COUNT(*) AS count FROM memory_retrieval_events WHERE scope_key = ?').get(scope.scopeKey).count;
-    const byRegion = this.db.prepare('SELECT region, COUNT(*) AS count FROM memory_chunk_index WHERE scope_key = ? AND status = \'active\' GROUP BY region').all(scope.scopeKey);
+    const byRegion = this.db.prepare(`SELECT region, COUNT(*) AS count FROM memory_chunk_index
+      WHERE ${active} GROUP BY region`).all(scope.scopeKey, now);
     return { chunks: count, edges, postings, retrievals, byRegion };
   }
 
@@ -710,9 +736,21 @@ class SelectiveMemoryEngine {
     const scope = this.normalizeScope(scopeInput);
     const limit = Math.max(1, Math.min(200, Number(options.limit || 50)));
     const region = options.region ? canonicalRegion(options.region, 'day_to_day') : null;
-    const rows = region
-      ? this.db.prepare('SELECT * FROM memory_chunk_index WHERE scope_key = ? AND region = ? ORDER BY updated_at DESC LIMIT ?').all(scope.scopeKey, region, limit)
-      : this.db.prepare('SELECT * FROM memory_chunk_index WHERE scope_key = ? ORDER BY updated_at DESC LIMIT ?').all(scope.scopeKey, limit);
+    const validStatuses = new Set(['active', 'archived', 'forgotten', 'superseded', 'merged']);
+    const status = options.includeInactive === true
+      ? (validStatuses.has(String(options.status || '')) ? String(options.status) : null)
+      : 'active';
+    const where = ['scope_key = ?'];
+    const values = [scope.scopeKey];
+    if (status) { where.push('status = ?'); values.push(status); }
+    if (region) { where.push('region = ?'); values.push(region); }
+    if (options.includeUntrusted !== true) where.push("provenance IN ('owner','agent')");
+    if (options.includeExpired !== true) {
+      where.push('(expires_at IS NULL OR expires_at > ?)');
+      values.push(nowIso());
+    }
+    values.push(limit);
+    const rows = this.db.prepare(`SELECT * FROM memory_chunk_index WHERE ${where.join(' AND ')} ORDER BY updated_at DESC LIMIT ?`).all(...values);
     return rows.map(row => ({ ...row, metadata: parseJson(row.metadata, {}), embedding: undefined }));
   }
 

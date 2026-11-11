@@ -16,8 +16,8 @@ import {
   type SkillDetail,
   type SkillRecord,
   type SkillStore,
-} from "../skills-manager/skill-store.js";
-import type { SkillRegistryClient } from "../skills-manager/registry-client.js";
+} from "../plugins/skills/manager/skill-store.js";
+import type { SkillRegistryClient } from "../plugins/skills/manager/registry-client.js";
 import {
   multipartBoundary,
   parseMultipartForm,
@@ -94,7 +94,7 @@ export function createSkillsRouter(options: SkillsRouterOptions): Router {
     "/",
     wrap(async (_req, res) => {
       const skills = (await store.list()).map(publicSkill);
-      res.json({ skills, total: skills.length });
+      res.json({ skills, total: skills.length, warnings: store.getDiscoveryWarnings() });
     }),
   );
 

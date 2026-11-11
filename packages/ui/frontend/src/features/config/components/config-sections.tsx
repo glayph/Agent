@@ -183,6 +183,19 @@ export function AgentDefaultsSection({
       />
 
       <SwitchCardField
+        label={t("pages.config.auto_approve_all", {
+          defaultValue: "Run tools without asking for approval",
+        })}
+        hint={t("pages.config.auto_approve_all_hint", {
+          defaultValue:
+            "When enabled, eligible tools run automatically. Keep this off to require approval prompts.",
+        })}
+        layout="setting-row"
+        checked={form.autoApproveAll}
+        onCheckedChange={(checked) => onFieldChange("autoApproveAll", checked)}
+      />
+
+      <SwitchCardField
         label={t("pages.config.split_on_marker")}
         hint={t("pages.config.split_on_marker_hint")}
         layout="setting-row"
@@ -1230,6 +1243,14 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
 
   return (
     <ConfigSectionCard title={t("pages.config.sections.runtime")}>
+      <SwitchCardField
+        label={t("pages.config.pre_action_double_check", { defaultValue: "Run a second verification before every action" })}
+        hint={t("pages.config.pre_action_double_check_hint", { defaultValue: "Miki always performs one intent check before a task step or outbound message. Turn this on to add a second independent check. If any check is uncertain, the action is held. Turning this off keeps the default single check and does not disable permissions or security checks." })}
+        layout="setting-row"
+        checked={form.preActionDoubleCheck}
+        onCheckedChange={(checked) => onFieldChange("preActionDoubleCheck", checked)}
+      />
+
       <Field
         label={t("pages.config.session_scope")}
         hint={t("pages.config.session_scope_hint")}

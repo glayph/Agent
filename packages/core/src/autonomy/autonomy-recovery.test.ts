@@ -1,4 +1,4 @@
-import { TaskExecutionError } from "../task-errors.js";
+import { TaskExecutionError } from "../tasks/task-errors.js";
 import Database from "better-sqlite3";
 import { GoalStore } from "../api/goals-router.js";
 import { ToolRegistry } from "../engine/tool-registry.js";

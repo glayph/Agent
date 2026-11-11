@@ -20,11 +20,12 @@ function AuthGateFallback() {
   const { t } = useTranslation()
   return (
     <div
-      className="bg-background text-muted-foreground flex h-dvh items-center justify-center text-sm"
+      className="bg-background flex h-dvh items-center justify-center"
       role="status"
+      aria-label={t("labels.loading", { defaultValue: "Loading" })}
       aria-live="polite"
     >
-      {t("labels.loading", { defaultValue: "Loading…" })}
+      <span className="miki-loading-ring" aria-hidden="true" />
     </div>
   )
 }
@@ -113,7 +114,7 @@ const RootLayout = () => {
     }
     const onVisibilityChange = () => { if (document.visibilityState === "visible") void checkAuth() }
     void checkAuth()
-    const pollTimer = globalThis.setInterval(() => void checkAuth(), 15_000)
+    const pollTimer = globalThis.setInterval(() => void checkAuth(), 30_000)
     document.addEventListener("visibilitychange", onVisibilityChange)
 
     return () => {

@@ -32,8 +32,6 @@ function fixWorkspaceDeps() {
   const packageFiles = [
     "packages/core/package.json",
     "packages/gateway/package.json",
-    "packages/installer/package.json",
-    "packages/skills/package.json",
   ];
 
   let fixedCount = 0;
@@ -104,6 +102,9 @@ function main() {
   if (tryTurboBuild()) {
     log("Build completed using turbo");
   } else {
+    // Direct tsc bypasses npm's Core prebuild lifecycle, so build llama.cpp explicitly.
+    log("Building vendored llama.cpp before TypeScript fallback...");
+    run(process.execPath, [path.join(root, "scripts", "build-llama.mjs")], { cwd: root });
     // Fallback: compile TypeScript
     log("Using TypeScript compilation fallback...");
     run("npx", ["tsc", "-b", "--force"], { cwd: root });

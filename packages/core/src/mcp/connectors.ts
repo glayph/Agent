@@ -15,6 +15,17 @@ import type {
 } from "./types.js";
 import type { ToolDefinition } from "./contracts/tools.js";
 
+export interface McpCatalogFailure {
+  serverName: string;
+  message: string;
+}
+
+export interface McpCatalogSnapshot {
+  entries: McpCatalogEntry[];
+  enabledServerNames: string[];
+  failures: McpCatalogFailure[];
+}
+
 interface ExternalClient {
   client: Client;
   transport: Transport;
@@ -41,10 +52,18 @@ export function namespaceExternalMcpToolName(
   serverName: string,
   toolName: string,
 ): string {
-  const normalized = `${serverName}__${toolName}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-  if (normalized.length <= 64) return normalized;
-  const suffix = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
-  return `${normalized.slice(0, 55)}_${suffix}`;
+  const raw = `${serverName}__${toolName}`;
+  const normalized = raw.replace(/[^a-zA-Z0-9_-]/g, "_");
+  // A delimiter can also occur inside either input, so even clean strings can
+  // be ambiguous (`a__b` + `c` versus `a` + `b__c`). Always add a digest of
+  // the original pair. This also prevents punctuation sanitization collisions.
+  const suffix = createHash("sha256")
+    .update(serverName)
+    .update("\0")
+    .update(toolName)
+    .digest("hex")
+    .slice(0, 12);
+  return `${normalized.slice(0, 51)}_${suffix}`;
 }
 
 function parseEnvFile(filePath: string): Record<string, string> {
@@ -127,35 +146,33 @@ function validatedRemoteUrl(config: McpServerConfig): URL {
   return url;
 }
 
-function toolSafety(tool: {
-  annotations?: {
-    readOnlyHint?: boolean;
-    destructiveHint?: boolean;
-    idempotentHint?: boolean;
-  };
+export function classifyExternalMcpToolSafety(annotations?: {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
 }): McpToolSafety {
-  const annotations = tool.annotations;
+  // MCP defines destructiveHint and idempotentHint as meaningful only when
+  // readOnlyHint is false. A tool explicitly marked read-only must not become
+  // side-effecting merely because the server also supplies irrelevant hints.
+  if (annotations?.readOnlyHint === true) return "read_only";
   if (
     annotations?.readOnlyHint === false ||
     annotations?.destructiveHint === true ||
     annotations?.idempotentHint === true
-  ) {
-    return "side_effect";
-  }
-  if (annotations?.readOnlyHint === true) return "read_only";
+  ) return "side_effect";
   return "unknown";
 }
 
 export function isExternalMcpToolExecutionAllowed(
   server: McpServerConfig,
   safety: McpToolSafety,
-  autoApproveAll = false,
+  _autoApproveAll = false,
 ): boolean {
-  if (autoApproveAll) return true;
-  return (
-    safety === "read_only" ||
-    (safety === "side_effect" && server.allowSideEffects === true)
-  );
+  // No-confirm mode may suppress an approval dialog, but it is not a grant of
+  // authority to an external server. Unknown annotations stay blocked and
+  // side effects require an explicit per-server allowSideEffects opt-in.
+  return safety === "read_only" ||
+    (safety === "side_effect" && server.allowSideEffects === true);
 }
 
 function externalMcpFailurePrefix(error: unknown): string {
@@ -168,10 +185,16 @@ function externalMcpFailurePrefix(error: unknown): string {
   if (/timeout|timed out|abort/i.test(message)) {
     return "External MCP server timed out.";
   }
-  if (/econn|enotfound|network|fetch failed|connect/i.test(message)) {
-    return "External MCP server is unavailable.";
+  if (/enoent|spawn .*enoent|command not found|executable.*not found/i.test(message)) {
+    return "External MCP server command was not found; check the configured command and PATH.";
   }
-  return "External MCP request failed.";
+  if (/eacces|eperm|permission denied/i.test(message)) {
+    return "External MCP server could not be started because the operating system denied access; check executable and directory permissions.";
+  }
+  if (/econn|enotfound|network|fetch failed|connect|eai_again|ehostunreach/i.test(message)) {
+    return "External MCP server is unavailable; check that the server is running and reachable.";
+  }
+  return "External MCP request failed; inspect the server logs and connection configuration.";
 }
 
 function toolDefinitionFromExternal(
@@ -198,7 +221,7 @@ function toolDefinitionFromExternal(
             level: "high" as const,
             label: "External MCP side effect",
             reason: autoApproveAll
-              ? "This configured external MCP tool is available in sandbox no-confirm mode; the external server and its authentication must still be available."
+              ? "Sandbox no-confirm mode may skip the user confirmation prompt, but this tool still requires the server's explicit allow_side_effects policy and working authentication."
               : safety === "side_effect"
                 ? "This external MCP tool is not read-only and requires allow_side_effects: true on its server configuration."
                 : "This external MCP tool did not declare a read-only annotation and is blocked by default.",
@@ -238,6 +261,9 @@ export async function executeMcpToolWithReconnect<T>(
 export class ExternalMcpConnectorManager {
   private clients = new Map<string, ExternalClient>();
   private toolRefs = new Map<string, ExternalMcpToolRef>();
+  // Keep schemas for a temporarily unavailable server so one transient outage
+  // does not erase the last-known-good capability catalogue.
+  private catalogEntries = new Map<string, McpCatalogEntry>();
 
   constructor(
     private readonly workspaceDir: string,
@@ -265,10 +291,9 @@ export class ExternalMcpConnectorManager {
     const existing = this.clients.get(name);
     if (!existing) return;
     this.clients.delete(name);
-    // Remove tool refs for this server
-    for (const [toolName, ref] of this.toolRefs) {
-      if (ref.serverName === name) this.toolRefs.delete(toolName);
-    }
+    // Keep toolRefs/catalogEntries until a successful catalog refresh or an
+    // explicit disable/removal. A transient transport close must not make a
+    // previously registered tool turn into a misleading "unknown tool".
     try {
       await existing.client.close();
     } catch {
@@ -326,9 +351,21 @@ export class ExternalMcpConnectorManager {
     return client;
   }
 
-  async listCatalogEntries(includeDeferred = true): Promise<McpCatalogEntry[]> {
-    const entries: McpCatalogEntry[] = [];
-    for (const server of this.enabledServers()) {
+  async listCatalogEntriesDetailed(includeDeferred = true): Promise<McpCatalogSnapshot> {
+    const failures: McpCatalogFailure[] = [];
+    const enabledServers = this.enabledServers();
+    const enabledServerNames = enabledServers.map((server) => server.name);
+    const enabled = new Set(enabledServerNames);
+
+    // An intentionally disabled/removed server must not remain discoverable.
+    for (const [toolName, ref] of this.toolRefs) {
+      if (!enabled.has(ref.serverName)) this.toolRefs.delete(toolName);
+    }
+    for (const [toolName, entry] of this.catalogEntries) {
+      if (entry.serverName && !enabled.has(entry.serverName)) this.catalogEntries.delete(toolName);
+    }
+
+    for (const server of enabledServers) {
       if (server.deferred && !includeDeferred) continue;
       try {
         const result = await executeMcpToolWithReconnect(
@@ -339,25 +376,31 @@ export class ExternalMcpConnectorManager {
           },
           () => this.closeClient(server.name),
         );
+
+        // A successful catalogue response, including an empty one, is authoritative.
+        for (const [toolName, ref] of this.toolRefs) {
+          if (ref.serverName === server.name) this.toolRefs.delete(toolName);
+        }
+        for (const [toolName, entry] of this.catalogEntries) {
+          if (entry.serverName === server.name) this.catalogEntries.delete(toolName);
+        }
+
         for (const tool of result.tools) {
-          const namespacedName = namespaceExternalMcpToolName(
-            server.name,
-            tool.name,
-          );
-          const safety = toolSafety(tool);
+          const namespacedName = namespaceExternalMcpToolName(server.name, tool.name);
+          const safety = classifyExternalMcpToolSafety(tool.annotations);
           const definition = toolDefinitionFromExternal(
             server.name,
             tool,
             safety,
             this.runtimeConfig.autoApproveAll === true,
           );
-          this.toolRefs.set(namespacedName, {
+          const ref: ExternalMcpToolRef = {
             serverName: server.name,
             toolName: tool.name,
             namespacedName,
             safety,
-          });
-          entries.push({
+          };
+          const entry: McpCatalogEntry = {
             name: namespacedName,
             description: definition.function.description,
             serverName: server.name,
@@ -366,15 +409,37 @@ export class ExternalMcpConnectorManager {
             definition,
             deferred: server.deferred === true,
             safety,
-          });
+          };
+          this.toolRefs.set(namespacedName, ref);
+          this.catalogEntries.set(namespacedName, entry);
         }
       } catch (err) {
-        console.warn(
-          `[MCP] external server ${server.name} unavailable: ${externalMcpFailurePrefix(err)}`,
-        );
+        const message = externalMcpFailurePrefix(err);
+        failures.push({ serverName: server.name, message });
+        console.warn(`[MCP] external server ${server.name} unavailable: ${message}`);
+        // The entry cache and refs remain available as last-known-good metadata
+        // until a successful refresh or the server is explicitly disabled/removed.
+        for (const [toolName, entry] of this.catalogEntries) {
+          if (entry.serverName === server.name) {
+            this.toolRefs.set(toolName, {
+              serverName: entry.serverName,
+              toolName: entry.toolName,
+              namespacedName: entry.name,
+              safety: entry.safety,
+            });
+          }
+        }
       }
     }
-    return entries;
+
+    const visible = [...this.catalogEntries.values()].filter((entry) =>
+      typeof entry.serverName === "string" && enabled.has(entry.serverName) && (includeDeferred || !entry.deferred),
+    );
+    return { entries: visible, enabledServerNames, failures };
+  }
+
+  async listCatalogEntries(includeDeferred = true): Promise<McpCatalogEntry[]> {
+    return (await this.listCatalogEntriesDetailed(includeDeferred)).entries;
   }
 
   async callTool(
@@ -383,8 +448,14 @@ export class ExternalMcpConnectorManager {
   ): Promise<unknown> {
     const ref = this.toolRefs.get(namespacedName);
     if (!ref) throw new Error(`Unknown external MCP tool '${namespacedName}'`);
+    if (!this.runtimeConfig.enabled) {
+      throw new Error("External MCP connectors are disabled by the global MCP configuration.");
+    }
     const server = this.runtimeConfig.servers[ref.serverName];
     if (!server) throw new Error(`Unknown MCP server '${ref.serverName}'`);
+    if (!server.enabled) {
+      throw new Error(`External MCP server '${ref.serverName}' is disabled in configuration.`);
+    }
     if (!isExternalMcpToolExecutionAllowed(server, ref.safety, this.runtimeConfig.autoApproveAll === true)) {
       throw new Error(
         ref.safety === "unknown"
@@ -409,6 +480,7 @@ export class ExternalMcpConnectorManager {
     const clients = [...this.clients.values()];
     this.clients.clear();
     this.toolRefs.clear();
+    this.catalogEntries.clear();
     await Promise.allSettled(
       clients.map(async ({ client, transport }) => {
         await client.close();

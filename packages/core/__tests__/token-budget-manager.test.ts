@@ -1,4 +1,4 @@
-import { TokenBudgetManager } from "../src/token-budget-manager.js";
+import { TokenBudgetManager } from "../src/engine/token-budget-manager.js";
 
 describe("TokenBudgetManager", () => {
   it("allocates compact budgets for simple tasks with input estimates", () => {

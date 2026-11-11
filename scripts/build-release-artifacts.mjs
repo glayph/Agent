@@ -4,7 +4,7 @@
  *
  * Full build pipeline for Miki:
  *   1. TypeScript compilation (tsc -b with project references)
- *   2. Go compatibility stub (ui/backend) + CLI (Miki-cli) binaries
+ *   2. Go compatibility stub (ui/legacy-go-compat) + CLI (Miki-cli) binaries
  *   3. React frontend (Vite via pnpm)
  *   4. Runtime package assembly (prepare-runtime-package.mjs)
  */
@@ -48,6 +48,8 @@ function npmCommand() {
 
 // ── Step 1: TypeScript compilation ─────────────────────────────────────────────
 function buildTypeScript() {
+  log("Building vendored llama.cpp from source before Agent TypeScript packages...");
+  run(process.execPath, [path.join(root, "scripts", "build-llama.mjs")], { cwd: root });
   log("Building TypeScript packages (tsc -b)...");
   run("npx", ["tsc", "-b", "--force"], { cwd: root });
   log("TypeScript build complete");
@@ -55,7 +57,7 @@ function buildTypeScript() {
 
 // ── Step 2: Go binaries ────────────────────────────────────────────────────────
 function buildGoBackend() {
-  const backendDir = path.join(root, "packages", "ui", "backend");
+  const backendDir = path.join(root, "packages", "ui", "legacy-go-compat");
   const outDir = path.join(backendDir, "dist", "bin");
   const exe = process.platform === "win32" ? "Miki-web.exe" : "Miki-web";
 

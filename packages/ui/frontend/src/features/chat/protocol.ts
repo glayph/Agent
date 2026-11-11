@@ -198,7 +198,7 @@ export function handlemikiMessage(
       const messageId = (payload.message_id as string) || `miki-${Date.now()}`
       const { content, kind, toolCalls } =
         parseAssistantMessageCreateState(payload)
-      if (isChatLogMessage({ role: payload.role, kind, content })) {
+      if (isChatLogMessage({ role: payload.role, kind, content, context_id: payload.context_id })) {
         updateChatStore((prev) => ({
           messages: prev.messages.filter(
             (candidate) => candidate.id !== messageId,

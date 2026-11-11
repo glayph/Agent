@@ -38,10 +38,21 @@ function compile() {
   fs.rmSync(buildDir, { recursive: true, force: true });
   fs.mkdirSync(buildDir, { recursive: true });
   fs.writeFileSync(path.join(buildDir, "package.json"), '{"type":"module"}');
-  for (const name of ["outbox", "recovery-manager", "replay-sweeper", "recovery-learning", "process-safety", "channel-runtime", "notice-fallback"]) {
-    const source = fs.readFileSync(path.join(root, "packages", "gateway", "src", `${name}.ts`), "utf8");
+  const gatewayModuleDirectories = {
+    outbox: "channels",
+    "recovery-manager": "runtime",
+    "replay-sweeper": "runtime",
+    "recovery-learning": "runtime",
+    "process-safety": "runtime",
+    "channel-runtime": "channels",
+    "notice-fallback": "monitoring",
+  };
+  for (const [name, directory] of Object.entries(gatewayModuleDirectories)) {
+    const source = fs.readFileSync(path.join(root, "packages", "gateway", "src", directory, `${name}.ts`), "utf8");
     const out = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, esModuleInterop: true } });
-    fs.writeFileSync(path.join(buildDir, `${name}.js`), out.outputText);
+    const outputPath = path.join(buildDir, directory, `${name}.js`);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, out.outputText);
   }
 }
 
@@ -51,11 +62,11 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import readline from "node:readline";
-import { ChannelRuntimeManager } from "./channel-runtime.js";
-import { ChannelDeliveryStore } from "./outbox.js";
-import { RecoveryManager } from "./recovery-manager.js";
-import { ReplaySweeper } from "./replay-sweeper.js";
-import { beginBoot, markCleanExit } from "./process-safety.js";
+import { ChannelRuntimeManager } from "./channels/channel-runtime.js";
+import { ChannelDeliveryStore } from "./channels/outbox.js";
+import { RecoveryManager } from "./runtime/recovery-manager.js";
+import { ReplaySweeper } from "./runtime/replay-sweeper.js";
+import { beginBoot, markCleanExit } from "./runtime/process-safety.js";
 
 const { DB, FLAGS, TG_PORT } = process.env;
 const flag = (name) => fs.existsSync(path.join(FLAGS, name));
@@ -323,7 +334,7 @@ function runNode(args, label) {
   if (r.status !== 0) throw new Error(`${label} failed`);
 }
 function runJest(extra, label) {
-  const r = childProcess.spawnSync(process.execPath, ["--experimental-vm-modules", path.join(root, "node_modules", "jest", "bin", "jest.js"), "--config=jest.config.cjs", "--runInBand", "--runTestsByPath", "packages/gateway/src/channel-runtime.test.ts", ...extra], { cwd: root, stdio: "inherit" });
+  const r = childProcess.spawnSync(process.execPath, ["--experimental-vm-modules", path.join(root, "node_modules", "jest", "bin", "jest.js"), "--config=jest.config.cjs", "--runInBand", "--runTestsByPath", "packages/gateway/src/channels/channel-runtime.test.ts", ...extra], { cwd: root, stdio: "inherit" });
   if (r.status !== 0) throw new Error(`${label} failed`);
 }
 

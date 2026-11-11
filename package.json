@@ -3,7 +3,7 @@
   "version": "1.3.14",
   "private": true,
   "type": "module",
-  "description": "Miki — local-first autonomous AI agent",
+  "description": "Miki \u2014 local-first autonomous AI agent",
   "workspaces": [
     "packages/*",
     "packages/ui/frontend"
@@ -15,7 +15,7 @@
     "build:llama": "node scripts/build-llama.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "build:go-backend": "node scripts/build-go-backend.mjs",
-    "build:all": "npm run test:native && npm run clean --workspaces --if-present && npm run build:llama && npm run build --workspace=@miki/config && npm run build --workspace=@miki/installer && npm run build --workspace=@miki/skills && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend && npm run build:cli && npm run test:skills",
+    "build:all": "npm run test:architecture-layout && npm run test:native && npm run clean --workspaces --if-present && npm run build --workspace=@miki/config && npm run build --workspace=@miki/memory && npm run build --workspace=@miki/core && npm run build --workspace=@miki/gateway && npm run build:frontend && npm run build:cli && npm run test:skills",
     "build:frontend": "npm --prefix packages/ui/frontend run build",
     "build:release:offline": "node scripts/build-offline-release.mjs",
     "build:release:linux": "node scripts/build-offline-release.mjs",
@@ -39,7 +39,7 @@
     "runtime:24-7": "node scripts/miki-24-7.mjs",
     "runtime:24-7:check": "node scripts/miki-24-7.mjs --check",
     "test:supervisor": "node scripts/miki-24-7.integration.test.mjs",
-    "test:gateway": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.config.cjs --runInBand --runTestsByPath packages/gateway/src/memory-index.test.ts packages/gateway/src/chat-attachments.test.ts packages/gateway/src/chat-send-file-tool.test.ts packages/gateway/src/chat-media-route.test.ts packages/gateway/src/chat-media-delivery.test.ts packages/gateway/src/async-route.test.ts packages/gateway/src/error-middleware.test.ts packages/gateway/src/provider-error.test.ts packages/gateway/src/model-resolution.test.ts packages/gateway/src/secret-scan-rules.test.ts packages/gateway/src/process-manager.test.ts packages/gateway/src/stream-hub.test.ts packages/gateway/src/chat-turn-runner.test.ts packages/gateway/src/chat-tool-trace.test.ts packages/gateway/src/session-lane.test.ts packages/gateway/src/local-runtime-gate.test.ts packages/gateway/src/channel-runtime.test.ts packages/gateway/src/answer-feedback.test.ts packages/gateway/src/learned-behavior.test.ts packages/gateway/src/zip-archive.test.ts packages/gateway/src/ws-origin.test.ts packages/gateway/src/local-request.test.ts packages/gateway/src/ignored-config.test.ts packages/gateway/src/notice-fallback.test.ts packages/gateway/src/webhook-ingress.test.ts packages/gateway/src/outbox.test.ts packages/gateway/src/health.test.ts packages/gateway/src/replay-recovery.test.ts packages/gateway/src/recovery-learning.test.ts packages/gateway/src/process-safety.test.ts packages/gateway/src/channel-probe.test.ts packages/gateway/src/tool-call-wire.test.ts packages/gateway/src/run-resource-lock.test.ts && vitest run --root . packages/gateway/src/model-retry.test.ts packages/gateway/src/session-cookie.test.ts packages/gateway/src/agent-runtime-stream-retry.test.ts packages/gateway/src/global-resource-arbiter.test.ts packages/gateway/src/run-artifact-collector.test.ts",
+    "test:gateway": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.config.cjs --runInBand --runTestsByPath packages/gateway/src/memory/memory-index.test.ts packages/gateway/src/chat/chat-attachments.test.ts packages/gateway/src/chat/chat-send-file-tool.test.ts packages/gateway/src/chat/chat-media-route.test.ts packages/gateway/src/chat/chat-media-delivery.test.ts packages/gateway/src/runtime/async-route.test.ts packages/gateway/src/security/error-middleware.test.ts packages/gateway/src/providers/provider-error.test.ts packages/gateway/src/providers/provider-gateway.test.ts packages/gateway/src/providers/model-resolution.test.ts packages/gateway/src/security/secret-scan-rules.test.ts packages/gateway/src/runtime/process-manager.test.ts packages/gateway/src/chat/stream-hub.test.ts packages/gateway/src/chat/chat-turn-runner.test.ts packages/gateway/src/chat/chat-tool-trace.test.ts packages/gateway/src/channels/session-lane.test.ts packages/gateway/src/runtime/local-runtime-gate.test.ts packages/gateway/src/channels/channel-runtime.test.ts packages/gateway/src/agent/answer-feedback.test.ts packages/gateway/src/agent/learned-behavior.test.ts packages/gateway/src/files/zip-archive.test.ts packages/gateway/src/security/ws-origin.test.ts packages/gateway/src/security/local-request.test.ts packages/gateway/src/config/ignored-config.test.ts packages/gateway/src/monitoring/notice-fallback.test.ts packages/gateway/src/channels/webhook-ingress.test.ts packages/gateway/src/channels/outbox.test.ts packages/gateway/src/monitoring/health.test.ts packages/gateway/src/runtime/replay-recovery.test.ts packages/gateway/src/runtime/recovery-learning.test.ts packages/gateway/src/runtime/process-safety.test.ts packages/gateway/src/channels/channel-probe.test.ts packages/gateway/src/plugins/tools/tool-call-wire.test.ts packages/gateway/src/runtime/run-resource-lock.test.ts && vitest run --root . packages/gateway/src/providers/model-retry.test.ts packages/gateway/src/security/session-cookie.test.ts packages/gateway/src/agent/agent-runtime-stream-retry.test.ts packages/gateway/src/runtime/global-resource-arbiter.test.ts packages/gateway/src/runtime/run-artifact-collector.test.ts",
     "soak": "node scripts/soak-agent.mjs",
     "test": "npm run test --workspaces --if-present",
     "verify": "node scripts/run-verify.mjs",
@@ -48,14 +48,15 @@
     "platform:qualify": "node scripts/platform-qualification.mjs",
     "benchmark:score": "node scripts/benchmark-score-gate.mjs --write",
     "clean": "npm run clean --workspaces --if-present",
-    "test:agent-core": "npm run test --workspace=@miki/core -- src/engine src/llm/provider",
+    "test:agent-core": "npm run test --workspace=@miki/core -- src/engine src/plugins/providers",
     "smoke:agent-core": "node scripts/smoke-agent-core.mjs",
     "test:files": "npm run test --workspace=@miki/core -- src/engine/file src/api/file-manager",
     "test:live-e2e": "node scripts/live-e2e.mjs",
     "test:e2e:local": "node scripts/live-e2e.mjs --autostart",
     "stress:resources": "node scripts/stress-global-resources.mjs",
     "soak:24h": "node scripts/soak-agent.mjs --duration-hours 24",
-    "self-improvement": "node scripts/self-improvement-pipeline.mjs"
+    "self-improvement": "node scripts/self-improvement-pipeline.mjs",
+    "test:architecture-layout": "node scripts/architecture-layout-contract.test.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

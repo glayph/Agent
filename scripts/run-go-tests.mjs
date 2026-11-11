@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 
 const modules = [
   "packages/Miki-cli",
-  "packages/ui/backend",
+  "packages/ui/legacy-go-compat",
 ];
 
 for (const relative of modules) {

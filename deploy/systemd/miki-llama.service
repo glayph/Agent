@@ -11,8 +11,8 @@ Group=@MIKI_GROUP@
 WorkingDirectory=@MIKI_ROOT@
 EnvironmentFile=-/etc/miki/miki.env
 # Model, binary and sizing come from /etc/miki/miki.env (MIKI_LLAMA_*); nothing model-specific is hardcoded here.
-ExecStart=/bin/sh -c 'exec "${MIKI_LLAMA_SERVER_BIN:-@MIKI_ROOT@/packages/core/dist/llm/local/native/linux-x64/llama-server}" --host 127.0.0.1 --port "${MIKI_LLAMA_PORT:-39200}" --no-ui --model "$MIKI_LLAMA_MODEL_PATH" --alias local-model --ctx-size "${MIKI_LLAMA_CONTEXT_SIZE:-16384}" --threads "${MIKI_LLAMA_THREADS:-4}"'
-ExecStartPre=/bin/sh -c 'test -x "${MIKI_LLAMA_SERVER_BIN:-@MIKI_ROOT@/packages/core/dist/llm/local/native/linux-x64/llama-server}" && test -n "$MIKI_LLAMA_MODEL_PATH" && test -f "$MIKI_LLAMA_MODEL_PATH"'
+ExecStart=/bin/sh -c 'exec "${MIKI_LLAMA_SERVER_BIN:-@MIKI_ROOT@/packages/core/dist/plugins/providers/builtin/llama.cpp/native/linux-x64/llama-server}" --host 127.0.0.1 --port "${MIKI_LLAMA_PORT:-39200}" --no-ui --model "$MIKI_LLAMA_MODEL_PATH" --alias local-model --ctx-size "${MIKI_LLAMA_CONTEXT_SIZE:-16384}" --threads "${MIKI_LLAMA_THREADS:-4}"'
+ExecStartPre=/bin/sh -c 'test -x "${MIKI_LLAMA_SERVER_BIN:-@MIKI_ROOT@/packages/core/dist/plugins/providers/builtin/llama.cpp/native/linux-x64/llama-server}" && test -n "$MIKI_LLAMA_MODEL_PATH" && test -f "$MIKI_LLAMA_MODEL_PATH"'
 Restart=always
 RestartSec=5s
 TimeoutStartSec=90s

@@ -4,12 +4,12 @@ export const SRC = process.env.MIKI_SRC || fileURLToPath(new URL('../../', impor
 const P = (p) => `file://${SRC}/${p}`
 const { AgentEngine } = await import(P('packages/core/src/engine/agent-engine.ts'))
 const { ToolRegistry } = await import(P('packages/core/src/engine/tool-registry.ts'))
-const { createFetchLLMClient } = await import(P('packages/core/src/engine/llm-client.ts'))
+const { createFetchLLMClient } = await import(P('packages/core/src/plugins/providers/llm-client.ts'))
 const { createWorkspaceTools, createMemoryTools } = await import(P('packages/core/src/engine/builtin-tools.ts'))
 const { createFileManagementTools } = await import(P('packages/core/src/engine/file-tools.ts'))
 const { GoalStore, createGoalTools } = await import(P('packages/core/src/api/goals-router.ts'))
 const sup = await import(P('packages/core/src/autonomy/autonomous-supervisor.ts'))
-const mr = await import(P('packages/gateway/src/model-resolution.ts'))
+const mr = await import(P('packages/gateway/src/providers/model-resolution.ts'))
 export const { AutonomousSupervisor, classifyFailure } = sup
 export const { resolveModel, describeResolution } = mr
 export { GoalStore }

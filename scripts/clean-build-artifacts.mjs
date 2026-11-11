@@ -11,10 +11,8 @@ const targets = [
   "packages/config/dist",
   "packages/core/dist",
   "packages/gateway/dist",
-  "packages/installer/dist",
-  "packages/skills/dist",
   "packages/ui/frontend/dist",
-  "packages/ui/backend/dist",
+  "packages/ui/legacy-go-compat/dist",
   "packages/Miki-cli/dist",
   "packages/ui/frontend/node_modules/node_modules",
 ];

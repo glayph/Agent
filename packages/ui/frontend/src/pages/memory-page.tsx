@@ -16,6 +16,7 @@ import {
   type MemoryItem,
   type MemorySearchResult,
   type MemoryStats,
+  type MemoryFileRecord,
   approveMemoryProcedure,
   confirmMemoryPreference,
   forgetGovernedMemory,
@@ -25,6 +26,7 @@ import {
   listGovernedMemory,
   listMemoryProcedures,
   listMemoryChunks,
+  listMemoryFiles,
   reindexMemory,
   searchMemory,
 } from "@/api/memory"
@@ -45,6 +47,7 @@ const REGIONS = [
   "static",
   "skill",
   "rule_emotion",
+  "temporary",
 ]
 
 function scoreLabel(value: number) {
@@ -85,31 +88,32 @@ function MemoryItemRow({
   onInspect: (id: string) => void
 }) {
   const { t } = useTranslation()
-  return (
-    <button
-      type="button"
-      onClick={() => onInspect(item.id)}
-      className="border-border hover:bg-muted/50 w-full rounded-lg border p-3 text-left transition-colors"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{item.region}</Badge>
-            <Badge variant="outline">{item.provenance}</Badge>
-            <span className="text-muted-foreground text-xs">
-              depth {item.depth}
-            </span>
-          </div>
-          <p className="text-sm leading-6">{item.text}</p>
+  const canInspect = !item.id.startsWith("file:") && !item.id.startsWith("governed:") && !item.id.startsWith("cognitive:")
+  const content = (
+    <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">{item.region}</Badge>
+          <Badge variant="outline">{item.provenance}</Badge>
+          <Badge variant="outline">{item.sourceType || "memory"}</Badge>
+          <span className="text-muted-foreground text-xs">depth {item.depth}</span>
         </div>
-        <div className="text-muted-foreground shrink-0 text-right text-xs">
-          <div className="text-foreground font-semibold">
-            {scoreLabel(item.score)}
-          </div>
-          <div>{t("pages.memory.score", { defaultValue: "score" })}</div>
-        </div>
+        <p className="break-words whitespace-pre-wrap text-sm leading-6">{item.text}</p>
       </div>
+      <div className="text-muted-foreground shrink-0 text-right text-xs">
+        <div className="text-foreground font-semibold">{scoreLabel(item.score)}</div>
+        <div>{t("pages.memory.score", { defaultValue: "score" })}</div>
+      </div>
+    </div>
+  )
+  return canInspect ? (
+    <button type="button" onClick={() => onInspect(item.id)} className="border-border hover:bg-muted/50 w-full min-w-0 rounded-lg border p-3 text-left transition-colors">
+      {content}
     </button>
+  ) : (
+    <div className="border-border w-full min-w-0 rounded-lg border p-3 text-left">
+      {content}
+    </div>
   )
 }
 
@@ -118,7 +122,9 @@ export function MemoryPage() {
   const [stats, setStats] = useState<MemoryStats | null>(null)
   const [chunks, setChunks] = useState<MemoryChunk[]>([])
   const [reviewPreferences, setReviewPreferences] = useState<GovernedMemoryRecord[]>([])
+  const [activeGovernedRecords, setActiveGovernedRecords] = useState<GovernedMemoryRecord[]>([])
   const [procedureCandidates, setProcedureCandidates] = useState<GovernedMemoryRecord[]>([])
+  const [memoryFiles, setMemoryFiles] = useState<MemoryFileRecord[]>([])
   const [governanceError, setGovernanceError] = useState<string | null>(null)
   const [region, setRegion] = useState("all")
   const [query, setQuery] = useState("")
@@ -148,18 +154,27 @@ export function MemoryPage() {
   }, [t])
 
   const loadGovernance = useCallback(async () => {
-    setGovernanceError(null)
-    try {
-      const [preferences, procedures] = await Promise.all([
-        listGovernedMemory({ kind: "preference", status: "review", limit: 100 }),
-        listMemoryProcedures(),
-      ])
-      setReviewPreferences(preferences.records)
-      setProcedureCandidates(procedures.procedures.filter((record) => record.status === "draft" || record.status === "review"))
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unable to load governed memory."
-      setGovernanceError(message)
-    }
+    const results = await Promise.allSettled([
+      listGovernedMemory({ kind: "preference", status: "review", limit: 100 }),
+      listGovernedMemory({ status: "active", limit: 100 }),
+      listMemoryProcedures(),
+      listMemoryFiles(),
+    ])
+    const [preferences, active, procedures, files] = results
+    const errors: string[] = []
+    if (preferences.status === "fulfilled") setReviewPreferences(preferences.value.records)
+    else errors.push(preferences.reason instanceof Error ? preferences.reason.message : "Preference review is unavailable.")
+    if (active.status === "fulfilled") {
+      setActiveGovernedRecords(active.value.records.filter((record) =>
+        record.kind !== "procedure" && (record.provenance === "owner" || record.provenance === "agent"),
+      ))
+    } else errors.push(active.reason instanceof Error ? active.reason.message : "Active governed memories are unavailable.")
+    if (procedures.status === "fulfilled") {
+      setProcedureCandidates(procedures.value.procedures.filter((record) => record.status === "draft" || record.status === "review"))
+    } else errors.push(procedures.reason instanceof Error ? procedures.reason.message : "Workflow candidates are unavailable.")
+    if (files.status === "fulfilled") setMemoryFiles(files.value.files)
+    else errors.push(files.reason instanceof Error ? files.reason.message : "Markdown memory archive is unavailable.")
+    setGovernanceError(errors.length ? errors.join(" ") : null)
   }, [])
 
   const resolvePreference = async (record: GovernedMemoryRecord) => {
@@ -355,7 +370,8 @@ export function MemoryPage() {
         </Button>
       </PageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" data-miki-page-body="true">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6" data-miki-page-body="true">
+        <div className="mx-auto flex w-full max-w-screen-2xl min-w-0 flex-col gap-5">
         {statsError && stats && (
           <div
             role="status"
@@ -382,7 +398,7 @@ export function MemoryPage() {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col gap-5">
+          <div className="flex min-w-0 flex-col gap-5">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <Metric
                 label={t("pages.memory.metrics.chunks", { defaultValue: "Chunks" })}
@@ -407,10 +423,37 @@ export function MemoryPage() {
             </div>
 
             <SectionPanel
+              title="Active governed memories"
+              description="Owner-approved preferences and verified agent records currently available to memory retrieval."
+            >
+              {governanceError && <div role="alert" className="mb-3 break-words rounded-md border border-destructive/30 p-3 text-sm">{governanceError}</div>}
+              {activeGovernedRecords.length ? (
+                <div className="grid min-w-0 gap-2 lg:grid-cols-2">
+                  {activeGovernedRecords.map((record) => (
+                    <div key={record.id} className="min-w-0 rounded-lg border p-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">{record.kind.replaceAll("_", " ")}</Badge>
+                        <Badge variant="outline">{record.provenance}</Badge>
+                        <span className="text-muted-foreground text-xs">{formatDateTime(record.updatedAt)}</span>
+                      </div>
+                      <p className="break-words whitespace-pre-wrap text-sm leading-6">{record.content}</p>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-muted-foreground text-xs">{t("pages.memory.confidence", { defaultValue: "Confidence" })} {scoreLabel(record.confidence)}</span>
+                        <Button size="sm" variant="ghost" onClick={() => void forgetGovernedRecord(record)} disabled={busy !== null}>
+                          <IconTrash data-icon="inline-start" /> Forget
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-muted-foreground text-sm">No active governed records.</p>}
+            </SectionPanel>
+
+            <SectionPanel
               title="Governed memory review"
               description="Review contradictory owner preferences and approve reusable workflow candidates. Draft procedures are never executed automatically."
             >
-              {governanceError && <div role="alert" className="rounded-md border border-destructive/30 p-3 text-sm">{governanceError}</div>}
+              {governanceError && <div role="alert" className="break-words rounded-md border border-destructive/30 p-3 text-sm">{governanceError}</div>}
               <div className="space-y-3">
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -423,7 +466,7 @@ export function MemoryPage() {
                         <Badge variant="secondary">{record.provenance}</Badge>
                         <span className="text-muted-foreground text-xs">{formatDateTime(record.updatedAt)}</span>
                       </div>
-                      <p className="text-sm leading-6">{record.content}</p>
+                      <p className="break-words whitespace-pre-wrap text-sm leading-6">{record.content}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button size="sm" onClick={() => void resolvePreference(record)} disabled={busy !== null}>
                           <IconCheck data-icon="inline-start" /> Use this preference
@@ -448,7 +491,7 @@ export function MemoryPage() {
                           <Badge variant="secondary">{record.metadata.platform ? String(record.metadata.platform) : "unknown platform"}</Badge>
                           <span className="text-muted-foreground text-xs">{record.evidenceIds.length} evidence run(s)</span>
                         </div>
-                        <p className="text-sm font-medium">{record.content}</p>
+                        <p className="break-words whitespace-pre-wrap text-sm font-medium">{record.content}</p>
                         {steps.length > 0 && <ol className="text-muted-foreground mt-2 list-decimal space-y-1 pl-5 text-xs">{steps.map((step, index) => <li key={`${record.id}:${index}`}>{String(step.tool || "tool")} — {String(step.status || "unknown")}</li>)}</ol>}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button size="sm" onClick={() => void approveProcedure(record)} disabled={busy !== null}>
@@ -463,6 +506,25 @@ export function MemoryPage() {
                   }) : <p className="text-muted-foreground text-sm">No workflow candidates awaiting approval.</p>}
                 </div>
               </div>
+            </SectionPanel>
+
+            <SectionPanel
+              title="Markdown memory archive"
+              description="The readable memory files used by Miki, including USER.md, MEMORY.md and dated notes."
+            >
+              {memoryFiles.length ? (
+                <div className="space-y-2">
+                  {memoryFiles.map((file) => (
+                    <details key={file.path} className="min-w-0 rounded-lg border p-3">
+                      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-sm font-medium">
+                        <span className="min-w-0 break-all">{file.path}</span>
+                        <span className="text-muted-foreground text-xs font-normal">{formatDateTime(file.updatedAt)} · {Math.ceil(file.size / 1024)} KB</span>
+                      </summary>
+                      <pre className="bg-muted/60 mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md p-3 text-xs leading-5">{file.content || "(empty memory file)"}{file.truncated ? "\n…[preview truncated]" : ""}</pre>
+                    </details>
+                  ))}
+                </div>
+              ) : <p className="text-muted-foreground text-sm">No Markdown memory files are available.</p>}
             </SectionPanel>
 
             <SectionPanel
@@ -584,8 +646,8 @@ export function MemoryPage() {
                         aria-pressed={selected?.id === chunk.id}
                         className="border-border hover:bg-muted/50 focus-visible:ring-ring/60 w-full rounded-lg border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none aria-pressed:border-primary/60 aria-pressed:bg-primary/5"
                       >
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
+                        <div className="mb-1 flex min-w-0 flex-wrap items-center justify-between gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <Badge variant="secondary">{chunk.region}</Badge>
                             <Badge variant="outline">{chunk.provenance}</Badge>
                           </div>
@@ -593,7 +655,7 @@ export function MemoryPage() {
                             {formatDateTime(chunk.updated_at)}
                           </span>
                         </div>
-                        <p className="line-clamp-2 text-sm">
+                        <p className="line-clamp-3 break-words whitespace-pre-wrap text-sm">
                           {chunk.summary || chunk.content}
                         </p>
                         <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs">
@@ -638,7 +700,7 @@ export function MemoryPage() {
               >
                 {selected ? (
                   <div className="space-y-4">
-                    <div className="rounded-lg border p-3 text-sm leading-6">
+                    <div className="max-w-full overflow-x-auto rounded-lg border p-3 text-sm leading-6 break-words whitespace-pre-wrap">
                       {selected.content}
                     </div>
                     <div className="text-muted-foreground grid grid-cols-2 gap-2 text-xs">
@@ -667,7 +729,7 @@ export function MemoryPage() {
                         </strong>
                       </div>
                     </div>
-                    <div className="text-muted-foreground text-xs">
+                    <div className="text-muted-foreground break-words text-xs">
                       {t("pages.memory.created", { defaultValue: "Created" })}{" "}
                       {formatDateTime(selected.created_at)}
                     </div>
@@ -698,6 +760,7 @@ export function MemoryPage() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   )

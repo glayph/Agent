@@ -1,12 +1,12 @@
-import type { ProviderTransportConfig } from "../../../llm/provider/transport.js";
-import { providerClient } from "../../../llm/provider/transport.js";
-import { openAICompatibleAdapter } from "../../../llm/provider/openai-compatible-adapter.js";
+import type { ProviderTransportConfig } from "../transport.js";
+import { providerClient } from "../transport.js";
+import { openAICompatibleAdapter } from "../openai-compatible-adapter.js";
 import type {
   MikiProviderContext,
   MikiProviderModel,
   MikiProviderPlugin,
   ProviderConnectionResult,
-} from "../../../llm/provider/sdk/index.js";
+} from "../sdk/index.js";
 
 export interface OpenAICompatibleProviderDefinition {
   id: string;

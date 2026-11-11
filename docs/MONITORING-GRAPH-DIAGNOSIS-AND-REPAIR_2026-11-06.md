@@ -13,7 +13,7 @@ This was a live-graph gap. The history hydration path already had a run-root fal
 
 ### P1 — Tool completion order was being treated as a dependency
 
-`packages/gateway/src/agent-runtime.ts` appended `lastCompletedMonitorToolByRun` to the next tool's `parent_node_ids`. Completion order does not prove dependency: independent plan steps, retries and interleaved/parallel tool calls can complete in an order unrelated to their actual prerequisites. This could draw false tool-to-tool edges and make the graph misleading.
+`packages/gateway/src/agent/agent-runtime.ts` appended `lastCompletedMonitorToolByRun` to the next tool's `parent_node_ids`. Completion order does not prove dependency: independent plan steps, retries and interleaved/parallel tool calls can complete in an order unrelated to their actual prerequisites. This could draw false tool-to-tool edges and make the graph misleading.
 
 ### P2 — A full build and browser-level reproduction are not available in this environment
 
@@ -49,7 +49,7 @@ The uploaded source contains no installed dependencies. The current environment 
 
 - `packages/ui/frontend/src/features/monitor/protocol.ts`
 - `packages/ui/frontend/src/features/monitor/protocol.test.ts`
-- `packages/gateway/src/agent-runtime.ts`
+- `packages/gateway/src/agent/agent-runtime.ts`
 - `docs/MONITORING-GRAPH-DIAGNOSIS-AND-REPAIR_2026-11-06.md`
 
 No existing Monitoring page feature was removed. Only an unverified completion-order relationship heuristic was removed; the actual planner dependency and run-root relationships remain.

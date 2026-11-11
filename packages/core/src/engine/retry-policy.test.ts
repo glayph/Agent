@@ -23,3 +23,20 @@ describe("transient retry policy", () => {
     expect(TRANSIENT_RETRY_MAX_DELAY_MS).toBe(12_000);
   });
 });
+
+import { NEVER_STOP_RETRY_DELAY_MS, neverStopRetryOptions } from "./retry-policy.js";
+
+describe("neverStopRetryOptions", () => {
+  it("retries forever at one fixed 3 second delay with no jitter", () => {
+    const options = neverStopRetryOptions();
+    expect(NEVER_STOP_RETRY_DELAY_MS).toBe(3_000);
+    expect(options).toMatchObject({ maxRetries: 0, jitter: false, retryPermanentFailures: true });
+    const delays = new Set(Array.from({ length: 500 }, (_, index) => calculateTransientRetryDelayMs(index + 1, options)));
+    expect([...delays]).toEqual([3_000]);
+  });
+
+  it("accepts an explicit delay and never goes below a safe floor", () => {
+    expect(neverStopRetryOptions(7_000).continueRetryingEveryMs).toBe(7_000);
+    expect(neverStopRetryOptions(1).continueRetryingEveryMs).toBe(250);
+  });
+});

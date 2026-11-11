@@ -14,13 +14,31 @@ describe("fallbackPlan", () => {
 
 describe("parsePlanJson", () => {
   const known = new Set(["file_read"]);
-  it("parses fenced JSON, drops unknown tools and caps the step count", () => {
+  it("parses fenced JSON and caps the step count", () => {
     const steps = parsePlanJson(
-      'Sure!\n```json\n{"steps":[{"title":"Read","tool":"file_read"},{"title":"Think","tool":"made_up"},"Summarize"]}\n```',
+      'Sure!\n```json\n{"steps":[{"title":"Read","tool":"file_read"},{"title":"Think"},"Summarize"]}\n```',
       known,
       2,
     );
     expect(steps).toEqual([{ title: "Read", tool: "file_read" }, { title: "Think" }]);
+  });
+  it("rejects unknown tools rather than silently converting them to thought-only steps", () => {
+    expect(parsePlanJson('{"steps":[{"title":"Act","tool":"made_up"}]}', known)).toBeNull();
+  });
+  it("rejects invalid, forward, self and duplicate dependencies", () => {
+    for (const depends_on of [[1], [2], [0], [1, 1], ["1"]]) {
+      expect(parsePlanJson(JSON.stringify({ steps: [{ title: "First" }, { title: "Second", depends_on }] }), known)).toBeNull();
+    }
+  });
+  it("preserves valid dependency metadata", () => {
+    const steps = parsePlanJson(JSON.stringify({ steps: [
+      { title: "Read", tool: "file_read", depends_on: [] },
+      { title: "Summarize", depends_on: [1] },
+    ] }), known);
+    expect(steps).toEqual([
+      { title: "Read", tool: "file_read", dependsOn: [] },
+      { title: "Summarize", dependsOn: [1] },
+    ]);
   });
   it("does not impose a default plan-step ceiling", () => {
     const rawSteps = Array.from({ length: 30 }, (_, index) => ({ title: `Step ${index + 1}` }));
@@ -31,6 +49,7 @@ describe("parsePlanJson", () => {
     expect(parsePlanJson("no json here", known)).toBeNull();
     expect(parsePlanJson('{"steps": "nope"}', known)).toBeNull();
     expect(parsePlanJson('{"steps": []}', known)).toBeNull();
+    expect(parsePlanJson('{"steps":[{"title":""}]}', known)).toBeNull();
   });
 });
 

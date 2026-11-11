@@ -17,7 +17,7 @@ export interface RuntimePaths {
    * that word is already taken in this codebase by workspaceDir/
    * MIKI_WORKSPACE_DIR (the install root) and by the separate
    * workspace-folders feature (user-managed project folders). See
-   * packages/gateway/src/identity-prompt.ts.
+   * packages/gateway/src/agent/identity-prompt.ts.
    */
   identityDir: string;
   sourceDir?: string;
@@ -84,7 +84,7 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
       configDir: path.join(sourceDir, "config"),
       dataDir,
       // User/agent-created skills stay under data/, never under source src/skills
-      // or a repo-root skills/ tree. Bundled catalog is packages/skills/src only.
+      // or a repo-root skills/ tree. Bundled catalog is packages/core/src/plugins/skills/catalog only.
       skillsDir: path.join(dataDir, "skills"),
       cacheDir: path.join(dataDir, "cache"),
       binDir: path.join(sourceDir, "bin"),
@@ -126,7 +126,7 @@ export function normalizeRuntimePaths(paths?: RuntimePathsInput): RuntimePaths {
  * With security.sandbox_mode: true in agent.yaml (the default), this is
  * always <dataDir>/downloaded-skills — a location fully isolated from the
  * agent's own source/workspace tree and from the bundled skill catalog
- * (packages/skills/src), even when RuntimePaths was constructed from a raw
+ * (packages/core/src/plugins/skills/catalog), even when RuntimePaths was constructed from a raw
  * workspace path (dev mode). User skillsDir is always under dataDir/skills
  * (or MIKI_RUNTIME_ROOT/skills), never under the source tree.
  *

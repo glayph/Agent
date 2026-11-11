@@ -5,11 +5,11 @@ import path from 'node:path';
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 const supervisor = fs.readFileSync(`${root}/packages/core/src/autonomy/autonomous-supervisor.ts`, 'utf8');
 const gw = fs.readFileSync(`${root}/packages/gateway/src/index.ts`, 'utf8');
-const runtime = fs.readFileSync(`${root}/packages/gateway/src/agent-runtime.ts`, 'utf8');
+const runtime = fs.readFileSync(`${root}/packages/gateway/src/agent/agent-runtime.ts`, 'utf8');
 // The chat turn lives in its own module (the websocket handler is only an adapter), so the
 // gateway-wide checks below cover every gateway chat source, not just index.ts.
-const chatTurnRunner = fs.readFileSync(`${root}/packages/gateway/src/chat-turn-runner.ts`, 'utf8');
-const streamHub = fs.readFileSync(`${root}/packages/gateway/src/stream-hub.ts`, 'utf8');
+const chatTurnRunner = fs.readFileSync(`${root}/packages/gateway/src/chat/chat-turn-runner.ts`, 'utf8');
+const streamHub = fs.readFileSync(`${root}/packages/gateway/src/chat/stream-hub.ts`, 'utf8');
 const gwChat = [gw, chatTurnRunner, streamHub].join('\n');
 const config = fs.readFileSync(`${root}/config/agent.yaml`, 'utf8');
 

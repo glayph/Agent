@@ -6,4 +6,4 @@
  * side effects; it exists to satisfy the package's declared main/export path.
  */
 export {};
-export * from "../messaging-adaptive.js";
+export * from "../messaging/messaging-adaptive.js";

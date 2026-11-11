@@ -52,6 +52,28 @@ describe("provider failure taxonomy", () => {
     expect(result.failureKind).toBe("model_not_found");
   });
 
+  it("treats the structured local_model_unavailable category as transient", async () => {
+    let calls = 0
+    const events: EngineEvent[] = []
+    const client: EngineLLMClient = {
+      model: "llama.cpp/local-model",
+      async complete() {
+        calls += 1
+        if (calls === 1) throw Object.assign(new Error("Local llama.cpp server is unavailable."), {
+          name: "ProviderRequestError",
+          category: "local_model_unavailable",
+        })
+        return reply("local model recovered") as never
+      },
+    }
+    const engine = new AgentEngine({ llm: client, tools: new ToolRegistry() })
+    const result = await engine.run({ history: user("retry the local model"), retryTransient: fast, onEvent: (event) => events.push(event) })
+    expect(result.status).toBe("completed")
+    expect(result.finalText).toBe("local model recovered")
+    expect(calls).toBe(2)
+    expect(events.some((event) => event.type === "model.retrying")).toBe(true)
+  })
+
   it("preserves rate-limit, provider-5xx, and network categories after bounded retries", async () => {
     const cases: Array<{ error: Error; expected: string }> = [
       { error: Object.assign(new Error("Provider rate limit exceeded."), { name: "LLMRateLimitError", status: 429 }), expected: "rate_limit" },
@@ -612,5 +634,80 @@ describe("model failover versus waiting for the primary model", () => {
     // Turn 1 and turn 2 each started on the primary model and each failed over once.
     expect(primary.calls()).toBe(2);
     expect(events.filter((event) => event.type === "model.fallback")).toHaveLength(2);
+  });
+});
+
+describe("retryPermanentFailures (always-on callers wait out key/quota blocks)", () => {
+  const neverStop = { baseDelayMs: 5, maxDelayMs: 5, maxRetries: 0, continueRetryingEveryMs: 5, jitter: false, retryPermanentFailures: true };
+  const quotaBlock = () => Object.assign(new Error("Provider requires credits before completion."), { name: "LLMEntitlementError", retryable: false, status: 402 });
+  const keyRejected = () => Object.assign(new Error("The API key was rejected."), { name: "LLMMissingCredentialError", retryable: false, status: 401 });
+
+  /** Fails with `makeError()` for the first `failures` calls, then answers. */
+  function blockedThenOk(makeError: () => Error, failures: number) {
+    let calls = 0;
+    const client: EngineLLMClient = {
+      model: "blocked-model",
+      async complete() {
+        calls += 1;
+        if (calls <= failures) throw makeError();
+        return reply("back after the block") as never;
+      },
+    };
+    return { client, calls: () => calls };
+  }
+
+  it("keeps retrying an exhausted quota / billing block at the fixed delay and resumes when it clears", async () => {
+    const llm = blockedThenOk(quotaBlock, 6);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const events: EngineEvent[] = [];
+    const result = await engine.run({ history: user("hi"), retryTransient: neverStop, onEvent: (event) => events.push(event) });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("back after the block");
+    expect(llm.calls()).toBe(7);
+    const retries = events.filter((event) => event.type === "model.retrying") as Array<{ delayMs: number; failureKind?: string }>;
+    expect(retries).toHaveLength(6);
+    expect(new Set(retries.map((event) => event.delayMs))).toEqual(new Set([5]));
+    expect(retries.every((event) => event.failureKind === "entitlement")).toBe(true);
+  });
+
+  it("keeps retrying a rejected API key (401) so a corrected key takes effect without a restart", async () => {
+    const llm = blockedThenOk(keyRejected, 3);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const events: EngineEvent[] = [];
+    const result = await engine.run({ history: user("hi"), retryTransient: neverStop, onEvent: (event) => events.push(event) });
+    expect(result.status).toBe("completed");
+    expect(llm.calls()).toBe(4);
+    expect((events.filter((event) => event.type === "model.retrying") as Array<{ failureKind?: string }>).every((event) => event.failureKind === "auth")).toBe(true);
+  });
+
+  it("does not wait forever on a request that can never succeed (HTTP 400 stays a failed run)", async () => {
+    const llm = blockedThenOk(() => Object.assign(new Error("Bad request."), { status: 400 }), 99);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const result = await engine.run({ history: user("hi"), retryTransient: neverStop });
+    expect(result.status).toBe("failed");
+    expect(result.failureKind).toBe("invalid_request");
+    expect(llm.calls()).toBe(1);
+  });
+
+  it("leaves the default unchanged: without the flag a quota block ends the run immediately", async () => {
+    const llm = blockedThenOk(quotaBlock, 99);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const result = await engine.run({ history: user("hi"), retryTransient: { ...neverStop, retryPermanentFailures: false } });
+    expect(result.status).toBe("failed");
+    expect(result.failureKind).toBe("entitlement");
+    expect(llm.calls()).toBe(1);
+  });
+
+  it("can still be cancelled while waiting out a quota block", async () => {
+    const llm = blockedThenOk(quotaBlock, 99);
+    const engine = new AgentEngine({ llm: llm.client, tools: new ToolRegistry() });
+    const controller = new AbortController();
+    const result = await engine.run({
+      history: user("hi"),
+      retryTransient: neverStop,
+      signal: controller.signal,
+      onEvent: (event) => { if (event.type === "model.retrying") controller.abort(); },
+    });
+    expect(result.status).toBe("cancelled");
   });
 });

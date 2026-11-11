@@ -29,12 +29,19 @@ class AgentMemoryIntegration {
     // be proven; the selective and cognitive graph stores below are filtered.
     const specialEvents = [];
 
+    const requestedMemoryOptions = systemState.memoryOptions && typeof systemState.memoryOptions === 'object'
+      ? systemState.memoryOptions
+      : {};
+    const bounded = (value, fallback, min, max) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.floor(number))) : fallback;
+    };
     const selectiveContext = typeof this.tkg.getSelectiveContext === 'function'
       ? this.tkg.getSelectiveContext(query, {
         scope: this._scope(systemState),
-        maxSelected: 8,
-        maxDepth: 1,
-        maxTokens: 800,
+        maxSelected: bounded(requestedMemoryOptions.maxSelected, 8, 1, 20),
+        maxDepth: bounded(requestedMemoryOptions.maxDepth, 1, 0, 3),
+        maxTokens: bounded(requestedMemoryOptions.maxTokens, 800, 100, 8_000),
         taskReference: systemState.taskId || systemState.runId || null,
       })
       : null;

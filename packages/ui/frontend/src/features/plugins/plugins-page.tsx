@@ -12,7 +12,7 @@ import {
   IconPuzzle,
 } from "@tabler/icons-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -377,7 +377,7 @@ function CatalogPage() {
           <h3 className="text-sm font-semibold">{t("pages.plugins.trustedExtensions", { defaultValue: "Trusted extensions" })}</h3>
           <p className="text-muted-foreground mt-1 text-xs">{t("pages.plugins.trustedExtensionsDescription", { defaultValue: "Packages are listed only after their archive checksum and Ed25519 signature match the locally configured trust key." })}</p>
         </div>
-        {marketplaceQuery.isLoading ? <StateMessage kind="loading" message={t("pages.plugins.loadingTrustedMarketplace", { defaultValue: "Checking trusted packages…" })} /> : marketplaceQuery.isError ? <StateMessage kind="error" message={t("pages.plugins.trustedMarketplaceUnavailable", { defaultValue: "The trusted package registry is unavailable." })} onRetry={() => { void marketplaceQuery.refetch() }} /> : (marketplaceQuery.data?.packages.length ?? 0) === 0 ? <StateMessage kind="empty" message={t("pages.plugins.noTrustedPackages", { defaultValue: "No verified packages are currently available in the trusted registry." })} /> : <div className="divide-border divide-y border-t">
+        {marketplaceQuery.isLoading ? <StateMessage kind="loading" message={t("pages.plugins.loadingTrustedMarketplace", { defaultValue: "Checking trusted packages…" })} /> : marketplaceQuery.isError ? <StateMessage kind="error" message={t("pages.plugins.trustedMarketplaceUnavailable", { defaultValue: "The trusted package registry is unavailable." })} onRetry={() => { void marketplaceQuery.refetch() }} /> : (marketplaceQuery.data?.packages.length ?? 0) === 0 ? <div className="space-y-2"><StateMessage kind="empty" message={marketplaceQuery.data?.unavailable_reason ? `${marketplaceQuery.data.unavailable_reason}: ${marketplaceQuery.data.warnings?.join(" ") || "Check the trusted plugin registry configuration."}` : marketplaceQuery.data?.warnings?.length ? marketplaceQuery.data.warnings.join(" ") : t("pages.plugins.noTrustedPackages", { defaultValue: "No verified packages are currently available in the trusted registry." })} />{marketplaceQuery.data?.unavailable_reason && <p className="text-muted-foreground text-xs">{t("pages.plugins.trustedRegistrySetupHint", { defaultValue: "Configure a signed registry.json and its trusted-public-key.pem under the config/plugins directory." })}</p>}</div> : <div className="divide-border divide-y border-t">
           {marketplaceQuery.data?.packages.map((item) => <div key={item.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">{item.manifest.displayName}</span><Badge variant="outline">v{item.manifest.version}</Badge><Badge variant="outline">{t("pages.plugins.signatureVerified", { defaultValue: "Signature verified" })}</Badge></div><p className="text-muted-foreground mt-1 text-xs">{item.id} · {item.description || item.manifest.description || ""}</p></div>
             {item.installed ? <StatusBadge status="installed" /> : <Button size="sm" disabled={installTrustedMutation.isPending} onClick={() => installTrustedMutation.mutate(item.id)}>{installTrustedMutation.isPending ? t("pages.plugins.installing", { defaultValue: "Installing…" }) : t("pages.plugins.install", { defaultValue: "Install" })}</Button>}
@@ -719,9 +719,10 @@ function HealthPage() {
 
 export function PluginsPage() {
   const { t } = useTranslation()
-  const requested = new URLSearchParams(globalThis.location.search).get("section")
-  const section: PluginPageSection =
-    requested === "installed" || requested === "core" || requested === "health" ? requested : "catalog"
+  const { section: requested } = useSearch({ from: "/plugins" })
+  const section: PluginPageSection = NAVIGATION.some((item) => item.section === requested)
+    ? requested as PluginPageSection
+    : "catalog"
   const meta = PAGE_META[section]
   return (
     <div className="flex h-full min-h-0 flex-col" data-miki-page="plugins">

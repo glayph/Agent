@@ -53,7 +53,7 @@ function DeferredCommandPalette() {
 export function AppLayout({ children }: { children: ReactNode }) {
   const [isMobileViewport, setIsMobileViewport] = useState(false)
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 639px)")
+    const media = window.matchMedia("(max-width: 767px)")
     const update = () => setIsMobileViewport(media.matches)
     update()
     media.addEventListener("change", update)
@@ -81,7 +81,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <TooltipProvider>
       <OfflineBanner />
       <SidebarProvider
-        defaultOpen={false}
+        defaultOpen={true}
         className="bg-background flex h-full min-h-0 overflow-hidden"
       >
         <a

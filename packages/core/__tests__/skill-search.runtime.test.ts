@@ -1,7 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { SkillSearchEngine } from "../src/skill-search.js";
+import { SkillSearchEngine } from "../src/plugins/skills/manager/skill-search.js";
 import { type RuntimePaths } from "../src/paths.js";
 
 function makeRuntimePaths(workspaceDir: string): RuntimePaths {

@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillRegistry } from "@miki/installer";
-import { SqliteAuditLog } from "../audit-log";
+import { SkillRegistry } from "./skills/installer/src/index.js";
+import { SqliteAuditLog } from "../observability/audit-log.ts";
 import { normalizeRuntimePaths, resolveDownloadedSkillsDir } from "../paths";
 import {
   executeRuntimePluginTool,

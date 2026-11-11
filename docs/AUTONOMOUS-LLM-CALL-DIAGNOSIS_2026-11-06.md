@@ -47,7 +47,7 @@ source-এর চেয়ে পুরোনো হলে, নতুন contract-�
 
 ### ১. Identity/system prompt-এ সঠিক lifecycle contract যোগ করা হয়েছে
 
-`packages/gateway/src/identity-prompt.ts`-এ এখন স্পষ্ট করা হয়েছে:
+`packages/gateway/src/agent/identity-prompt.ts`-এ এখন স্পষ্ট করা হয়েছে:
 
 - একটি model/API invocation শেষ হলে model নিজে আরেকটি network call শুরু করে না;
 - পরবর্তী fresh LLM request host-side `AutonomousSupervisor` schedule করে;

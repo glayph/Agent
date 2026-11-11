@@ -2,7 +2,7 @@
 
 > Note: some source paths cited below (`packages/core/src/identity/`, `packages/core/src/tools/executor/`,
 > `packages/core/src/agent.ts`) are not present in this tree; identity loading now lives in
-> `packages/gateway/src/identity-prompt.ts`. Treat those references as historical.
+> `packages/gateway/src/agent/identity-prompt.ts`. Treat those references as historical.
 
 This is Miki's version of OpenClaw's SOUL/AGENTS/IDENTITY/USER/TOOLS
 convention: plain, human-editable files that give every agent run the same
@@ -92,7 +92,7 @@ there's a permission-gated tool layer to register them against.
 
 ## Memory lives here too (step 02)
 
-`packages/core/src/memory-files/` implements OpenClaw-style file memory,
+`packages/memory/src/file-memory/` implements OpenClaw-style file memory,
 rooted at this same `identityDir` (one memory for the whole agent —
 systemwide, not per workspace folder):
 

@@ -100,6 +100,44 @@ try {
     assert.ok(!isolated.items.some(item => item.id === other.chunkId));
   });
 
+  test('Bengali and English task queries select the memory regions needed for the next step', () => {
+    const taskRegions = engine.inferRegions('এখন পরবর্তী কাজ কী এবং schedule কী?');
+    assert.ok(taskRegions.has('day_to_day'));
+    assert.ok(taskRegions.has('long_term'));
+    const workflowRegions = engine.inferRegions('Which tool and workflow should I use next?');
+    assert.ok(workflowRegions.has('skill'));
+    const preferenceRegions = engine.inferRegions('আমার পছন্দের নিয়ম কী?');
+    assert.ok(preferenceRegions.has('rule_emotion'));
+    assert.ok(preferenceRegions.has('long_term'));
+  });
+
+  test('default list and statistics exclude untrusted and expired memory', () => {
+    const trusted = engine.ingest({ scope: scope(), region: 'long_term', content: 'Trusted memory about the current workspace status.' });
+    const untrusted = engine.ingest({ scope: scope(), region: 'long_term', content: 'Untrusted memory about a fictional workspace status.', provenance: 'untrusted' });
+    const expired = engine.ingest({ scope: scope(), region: 'long_term', content: 'Expired memory about an old workspace status.', expiresAt: '2000-01-01T00:00:00.000Z' });
+    const listed = engine.list(scope(), { limit: 100 });
+    const ids = new Set(listed.map((item) => item.id));
+    assert.ok(ids.has(trusted.chunkId));
+    assert.ok(!ids.has(untrusted.chunkId));
+    assert.ok(!ids.has(expired.chunkId));
+    const stats = engine.stats(scope());
+    assert.equal(stats.chunks, listed.length);
+    assert.ok(!stats.byRegion.some((item) => item.region === 'untrusted'));
+  });
+
+  test('graph traversal never reintroduces untrusted or expired neighbours', () => {
+    const seed = engine.ingest({ scope: scope(), region: 'long_term', content: 'Trusted seed memory for project dependency recall.' });
+    const untrusted = engine.ingest({ scope: scope(), region: 'long_term', content: 'Untrusted related project dependency detail.', provenance: 'untrusted' });
+    const expired = engine.ingest({ scope: scope(), region: 'long_term', content: 'Expired related project dependency detail.', expiresAt: '2000-01-01T00:00:00.000Z' });
+    engine.connect(scope(), seed.chunkId, untrusted.chunkId, 'related_to', { weight: 1 });
+    engine.connect(scope(), seed.chunkId, expired.chunkId, 'related_to', { weight: 1 });
+    const result = engine.retrieve('Trusted seed project dependency', { scope: scope(), regions: ['long_term'], maxDepth: 1, maxSelected: 8 });
+    const ids = new Set(result.items.map((item) => item.id));
+    assert.ok(ids.has(seed.chunkId));
+    assert.ok(!ids.has(untrusted.chunkId));
+    assert.ok(!ids.has(expired.chunkId));
+  });
+
   test('forget and reindex are bounded administrative operations', () => {
     const candidate = engine.ingest({ scope: scope(), region: 'skill', content: 'Forget-me chunk for index maintenance.' });
     assert.deepStrictEqual(engine.forget(scope(), candidate.chunkId), { forgotten: true, chunkId: candidate.chunkId });

@@ -75,16 +75,12 @@ const RUNTIME_FILE_CANDIDATES = [
     "dist/runtime/packages/core/dist/api/index.js",
   ],
   [
+    "packages/core/dist/plugins/skills/index.js",
+    "dist/runtime/packages/core/dist/plugins/skills/index.js",
+  ],
+  [
     "packages/config/dist/index.js",
     "dist/runtime/packages/config/dist/index.js",
-  ],
-  [
-    "packages/installer/dist/index.js",
-    "dist/runtime/packages/installer/dist/index.js",
-  ],
-  [
-    "packages/skills/dist/index.js",
-    "dist/runtime/packages/skills/dist/index.js",
   ],
   [
     "packages/ui/frontend/dist/index.html",

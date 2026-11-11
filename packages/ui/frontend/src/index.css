@@ -648,31 +648,6 @@ select:focus-visible {
 }
 
 /* =============================================================================
-   SHIMMER LOADING STATE
-   ============================================================================= */
-.motion-shimmer {
-  position: relative;
-  isolation: isolate;
-  background: var(--skeleton-bg);
-  overflow: hidden;
-}
-
-.motion-shimmer::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    color-mix(in srgb, var(--skeleton-shine) 60%, transparent) 48%,
-    transparent 64%
-  );
-  background-size: 240% 100%;
-  animation: shimmer var(--skeleton-speed) linear infinite;
-}
-
-/* =============================================================================
    COMMAND PALETTE
    ============================================================================= */
 .app-command-palette [cmdk-list] {
@@ -1392,15 +1367,6 @@ select:focus-visible {
 /* =============================================================================
    KEYFRAME ANIMATIONS
    ============================================================================= */
-@keyframes shimmer {
-  0% {
-    background-position: 240% 0;
-  }
-  100% {
-    background-position: -240% 0;
-  }
-}
-
 @keyframes dockIndicatorIn {
   0% {
     opacity: 0;
@@ -1486,9 +1452,6 @@ select:focus-visible {
     animation: none !important;
   }
 
-  .motion-shimmer::after {
-    animation: none !important;
-  }
 }
 
 /* =============================================================================
@@ -3246,4 +3209,579 @@ pre {
 }
 .launcher-auth-backdrop {
   background: linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-background) 65%, transparent), transparent 65%);
+}
+
+/* =============================================================================
+   MIKI WORKSPACE REFRESH — quiet professional surfaces, low-cost motion
+   ============================================================================= */
+:root {
+  --app-rail-width: 4.25rem;
+  --app-topbar-height: 3.25rem;
+  --app-section-gap: 1.125rem;
+  --app-control-height: 2.5rem;
+  --app-motion-fast: 130ms;
+  --app-motion-base: 190ms;
+  --app-motion-ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 92% 0%, color-mix(in srgb, var(--primary) 4%, transparent), transparent 34rem),
+    var(--background);
+}
+
+/* Route transitions stay compositor-friendly and deliberately short. */
+main[data-motion-surface="route"] > * {
+  animation: miki-route-enter 180ms var(--app-motion-ease) both;
+}
+
+@keyframes miki-route-enter {
+  from { opacity: 0.84; transform: translate3d(0, 5px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* Adaptive navigation rail: compact by default, expandable for focused work. */
+.miki-sidebar {
+  flex: 0 0 var(--sidebar-width);
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background: color-mix(in srgb, var(--background) 96%, var(--card));
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.group[data-state="expanded"] .miki-sidebar__header {
+  justify-content: space-between;
+  padding-inline: 0.85rem;
+}
+
+.group[data-state="expanded"] .miki-sidebar__brand-row {
+  width: auto;
+  padding-inline: 0.35rem;
+}
+
+.group[data-state="expanded"] .miki-sidebar__brand {
+  width: 2rem;
+  height: 2rem;
+  flex-basis: 2rem;
+  border-radius: 0.65rem;
+}
+
+.group[data-state="expanded"] .miki-sidebar__toggle {
+  color: var(--muted-foreground);
+}
+
+.group[data-state="expanded"] .miki-sidebar__toggle:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+}
+
+.miki-sidebar__header {
+  justify-content: center;
+  padding-inline: 0.5rem;
+}
+
+.miki-sidebar__brand-row {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.miki-sidebar__brand {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.miki-sidebar__content {
+  gap: 0.55rem;
+  padding-inline: 0.45rem;
+}
+
+.miki-sidebar__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding-block: 0.25rem 0.55rem;
+}
+
+.miki-sidebar__group + .miki-sidebar__group {
+  border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  padding-top: 0.7rem;
+}
+
+.miki-sidebar__group-title {
+  color: var(--muted-foreground);
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.group[data-state="expanded"] .miki-sidebar__group-title {
+  align-self: stretch;
+  padding-inline: 0.75rem;
+}
+
+.miki-sidebar__group [data-slot="sidebar-menu"] {
+  width: 100%;
+  gap: 0.25rem;
+}
+
+.miki-sidebar__nav-item {
+  position: relative;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.85rem;
+  color: var(--muted-foreground);
+  transition:
+    color var(--app-motion-fast) var(--app-motion-ease),
+    background-color var(--app-motion-fast) var(--app-motion-ease),
+    border-color var(--app-motion-fast) var(--app-motion-ease),
+    transform var(--app-motion-fast) var(--app-motion-ease);
+}
+
+.miki-sidebar__nav-item svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  stroke-width: 1.8;
+}
+
+.miki-sidebar__nav-item:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+  color: var(--foreground);
+}
+
+.miki-sidebar__nav-item.active {
+  border-color: color-mix(in srgb, var(--primary) 16%, transparent);
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  color: var(--primary);
+}
+
+.miki-sidebar__nav-item.active::before {
+  position: absolute;
+  top: 0.65rem;
+  bottom: 0.65rem;
+  left: -0.45rem;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: var(--primary);
+}
+
+.group[data-state="expanded"] .miki-sidebar__nav-item {
+  height: 2.45rem;
+  width: 100%;
+  border-radius: 0.7rem;
+  padding-inline: 0.75rem;
+}
+
+.group[data-state="expanded"] .miki-sidebar__nav-item.active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.group[data-state="expanded"] .miki-sidebar__nav-item.active::before {
+  left: 0;
+  top: 0.5rem;
+  bottom: 0.5rem;
+}
+
+.miki-sidebar__footer {
+  padding: 0.5rem 0.45rem;
+}
+
+/* The old animated shimmer created a compositor layer for every placeholder.
+   Static placeholders avoid dozens of concurrent infinite gradient animations. */
+.miki-skeleton {
+  background: color-mix(in srgb, var(--muted) 72%, var(--card));
+  opacity: 0.82;
+  contain: layout paint style;
+}
+
+/* Header, panels, forms and data views share one consistent visual language. */
+.page-header-surface,
+[data-miki-topbar="true"],
+[data-chat-header="true"] {
+  min-height: var(--app-topbar-height);
+  height: var(--app-topbar-height);
+  border-color: color-mix(in srgb, var(--border) 76%, transparent) !important;
+  background: color-mix(in srgb, var(--background) 90%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+}
+
+.page-header-title {
+  max-width: min(52vw, 34rem);
+  color: var(--foreground) !important;
+  font-size: 1.025rem !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.035em !important;
+}
+
+[data-miki-page] [data-slot="card"] {
+  border: 1px solid color-mix(in srgb, var(--border) 74%, transparent) !important;
+  border-radius: 0.95rem !important;
+  background: color-mix(in srgb, var(--card) 97%, var(--primary) 3%) !important;
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 4%, transparent) !important;
+  transition:
+    border-color var(--app-motion-base) var(--app-motion-ease),
+    box-shadow var(--app-motion-base) var(--app-motion-ease),
+    background-color var(--app-motion-base) var(--app-motion-ease);
+}
+
+[data-miki-page] [data-slot="card"]:hover {
+  border-color: color-mix(in srgb, var(--primary) 22%, var(--border)) !important;
+  box-shadow: 0 4px 16px color-mix(in srgb, #000 5%, transparent) !important;
+}
+
+.dark [data-miki-page] [data-slot="card"] {
+  background: color-mix(in srgb, var(--card) 96%, white 4%) !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%) !important;
+}
+
+.dark [data-miki-page] [data-slot="card"]:hover {
+  box-shadow: 0 5px 18px rgb(0 0 0 / 24%) !important;
+}
+
+[data-miki-page-body="true"] {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 32%, transparent) transparent;
+  overscroll-behavior: contain;
+}
+
+[data-miki-page-body="true"]::-webkit-scrollbar,
+[data-chat-scroll="true"]::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-miki-page-body="true"]::-webkit-scrollbar-thumb,
+[data-chat-scroll="true"]::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+  background-clip: padding-box;
+}
+
+[data-miki-page] [data-slot="input"],
+[data-miki-page] [data-slot="textarea"],
+[data-miki-page] [data-slot="select-trigger"],
+[data-miki-page] input,
+[data-miki-page] textarea,
+[data-miki-page] select {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 0.7rem;
+  background-color: color-mix(in srgb, var(--card) 94%, var(--muted) 6%);
+  transition:
+    border-color var(--app-motion-fast) var(--app-motion-ease),
+    box-shadow var(--app-motion-fast) var(--app-motion-ease),
+    background-color var(--app-motion-fast) var(--app-motion-ease);
+}
+
+[data-miki-page] :is(input, textarea, select):focus-visible {
+  border-color: var(--ring);
+  background: var(--card);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 13%, transparent);
+}
+
+[data-miki-page] [data-slot="button"] {
+  transition:
+    transform var(--app-motion-fast) var(--app-motion-ease),
+    background-color var(--app-motion-fast) var(--app-motion-ease),
+    border-color var(--app-motion-fast) var(--app-motion-ease),
+    color var(--app-motion-fast) var(--app-motion-ease);
+}
+
+[data-miki-page] [data-slot="button"]:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+[data-miki-page] [data-page-section="true"] {
+  border-radius: 0.9rem;
+}
+
+[data-miki-page] :is(table, [role="grid"]) {
+  border-color: color-mix(in srgb, var(--border) 76%, transparent);
+}
+
+[data-miki-page] :is(th, [role="columnheader"]) {
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+/* Keep dense agent/monitor panels clipped to their own viewport. */
+[data-miki-page="monitor"],
+[data-miki-page="chat"],
+[data-workspace-shell="true"] {
+  min-width: 0;
+  min-height: 0;
+  isolation: isolate;
+}
+
+[data-miki-page="chat"] [data-chat-scroll="true"] {
+  scrollbar-gutter: stable;
+}
+
+/* Desktop labels are communicated by tooltips; mobile drawer keeps text labels. */
+@media (max-width: 767px) {
+  :root {
+    --app-topbar-height: 3.5rem;
+  }
+
+  .miki-sidebar__header {
+    justify-content: flex-start;
+    padding-inline: 1rem;
+  }
+
+  .miki-sidebar__brand-row {
+    width: auto;
+    justify-content: flex-start;
+  }
+
+  .miki-sidebar__brand-label {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    clip: auto !important;
+    white-space: nowrap !important;
+  }
+
+  .miki-sidebar__content {
+    padding-inline: 0.75rem;
+  }
+
+  .miki-sidebar__group {
+    align-items: stretch;
+    padding-block: 0.45rem 0.65rem;
+  }
+
+  .miki-sidebar__group [data-slot="sidebar-menu"] {
+    gap: 0.2rem;
+  }
+
+  .miki-sidebar__nav-item {
+    width: 100%;
+    height: 2.6rem;
+    justify-content: flex-start;
+    gap: 0.8rem;
+    padding-inline: 0.75rem;
+  }
+
+  .miki-sidebar__nav-label {
+    display: inline;
+    font-size: 0.875rem;
+  }
+
+  .page-header-title {
+    max-width: 48vw;
+    font-size: 0.98rem !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main[data-motion-surface="route"] > *,
+  .miki-sidebar__nav-item,
+  [data-miki-page] [data-slot="button"],
+  [data-miki-page] [data-slot="card"] {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+
+.miki-loading-ring {
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 2px solid color-mix(in srgb, var(--primary) 18%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: miki-loading-spin 700ms linear infinite;
+  will-change: transform;
+}
+
+@keyframes miki-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .miki-loading-ring { animation: none; }
+}
+
+
+/* Sidebar refresh: a calm, labelled control rail with clear route hierarchy. */
+.miki-sidebar {
+  background:
+    radial-gradient(ellipse at 0 0, color-mix(in srgb, var(--primary) 6%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 98%, var(--primary) 2%), var(--background));
+  border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
+  box-shadow: 8px 0 28px color-mix(in srgb, #000 4%, transparent);
+}
+
+.miki-sidebar__header {
+  flex-direction: row !important;
+  min-height: 4.25rem;
+  height: auto;
+  border-color: color-mix(in srgb, var(--border) 78%, transparent) !important;
+  padding-inline: 0.8rem !important;
+}
+
+.miki-sidebar__brand-row {
+  flex: 1 1 auto;
+  gap: 0.7rem;
+  padding-inline: 0.2rem !important;
+}
+
+.miki-sidebar__brand {
+  width: 2.35rem;
+  height: 2.35rem;
+  flex-basis: 2.35rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, var(--card) 90%, var(--primary) 10%) !important;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.miki-sidebar__brand-label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.16rem;
+  overflow: hidden;
+  line-height: 1.1;
+  white-space: normal;
+}
+
+.miki-sidebar__brand-label strong {
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 720;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miki-sidebar__brand-label small {
+  color: var(--muted-foreground);
+  font-size: 0.61rem;
+  font-weight: 650;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.miki-sidebar__content {
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem 0.85rem;
+}
+
+.miki-sidebar__group {
+  gap: 0.35rem;
+  padding: 0.28rem 0.05rem 0.48rem;
+}
+
+.miki-sidebar__group + .miki-sidebar__group {
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding-top: 0.62rem;
+}
+
+.miki-sidebar__group-title {
+  padding: 0.14rem 0.7rem 0.1rem;
+  color: color-mix(in srgb, var(--muted-foreground) 88%, var(--foreground));
+  font-size: 0.61rem;
+  font-weight: 720;
+  letter-spacing: 0.11em;
+}
+
+.miki-sidebar__nav-item[data-labels="true"] {
+  min-height: 2.42rem;
+  border-color: transparent;
+  border-radius: 0.72rem;
+  padding-inline: 0.68rem;
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  font-weight: 540;
+  transition:
+    color var(--app-motion-fast) var(--app-motion-ease),
+    background-color var(--app-motion-fast) var(--app-motion-ease),
+    border-color var(--app-motion-fast) var(--app-motion-ease),
+    transform var(--app-motion-fast) var(--app-motion-ease);
+}
+
+.miki-sidebar__nav-item[data-labels="true"] svg {
+  width: 1.08rem;
+  height: 1.08rem;
+  color: color-mix(in srgb, var(--muted-foreground) 92%, var(--primary));
+  stroke-width: 1.85;
+  transition: color var(--app-motion-fast) var(--app-motion-ease);
+}
+
+.miki-sidebar__nav-item[data-labels="true"]:hover {
+  transform: translateX(2px);
+  border-color: color-mix(in srgb, var(--border) 74%, transparent);
+  background: color-mix(in srgb, var(--primary) 6%, var(--card));
+  color: var(--foreground);
+}
+
+.miki-sidebar__nav-item[data-labels="true"].active {
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+  background: linear-gradient(100deg, color-mix(in srgb, var(--primary) 14%, var(--card)), color-mix(in srgb, var(--primary) 7%, var(--card)));
+  color: var(--primary);
+  font-weight: 660;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 16%, transparent);
+}
+
+.miki-sidebar__nav-item[data-labels="true"].active svg {
+  color: var(--primary);
+}
+
+.miki-sidebar__nav-item[data-labels="true"].active::before {
+  left: 0;
+  top: 0.48rem;
+  bottom: 0.48rem;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+}
+
+.miki-sidebar__nav-item[data-labels="false"] {
+  border-radius: 0.82rem;
+}
+
+.group[data-state="collapsed"] .miki-sidebar__brand-row {
+  flex: 0 0 2.75rem;
+}
+
+@media (max-width: 767px) {
+  .miki-sidebar__header {
+    min-height: 3.75rem;
+    padding-inline: 1rem !important;
+  }
+
+  .miki-sidebar__content {
+    padding: 0.35rem 0.75rem 0.8rem;
+  }
+
+  .miki-sidebar__group-title {
+    padding-inline: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .miki-sidebar__nav-item[data-labels="true"] {
+    transition: none !important;
+    transform: none !important;
+  }
 }

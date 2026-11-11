@@ -24,6 +24,10 @@ agent:
   timezone: Asia/Dhaka
   # Every successful tool action receives an independent semantic verification pass.
   verify_actions: true
+  # One current-intent verification runs before every tool step and outbound message by default.
+  # Set true to add a second independent check; false keeps the default single check.
+  # Permission, approval, and security checks remain active in either mode.
+  pre_action_double_check: false
   browser:
     clear_state_every_n_navigations: 1000000   # schema minimum is 1; a huge value keeps logins/sessions
     chrome_path: null
@@ -85,18 +89,19 @@ agent:
     procedural_enabled: true
     max_context_procedures: 3
   # Optional model routing. Non-empty lane primaries override the dashboard-selected default model;
-  # lane fallbacks are used for transient provider failures. The heartbeat primary is used for
-  # background autonomy when it matches a configured model. Empty entries below are ignored.
+  # explicit lane fallbacks are tried first on transient provider failures. When enabled, the Gateway
+  # appends other enabled, credential-valid model catalog entries as provider-agnostic fallbacks.
+  # The heartbeat primary is used for background autonomy when it matches a configured model.
+  # Empty entries below are ignored.
   model_router:
     enabled: true
     max_attempts: 8  # legacy compatibility only; explicit fallback chains are no longer truncated
     lanes:
       default:
-        primary:
-        # Local fallback is the final recovery route when a remote model fails.
-        # llama.cpp resolves the configured local model dynamically at runtime.
-        fallbacks:
-          - llama.cpp/local-model
+        # Leave this empty to use the default model selected on the Models page.
+        # Set a primary only when that model is registered and available at runtime.
+        primary: ""
+        fallbacks: []
       complex:
         primary: 
         fallbacks:
@@ -113,7 +118,7 @@ agent:
     roles: {}
     credential_profiles: {}
   security:
-    # Agent approval prompts are disabled separately through tools.auto_approve_all.
+    # Routine safe actions may auto-run; destructive actions still require owner approval.
     # Disable application-level network/path restrictions only inside a disposable VM.
     # Never mount host secrets, home directories or sensitive host sockets into this guest.
     bypass_restrictions: true
@@ -123,8 +128,8 @@ agent:
     privileged_account_required: false
     audit_logging: true
     approval_note: >-
-      Owner selected no-confirmation execution for an isolated personal VM; host OS
-      isolation is provided by the VM/container, not by this application setting.
+      Routine safe actions are auto-approved. Destructive, credential, install, and
+      system-wide changes require owner approval; VM isolation is an additional boundary.
   visual:
     screen_cooldown_seconds: 2
 self_improvement:
@@ -161,14 +166,15 @@ concurrency:
   # resource waits are cancellation-aware and have no generic deadline.
   # Scheduled task retries are persistent in unlimited_budgets mode.
   retryBaseDelayMs: 3000
-  retryMaxDelayMs: 180000
+  # Fixed 3 s between attempts (no exponential growth): scheduled-task retries never slow down to minutes.
+  retryMaxDelayMs: 3000
 heartbeat:
   enabled: true
   interval_seconds: 20
   checklist_path: identity/HEARTBEAT.md
   # Each HEARTBEAT.md line becomes a persisted recurring task that runs on this interval.
   checklist_tasks:
-    enabled: true
+    enabled: false
     interval_seconds: 3600
   proactive:
     enabled: true
@@ -185,14 +191,32 @@ heartbeat:
     # A scheduled (cron) task due within 30 seconds always takes the slot first.
     decision_interval_seconds: 5
     failure_threshold: 3
-    failure_backoff_base_seconds: 3
-    # Exponential retry backoff prevents tight retry loops during extended provider or network outages.
-    failure_backoff_max_seconds: 180
+    failure_backoff_base_seconds: 30
+    # Failed runs wait at least 30 seconds, then back off to a 60-second cap; attempts continue indefinitely.
+    failure_backoff_max_seconds: 60
+    # At most one in-run retry after 3 seconds; a provider Retry-After is still honoured as a floor.
+    model_retry_seconds: 3
+    model_retry_max_retries: 1
+    # Wait out a rejected key (401/403) or exhausted quota/billing (402/insufficient_quota) instead of ending the run.
+    retry_permanent_provider_errors: true
+    # A user message that never gets a linked reply holds background work at most this long once no run is alive (0 = forever).
+    foreground_hold_max_seconds: 300
+    # After every goal finishes, an independent tool-less model call re-checks it (check #2, after the deterministic acceptance check).
+    # If the owner's real need is not met, the goal is re-planned with what is missing instead of being closed.
+    double_check: true
+    # Optional stronger/independent auditor model. Empty uses the configured heartbeat/default model.
+    double_check_model: ""
+    # After a verified goal, queue a goal that plans what the owner should do next (never chains from itself).
+    next_step_goals: true
+    # Recent user requests that already got a reply are re-audited by the model; unfinished ones become high-priority goals.
+    user_request_audit: true
+    user_request_audit_passes: 2
+    user_request_reopen_max: 3
     # Idle Mode is always active from startup. Zero means no user-inactivity countdown or gate.
     idle_after_seconds: 0
     # Curiosity cycle: while idle Miki researches topics from identity/INTERESTS.md as low-priority goals.
     curiosity:
-      enabled: true
+      enabled: false
       # No open-goal or per-day cap; duplicate detection and resource admission remain active.
     # Server-side rules for telling the user about discoveries (the model only proposes; these decide).
     # Miki decides whether a discovery is relevant using memory and user personality.
@@ -216,7 +240,7 @@ autonomy:
   # Queue depth is unbounded in unlimited_budgets mode; host admission controls active work.
   tool_policy:
     mode: operator
-    # Suppress all AgentEngine/AutonomyPolicy owner confirmation prompts in the isolated VM.
+    # Keep routine safe actions automatic; require the owner for destructive/install/service changes.
     auto_approve_all: true
     # Retries are unbounded in the runtime; backoff applies between attempts (retry_backoff_seconds).
     retry_backoff_seconds: 3            # exponential retry base; capped by heartbeat.proactive.failure_backoff_max_seconds
@@ -234,7 +258,7 @@ autonomy:
     allowed_tools:
       - web_search
     # Used to include external side-effect tools in autonomous goal tool allowlists.
-    # Owner confirmation prompts are disabled by auto_approve_all above.
+    # Explicit high-impact tools remain available, but AutonomyPolicy asks the owner before execution.
     allowed_external_side_effect_tools:
       - terminal_run
       - terminal_kill
@@ -252,11 +276,11 @@ autonomy:
       - plugin_invoke
       - goal_create
       - goal_update
-    # In this profile file tools may access any path visible inside the VM guest.
-    # The VM/container must be the actual OS isolation boundary.
+    # File changes stay within the configured Miki workspace. Sensitive/destructive effects still require approval.
     safe_write_roots:
       - "*"
-    allow_all_paths: true
+    # Host paths outside the workspace stay disallowed while no-confirm mode is disabled.
+    allow_all_paths: false
   event_triggers:
     max_per_minute: 30
     cooldown_seconds: 5
@@ -318,10 +342,10 @@ evolution:
   cold_path_trigger: after_turn
   cold_path_times: []
 tools:
-  # Disable all interactive owner confirmations for AgentEngine tool calls.
+  # Preserve autonomous routine work while explicitly confirming destructive actions.
   auto_approve_safe: true
   auto_approve_all: true
-  require_confirm_destructive: false
+  require_confirm_destructive: true
   require_confirm_computer_use: false
   cron:
     # Canonical legacy Cron command policy. v1 Cron schedules create autonomous goals only.

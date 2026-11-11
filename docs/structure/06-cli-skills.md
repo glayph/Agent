@@ -27,21 +27,6 @@ packages/cli/
 - When a Go binary is present it shows a terminal dashboard; otherwise falls back to headless mode with web UI still available.
 - The pack script embeds a complete runtime so the published npm package does not require the full monorepo.
 
-## packages/skills
+## Bundled skills catalog
 
-Pre-bundled skills that the agent can load and execute under governance.
-
-```
-packages/skills/
-├── package.json                 # @miki/skills
-├── tsconfig.json
-├── validate-skills.mjs          # Skill validation utility
-└── src/
-    ├── index.ts                 # Skill registry / exports
-    └── goal-completion/         # Example / built-in skill modules
-        └── index.ts
-```
-
-**Comments**
-- Skills are discovered and governed by the skill-governance engine inside core.
-- Validation script ensures skill manifests meet expected contracts before packaging.
+The bundled catalog lives in `packages/core/src/plugins/skills/catalog/`. Runtime discovery, loading and registry integration live in `packages/core/src/plugins/skills/manager/`; installer implementation lives in `packages/core/src/plugins/skills/installer/`. These are built together with `@miki/core`.

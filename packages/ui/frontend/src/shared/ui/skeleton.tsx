@@ -4,8 +4,9 @@ function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="skeleton"
+      aria-hidden="true"
       className={cn(
-        "motion-shimmer bg-muted overflow-hidden rounded-md",
+        "miki-skeleton overflow-hidden rounded-md bg-muted/70",
         className,
       )}
       {...props}

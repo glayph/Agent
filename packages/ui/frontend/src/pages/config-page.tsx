@@ -590,6 +590,7 @@ function ConfigFormView() {
 
         configApply = await patchAppConfig({
           agent: {
+            pre_action_double_check: form.preActionDoubleCheck,
             security: {
               bypass_restrictions: form.bypassRestrictions,
             },
@@ -631,6 +632,7 @@ function ConfigFormView() {
             ),
           },
           tools: {
+            auto_approve_all: form.autoApproveAll,
             exec: execConfigPatch,
             mcp: {
               enabled: form.mcpEnabled,

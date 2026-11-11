@@ -90,6 +90,8 @@ export interface AgentConfig {
     language: string;
     timezone: string;
     verify_actions?: boolean;
+    /** Independently check the active owner intent twice before every non-discovery tool action. */
+    pre_action_double_check?: boolean;
     memory: {
       short_term_limit: number;
       long_term_enabled: boolean;

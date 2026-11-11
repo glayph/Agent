@@ -115,9 +115,9 @@ describe("chat protocol flow", () => {
     expect(getChatState().messages).toEqual([])
   })
 
-  it("keeps proactive assistant replies while hiding provider and quota log messages", () => {
+  it("hides proactive notices along with provider and quota log messages", () => {
     const messages = [
-      { message_id: "proactive-1", content: "I found a useful update for you." },
+      { message_id: "proactive-1", content: "A background goal failed.", context_id: "proactive:warning:run-1" },
       { message_id: "provider-log", content: "[ProviderPlugin] provider.plugin.ready" },
       { message_id: "quota-log", content: "Quota limit reached. Please wait for the quota to reset." },
     ]
@@ -129,9 +129,7 @@ describe("chat protocol flow", () => {
       )
     }
 
-    expect(getChatState().messages.map((message) => message.content)).toEqual([
-      "I found a useful update for you.",
-    ])
+    expect(getChatState().messages).toEqual([])
   })
 
 

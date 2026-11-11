@@ -5,9 +5,9 @@ import { AgentEngine } from "./agent-engine.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
 import { buildSkillsContext, createSkillTools } from "./skill-tools.js";
-import { SkillStore } from "../skills-manager/skill-store.js";
-import { SkillRegistryClient } from "../skills-manager/registry-client.js";
-import { SKILL_MD, makeZip } from "../skills-manager/__tests__/zip-fixture.js";
+import { SkillStore } from "../plugins/skills/manager/skill-store.js";
+import { SkillRegistryClient } from "../plugins/skills/manager/registry-client.js";
+import { SKILL_MD, makeZip } from "../plugins/skills/manager/__tests__/zip-fixture.js";
 import type {
   ApprovalGate,
   EngineTool,
@@ -104,8 +104,38 @@ describe("skill tools", () => {
     expect(
       (await call("skill_search", { query: "greets" })).installed[0].name,
     ).toBe("demo-skill");
+    const defaultScope = await call("skill_search", { query: "greets" });
+    expect(defaultScope.installed[0].name).toBe("demo-skill");
+    expect(defaultScope.registry.warnings[0]).toMatch(/No skill registry/);
     const both = await call("skill_search", { query: "greets", scope: "all" });
     expect(both.registry.warnings[0]).toMatch(/No skill registry/);
+  });
+
+  it("uses the semantic ranker for cross-language or non-keyword Skill discovery", async () => {
+    const semanticTools = createSkillTools({
+      store,
+      workspaceRoot: path.join(root, "workspace"),
+      semanticSearch: async ({ query, candidates }) => {
+        expect(query).toBe("এই কাজের জন্য উপযুক্ত সহায়ক নির্দেশনা খুঁজে দাও");
+        expect(candidates.map((candidate) => candidate.name)).toContain("demo-skill");
+        return ["demo-skill"];
+      },
+    });
+    const search = semanticTools.find((tool) => tool.name === "skill_search")!;
+    const result = await search.execute({ query: "এই কাজের জন্য উপযুক্ত সহায়ক নির্দেশনা খুঁজে দাও" }, ctx()) as { installed: Array<{ name: string; match_type: string }> };
+    expect(result.installed[0]).toMatchObject({ name: "demo-skill", match_type: "semantic" });
+  });
+
+  it("shows a diagnostic when the semantic selector invents a Skill name", async () => {
+    const semanticTools = createSkillTools({
+      store,
+      workspaceRoot: path.join(root, "workspace"),
+      semanticSearch: async () => ["not-installed-skill"],
+    });
+    const search = semanticTools.find((tool) => tool.name === "skill_search")!;
+    const result = await search.execute({ query: "একটি ভিন্ন অর্থের অনুরোধ" }, ctx()) as { search_warnings: string[]; installed: unknown[] };
+    expect(result.installed).toHaveLength(0);
+    expect(result.search_warnings.join(" ")).toMatch(/unregistered Skill name/i);
   });
 
   it("skill_read returns instructions, scripts and supporting files", async () => {
@@ -177,6 +207,20 @@ describe("skill tools", () => {
     await expect(call("skill_delete", { name: "demo-skill" })).rejects.toThrow(
       /not found/i,
     );
+  });
+
+  it("keeps catalog management available when a turn profile restricts skill use", async () => {
+    const restricted = createSkillTools({
+      store,
+      registry: new SkillRegistryClient({ store, registries: () => [] }),
+      workspaceRoot: path.join(root, "workspace"),
+      allowedSkills: () => [],
+    });
+    const install = restricted.find((tool) => tool.name === "skill_install")!;
+    const remove = restricted.find((tool) => tool.name === "skill_delete")!;
+    await expect(install.execute({ slug: "some-skill" }, ctx())).rejects.toThrow(/No skill registry/i);
+    await expect(remove.execute({ name: "demo-skill" }, ctx())).resolves.toEqual({ deleted: true, name: "demo-skill" });
+    await expect(restricted.find((tool) => tool.name === "skill_read")!.execute({ name: "demo-skill" }, ctx())).rejects.toThrow(/not enabled for this turn/i);
   });
 });
 

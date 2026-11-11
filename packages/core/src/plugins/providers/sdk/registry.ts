@@ -1,0 +1,329 @@
+import type { LLMResponse } from "@miki/config";
+import {
+  MIKI_PROVIDER_PLUGIN_API_VERSION,
+  type MikiProviderCompletionRequest,
+  type MikiProviderContext,
+  type MikiProviderEndpoint,
+  type MikiProviderManifest,
+  type MikiProviderMessage,
+  type MikiProviderPlugin,
+  type ProviderPluginDescriptor,
+  type ProviderConnectionResult,
+} from "./index.js";
+import { LLMAPIError } from "../errors.js";
+import { ProviderPluginLoader, validateProviderManifest } from "./loader.js";
+
+export interface ProviderPluginRegistryOptions {
+  workspaceDir: string;
+  configDir: string;
+  mikiVersion?: string;
+  apiVersion?: string;
+  resolveCredentials?: (
+    auth: MikiProviderPlugin["auth"],
+    providerId: string,
+    /** Optional credential profile (secret name) chosen by the model router. */
+    profile?: string,
+    signal?: AbortSignal,
+  ) => Promise<Record<string, string>> | Record<string, string>;
+  logger?: (event: string, details?: Record<string, unknown>) => void;
+  externalPluginDirectory?: string;
+  allowExternalPlugins?: boolean;
+}
+
+function apiMajor(version: string): number | null {
+  const match = /^(?:v)?(\d+)(?:\.|$)/.exec(version.trim());
+  return match ? Number(match[1]) : null;
+}
+
+function normalizeModel(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  const error = new Error("Provider request was aborted.");
+  error.name = "AbortError";
+  throw error;
+}
+
+function endpointFromCatalog(
+  manifest: MikiProviderManifest,
+  auth: MikiProviderPlugin["auth"],
+  catalog: Awaited<ReturnType<MikiProviderPlugin["catalog"]>>,
+): MikiProviderEndpoint {
+  return {
+    id: manifest.id,
+    displayName: manifest.displayName,
+    baseUrl: catalog?.baseUrl || "",
+    apiKeyEnv: auth.envVars?.[0],
+    emptyApiKeyAllowed: auth.allowEmptyKey,
+    authMode: auth.mode,
+    local: manifest.capabilities.local,
+  };
+}
+
+export class ProviderPluginRegistry {
+  private readonly plugins = new Map<string, MikiProviderPlugin>();
+  private readonly sources = new Map<string, "builtin" | "external">();
+  private readonly prefixOwner = new Map<string, string>();
+  private readonly options: Required<
+    Pick<
+      ProviderPluginRegistryOptions,
+      "workspaceDir" | "configDir" | "mikiVersion" | "apiVersion"
+    >
+  > &
+    ProviderPluginRegistryOptions;
+
+  constructor(options: ProviderPluginRegistryOptions) {
+    this.options = {
+      ...options,
+      mikiVersion: options.mikiVersion || process.env.MIKI_VERSION || "1.3.14",
+      apiVersion: options.apiVersion || MIKI_PROVIDER_PLUGIN_API_VERSION,
+    };
+  }
+
+  private context(
+    credentials?: Readonly<Record<string, string>>,
+    signal?: AbortSignal,
+  ): MikiProviderContext {
+    return {
+      workspaceDir: this.options.workspaceDir,
+      configDir: this.options.configDir,
+      mikiVersion: this.options.mikiVersion,
+      credentials,
+      signal,
+      log: (event, details) => {
+        this.options.logger?.(event, { providerRegistry: true, ...details });
+      },
+    };
+  }
+
+  register(
+    plugin: MikiProviderPlugin,
+    source: "builtin" | "external" = "builtin",
+  ): void {
+    const id = plugin?.manifest?.id?.trim().toLowerCase();
+    if (!id) throw new Error("provider plugin manifest id is required");
+    if (!plugin.complete || !plugin.catalog)
+      throw new Error(`provider plugin ${id} is missing required hooks`);
+    const validation = validateProviderManifest(plugin.manifest, {
+      source,
+      mikiVersion: this.options.mikiVersion,
+      pluginApiVersion: this.options.apiVersion,
+      allowedExternalPermissions: ["network"],
+    });
+    if (!validation.valid)
+      throw new Error(
+        `provider plugin ${id} has an invalid manifest: ${validation.errors.join("; ")}`,
+      );
+    if (
+      apiMajor(plugin.manifest.pluginApiVersion) !==
+      apiMajor(this.options.apiVersion)
+    ) {
+      throw new Error(
+        `provider plugin ${id} targets incompatible plugin API ${plugin.manifest.pluginApiVersion}`,
+      );
+    }
+    if (this.plugins.has(id))
+      throw new Error(`duplicate provider plugin id: ${id}`);
+    for (const value of [id, ...(plugin.manifest.aliases ?? []), ...(plugin.manifest.modelPrefixes ?? [])]) {
+      const key = normalizeModel(value);
+      if (!key) continue;
+      const owner = this.prefixOwner.get(key);
+      if (owner && owner !== id) throw new Error(`provider prefix '${value}' is claimed by both ${owner} and ${id}`);
+      this.prefixOwner.set(key, id);
+    }
+    this.plugins.set(id, plugin);
+    this.sources.set(id, source);
+    this.options.logger?.("provider.plugin.ready", {
+      providerId: id,
+      version: plugin.manifest.version,
+      source,
+    });
+  }
+
+  unregister(providerId: string): Promise<void> {
+    const id = normalizeModel(providerId);
+    const plugin = this.plugins.get(id);
+    this.plugins.delete(id);
+    for (const [prefix, owner] of this.prefixOwner) if (owner === id) this.prefixOwner.delete(prefix);
+    this.options.logger?.("provider.plugin.removed", { providerId: id });
+    return plugin?.shutdown ? plugin.shutdown() : Promise.resolve();
+  }
+
+  get(providerId: string): MikiProviderPlugin | undefined {
+    const normalized = normalizeModel(providerId);
+    return this.plugins.get(normalized) || Array.from(this.plugins.values()).find((plugin) =>
+      (plugin.manifest.aliases ?? []).some((alias) => normalizeModel(alias) === normalized),
+    );
+  }
+
+  descriptors(): ProviderPluginDescriptor[] {
+    return Array.from(this.plugins.values()).map((plugin) => ({
+      manifest: plugin.manifest,
+      auth: plugin.auth,
+      source: this.sources.get(plugin.manifest.id) || "builtin",
+      readiness: "ready",
+    }));
+  }
+
+  resolve(model: string): MikiProviderPlugin | undefined {
+    const normalized = normalizeModel(model);
+    const prefix = normalized.split("/", 1)[0];
+    const direct = this.plugins.get(prefix) || this.plugins.get(normalized);
+    if (direct) return direct;
+    for (const plugin of this.plugins.values()) {
+      if (
+        plugin.manifest.modelIds?.some(
+          (id) => normalizeModel(id) === normalized,
+        )
+      )
+        return plugin;
+      if (
+        plugin.manifest.modelPrefixes?.some(
+          (value) =>
+            normalized === normalizeModel(value) ||
+            normalized.startsWith(`${normalizeModel(value)}/`) ||
+            normalized.startsWith(`${normalizeModel(value)}-`),
+        )
+      )
+        return plugin;
+    }
+    return undefined;
+  }
+
+  async loadExternalPlugins(
+    directory = this.options.externalPluginDirectory,
+  ): Promise<ProviderPluginDescriptor[]> {
+    if (!directory || this.options.allowExternalPlugins !== true) return [];
+    const loader = new ProviderPluginLoader({
+      externalDirectory: directory,
+      allowExternal: true,
+      allowedExternalPermissions: ["network"],
+      mikiVersion: this.options.mikiVersion,
+      pluginApiVersion: this.options.apiVersion,
+    });
+    const loaded: ProviderPluginDescriptor[] = [];
+    for (const record of loader.discover()) {
+      if (record.descriptor.readiness !== "ready") {
+        loaded.push(record.descriptor);
+        continue;
+      }
+      loaded.push({
+        ...record.descriptor,
+        readiness: "metadata_only",
+        reason:
+          "external provider entrypoints require the bounded runtime-contract executor; direct in-process loading is disabled",
+      });
+    }
+    return loaded;
+  }
+
+  async catalog(
+    providerId: string,
+    signal?: AbortSignal,
+  ): Promise<Awaited<ReturnType<MikiProviderPlugin["catalog"]>> | null> {
+    throwIfAborted(signal);
+    const plugin = this.get(providerId);
+    if (!plugin) return null;
+    return plugin.catalog(this.context(undefined, signal));
+  }
+
+  async listModels(
+    providerId: string,
+    credentials: Readonly<Record<string, string>> = {},
+    signal?: AbortSignal,
+  ): Promise<
+    Awaited<ReturnType<NonNullable<MikiProviderPlugin["listModels"]>>>
+  > {
+    throwIfAborted(signal);
+    const plugin = this.get(providerId);
+    if (!plugin?.listModels) return [];
+    return plugin.listModels(this.context(credentials, signal));
+  }
+
+  async testConnection(
+    providerId: string,
+    credentials: Readonly<Record<string, string>> = {},
+    signal?: AbortSignal,
+  ): Promise<ProviderConnectionResult> {
+    throwIfAborted(signal);
+    const plugin = this.get(providerId);
+    if (!plugin?.testConnection) {
+      return {
+        ok: false,
+        latencyMs: 0,
+        error: "Connection testing is not supported by this provider plugin.",
+      };
+    }
+    return plugin.testConnection(this.context(credentials, signal));
+  }
+
+  async complete(
+    model: string,
+    messages: MikiProviderMessage[],
+    options: {
+      extra?: Record<string, unknown>;
+      timeoutMs?: number;
+      onTextDelta?: (delta: string) => void;
+      signal?: AbortSignal;
+      credentialProfile?: string;
+      providerId?: string;
+      baseUrl?: string;
+      credentials?: Readonly<Record<string, string>>;
+    } = {},
+  ): Promise<LLMResponse> {
+    throwIfAborted(options.signal);
+    const plugin = options.providerId ? this.get(options.providerId) : this.resolve(model);
+    if (!plugin)
+      throw new LLMAPIError(`No provider plugin matches model "${model}".`);
+    const catalog = await plugin.catalog(this.context(undefined, options.signal));
+    throwIfAborted(options.signal);
+    if (!catalog)
+      throw new LLMAPIError(
+        `Provider plugin ${plugin.manifest.id} has no available catalog.`,
+        { providerId: plugin.manifest.id },
+      );
+    const credentials = options.credentials ?? (this.options.resolveCredentials
+      ? await this.options.resolveCredentials(
+          plugin.auth,
+          plugin.manifest.id,
+          options.credentialProfile,
+          options.signal,
+        )
+      : {});
+    throwIfAborted(options.signal);
+    const endpoint = endpointFromCatalog(plugin.manifest, plugin.auth, catalog);
+    if (options.baseUrl) endpoint.baseUrl = options.baseUrl;
+    const request: MikiProviderCompletionRequest = {
+      provider: endpoint,
+      model,
+      messages,
+      credentials,
+      extra: options.extra,
+      timeoutMs: options.timeoutMs,
+      ...(plugin.manifest.capabilities.streaming && options.onTextDelta
+        ? { onTextDelta: options.onTextDelta }
+        : {}),
+      signal: options.signal,
+      context: this.context(credentials, options.signal),
+    };
+    this.options.logger?.("provider.plugin.complete", {
+      providerId: plugin.manifest.id,
+      model,
+      messageCount: messages.length,
+    });
+    throwIfAborted(options.signal);
+    const result = await plugin.complete(request);
+    throwIfAborted(options.signal);
+    return result;
+  }
+
+  async shutdown(): Promise<void> {
+    for (const plugin of this.plugins.values()) await plugin.shutdown?.();
+    this.plugins.clear();
+  }
+}

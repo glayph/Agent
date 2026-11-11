@@ -40,7 +40,13 @@ export function useHubMarketplace() {
     queryKey: ["skills-api-health"],
     queryFn: async () => {
       try {
-        await searchSkills("test", 1, 0)
+        const health = await searchSkills("test", 1, 0)
+        if ((health.registries_configured ?? 0) < 1) {
+          return {
+            available: false,
+            error: health.warnings?.join(" ") || "No skill registry is configured. Add a registry in skills.registries or install from a trusted URL.",
+          }
+        }
         return { available: true, error: null as string | null }
       } catch (err) {
         return {
@@ -229,6 +235,7 @@ export function useHubMarketplace() {
     canInstallFromMarketplace,
     marketResults,
     marketSearchError,
+    marketplaceUnavailableReason: canSearchMarketplace ? undefined : skillSearchHealthQuery.data?.error ?? "Skill marketplace is unavailable.",
     unavailableToolMessages,
     hasSubmittedQuery,
     isMarketSearchInitialLoading,

@@ -15,8 +15,8 @@ This change set repairs monitoring graph persistence and historical inspection w
 
 ## Files changed
 
-- `packages/gateway/src/monitor-history.ts`
-- `packages/gateway/src/monitor-history.test.ts`
+- `packages/gateway/src/monitoring/monitor-history.ts`
+- `packages/gateway/src/monitoring/monitor-history.test.ts`
 - `packages/ui/frontend/src/features/monitor/history-api.ts`
 - `packages/ui/frontend/src/features/monitor/history-api.test.ts`
 - `packages/ui/frontend/src/features/monitor/monitor-canvas.tsx`

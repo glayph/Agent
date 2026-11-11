@@ -21,7 +21,7 @@ Node Gateway (packages/gateway)
       └── Provider integrations
 ```
 
-The Go code under `packages/ui/backend` is **compatibility/legacy only**. `stub_main.go` is not a full dashboard backend and must not be selected as the primary Web UI server. The files under `packages/ui/backend/api/*.go` are guarded by the `legacy_backend` build tag and remain compatibility code.
+The Go code under `packages/ui/legacy-go-compat` is **compatibility/legacy only**. `stub_main.go` is not a full dashboard backend and must not be selected as the primary Web UI server. The files under `packages/ui/legacy-go-compat/api/*.go` are guarded by the `legacy_backend` build tag and remain compatibility code.
 
 The default Node Gateway port is `18800`. The Vite development server must proxy `/api`, `/gateway`, `/miki/media`, and `/miki/ws` to that same gateway origin.
 

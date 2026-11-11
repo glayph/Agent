@@ -36,6 +36,9 @@ function test(name, fn) {
 test('tokenizer keeps Bengali words whole and strips common suffixes', () => {
   assert.deepStrictEqual(tokenize('মেমোরি সিস্টেম আপগ্রেড করো'), ['মেমোরি', 'সিস্টেম', 'আপগ্রেড']);
   assert.ok(tokenize('মেমোরিতে কী আছে?').includes('মেমোরি'));
+  assert.ok(tokenize('মেমোরির অবস্থা কী?').includes('মেমোরি'));
+  assert.deepStrictEqual(tokenize('পছন্দের নিয়ম'), tokenize('পছন্দ নিয়ম'));
+  assert.ok(tokenize('পছন্দের নিয়ম').includes('পছন্দ'), 'genitive suffix must not remove a root consonant');
   assert.ok(tokenize('কেন মেমোরিতে কিছু নেই?').includes('কেন'));
   assert.ok(tokenize('কেন মেমোরিতে কিছু নেই?').includes('নেই'));
   assert.ok(tokenize('এটা কাজ করবে না').includes('না'));
@@ -93,6 +96,20 @@ test('Bengali memories are recalled, including inflected forms of the same word'
     assert.ok(!short.items.some((item) => item.text.includes('আবহাওয়া')), 'short query must still filter unrelated records');
     const mixed = engine.retrieve('VirtualBox এর কোডনেম', { scope });
     assert.ok(mixed.items.some((item) => item.text.includes('ফ্যালকন')), 'mixed Bengali and English query should recall relevant memory');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Bengali genitive queries recall the matching owner memory', () => {
+  const { engine, dir } = makeEngine();
+  try {
+    engine.ingest({ scope, region: 'rule_emotion', content: 'আমার পছন্দের উত্তর ভাষা বাংলা।' });
+    engine.ingest({ scope, region: 'long_term', content: 'মেমোরি সিস্টেমের graph database SQLite ব্যবহার করে।' });
+    const preference = engine.retrieve('আমার পছন্দ কী?', { scope });
+    assert.ok(preference.items.some((item) => item.text.includes('পছন্দের')), 'পছন্দ should match পছন্দের');
+    const memory = engine.retrieve('মেমোরির database কী?', { scope });
+    assert.ok(memory.items.some((item) => item.text.includes('মেমোরি সিস্টেম')), 'মেমোরির should match মেমোরি');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

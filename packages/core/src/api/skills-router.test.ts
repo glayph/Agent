@@ -5,9 +5,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AddressInfo } from "node:net";
 import { createSkillsRouter, type SkillAuditEvent } from "./skills-router.js";
-import { SkillStore } from "../skills-manager/skill-store.js";
-import { SkillRegistryClient } from "../skills-manager/registry-client.js";
-import { SKILL_MD, makeZip } from "../skills-manager/__tests__/zip-fixture.js";
+import { SkillStore } from "../plugins/skills/manager/skill-store.js";
+import { SkillRegistryClient } from "../plugins/skills/manager/registry-client.js";
+import { SKILL_MD, makeZip } from "../plugins/skills/manager/__tests__/zip-fixture.js";
 
 let root: string;
 let server: http.Server;

@@ -3,7 +3,7 @@ import { ToolRegistry } from "./tool-registry.js";
 import { RUN_SUMMARY_SENTINEL, compactRunContext, pruneToolResults, splitUnits } from "./context-manager.js";
 import { scriptedLLM } from "./__tests__/scripted-llm.js";
 import type { EngineEvent, EngineLLMClient, EngineMessage, EngineTool } from "./types.js";
-import { MetricsCollector } from "../metrics-collector.js";
+import { MetricsCollector } from "../observability/metrics-collector.js";
 
 function tool(overrides: Partial<EngineTool> & { name: string }): EngineTool {
   return {
@@ -91,7 +91,8 @@ describe("lazy tool and plugin schema discovery", () => {
       execute: specialExecute,
     }));
     const llm = scriptedLLM([
-      { calls: [{ name: "miki_find_tools", args: { query: "plugin_special_archive_extract" }, id: "discover_archive" }] },
+      { calls: [{ name: "miki_find_tools", args: { query: "এই আর্কাইভটি খুলে এর ভিতরের ফাইল ও ম্যানিফেস্ট পরীক্ষা করো" }, id: "discover_archive" }] },
+      { text: JSON.stringify({ tool_names: ["plugin_special_archive_extract"] }) },
       { calls: [{ name: "plugin_special_archive_extract", args: {}, id: "extract_archive" }] },
       { text: "The archive was extracted." },
     ]);
@@ -100,7 +101,63 @@ describe("lazy tool and plugin schema discovery", () => {
     expect(result.status).toBe("completed");
     expect(specialExecute).toHaveBeenCalledTimes(1);
     expect(llm.requests[0].options?.tools?.some((schema) => schema.function.name === "miki_find_tools")).toBe(true);
-    expect(llm.requests[1].options?.tools?.some((schema) => schema.function.name === "plugin_special_archive_extract")).toBe(true);
+    expect(llm.requests[1].options?.toolChoice).toBe("none");
+    expect(llm.requests[1].messages.some((message) => String(message.content).includes("এই আর্কাইভটি খুলে"))).toBe(true);
+    expect(llm.requests[2].options?.tools?.some((schema) => schema.function.name === "plugin_special_archive_extract")).toBe(true);
+  });
+
+  it("does not claim no match when one selector batch was malformed", async () => {
+    const registry = new ToolRegistry();
+    const fillerDescription = "A tool with enough metadata to force lazy tool discovery. ".repeat(40);
+    for (let index = 0; index < 33; index += 1) registry.register(tool({ name: `batch_tool_${index}`, description: fillerDescription }));
+    const llm = scriptedLLM([
+      { calls: [{ name: "miki_find_tools", args: { query: "এই কাজের উপযোগী tool খুঁজে দাও" }, id: "discover_partial_batch" }] },
+      { text: JSON.stringify({ tool_names: [] }) },
+      { text: "malformed selector output" },
+      { text: "Not enough candidate batches were evaluated, so no-match cannot be asserted." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, contextWindowTokens: 1024 });
+    const result = await engine.run({ history: user("Find the appropriate tool") });
+    const discovery = result.toolCalls.find((record) => record.name === "miki_find_tools");
+    expect(discovery?.status).toBe("failed");
+    expect(discovery?.resultPreview).toContain("partially validated");
+  });
+
+  it("does not treat hallucinated tool names as a successful no-match", async () => {
+    const registry = new ToolRegistry();
+    const fillerDescription = "A plugin integration tool with many detailed configuration options. ".repeat(30);
+    for (let index = 0; index < 24; index += 1) registry.register(tool({ name: `plugin_tool_${index}`, description: fillerDescription }));
+    const llm = scriptedLLM([
+      { calls: [{ name: "miki_find_tools", args: { query: "এই কাজের জন্য plugin capability খুঁজে দাও" }, id: "discover_hallucinated" }] },
+      { text: JSON.stringify({ tool_names: ["plugin_tool_that_does_not_exist"] }) },
+      { text: "The selector returned an invalid tool name, so discovery must be retried rather than reporting no capability." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, contextWindowTokens: 1024 });
+    const result = await engine.run({ history: user("Find a plugin tool for this task") });
+    expect(result.status).toBe("completed");
+    const discoveryResult = result.toolCalls.find((record) => record.name === "miki_find_tools");
+    expect(discoveryResult?.status).toBe("failed");
+    expect(discoveryResult?.resultPreview).toContain("unregistered tool name");
+  });
+
+  it("reports malformed semantic selector output as a discovery failure, not as no matching tool", async () => {
+    const registry = new ToolRegistry();
+    const fillerDescription = "A plugin integration tool with many detailed configuration options. ".repeat(30);
+    for (let index = 0; index < 24; index += 1) {
+      registry.register(tool({ name: `plugin_tool_${index}`, description: fillerDescription }));
+    }
+    const llm = scriptedLLM([
+      { calls: [{ name: "miki_find_tools", args: { query: "এই কাজের জন্য সঠিক plugin tool খুঁজে দাও" }, id: "discover_invalid_selector" }] },
+      { text: "I cannot return structured output right now." },
+      { text: "Discovery could not be validated, so I will not claim that the capability is absent." },
+    ]);
+    const engine = new AgentEngine({ llm: llm.client, tools: registry, contextWindowTokens: 1024 });
+    const result = await engine.run({ history: user("Use the right plugin for this task") });
+    const discovery = result.toolCalls.find((record) => record.name === "miki_find_tools");
+    expect(discovery?.status).toBe("failed");
+    expect(discovery?.error).toContain("no valid selector response");
+    expect(discovery?.error).not.toContain("No registered capability was judged relevant");
+    expect(llm.requests[1].options?.toolChoice).toBe("none");
   });
 });
 
@@ -315,6 +372,41 @@ describe("model failover", () => {
     expect(result.status).toBe("completed");
     expect(result.model).toBe("gemini-main");
     expect(result.finalText).toBe("recovered with alternate credential");
+  });
+
+  it("resolves duplicate-named provider fallbacks by stable catalog row ID", async () => {
+    const primary: EngineLLMClient = {
+      model: "shared-model",
+      providerId: "provider-a",
+      routeKey: "provider-a|shared-model",
+      async complete() {
+        throw Object.assign(new Error("503 upstream unavailable"), { status: 503 });
+      },
+    };
+    const alternate: EngineLLMClient = {
+      model: "shared-model",
+      providerId: "provider-b",
+      routeKey: "provider-b|shared-model",
+      async complete() {
+        return reply("response from the selected backup provider");
+      },
+    };
+    const resolved: Array<{ model?: string; modelIndex?: number }> = [];
+    const engine = new AgentEngine({
+      llm: (model, modelIndex) => {
+        resolved.push({ model, modelIndex });
+        return modelIndex === 22 ? alternate : primary;
+      },
+      tools: new ToolRegistry(),
+      fallbackRoutes: () => [{ model: "shared-model", modelIndex: 22 }],
+    });
+
+    const result = await engine.run({ history: user("continue using the configured backup provider") });
+
+    expect(result.status).toBe("completed");
+    expect(result.providerId).toBe("provider-b");
+    expect(result.finalText).toBe("response from the selected backup provider");
+    expect(resolved).toContainEqual({ model: "shared-model", modelIndex: 22 });
   });
 
   it("rotates the configured credential for a fallback model after a transient model hop", async () => {
