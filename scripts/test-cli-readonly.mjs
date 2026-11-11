@@ -8,7 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const entry = path.join(root, "bin", "miki.js");
 for (const [label, args, expected] of [
   ["help", ["--help"], "miki CLI Command Reference"],
-  ["version", ["--version"], "1.3.14"],
+  ["version", ["--version"], "1.3.15"],
   ["weke", ["weke"], "miki weke: ready"],
 ]) {
   const result = spawnSync(process.execPath, [entry, ...args], {

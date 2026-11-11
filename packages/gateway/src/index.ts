@@ -1310,7 +1310,7 @@ app.post("/api/config/test-command-patterns", requireAuth, (req, res) => {
     matched_blacklist: result.matchedBlacklist,
   })
 })
-app.get("/api/system/version", (_req, res) => res.json({ version: "1.3.14", go_version: "not used by Node backend" }))
+app.get("/api/system/version", (_req, res) => res.json({ version: "1.3.15", go_version: "not used by Node backend" }))
 /** File execution is on by default. MIKI_FILE_EXECUTION=false or app_config.files.execution_enabled=false turns it off at runtime. */
 const fileExecutionEnabled = () => {
   if (String(process.env.MIKI_FILE_EXECUTION ?? "").toLowerCase() === "false") return false

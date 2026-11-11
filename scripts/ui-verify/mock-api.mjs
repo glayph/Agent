@@ -45,7 +45,7 @@ export async function installMocks(page, state) {
     if (p === "/api/auth/status") return json(route, { authenticated: true, initialized: true, session_timeout_minutes: 0 })
     if (p === "/api/gateway/status") return json(route, { gateway_status: "running", gateway_start_allowed: true, pid: 1 })
     if (p === "/api/gateway/logs") return json(route, { logs: [], log_total: 0, log_run_id: 1 })
-    if (p === "/api/system/version") return json(route, { version: "1.3.14" })
+    if (p === "/api/system/version") return json(route, { version: "1.3.15" })
     if (p === "/api/channels/catalog") return json(route, { channels: state.channels })
     let m = p.match(/^\/api\/channels\/([^/]+)\/config$/)
     if (m) {

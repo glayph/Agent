@@ -80,7 +80,7 @@ export class ProviderPluginRegistry {
   constructor(options: ProviderPluginRegistryOptions) {
     this.options = {
       ...options,
-      mikiVersion: options.mikiVersion || process.env.MIKI_VERSION || "1.3.14",
+      mikiVersion: options.mikiVersion || process.env.MIKI_VERSION || "1.3.15",
       apiVersion: options.apiVersion || MIKI_PROVIDER_PLUGIN_API_VERSION,
     };
   }
