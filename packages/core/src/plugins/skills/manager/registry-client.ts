@@ -387,9 +387,11 @@ export class SkillRegistryClient {
     if (!registry)
       throw new SkillStoreError(
         400,
-        registryName
-          ? `Unknown skill registry "${registryName}".`
-          : "Specify a registry, or provide a url.",
+        registries.length === 0
+          ? "No skill registry is configured. Set MIKI_SKILL_REGISTRIES or provide a URL."
+          : registryName
+            ? `Unknown skill registry "${registryName}".`
+            : "Specify a registry, or provide a URL.",
         "unknown_registry",
       );
     this.assertAllowedUrl(registry.url, `Registry "${registry.name}"`);

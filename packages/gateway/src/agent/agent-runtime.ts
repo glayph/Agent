@@ -79,6 +79,7 @@ import {
   terminalSafeMode,
   wireToolCallExtras,
 } from "@miki/core/plugins/tools"
+import { createModelDownloadTools } from "./model-download-tools.js"
 
 type Json = Record<string, unknown>
 
@@ -91,6 +92,8 @@ export interface AgentRuntimeDeps {
   setAppConfig(next: Json): void
   /** Stored model entries, default first. */
   storedModels(): Array<{ id?: number; payload: Json; isDefault: boolean }>
+  /** Register a downloaded GGUF as a non-default local model without starting it. */
+  registerLocalModel?: (input: { name: string; modelPath: string; sha256: string; bytes: number }) => Promise<unknown> | unknown
   requireAuth: express.RequestHandler
   /** Runtime kill switch for script execution (dashboard and agent). */
   fileExecutionEnabled(): boolean
@@ -150,6 +153,7 @@ const TOOL_GROUPS: Record<string, { label: string; defaultEnabled: boolean; name
   memory: { label: "Long-term memory", defaultEnabled: true, names: (n) => n.startsWith("memory_") },
   skills: { label: "Skills", defaultEnabled: true, names: (n) => n.startsWith("skill_") },
   control: { label: "Agent control", defaultEnabled: true, names: (n) => n.startsWith("agent_control_") },
+  models: { label: "Model management", defaultEnabled: true, names: (n) => n.startsWith("model_") },
   goals: { label: "Persistent goals", defaultEnabled: true, names: (n) => n.startsWith("goal_") },
   web_search: { label: "Web search", defaultEnabled: true, names: (n) => n === "web_search" },
   browser: { label: "Browser automation", defaultEnabled: true, names: (n) => n.startsWith("browser_") },
@@ -1133,6 +1137,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       },
       onRun: (entry) => deps.recordFileRun({ file: `${entry.skill}/${entry.script}`, args: entry.args, status: entry.status, exitCode: entry.exitCode, durationMs: entry.durationMs, source: `skill:${entry.skill}` }),
     }),
+    ...(deps.registerLocalModel ? createModelDownloadTools({
+      dataRoot: deps.dataRoot,
+      registerLocalModel: deps.registerLocalModel,
+    }) : []),
     ...createControlTools(createControlToolFactory(control)),
     ...(deps.pluginHost ? [
       {

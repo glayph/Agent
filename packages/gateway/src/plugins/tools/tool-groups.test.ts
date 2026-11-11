@@ -6,6 +6,8 @@ describe("resolveToolGroupKey", () => {
     expect(resolveToolGroupKey("web_search")).toBe("web_search")
     expect(resolveToolGroupKey("web-search")).toBe("web_search")
     expect(resolveToolGroupKey("agent-control")).toBe("control")
+    expect(resolveToolGroupKey("models")).toBe("models")
+    expect(resolveToolGroupKey("model-management")).toBe("models")
     expect(resolveToolGroupKey("terminal")).toBe("terminal")
     expect(resolveToolGroupKey(" Browser ")).toBe("browser")
     expect(resolveToolGroupKey("computer")).toBe("computer")

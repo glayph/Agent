@@ -12,7 +12,7 @@ import { createGlobalMemory, initMemory } from "@miki/memory/core"
 import http from "node:http"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync as makeDirSync, copyFileSync, chmodSync, appendFileSync } from "node:fs"
+import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync as makeDirSync, copyFileSync, chmodSync, appendFileSync, statSync } from "node:fs"
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto"
 import { isIP } from "node:net"
 import Database from "better-sqlite3"
@@ -1441,6 +1441,50 @@ const agent = createAgentRuntime({
   getAutonomyRuntimeContext: () => autonomyRuntimeContext(),
   setAppConfig: (next) => persistAppConfig(next),
   storedModels: () => storedModels().map((row) => ({ id: row.id, payload: hydrateStoredModel(row.id, JSON.parse(row.payload) as Record<string, unknown>), isDefault: row.is_default === 1 })),
+  registerLocalModel: ({ name, modelPath, sha256, bytes }) => {
+    const modelsDir = path.resolve(dataRoot, "models")
+    const absolutePath = path.resolve(modelPath)
+    const relativePath = path.relative(modelsDir, absolutePath)
+    if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      throw new Error("A downloaded model must be stored inside the managed model directory.")
+    }
+    const file = statSync(absolutePath, { throwIfNoEntry: false })
+    if (!file?.isFile() || file.size !== bytes) throw new Error("The downloaded model changed before it could be registered.")
+    if (!/^[a-z0-9][a-z0-9._-]{1,63}$/i.test(name)) throw new Error("The model name is invalid.")
+    for (const row of storedModels()) {
+      const payload = JSON.parse(row.payload) as Record<string, unknown>
+      const local = payload.local && typeof payload.local === "object" ? payload.local as Record<string, unknown> : {}
+      if (path.resolve(String(local.model_path || "")) === absolutePath) {
+        return { registered: true, reused: true, index: row.id, model_name: payload.model_name, is_default: row.is_default === 1 }
+      }
+      if (String(payload.model_name || "").toLowerCase() === name.toLowerCase()) {
+        throw new Error(`A model named "${name}" is already registered.`)
+      }
+    }
+    const payload = {
+      model_name: name,
+      model: name,
+      provider: "llama.cpp",
+      api_base: providerDefaultApiBase("llama.cpp"),
+      enabled: true,
+      local: {
+        runtime: "llama.cpp",
+        model_format: "gguf",
+        model_path: absolutePath,
+        context_size: Math.max(512, Number(process.env.MIKI_LOCAL_CONTEXT_SIZE) || 4096),
+        gpu_layers: "auto",
+        enabled: true,
+        auto_start: false,
+        allowed_model_dirs: [path.dirname(absolutePath)],
+      },
+      download: { bytes, sha256 },
+    }
+    const result = db.prepare("INSERT INTO model_configs(payload,is_default,created_at,updated_at) VALUES(?,0,?,?)").run(JSON.stringify(payload), now(), now())
+    modelConfigVersion += 1
+    refreshLocalRuntimeConfig()
+    autonomy.wake({ forceAmbient: false })
+    return { registered: true, reused: false, index: Number(result.lastInsertRowid), model_name: name, is_default: false, auto_start: false }
+  },
   requireAuth,
   fileExecutionEnabled,
   recordFileRun,
@@ -2126,6 +2170,7 @@ app.get("/api/tools", async (_req, res) => {
     group("memory", "memory", "Search and store long-term memory notes.", "memory", true, allToolNames.filter((name) => name.startsWith("memory_"))),
     group("skills", "skills", "Discover, read and run installed skills; install or delete them (with approval).", "skills", true, allToolNames.filter((name) => name.startsWith("skill_"))),
     group("control", "agent-control", "Typed, approval-gated agent configuration operations.", "system", true, allToolNames.filter((name) => name.startsWith("agent_control_"))),
+    group("models", "model-management", "Search public model metadata and install verified GGUF files as selectable local models; installation does not switch the active model.", "models", true, allToolNames.filter((name) => name.startsWith("model_"))),
     group("goals", "goals", "Create, inspect, update, pause and complete persistent user goals.", "autonomy", true, allToolNames.filter((name) => name.startsWith("goal_"))),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
     group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, allToolNames.filter((name) => name.startsWith("browser_")), browserBlocked),

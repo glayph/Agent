@@ -235,6 +235,8 @@ describe("buildSkillsContext", () => {
     expect(context).toContain("- demo-skill: Greets people from a script.");
     expect(context).not.toContain("silent");
     expect(context).toContain("skill_read");
+    expect(context).toContain("semantic relevance, not fixed keywords");
+    expect(context).toContain("skill_search with a natural-language description");
     const tiny = (await buildSkillsContext(store, { maxChars: 10 }))!;
     expect(tiny).toContain("and 1 more");
   });

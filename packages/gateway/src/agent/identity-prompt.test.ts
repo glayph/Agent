@@ -63,13 +63,16 @@ describe("identity prompt", () => {
     fs.writeFileSync(path.join(dir, "AGENTS.md"), "global rules");
     try {
       const context = buildIdentityContext({
-        groups: [{ key: "computer", enabled: false }],
+        groups: [{ key: "computer", enabled: false }, { key: "models", enabled: true }],
         identityDirs: [dir],
         specialistId: "../../outside",
       });
       expect(context).toContain("MIKI CORE IDENTITY AND RUNTIME-INTEGRITY CONTRACT");
       expect(context).toContain("CURRENT RUNTIME IDENTITY: miki");
       expect(context).toContain("CAPABILITIES CURRENTLY DISABLED: computer");
+      expect(context).toContain("model_search_gguf, model_download_gguf");
+      expect(context).toContain("semantically inspect available tools and installed Skills");
+      expect(context).toContain("Only report an action as complete when a tool result or independent check confirms the outcome");
       expect(context).toContain("global rules");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 /** Tool groups the dashboard can toggle, keyed by their config key. */
-export const TOOL_GROUP_KEYS = ["filesystem", "memory", "skills", "control", "goals", "web_search", "browser", "terminal", "computer", "plugins", "mcp"] as const
+export const TOOL_GROUP_KEYS = ["filesystem", "memory", "skills", "control", "models", "goals", "web_search", "browser", "terminal", "computer", "plugins", "mcp"] as const
 export type ToolGroupKey = (typeof TOOL_GROUP_KEYS)[number]
 
 /**
@@ -12,6 +12,8 @@ const ALIASES: Record<string, ToolGroupKey> = {
   websearch: "web_search",
   "agent-control": "control",
   agent_control: "control",
+  "model-management": "models",
+  model_management: "models",
   "agent-goals": "goals",
   shell: "terminal",
   "computer-use": "computer",
