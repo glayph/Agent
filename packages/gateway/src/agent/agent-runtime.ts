@@ -614,6 +614,34 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     return out
   }
 
+  /** Identity + live capability + autonomy context. Shared by the main run and by live chat replies. */
+  const identityPrompt = (): string => {
+    const config = deps.getAppConfig() as LooseConfig
+    const persona = typeof config?.agent?.persona === "string" ? config.agent.persona : undefined
+    const configuredIdentityPath = typeof config?.agent?.identity?.path === "string"
+      ? config.agent.identity.path.trim()
+      : ""
+    const state = toolState()
+    const identity = buildIdentityContext({
+      groups: Object.keys(TOOL_GROUPS).map((key) => ({ key, enabled: state[key] === true })),
+      persona,
+      specialistId: process.env.MIKI_AGENT_ID?.trim() || "miki",
+      identityDirs: [
+        ...(configuredIdentityPath ? [path.resolve(deps.workspaceRoot, configuredIdentityPath)] : []),
+        path.join(deps.workspaceRoot, "identity"),
+        path.join(deps.workspaceRoot, "config", "identity"),
+      ],
+      autonomyRuntimeContext: (() => {
+        try { return deps.getAutonomyRuntimeContext?.() }
+        catch (error) {
+          deps.log?.("autonomy.runtime_context_unavailable", { error: error instanceof Error ? error.message : String(error) })
+          return undefined
+        }
+      })(),
+    })
+    return identity
+  }
+
   let allTools: EngineTool[] = []
   let nativeTools: EngineTool[] = []
   let extensionTools: EngineTool[] = []
@@ -1957,32 +1985,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       }
     },
     // Identity + live capability context; the model still writes every reply itself.
-    systemPrompt: () => {
-      const config = deps.getAppConfig() as LooseConfig
-      const persona = typeof config?.agent?.persona === "string" ? config.agent.persona : undefined
-      const configuredIdentityPath = typeof config?.agent?.identity?.path === "string"
-        ? config.agent.identity.path.trim()
-        : ""
-      const state = toolState()
-      const identity = buildIdentityContext({
-        groups: Object.keys(TOOL_GROUPS).map((key) => ({ key, enabled: state[key] === true })),
-        persona,
-        specialistId: process.env.MIKI_AGENT_ID?.trim() || "miki",
-        identityDirs: [
-          ...(configuredIdentityPath ? [path.resolve(deps.workspaceRoot, configuredIdentityPath)] : []),
-          path.join(deps.workspaceRoot, "identity"),
-          path.join(deps.workspaceRoot, "config", "identity"),
-        ],
-        autonomyRuntimeContext: (() => {
-          try { return deps.getAutonomyRuntimeContext?.() }
-          catch (error) {
-            deps.log?.("autonomy.runtime_context_unavailable", { error: error instanceof Error ? error.message : String(error) })
-            return undefined
-          }
-        })(),
-      })
-      return `${DEFAULT_SYSTEM_PROMPT}\n\n${identity}`
-    },
+    systemPrompt: () => `${DEFAULT_SYSTEM_PROMPT}\n\n${identityPrompt()}`,
     // Refresh task-aware memory and current execution state before every model turn,
     // including the first request and every request after tool execution.
     turnContextProvider: async (info) => {
@@ -2940,7 +2943,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     }
     return registry.get(toolName)?.monitor
   }
-  return { engine, control, approvals, registry, processes, llmFor, resolveCurrentModel, resolveMonitorPresentation, mount, refreshExtensionTools, startRun, startBackgroundWorker, stopBackgroundWorker, steerRun, noteSteerAcknowledged, cancelRun, syncTools, setToolState, flushArtifacts: () => artifacts.flush(), acquireExecutionSlot, releaseRunInteractiveResources, resourceSnapshot: () => ({ ...hostResourceManager.snapshot(), ...globalResourceArbiter.snapshot() }), allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size, isRunActive: (runId: string) => runs.has(runId) }
+  return { engine, control, approvals, registry, processes, llmFor, identityPrompt, resolveCurrentModel, resolveMonitorPresentation, mount, refreshExtensionTools, startRun, startBackgroundWorker, stopBackgroundWorker, steerRun, noteSteerAcknowledged, cancelRun, syncTools, setToolState, flushArtifacts: () => artifacts.flush(), acquireExecutionSlot, releaseRunInteractiveResources, resourceSnapshot: () => ({ ...hostResourceManager.snapshot(), ...globalResourceArbiter.snapshot() }), allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size, isRunActive: (runId: string) => runs.has(runId) }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>
