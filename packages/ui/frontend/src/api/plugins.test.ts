@@ -80,7 +80,7 @@ describe("Plugin API response compatibility", () => {
           success: true,
           data: {
             health: {
-              "browser.playwright": {
+              "browser.webextension-bridge": {
                 ok: true,
                 status: "functional",
                 latencyMs: 4,
@@ -95,7 +95,7 @@ describe("Plugin API response compatibility", () => {
 
     const result = await getPluginHealth()
 
-    expect(result.health["browser.playwright"]?.ok).toBe(true)
-    expect(result.health["browser.playwright"]?.latencyMs).toBe(4)
+    expect(result.health["browser.webextension-bridge"]?.ok).toBe(true)
+    expect(result.health["browser.webextension-bridge"]?.latencyMs).toBe(4)
   })
 })

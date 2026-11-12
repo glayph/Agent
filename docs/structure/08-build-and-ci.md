@@ -1,74 +1,37 @@
-# 08 — Build, CI, Scripts & Tooling
+# 08 — Build, CI, Scripts and Tooling
 
-## scripts/
+The root `package.json` defines the supported scripts. Always inspect its current script body before assuming an exact build sequence.
 
-```
-scripts/
-├── build-all related
-│   ├── build-cli.mjs                 # Builds the CLI package
-│   ├── build-go-backend.mjs          # Builds the legacy Go compatibility stub
-│   ├── build-llama.mjs               # Builds / prepares llama.cpp integration
-│   ├── build-local.mjs               # Local development build
-│   ├── build-offline-release.mjs     # Full offline release packaging
-│   ├── build-release-artifacts.mjs   # Release artifact assembly
-│   ├── build-standard.mjs            # Standard build path
-│   └── clean-build-artifacts.mjs     # Cleanup
-├── model management
-│   ├── miki-model.mjs                # list / status / install / remove models
-│   ├── miki-model.test.mjs
-│   └── model-smoke.mjs               # Smoke test for model runtime
-├── verification & quality
-│   ├── run-verify.mjs                # Main verification suite
-│   ├── run-release-verify.mjs        # Release-time verification
-│   ├── run-go-tests.mjs
-│   ├── smoke-gateway-integration.mjs
-│   ├── soak-agent.mjs                # Long-running soak test
-│   ├── benchmark-score-gate.mjs      # Performance / quality gate
-│   └── assert-pack-contents.mjs
-├── runtime helpers
-│   ├── miki-24-7.mjs                 # 24/7 runtime launcher
-│   ├── miki-24-7-policy.mjs / .test.mjs
-│   ├── miki-healthcheck.mjs
-│   ├── miki-backup.mjs
-│   └── offline-launcher-template.mjs
-├── packaging & sync
-│   ├── prepare-runtime-package.mjs
-│   ├── runtime-package-filters.mjs / .test.mjs
-│   ├── sync-webui-backend.mjs
-│   ├── frontend-pnpm.mjs
-│   └── fix-packages.mjs
-├── analysis
-│   ├── analyze-live-memory.cjs
-│   └── inspect-memory-upgrade.cjs
-├── dev.js                            # Development launcher
-└── jest-release-setup.cjs
+## Main commands
+
+```bash
+npm ci
+npm run build:all
+npm run test:architecture-layout
+npm run test:agent-core
+npm run test:gateway
+npm --prefix packages/ui/frontend run test
+npm --prefix packages/ui/frontend run lint
 ```
 
-**Comments**
-- `npm run build:all` orchestrates the full monorepo build (config → installer → skills → memory → Core (llama.cpp source build + TypeScript compile) → Node Gateway → frontend → cli). The Go compatibility stub is separate legacy packaging and is not the primary Web UI backend.
-- Model scripts allow installing approved GGUF models (default local target: gemma-4-E2B style) and verifying health.
-- 24/7 scripts support continuous operation with policy checks.
-- Soak and benchmark scripts are used for reliability and quality gating.
+The root engine declaration requires Node.js `>=22.19.0`. `npm ci` must run with install scripts enabled for native dependencies such as SQLite. A full build may also compile the bundled llama.cpp native integration and therefore require a supported CMake/compiler toolchain.
 
-## .github/workflows/
+## Script families
 
-```
-.github/workflows/
-├── build-cross-platform.yml              # Cross-platform build CI
-└── release-offline-cross-platform.yml    # Offline release workflow
-```
+- **Build:** workspace orchestration, frontend compilation, CLI assembly, native provider preparation, local/release build scripts.
+- **Validation:** architecture/layout contracts, package tests, frontend tests/lint, bundled-skill checks, native SQLite check, release verification.
+- **Runtime:** development launcher, continuous-runtime supervisor, health checks, backup/recovery helpers.
+- **Models:** list/status/install/remove supported local models and smoke-test model runtime.
+- **Reliability:** chaos/recovery tests, integration smoke, soak and benchmark gates.
 
-**Comments**
-- CI builds and packages for multiple platforms.
-- Offline release workflow produces the distributable that was originally zipped as Agent-1.3.7-offline.
+Use `npm run` to inspect the exact script names in this checkout. Historical reports may refer to commands or paths from an earlier source snapshot.
 
-## Root test & lint tooling
+## CI
 
-- `eslint.config.js` — flat ESLint configuration.
-- `jest.config.cjs`, `jest.core.config.cjs`, `jest.release.config.cjs`, `jest.setup.mjs` — layered Jest setups.
-- `turbo.json` — task pipeline and caching for the monorepo.
+`.github/workflows/` contains cross-platform build and offline-release workflows. The release pipeline assembles distributable artifacts from built workspace outputs. Release success should be based on the workflow logs and artifact checks, not a static statement in documentation.
 
-These files ensure consistent code quality, unit/integration coverage, and reproducible releases.
+## Change verification
 
+For a runtime identity change, run the identity prompt tests and any relevant supervisor tests. For Chat Top Bar changes, run the status/helper and frontend test suites, lint and production build, then inspect desktop/mobile behavior in an actual browser. For broad changes, finish with architecture/layout contracts and the root build/test path.
 
-**Native provider build:** `packages/core` build command runs `scripts/build-llama.mjs` before TypeScript compilation. Every Core/Agent build configures and builds the vendored `packages/core/src/plugins/providers/builtin/llama.cpp/source` CMake project and stages `llama-server` under `packages/core/dist/plugins/providers/builtin/llama.cpp/native`. The Turbo task for `@miki/core#build` is non-cacheable so a cache hit cannot skip this native build step. Standalone direct-`tsc` build entrypoints invoke the same script explicitly.
+Do not claim a check passed unless it was executed successfully in the current environment. Record Node version, dependency installation state, commands, exit codes and environmental blockers in the upgrade verification record.

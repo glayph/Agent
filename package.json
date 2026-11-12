@@ -3,13 +3,12 @@
   "version": "1.3.15",
   "private": true,
   "type": "module",
-  "description": "Miki \u2014 local-first autonomous AI agent",
+  "description": "Miki — local-first autonomous AI agent",
   "workspaces": [
     "packages/*",
     "packages/ui/frontend"
   ],
   "scripts": {
-    "postinstall": "node scripts/install-playwright-browser.mjs",
     "build": "npm run build:all",
     "test:recovery-chaos": "node scripts/recovery-chaos.mjs",
     "build:llama": "node scripts/build-llama.mjs",
@@ -30,7 +29,6 @@
     "model:smoke": "node scripts/model-smoke.mjs",
     "test:native": "node scripts/test-native-sqlite.mjs",
     "test:skills": "node scripts/test-bundled-skills.mjs",
-    "setup:browser": "node scripts/install-playwright-browser.mjs",
     "test:cli-readonly": "node scripts/test-cli-readonly.mjs",
     "test:cookie": "node --test scripts/cookie-jar.test.mjs",
     "test:model-manager": "node --test scripts/miki-model.test.mjs",

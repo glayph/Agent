@@ -68,3 +68,8 @@ After applying a rule, verify from an allowed host that HTTPS and WebSocket traf
 [2]: https://learn.microsoft.com/en-us/powershell/module/netsecurity/new-netfirewallrule?view=windowsserver2025 — Microsoft Learn, New-NetFirewallRule.
 
 [3]: https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/configure-with-command-line — Microsoft Learn, Manage Windows Firewall with the command line.
+
+
+## Deployment security note
+
+These rules are examples, not a universal production policy. Keep the Gateway bound to loopback unless remote access is deliberately configured behind authentication and a hardened reverse proxy. Restrict administrative endpoints and outbound access according to the actual enabled tools. Network reachability does not grant Miki permission to use an OS account, secret, browser profile or external service; runtime authorization and approval controls remain in force. Validate the final rules against the target host and deployment topology before applying them.

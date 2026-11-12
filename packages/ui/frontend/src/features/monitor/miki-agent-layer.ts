@@ -5,13 +5,17 @@ export const MIKI_AGENT_NODE_ID = "miki-agent"
 const MIKI_AGENT_RUN_ID = "miki-agent-runtime"
 const LIVE_TOOL_STATUSES = new Set<MonitorNode["status"]>(["pending", "running", "retrying"])
 
-/** Add the always-on agent card and transient edges to every live tool call. */
+/** Project only the live execution surface; history stays on Activity. */
 export function withMikiAgentLayer(
   nodes: MonitorNode[],
   edges: MonitorEdge[],
   now = Date.now(),
 ): { nodes: MonitorNode[]; edges: MonitorEdge[] } {
-  const activeTools = nodes.filter((node) => Boolean(node.toolName?.trim()) && LIVE_TOOL_STATUSES.has(node.status))
+  const liveNodes = nodes.filter((node) => LIVE_TOOL_STATUSES.has(node.status))
+  const activeTools = liveNodes.filter((node) => Boolean(node.toolName?.trim()))
+  // Do not leave a synthetic agent card or edges on an idle canvas. Completed
+  // and failed records are historical data, not live execution.
+  if (liveNodes.length === 0) return { nodes: [], edges: [] }
   const activeCount = activeTools.length
   const agent: MonitorNode = {
     id: MIKI_AGENT_NODE_ID,
@@ -37,10 +41,12 @@ export function withMikiAgentLayer(
   // agent card floating beside an otherwise connected run. Older Gateway
   // snapshots may not contain a root, so anchor every orphan entry component
   // to Miki without inventing dependencies between sibling nodes.
-  const roots = nodes.filter((node) => node.id === `${node.runId}:root`)
+  const roots = liveNodes.filter((node) => node.id === `${node.runId}:root`)
   const rootIds = new Set(roots.map((node) => node.id))
-  const incoming = new Set(edges.map((edge) => edge.target))
-  const orphanEntries = nodes.filter((node) => !incoming.has(node.id) && !rootIds.has(node.id))
+  const liveNodeIds = new Set(liveNodes.map((node) => node.id))
+  const activeEdges = edges.filter((edge) => liveNodeIds.has(edge.source) && liveNodeIds.has(edge.target))
+  const incoming = new Set(activeEdges.map((edge) => edge.target))
+  const orphanEntries = liveNodes.filter((node) => !incoming.has(node.id) && !rootIds.has(node.id))
   const fallbackTargets = activeTools.filter((tool) => !incoming.has(tool.id))
   const targets = roots.length > 0
     ? roots
@@ -56,5 +62,5 @@ export function withMikiAgentLayer(
     displayOnly: true,
   }))
 
-  return { nodes: [...nodes, agent], edges: [...edges, ...liveEdges] }
+  return { nodes: [...liveNodes, agent], edges: [...activeEdges, ...liveEdges] }
 }

@@ -1,6 +1,6 @@
-# @miki/cli — the self-contained Agent Miki npm package
+# @miki/cli — Agent-Miki command-line runtime
 
-This package publishes one command: `miki`. It starts the Agent Miki runtime with a portable TypeScript CLI, managed gateway lifecycle, readiness checks, and an interactive terminal dashboard. No Go toolchain or native CLI binary is required.
+This package publishes the `miki` command. It starts and manages the Agent-Miki runtime through the TypeScript CLI, Gateway lifecycle controller, readiness checks and terminal dashboard. The current CLI path does not require the legacy Go compatibility backend.
 
 ```bash
 npm install -g @miki/cli
@@ -25,7 +25,7 @@ Options include `--host <host>`, `--port <port>`, `--debug`, and `--plain`. The 
 
 ## How startup works
 
-The published launcher starts the memory service, loads `packages/cli/dist/cli.js`, and asks the TypeScript runtime controller to start the gateway. The controller validates ports, propagates runtime environment variables, writes `data/gateway.pid`, streams child logs, polls `/gateway/health`, and supports start, stop, restart, and graceful shutdown. The gateway starts the core backend, serves the built web UI, and proxies API and WebSocket traffic.
+The published launcher loads the CLI runtime, prepares the selected workspace, and asks the TypeScript lifecycle controller to start the Gateway and its dependent runtime services. Follow the current controller source for the exact startup order; it can vary with package layout and deployment mode. The controller validates ports, propagates runtime environment variables, writes `data/gateway.pid`, streams child logs, polls `/gateway/health`, and supports start, stop, restart, and graceful shutdown. The gateway starts the core backend, serves the built web UI, and proxies API and WebSocket traffic.
 
 ## Self-contained package layout
 
@@ -83,3 +83,8 @@ npm run build:cli
 node packages/cli/dist/cli.js --help
 node packages/cli/dist/cli.js doctor
 ```
+
+
+## Agent autonomy and permission model
+
+The CLI starts and manages the host runtime; it does not itself provide unlimited model execution. Background decisions and durable work depend on the Gateway/Core supervisor and worker services, provider access, configured permissions and process health. See [the root operating model](../../docs/AGENT_MIKI_OPERATING_MODEL.md) and [idle-mode guide](../../docs/always-active-idle-mode.md). A successful `miki start` means the lifecycle start completed, not that a particular autonomous goal is active or complete.

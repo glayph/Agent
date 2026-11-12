@@ -73,24 +73,9 @@ function latestRunIdentity(messages: ChatMessage[]): {
 }
 
 function hideResolvedErrors(messages: ChatMessage[]): ChatMessage[] {
-  const latestSuccessfulReply = messages.reduce(
-    (latest, message, index) =>
-      message.role === "assistant" && message.kind !== "error" ? index : latest,
-    -1,
-  )
-  if (latestSuccessfulReply < 0) return messages
+  // Errors are user-facing assistant messages. Keep them in the transcript so
+  // a later successful run cannot erase the explanation for the failed run.
   return messages
-    .filter(
-      (message, index) =>
-        message.kind !== "error" || index > latestSuccessfulReply,
-    )
-    .map((message, index) =>
-      message.role === "user" &&
-      message.deliveryStatus === "failed" &&
-      index < latestSuccessfulReply
-        ? { ...message, deliveryStatus: undefined, deliveryDetail: undefined }
-        : message,
-    )
 }
 
 let wsRef: WebSocket | null = null
@@ -411,7 +396,25 @@ export async function connectChat() {
         }
         if (message.type !== "message.delta") flushPendingDeltas()
         if (message.type === "proactive.message") {
-          // Background notices belong outside the conversation transcript.
+          const proactivePayload = message.payload ?? {}
+          const notificationKind =
+            typeof proactivePayload.notification_kind === "string"
+              ? proactivePayload.notification_kind
+              : ""
+          // Progress and warning notices are status noise. Result and discovery
+          // notices are user-facing Agent messages and belong in the transcript.
+          if (notificationKind !== "result" && notificationKind !== "discovery") {
+            return
+          }
+          handlemikiMessage(
+            {
+              ...message,
+              type: "message.create",
+              session_id: sessionId,
+              payload: { ...proactivePayload, role: "assistant" },
+            },
+            sessionId,
+          )
           return
         }
         if (message.type === "auth.ok") {
@@ -596,13 +599,6 @@ export async function connectChat() {
             )
             const isLastRun = runningRunIds.length === 0
             return {
-              ...(isLastRun && terminalStatus === "completed"
-                ? {
-                    messages: prev.messages.filter(
-                      (message) => message.kind !== "error",
-                    ),
-                  }
-                : {}),
               runningRunIds,
               isTyping: !isLastRun,
               runStatus: isLastRun

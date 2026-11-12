@@ -228,6 +228,21 @@ describe("external channel runtime", () => {
     db.close();
   });
 
+  it("preserves the legacy proactive-notice API's void return contract", async () => {
+    const db = new Database(":memory:");
+    const manager = new ChannelRuntimeManager({
+      db, chatTurns: {} as never, getAppConfig: () => ({ channel_list: {} }), log: () => undefined,
+      fetchImpl: (async () => new Response("{}", { status: 200 })) as typeof fetch,
+    });
+    try {
+      await expect(manager.sendProactiveNotice("Legacy callers still receive no result value.")).resolves.toBeUndefined();
+      expect(manager.deliveryStats().pending).toBe(1);
+    } finally {
+      await manager.close();
+      db.close();
+    }
+  });
+
   it("re-fans out a durable notice when an explicit recipient is configured later", async () => {
     const db = new Database(":memory:")
     const requests: string[] = []

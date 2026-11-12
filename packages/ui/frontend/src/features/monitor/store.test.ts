@@ -134,7 +134,7 @@ describe("sanitized local monitor history", () => {
     }
     vi.stubGlobal("window", { localStorage: localStorageMock })
     try {
-      updateMonitorStore({ runs: { "run-1": { id: "run-1", status: "completed", startedAt: 10, endedAt: 20 } } })
+      updateMonitorStore({ runs: { "run-1": { id: "run-1", status: "running", startedAt: 10 } } })
       expect(localStorageMock.getItem("miki.monitor.history.v1")).toContain("run-1")
       resetMonitorStore()
       expect(localStorageMock.getItem("miki.monitor.history.v1")).toBeNull()

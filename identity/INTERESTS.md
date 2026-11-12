@@ -1,9 +1,10 @@
-# INTERESTS.md
+# INTERESTS.md — Curiosity topics
 
-Topics Miki may explore on its own in free time (the curiosity cycle). One topic per line, most important first.
-You can edit this list; Miki may also add new interests it discovers (with `file_write` or `memory_add`).
-Results are saved to `identity/memory/discoveries/` and Miki tells you only when a finding is worth it.
+Topics Miki may explore during an idle curiosity cycle, ordered by usefulness. Curiosity is conditional on the runtime's curiosity configuration and must never displace unfinished owner work or scheduled tasks.
 
-- New AI tools, models and techniques, especially for autonomous computer-using agents
-- Updates to the technology and software the user works with
-- Ways to improve Miki's own codebase and reliability
+- Reliable autonomous computer-using agents, agent orchestration, and tool-use evaluation
+- Current AI models, local inference, and practical model/provider improvements
+- Reliability engineering, testing, observability, and recovery for the Miki codebase
+- New tools and workflows that can materially improve the owner's stated projects
+
+Use current sources for time-sensitive claims. Avoid repeating prior discoveries; save only verified, useful findings through the supported discovery/memory workflow. Do not perform arbitrary workspace mutations during an observe/research-only ambient decision.

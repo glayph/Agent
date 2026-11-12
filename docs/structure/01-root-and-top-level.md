@@ -1,116 +1,47 @@
 # 01 — Root and Top-Level Directories
 
-## Root files
+This guide reflects the root files and folders present in the current source snapshot. Optional generated directories such as `node_modules/`, package `dist/`, runtime `data/`, and build outputs may appear after installation or execution and are not part of the clean source layout.
 
-```
-.
-├── .env.example                 # Example environment variables (API keys, ports, bind)
-├── .gitattributes               # Git attribute rules (line endings, etc.)
-├── .gitignore                   # Ignores node_modules, dist, runtime data, caches
-├── LICENSE                      # MIT License (Copyright 2026 Agent Miki contributors)
-├── README.md                    # Project overview, architecture, quick start
-├── SETUP.md                     # Detailed setup and operational documentation
-├── package.json                 # Monorepo root: workspaces, scripts (build, start, model:*, verify)
-├── package-lock.json            # npm lockfile: canonical for the monorepo (CI runs `npm ci`)
-├── pnpm-lock.yaml               # pnpm lockfile: only the frontend build uses pnpm (scripts/frontend-pnpm.mjs); not read by `npm ci`
-├── pnpm-workspace.yaml          # pnpm settings picked up by the frontend's pnpm install
-├── tsconfig.json                # Root TypeScript config
-├── tsconfig.base.json           # Shared base TS compiler options
-├── turbo.json                   # Turborepo pipeline configuration
-├── eslint.config.js             # ESLint flat config
-├── jest.config.cjs              # Main Jest configuration
-├── jest.core.config.cjs         # Core-package specific Jest config
-├── jest.release.config.cjs      # Release verification Jest config
-└── jest.setup.mjs               # Jest setup / global helpers
-```
+## Root configuration
 
-**Comments**
-- `package.json` defines the high-level scripts: `build:all`, `start` (→ bin/miki.js), `model:list|install|status`, `verify`, `dev`, `runtime:24-7`.
-- npm workspaces (`package-lock.json`) are canonical; pnpm is used only inside `packages/ui/frontend`. When dependencies change, update `package-lock.json` first. The root `pnpm-lock.yaml`/`pnpm-workspace.yaml` are kept only until someone confirms `corepack pnpm install` in the frontend works without them.
-- Test configs are split so core, release and general tests can run independently.
+| File | Responsibility |
+|---|---|
+| `package.json` | npm workspace declaration, lifecycle scripts, build/test orchestration and Node engine requirement |
+| `package-lock.json` | Canonical npm dependency lock used by `npm ci` |
+| `pnpm-lock.yaml`, `pnpm-workspace.yaml` | Retained pnpm configuration; verify the invoking script before using them |
+| `tsconfig.json`, `tsconfig.base.json` | Root and shared TypeScript settings |
+| `turbo.json` | Build task graph and caching configuration |
+| `eslint.config.js` | Flat ESLint configuration |
+| `jest.config.cjs`, `jest.core.config.cjs`, `jest.release.config.cjs`, `jest.setup.mjs` | General, Core and release-oriented Jest setup |
+| `.gitignore`, `.gitattributes` | Repository hygiene and file normalization |
+| `.gitleaks.toml`, `.miki-secretignore` | Secret-scanning configuration |
+
+Node.js must satisfy the root engine declaration (`>=22.19.0`). Check the installed version before installing dependencies or interpreting build failures.
 
 ## bin/
 
-```
-bin/
-├── miki.js                      # Primary Node entry: resolves runtime, starts gateway/core/memory/UI
-├── miki-config.js               # Configuration helper / inspector
-├── miki-doctor.mjs              # Environment & runtime diagnostics
-└── supervisor.ps1               # Windows process supervisor helper
-```
-
-**Comments**
-- `miki.js` is the main orchestrator. It locates the runtime root, checks required dist artifacts, spawns the Go CLI dashboard when available, and launches the gateway + core services.
-- Doctor performs health and dependency checks useful for installation troubleshooting.
+`bin/miki.js` is the primary Node launcher. `bin/miki-config.js` provides configuration support, `bin/miki-doctor.mjs` reports environment/runtime diagnostics, and `bin/supervisor.ps1` is a Windows helper. Follow the launcher code and package build outputs for the actual startup order.
 
 ## config/
 
-```
-config/
-├── .env.example                 # Config-level env example
-├── agent.yaml                   # Core agent persona, models, memory, security, tools policy
-└── tools.yaml                   # Tool permission levels, deny patterns, MCP, web-search providers
-```
+- `agent.yaml`: configured persona and Agent/runtime defaults.
+- `tools.yaml`: tool-group permissions, denied operations, MCP and web-search configuration.
+- `.env.example`: environment variable template.
 
-**Comments**
-- `agent.yaml` is the single most important runtime configuration file (persona, model routing, resource limits, security defaults, self-improvement flags).
-- `tools.yaml` controls shell/file/computer-use permissions, deny patterns, and web-search provider selection.
-
-## data/
-
-```
-data/                            # Runtime data directory (empty in source; created at runtime)
-```
-
-**Comments**
-- Holds SQLite databases, memory stores, logs, model cache, workspace state. Not committed.
+The YAML files express defaults and policy inputs; they do not supersede hard runtime denials, live tool registration, OS permissions, or approval gates. The interactive identity file loading order is documented in [the operating model](../AGENT_MIKI_OPERATING_MODEL.md).
 
 ## deploy/
 
-```
-deploy/
-├── firewall/
-│   └── agent-miki-firewall-examples.md   # Example firewall rules
-├── linux/
-│   ├── install-systemd.sh                # Installs systemd service
-│   ├── uninstall-systemd.sh
-│   └── systemd/
-│       └── agent-miki.service.in         # systemd unit template
-├── reverse-proxy/
-│   └── nginx-agent-miki.conf.example     # Nginx reverse-proxy example
-└── windows/
-    ├── Install-AgentMiki.ps1             # Windows installer script
-    └── Uninstall-AgentMiki.ps1
-```
+Deployment helpers are grouped by platform and deployment function: Linux service scripts, Windows installation scripts, reverse-proxy configuration and firewall examples. Read and adapt examples before exposing the Gateway beyond loopback. Do not copy sample firewall rules blindly into a production host.
 
-**Comments**
-- Provides production deployment helpers for Linux (systemd) and Windows.
-- Reverse-proxy and firewall examples support hardened network exposure.
+## docs/ and identity/
 
-## docs/
+`docs/` contains current operating/architecture guides and dated investigation reports. `identity/` contains Miki's prompt documents, operating manual, owner preferences and optional specialist identity profiles. `identity/README.md` explains which components are loaded in interactive and ambient contexts.
 
-```
-docs/
-├── provider-gateway.md          # Provider gateway design notes
-└── structure/                   # This annotated structure documentation set
-    ├── 00-index.md
-    ├── 01-root-and-top-level.md
-    └── ...
-```
+## packages/ and scripts/
 
-## providers/
+Workspace package ownership is documented in [02-packages-overview.md](02-packages-overview.md). `scripts/` contains the build, validation, runtime supervision, recovery tests and release automation described in [08-build-and-ci.md](08-build-and-ci.md).
 
-```
-providers/
-└── example-provider/
-    ├── README.md
-    ├── miki.provider.json       # Provider manifest
-    └── provider.mjs             # Example external provider implementation
-```
+## Runtime data
 
-**Comments**
-- Demonstrates how third-party model providers can be registered via the plugin/SDK boundary.
-
-## scripts/
-
-See [08-build-and-ci.md](08-build-and-ci.md) for the full scripts inventory.
+The runtime data root may contain databases, memory, logs, process state, model cache, vault files and task artifacts. It is generated at runtime and contains sensitive information; keep it outside source control and secure backups appropriately.

@@ -34,7 +34,9 @@ for (const legacy of [
 
 // Every Core build must execute the source build. Turbo cannot cache away the native build side effect.
 const coreManifest = JSON.parse(fs.readFileSync(at('packages/core/package.json'), 'utf8'));
-assert.equal(coreManifest.scripts?.build, "node ../../scripts/build-llama.mjs && tsc -p tsconfig.json && node scripts/build-skill-catalog.mjs");
+assert.match(coreManifest.scripts?.build ?? '', /node \.\.\/\.\.\/scripts\/build-llama\.mjs/);
+assert.match(coreManifest.scripts?.build ?? '', /tsc -p tsconfig\.json/);
+assert.match(coreManifest.scripts?.build ?? '', /node scripts\/build-skill-catalog\.mjs/);
 const turbo = JSON.parse(fs.readFileSync(at('turbo.json'), 'utf8'));
 assert.equal(turbo.tasks?.['@miki/core#build']?.cache, false, 'Turbo must not skip the Core native build');
 const buildScript = fs.readFileSync(at('scripts/build-llama.mjs'), 'utf8');

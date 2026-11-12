@@ -2,6 +2,7 @@ import { execFile, spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { fileURLToPath } from "node:url";
 import { getErrorMessage } from "../../errors.js";
 import { readMikiEnv } from "@miki/config";
 
@@ -638,6 +639,13 @@ function Invoke-MikiComputer {
       }) "Captured screenshot without mouse input." $null
     }
 
+    if ($action -eq "list_applications") {
+      $apps = Get-StartApps | Sort-Object Name | ForEach-Object {
+        [ordered]@{ id = [string]$_.AppID; name = [string]$_.Name; source = "windows-start-apps" }
+      }
+      return New-MikiResult $true $action ([ordered]@{ applications = @($apps); count = $apps.Count }) "Listed installed Start Menu applications." $null
+    }
+
     if ($action -eq "list_processes") {
       $processes = Get-Process | Sort-Object CPU -Descending | Select-Object -First 100 | ForEach-Object {
         [ordered]@{
@@ -768,7 +776,7 @@ $result | ConvertTo-Json -Depth 16 -Compress
 function execFileText(
   command: string,
   args: string[],
-  options: { timeout: number; maxBuffer: number },
+  options: { timeout: number; maxBuffer: number; signal?: AbortSignal },
 ): Promise<ExecFileResult> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -779,6 +787,7 @@ function execFileText(
         timeout: options.timeout,
         maxBuffer: options.maxBuffer,
         windowsHide: true,
+        ...(options.signal ? { signal: options.signal } : {}),
       },
       (error, stdout, stderr) => {
         if (error) {
@@ -799,8 +808,8 @@ export function linuxX11UnavailableReason(
 ): string | null {
   if (!env.DISPLAY?.trim()) {
     return env.WAYLAND_DISPLAY?.trim()
-      ? "Linux Wayland-only sessions are not supported. Start an X11/XWayland display and set DISPLAY, or run Miki in an X11 desktop session."
-      : "No Linux desktop display is available. Computer UI actions require an accessible X11 display (DISPLAY is unset); run Miki in a graphical desktop session. Process and system-information actions can still work headlessly.";
+      ? "No X11/XWayland display is available. Coordinate input and X11 screenshots are disabled; semantic application control can still work when the AT-SPI accessibility bus is available."
+      : "No Linux desktop display is available. GUI actions require an active desktop session; process and system-information actions can still work headlessly.";
   }
   return null;
 }
@@ -1024,6 +1033,81 @@ export function normalizeHotkeyForSendKeys(keys: unknown): string {
   return `${modifiers}${sendKey}`;
 }
 
+export interface InstalledComputerApplication {
+  id: string;
+  name: string;
+  source: string;
+  command?: string;
+  args?: string[];
+  path?: string;
+}
+
+/** Parse the safe argv subset of a freedesktop .desktop Exec field; never invoke a shell. */
+export function parseDesktopApplication(contents: string, desktopPath: string): InstalledComputerApplication | null {
+  const lines = contents.split(/\r?\n/);
+  let inEntry = false;
+  let type = "Application";
+  let name = "";
+  let exec = "";
+  let hidden = false;
+  let noDisplay = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.startsWith("[") && line.endsWith("]")) {
+      inEntry = line === "[Desktop Entry]";
+      continue;
+    }
+    if (!inEntry || !line || line.startsWith("#")) continue;
+    const index = line.indexOf("=");
+    if (index < 1) continue;
+    const key = line.slice(0, index);
+    const value = line.slice(index + 1);
+    if (key === "Type") type = value;
+    else if (key === "Name") name = value;
+    else if (key === "Exec") exec = value;
+    else if (key === "Hidden") hidden = value.toLowerCase() === "true";
+    else if (key === "NoDisplay") noDisplay = value.toLowerCase() === "true";
+  }
+  if (type !== "Application" || !name || hidden || noDisplay || !exec) return null;
+  const tokens = exec.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+/g) || [];
+  const argv = tokens.map((token) => {
+    const unquoted = token.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, (_m, a, b) => a ?? b);
+    return unquoted.replace(/%[fFuUdiDnNickvm]/g, "");
+  }).filter((token) => token.length > 0);
+  if (!argv.length) return null;
+  return {
+    id: path.basename(desktopPath, ".desktop"),
+    name,
+    source: "freedesktop-desktop-entry",
+    command: argv[0],
+    args: argv.slice(1),
+    path: desktopPath,
+  };
+}
+
+function findMacApplications(): InstalledComputerApplication[] {
+  const home = os.homedir();
+  const roots = ["/Applications", "/System/Applications", path.join(home, "Applications")];
+  const found: InstalledComputerApplication[] = [];
+  const visited = new Set<string>();
+  const walk = (directory: string, depth: number) => {
+    if (depth > 3 || !fs.existsSync(directory)) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(directory, entry.name);
+      if (entry.name.endsWith(".app")) {
+        if (visited.has(candidate)) continue;
+        visited.add(candidate);
+        found.push({ id: candidate, name: entry.name.slice(0, -4), source: "macos-app-bundle", path: candidate });
+      } else if (!entry.name.startsWith(".")) walk(candidate, depth + 1);
+    }
+  };
+  roots.forEach((directory) => walk(directory, 0));
+  return found.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export class ComputerAgent {
   private readonly timeoutMs: number;
   private elementCache = new Map<string, ComputerElementLocator>();
@@ -1046,13 +1130,14 @@ export class ComputerAgent {
     });
   }
 
-  private async ensureLinuxX11(): Promise<{ width: number; height: number }> {
+  private async ensureLinuxX11(signal?: AbortSignal): Promise<{ width: number; height: number }> {
     const unavailable = linuxX11UnavailableReason();
     if (unavailable) throw new Error(unavailable);
     try {
       const { stdout } = await execFileText("xdotool", ["getdisplaygeometry"], {
         timeout: 10_000,
         maxBuffer: 64 * 1024,
+        signal,
       });
       const [width, height] = stdout.trim().split(/\s+/).map(Number);
       if (!Number.isFinite(width) || !Number.isFinite(height)) {
@@ -1060,40 +1145,45 @@ export class ComputerAgent {
       }
       return { width, height };
     } catch (error) {
+      if (signal?.aborted) throw error;
       throw new Error(
         `X11 display is unavailable to the Linux computer-use backend. Ensure xdotool is installed and DISPLAY names an accessible X11/XWayland server. ${getErrorMessage(error)}`,
       );
     }
   }
 
-  private async runXdotool(args: string[]): Promise<string> {
+  private async runXdotool(args: string[], signal?: AbortSignal): Promise<string> {
     const { stdout } = await execFileText("xdotool", args, {
       timeout: this.timeoutMs,
       maxBuffer: 2 * 1024 * 1024,
+      signal,
     });
     return stdout.trim();
   }
 
-  private async linuxWindowInfo(id: string): Promise<Record<string, unknown>> {
+  private async linuxWindowInfo(id: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     let title = "";
     let pid: number | undefined;
     let geometry: Record<string, number> = {};
     try {
-      title = await this.runXdotool(["getwindowname", id]);
-    } catch {
+      title = await this.runXdotool(["getwindowname", id], signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
       /* stale window */
     }
     try {
-      const rawPid = await this.runXdotool(["getwindowpid", id]);
+      const rawPid = await this.runXdotool(["getwindowpid", id], signal);
       if (/^\d+$/.test(rawPid)) pid = Number(rawPid);
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       /* not all X11 clients expose a PID */
     }
     try {
       geometry = parseXdotoolGeometry(
-        await this.runXdotool(["getwindowgeometry", "--shell", id]),
+        await this.runXdotool(["getwindowgeometry", "--shell", id], signal),
       );
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       /* window may close while enumerating */
     }
     let processName = "";
@@ -1103,9 +1193,11 @@ export class ComputerAgent {
           await execFileText("ps", ["-p", String(pid), "-o", "comm="], {
             timeout: 5_000,
             maxBuffer: 64 * 1024,
+            signal,
           })
         ).stdout.trim();
-      } catch {
+      } catch (error) {
+        if (signal?.aborted) throw error;
         /* process exited during lookup */
       }
     }
@@ -1131,11 +1223,12 @@ export class ComputerAgent {
     };
   }
 
-  private async linuxWindows(): Promise<Record<string, unknown>[]> {
+  private async linuxWindows(signal?: AbortSignal): Promise<Record<string, unknown>[]> {
     let output: string;
     try {
-      output = await this.runXdotool(["search", "--onlyvisible", "--name", ""]);
-    } catch {
+      output = await this.runXdotool(["search", "--onlyvisible", "--name", ""], signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return [];
     }
     const ids = output
@@ -1143,15 +1236,16 @@ export class ComputerAgent {
       .map((id) => id.trim())
       .filter((id) => /^\d+$/.test(id));
     const windows = await Promise.all(
-      ids.slice(0, 100).map((id) => this.linuxWindowInfo(id)),
+      ids.slice(0, 100).map((id) => this.linuxWindowInfo(id, signal)),
     );
     return windows.filter((window) => window.name || window.processName);
   }
 
   private async findLinuxWindow(
     target: ComputerWindowTarget,
+    signal?: AbortSignal,
   ): Promise<Record<string, unknown> | null> {
-    const windows = await this.linuxWindows();
+    const windows = await this.linuxWindows(signal);
     if (target.windowHandle != null) {
       return (
         windows.find(
@@ -1176,38 +1270,56 @@ export class ComputerAgent {
     );
     if (title || processName) return match || null;
     try {
-      const activeId = await this.runXdotool(["getactivewindow"]);
+      const activeId = await this.runXdotool(["getactivewindow"], signal);
       return (
         windows.find((window) => String(window.windowHandle) === activeId) ||
-        this.linuxWindowInfo(activeId)
+        this.linuxWindowInfo(activeId, signal)
       );
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return null;
     }
+  }
+
+  private async runAtSpi<T>(action: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<ComputerPowerShellResult<T>> {
+    const sourcePath = fileURLToPath(new URL("./atspi_bridge.py", import.meta.url));
+    const packagedPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../src/plugins/computer-use/atspi_bridge.py");
+    const scriptPath = fs.existsSync(sourcePath) ? sourcePath : packagedPath;
+    if (!fs.existsSync(scriptPath)) throw new Error("The Miki AT-SPI helper is missing from this installation.");
+    const encoded = Buffer.from(JSON.stringify({ action, ...payload }), "utf8").toString("base64");
+    const python = readMikiEnv("MIKI_PYTHON") || "python3";
+    const { stdout, stderr } = await execFileText(python, [scriptPath, encoded], {
+      timeout: this.timeoutMs, maxBuffer: 6 * 1024 * 1024, signal,
+    });
+    const output = stdout.trim();
+    if (!output) throw new Error(stderr.trim() || "AT-SPI helper returned no output.");
+    const parsed = JSON.parse(output) as ComputerPowerShellResult<T>;
+    if (parsed.ok === false) throw new Error(parsed.error || "AT-SPI operation failed.");
+    return parsed;
   }
 
   private async runLinux<T>(
     action: string,
     payload: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<ComputerPowerShellResult<T>> {
-    const guiActions = new Set([
-      "observe",
-      "focus",
-      "invoke",
-      "set_text",
-      "hotkey",
-      "clipboard_set",
-      "clipboard_get",
-      "clipboard_clear",
-      "screenshot",
-      "list_displays",
-      "list_windows",
-      "click_at",
-      "drag",
-      "scroll",
+    const x11Actions = new Set([
+      "hotkey", "clipboard_set", "clipboard_get", "clipboard_clear",
+      "screenshot", "list_displays", "click_at", "drag", "scroll",
     ]);
     let screen: { width: number; height: number } | undefined;
-    if (guiActions.has(action)) screen = await this.ensureLinuxX11();
+    if (x11Actions.has(action)) screen = await this.ensureLinuxX11(signal);
+    if (["observe", "focus", "invoke", "set_text", "list_windows"].includes(action)) {
+      try {
+        return await this.runAtSpi<T>(action, payload, signal);
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        if (action === "invoke" || action === "set_text") {
+          throw new Error(`AT-SPI semantic control is unavailable for '${action}'. Install python3-pyatspi and at-spi2-core. ${getErrorMessage(error)}`);
+        }
+        // Preserve window metadata/focus on systems that have not installed AT-SPI.
+      }
+    }
 
     if (action === "list_processes") {
       const { stdout } = await execFileText(
@@ -1302,46 +1414,25 @@ export class ComputerAgent {
       return {
         ok: true,
         action,
-        data: await this.linuxWindows(),
+        data: await this.linuxWindows(signal),
       } as ComputerPowerShellResult<T>;
     }
     if (action === "observe") {
       const options = payload as ComputerObserveOptions;
-      let windows = await this.linuxWindows();
-      const activeWindow = await this.findLinuxWindow({});
-      if (options.activeOnly && activeWindow) windows = [activeWindow];
-      if (options.query) {
-        const needle = options.query.toLowerCase();
-        windows = windows.filter((window) =>
-          JSON.stringify(window).toLowerCase().includes(needle),
-        );
-      }
-      windows = windows.slice(0, options.maxElements || 80);
-      const targetWindow = await this.findLinuxWindow(options);
-      const elements = windows.map((window, index) => ({
-        name: window.title,
-        controlType: "Window",
-        processName: window.processName,
-        processId: window.pid,
-        windowHandle: window.windowHandle,
-        windowTitle: window.title,
-        rect: window.rect,
-        depth: 0,
-        path: `window.${index}`,
-        accessible: false,
+      const windows = await this.linuxWindows(signal);
+      const activeWindow = await this.findLinuxWindow({}, signal);
+      const matched = options.activeOnly && activeWindow ? [activeWindow] : windows;
+      const selected = await this.findLinuxWindow(options, signal);
+      const filtered = options.query ? matched.filter((window) => JSON.stringify(window).toLowerCase().includes(options.query!.toLowerCase())) : matched;
+      const elements = filtered.slice(0, options.maxElements || 80).map((window, index) => ({
+        name: window.title, controlType: "Window", processName: window.processName,
+        processId: window.pid, windowHandle: window.windowHandle, windowTitle: window.title,
+        rect: window.rect, depth: 0, path: `window.${index}`, accessible: false,
       }));
       return {
-        ok: true,
-        action,
-        data: {
-          activeWindow,
-          targetWindow,
-          topWindows: windows.slice(0, 25),
-          elements,
-          elementCount: elements.length,
-        },
-        message:
-          "Observed X11 window metadata only; this backend does not expose UI Automation controls.",
+        ok: true, action,
+        data: { activeWindow, targetWindow: selected, topWindows: filtered.slice(0, 25), elements, elementCount: elements.length },
+        message: "AT-SPI is not available; returned window metadata only. Install python3-pyatspi and at-spi2-core for semantic desktop control.",
       } as ComputerPowerShellResult<T>;
     }
     if (action === "focus") {
@@ -1363,11 +1454,6 @@ export class ComputerAgent {
         data: window,
         message: "Activated X11 window.",
       } as ComputerPowerShellResult<T>;
-    }
-    if (action === "invoke" || action === "set_text") {
-      throw new Error(
-        `Linux X11 does not provide UI Automation element access for '${action}'. Use computer_observe for window metadata; element invoke/text setting requires Windows UI Automation.`,
-      );
     }
     if (action === "hotkey") {
       const windowTarget = payload["window"];
@@ -1668,19 +1754,136 @@ export class ComputerAgent {
     throw new Error(`Unsupported Linux computer action: ${action}`);
   }
 
+  private async runMacAccessibility<T>(action: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<ComputerPowerShellResult<T>> {
+    if (action === "screenshot") {
+      const screenshotPath = path.join(os.tmpdir(), `miki-screen-${process.pid}-${crypto.randomUUID()}.png`);
+      try {
+        await execFileText("screencapture", ["-x", screenshotPath], { timeout: this.timeoutMs, maxBuffer: 64 * 1024, signal });
+        const png = fs.readFileSync(screenshotPath);
+        if (png.length < 24 || png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("macOS screencapture did not return a valid PNG image.");
+        const width = png.readUInt32BE(16);
+        const height = png.readUInt32BE(20);
+        return { ok: true, action, data: { screenshot: png.toString("base64"), width, height, format: "png" }, message: "Captured the macOS desktop using screencapture." } as ComputerPowerShellResult<T>;
+      } finally { try { fs.unlinkSync(screenshotPath); } catch { /* temporary file already removed */ } }
+    }
+    if (action === "clipboard_get") {
+      const { stdout } = await execFileText("pbpaste", [], { timeout: this.timeoutMs, maxBuffer: 1024 * 1024, signal });
+      return { ok: true, action, data: { text: stdout }, message: "Read the macOS clipboard." } as ComputerPowerShellResult<T>;
+    }
+    if (action === "clipboard_set" || action === "clipboard_clear") {
+      const text = action === "clipboard_clear" ? "" : String(payload.text ?? "");
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("pbcopy", [], { stdio: ["pipe", "ignore", "pipe"] });
+        let stderr = "";
+        child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+        child.once("error", reject);
+        child.once("close", (code) => code === 0 ? resolve() : reject(new Error(stderr.trim() || `pbcopy exited with code ${code}.`)));
+        child.stdin?.end(text);
+        signal?.addEventListener("abort", () => { child.kill(); reject(signal.reason instanceof Error ? signal.reason : new Error("Clipboard operation cancelled.")); }, { once: true });
+      });
+      return { ok: true, action, data: { length: text.length }, message: action === "clipboard_clear" ? "Cleared the macOS clipboard." : "Updated the macOS clipboard." } as ComputerPowerShellResult<T>;
+    }
+    if (action === "list_processes") {
+      const { stdout } = await execFileText("ps", ["-axo", "pid=,comm=,%cpu=,rss="], { timeout: this.timeoutMs, maxBuffer: 2 * 1024 * 1024, signal });
+      const processes = stdout.split(/\r?\n/).map((line) => {
+        const match = /^\s*(\d+)\s+(\S+)\s+([\d.]+)\s+(\d+)/.exec(line);
+        return match ? { pid: Number(match[1]), name: match[2], cpu: Number(match[3]), memoryMB: Math.round(Number(match[4]) / 102.4) / 10 } : null;
+      }).filter((item): item is NonNullable<typeof item> => item !== null).slice(0, 100);
+      return { ok: true, action, data: { processes, count: processes.length }, message: "Listed macOS processes." } as ComputerPowerShellResult<T>;
+    }
+    if (action === "get_system_info") {
+      const [name, version, architecture, memory] = await Promise.all([
+        execFileText("sw_vers", ["-productName"], { timeout: 5_000, maxBuffer: 4_096, signal }),
+        execFileText("sw_vers", ["-productVersion"], { timeout: 5_000, maxBuffer: 4_096, signal }),
+        execFileText("uname", ["-m"], { timeout: 5_000, maxBuffer: 4_096, signal }),
+        execFileText("sysctl", ["-n", "hw.memsize"], { timeout: 5_000, maxBuffer: 4_096, signal }),
+      ]);
+      return { ok: true, action, data: { os: name.stdout.trim(), version: version.stdout.trim(), architecture: architecture.stdout.trim(), totalMemoryGB: Math.round(Number(memory.stdout.trim()) / 1024 ** 3 * 10) / 10 }, message: "Retrieved macOS system information." } as ComputerPowerShellResult<T>;
+    }
+    const script = String.raw`function run(argv) {
+      ObjC.import('Foundation');
+      function safe(fn, fallback) { try { return fn(); } catch (_) { return fallback; } }
+      function val(obj, key, fallback) { return safe(function(){ var x=obj[key](); return x===undefined||x===null ? fallback : x; }, fallback); }
+      function children(obj) { return safe(function(){ return obj.uiElements(); }, []); }
+      function describe(el, p, depth, processName) {
+        var pos=val(el,'position',null), size=val(el,'size',null);
+        return { name:String(val(el,'name','')||''), controlType:String(val(el,'role','')||''),
+          value:String(val(el,'value','')||'').slice(0,2000), path:p, processName:processName,
+          enabled:Boolean(val(el,'enabled',true)), depth:depth,
+          rect:{x:pos?Number(pos[0]):0,y:pos?Number(pos[1]):0,width:size?Number(size[0]):0,height:size?Number(size[1]):0} };
+      }
+      var input=JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding($.NSData.alloc.initWithBase64EncodedStringOptions(argv[0],0), $.NSUTF8StringEncoding)));
+      var action=input.action, se=Application('System Events');
+      var processes=safe(function(){return se.processes.whose({visible:true})();},[]);
+      var windows=[];
+      processes.forEach(function(proc, pi) {
+        var pname=String(val(proc,'name','')||''), wins=safe(function(){return proc.windows();},[]);
+        wins.forEach(function(win, wi) {
+          var info=describe(win,String(pi)+'.'+String(wi),0,pname); info.title=info.name;
+          info.active=Boolean(val(proc,'frontmost',false)); windows.push({proc:proc,win:win,info:info,pi:pi,wi:wi});
+        });
+      });
+      if (action==='list_windows') return JSON.stringify({ok:true,action:action,data:{windows:windows.map(function(w){return w.info;}),count:windows.length}});
+      var windowTarget=input.window||input;
+      var wantedTitle=String(windowTarget.windowTitle||windowTarget.window_title||'').toLowerCase();
+      var wantedProcess=String(windowTarget.processName||windowTarget.process_name||'').toLowerCase();
+      var selected=windows.find(function(w){return (!wantedTitle||w.info.title.toLowerCase().includes(wantedTitle))&&(!wantedProcess||w.info.processName.toLowerCase().includes(wantedProcess));}) || windows.find(function(w){return w.info.active;}) || windows[0];
+      if (action==='observe') {
+        if (!selected) return JSON.stringify({ok:true,action:action,data:{activeWindow:null,targetWindow:null,topWindows:[],elements:[],elementCount:0}});
+        var max=Math.max(1,Math.min(300,Number(input.maxElements||input.max_elements||100))), query=String(input.query||'').toLowerCase();
+        var queue=[{el:selected.win,p:selected.info.path,d:0}], elements=[];
+        while(queue.length&&elements.length<max){var item=queue.shift(), info=describe(item.el,item.p,item.d,selected.info.processName);
+          if(!query||JSON.stringify(info).toLowerCase().includes(query))elements.push(info);
+          if(item.d<10)children(item.el).slice(0,100).forEach(function(child,i){queue.push({el:child,p:item.p+'.'+i,d:item.d+1});});
+        }
+        return JSON.stringify({ok:true,action:action,data:{activeWindow:windows.find(function(w){return w.info.active;})?.info||null,targetWindow:selected.info,topWindows:windows.slice(0,25).map(function(w){return w.info;}),elements:elements,elementCount:elements.length},message:'Observed macOS application controls through System Events accessibility scripting.'});
+      }
+      if (!selected) throw new Error('No accessible application window was found.');
+      if (action==='focus') { selected.proc.frontmost=true; return JSON.stringify({ok:true,action:action,data:selected.info,message:'Focused application through macOS Accessibility scripting.'}); }
+      if (action==='hotkey') {
+        if(selected) selected.proc.frontmost=true;
+        var hotkeyValue=input.keys||input.sendKeys||''; var combo=(Array.isArray(hotkeyValue)?hotkeyValue.join('+'):String(hotkeyValue)).split('+'), primary=combo.pop()||'';
+        var modifiers=combo.map(function(item){var key=item.toLowerCase();return ({cmd:'command down',command:'command down',meta:'command down',ctrl:'control down',control:'control down',alt:'option down',option:'option down',shift:'shift down'})[key];}).filter(Boolean);
+        var special={enter:36,return:36,tab:48,escape:53,esc:53,space:49,backspace:51,delete:117,left:123,right:124,down:125,up:126,home:115,end:119,pageup:116,pagedown:121};
+        var code=special[primary.toLowerCase()];
+        if(code!==undefined) se.keyCode(code,{using:modifiers}); else se.keystroke(primary,{using:modifiers});
+        return JSON.stringify({ok:true,action:action,data:{keys:input.keys||input.sendKeys},message:'Sent a keyboard shortcut through macOS System Events.'});
+      }
+      var locator=input.locator||{}, parts=String(locator.path||'').split('.').map(Number);
+      if(parts.length>=2){var pathWindow=windows.find(function(w){return w.pi===parts[0]&&w.wi===parts[1];});if(pathWindow)selected=pathWindow;}
+      var node=selected.win;
+      // Paths emitted for descendants include process/window indices followed by child indices.
+      parts.slice(2).forEach(function(i){var list=children(node);if(!list[i])throw new Error('The UI element no longer exists; observe the app again.');node=list[i];});
+      if(action==='invoke') { if(typeof node.click!=='function')throw new Error('This macOS element has no click action.'); node.click(); return JSON.stringify({ok:true,action:action,data:{name:String(val(node,'name','')),role:String(val(node,'role',''))}}); }
+      if(action==='set_text') { try { node.value=String(input.text||''); } catch(e) { throw new Error('The selected macOS control does not accept value updates: '+String(e)); } return JSON.stringify({ok:true,action:action,data:{name:String(val(node,'name','')),length:String(input.text||'').length}}); }
+      throw new Error('Unsupported macOS accessibility action: '+action);
+    }`;
+    const encoded = Buffer.from(JSON.stringify({ action, ...payload }), "utf8").toString("base64");
+    const { stdout, stderr } = await execFileText("osascript", ["-l", "JavaScript", "-e", script, encoded], { timeout: this.timeoutMs, maxBuffer: 6 * 1024 * 1024, signal });
+    const output = stdout.trim();
+    if (!output) throw new Error(stderr.trim() || "macOS Accessibility helper returned no output. Grant Miki Accessibility permission in System Settings.");
+    const parsed = JSON.parse(output) as ComputerPowerShellResult<T>;
+    if (parsed.ok === false) throw new Error(parsed.error || "macOS Accessibility action failed.");
+    return parsed;
+  }
+
   private async runPowerShell<T>(
     action: string,
     payload: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<ComputerPowerShellResult<T>> {
     if (process.platform === "linux") {
-      return this.runLinux<T>(action, payload);
+      return this.runLinux<T>(action, payload, signal);
+    }
+    if (process.platform === "darwin") {
+      return this.runMacAccessibility<T>(action, payload, signal);
     }
     if (process.platform !== "win32") {
       return {
         ok: false,
         action,
         error:
-          "computer_use supports Windows UI Automation and Linux X11; this platform is unsupported.",
+          "computer_use supports Windows UI Automation, macOS Accessibility, and Linux AT-SPI/X11; this platform is unsupported.",
       };
     }
 
@@ -1701,7 +1904,7 @@ export class ComputerAgent {
         "-PayloadBase64",
         payloadBase64,
       ],
-      { timeout: this.timeoutMs, maxBuffer: 6 * 1024 * 1024 },
+      { timeout: this.timeoutMs, maxBuffer: 6 * 1024 * 1024, signal },
     );
     const output = result.stdout.trim();
     if (!output) {
@@ -1796,7 +1999,7 @@ export class ComputerAgent {
     return locator;
   }
 
-  async observe(args: Record<string, unknown>): Promise<string> {
+  async observe(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     try {
       // A fresh observation is a reconciliation boundary: cached element IDs
       // are tied to the prior UI tree and must not survive a desktop restart,
@@ -1813,6 +2016,7 @@ export class ComputerAgent {
       const result = await this.runPowerShell<ComputerObserveData>(
         "observe",
         options as Record<string, unknown>,
+        signal,
       );
       if (result.ok && isRecord(result.data)) {
         result.data = this.rememberElements(
@@ -1821,6 +2025,7 @@ export class ComputerAgent {
       }
       return this.formatResult(result);
     } catch (err) {
+      if (signal?.aborted) throw err;
       return this.formatError("observe", err);
     }
   }
@@ -1919,35 +2124,95 @@ export class ComputerAgent {
     }
   }
 
+  async listApplications(_args: Record<string, unknown> = {}): Promise<string> {
+    try {
+      let applications: InstalledComputerApplication[] = [];
+      if (process.platform === "win32") {
+        const result = await this.runPowerShell<{ applications?: InstalledComputerApplication[] }>("list_applications", {});
+        applications = Array.isArray(result.data?.applications) ? result.data!.applications! : [];
+      } else if (process.platform === "darwin") {
+        applications = findMacApplications();
+      } else if (process.platform === "linux") {
+        const home = os.homedir();
+        const roots = [
+          "/usr/share/applications", "/usr/local/share/applications",
+          path.join(home, ".local/share/applications"),
+          "/var/lib/flatpak/exports/share/applications",
+          path.join(home, ".local/share/flatpak/exports/share/applications"),
+        ];
+        const files: string[] = [];
+        const walk = (directory: string, depth: number) => {
+          if (depth > 3 || !fs.existsSync(directory)) return;
+          let entries: fs.Dirent[];
+          try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return; }
+          for (const entry of entries) {
+            const full = path.join(directory, entry.name);
+            if (entry.isFile() && entry.name.endsWith(".desktop")) files.push(full);
+            else if (entry.isDirectory() && !entry.name.startsWith(".")) walk(full, depth + 1);
+          }
+        };
+        roots.forEach((directory) => walk(directory, 0));
+        const byId = new Map<string, InstalledComputerApplication>();
+        for (const file of files) {
+          try {
+            const app = parseDesktopApplication(fs.readFileSync(file, "utf8"), file);
+            if (app) byId.set(app.id, app);
+          } catch { /* unreadable or malformed desktop entry */ }
+        }
+        applications = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+      } else {
+        throw new Error(`Installed application discovery is not implemented for ${process.platform}.`);
+      }
+      return this.formatResult({
+        ok: true, action: "list_applications",
+        data: { applications, count: applications.length },
+        message: "Enumerated applications exposed by the host operating system's application registry.",
+      });
+    } catch (err) {
+      return this.formatError("list_applications", err);
+    }
+  }
+
   async launch(args: Record<string, unknown>): Promise<string> {
     try {
-      const command = asString(args["command"] ?? args["app"] ?? args["path"]);
-      if (!command) throw new Error("command is required.");
-      const launchArgs = normalizeLaunchArgs(args["args"]);
+      const applicationId = asString(args["application_id"] ?? args["applicationId"]);
+      const applicationName = asString(args["application_name"] ?? args["applicationName"] ?? args["app"]);
+      let command = asString(args["command"] ?? args["path"]);
+      let launchArgs = normalizeLaunchArgs(args["args"]);
+      let selectedApplication: InstalledComputerApplication | undefined;
+
+      if (applicationId || (!command && applicationName)) {
+        const result = JSON.parse(await this.listApplications()) as { ok?: boolean; data?: { applications?: InstalledComputerApplication[] } };
+        const apps = result.data?.applications || [];
+        const query = applicationId || applicationName!;
+        const matches = apps.filter((app) => app.id.toLowerCase() === query.toLowerCase() || app.name.toLowerCase() === query.toLowerCase());
+        if (!matches.length) throw new Error(`Installed application '${query}' was not found. Call computer_list_applications to inspect available names and IDs.`);
+        if (matches.length > 1) throw new Error(`Application name '${query}' is ambiguous. Use one of these IDs: ${matches.map((app) => app.id).join(", ")}`);
+        selectedApplication = matches[0];
+        if (process.platform === "darwin") {
+          command = "/usr/bin/open";
+          launchArgs = ["-a", selectedApplication.path || selectedApplication.id];
+        } else if (process.platform === "win32") {
+          command = "explorer.exe";
+          launchArgs = [`shell:AppsFolder\\${selectedApplication.id}`];
+        } else {
+          command = selectedApplication.command;
+          launchArgs = selectedApplication.args || [];
+        }
+      }
+      if (!command) throw new Error("command, application_name or application_id is required.");
       const cwd = asString(args["working_dir"] ?? args["workingDir"]);
-      const workingDir = cwd
-        ? path.isAbsolute(cwd)
-          ? cwd
-          : path.resolve(cwd)
-        : process.cwd();
-      const child = spawn(command, launchArgs, {
-        cwd: workingDir,
-        detached: true,
-        shell: false,
-        stdio: "ignore",
-        windowsHide: true,
+      const workingDir = cwd ? (path.isAbsolute(cwd) ? cwd : path.resolve(cwd)) : process.cwd();
+      const child = spawn(command, launchArgs, { cwd: workingDir, detached: true, shell: false, stdio: "ignore", windowsHide: true });
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", () => resolve());
+        child.once("error", reject);
       });
       child.unref();
       return this.formatResult({
-        ok: true,
-        action: "launch",
-        data: {
-          command,
-          args: launchArgs,
-          pid: child.pid,
-          workingDir,
-        },
-        message: "Application launched without shell command interpretation.",
+        ok: true, action: "launch",
+        data: { command, args: launchArgs, pid: child.pid, workingDir, ...(selectedApplication ? { application: { id: selectedApplication.id, name: selectedApplication.name } } : {}) },
+        message: "Application process started without shell command interpretation.",
       });
     } catch (err) {
       return this.formatError("launch", err);
@@ -2093,7 +2358,7 @@ export class ComputerAgent {
           backend: "windows-ui-automation",
           semanticUiAutomation: true,
           actions: {
-            listWindows: true, observe: true, focus: true, screenshot: true,
+            listApplications: true, listWindows: true, observe: true, focus: true, screenshot: true,
             invoke: true, setText: true, hotkey: true, clipboard: true, launch: true,
             verify: true, clickAt: true, drag: true, scroll: true, listDisplays: true,
             listProcesses: true, getSystemInfo: true, terminateApp: true,
@@ -2105,21 +2370,13 @@ export class ComputerAgent {
     }
     if (platform === "darwin") {
       return this.formatResult({
-        ok: true,
-        action: "capabilities",
+        ok: true, action: "capabilities",
         data: {
-          platform,
-          backend: "partial-macos-window-enumeration",
-          semanticUiAutomation: false,
-          actions: {
-            listWindows: true, observe: false, focus: false, screenshot: false,
-            invoke: false, setText: false, hotkey: false, clipboard: false, launch: false,
-            verify: false, clickAt: false, drag: false, scroll: false, listDisplays: false,
-            listProcesses: false, getSystemInfo: false, terminateApp: false,
-          },
-          limitations: ["The current ComputerAgent has an AppleScript window-listing path only; other desktop actions are not implemented for macOS."],
+          platform, backend: "macos-accessibility-system-events", semanticUiAutomation: true,
+          actions: { listApplications: true, listWindows: true, observe: true, focus: true, screenshot: true, invoke: true, setText: true, hotkey: true, clipboard: true, launch: true, verify: true, clickAt: false, drag: false, scroll: false, listDisplays: false, listProcesses: true, getSystemInfo: true, terminateApp: false },
+          limitations: ["macOS Accessibility permission must be granted to Miki in System Settings > Privacy & Security > Accessibility.", "Screen Recording permission may be requested for desktop screenshots.", "Coordinate click/drag/scroll and process termination are not enabled by this backend; applications with custom controls may need a supported accessibility action or manual interaction."],
         },
-        message: "Capability report reflects the current source backend, not inferred macOS capabilities.",
+        message: "macOS applications are addressed through the system accessibility tree; each application may expose different controls.",
       })
     }
     if (platform !== "linux") {
@@ -2128,11 +2385,18 @@ export class ComputerAgent {
 
     const displayReason = linuxX11UnavailableReason()
     const commandAvailable = async (command: string): Promise<boolean> => {
-      if (displayReason) return false
       try {
         const result = await execFileText("which", [command], { timeout: 1_500, maxBuffer: 4_096 })
         return result.stdout.trim().length > 0
       } catch { return false }
+    }
+    const pythonAvailable = await commandAvailable(readMikiEnv("MIKI_PYTHON") || "python3")
+    let atspi = false
+    if (pythonAvailable) {
+      try {
+        await execFileText(readMikiEnv("MIKI_PYTHON") || "python3", ["-c", "import pyatspi"], { timeout: 2_500, maxBuffer: 4_096 })
+        atspi = true
+      } catch { atspi = false }
     }
     const [xdotool, xclip, imagemagick, ffmpeg, xrandr, ps, pgrep] = await Promise.all([
       commandAvailable("xdotool"), commandAvailable("xclip"), commandAvailable("import"),
@@ -2140,28 +2404,28 @@ export class ComputerAgent {
       commandAvailable("pgrep"),
     ])
     const gui = !displayReason && xdotool
+    const hasDisplaySession = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
+    const waylandOnly = Boolean(process.env.WAYLAND_DISPLAY?.trim() && !process.env.DISPLAY?.trim())
     const screenshot = gui && (imagemagick || ffmpeg)
     const actions = {
-      listWindows: gui, observe: gui, focus: gui, screenshot,
-      invoke: false, setText: false, hotkey: gui, clipboard: gui && xclip, launch: false,
-      verify: false, clickAt: gui, drag: gui, scroll: gui, listDisplays: gui && xrandr,
+      listApplications: true, listWindows: atspi || gui, observe: atspi || gui, focus: atspi || gui, screenshot,
+      invoke: atspi, setText: atspi, hotkey: gui, clipboard: gui && xclip, launch: true,
+      verify: atspi, clickAt: gui, drag: gui, scroll: gui, listDisplays: gui && xrandr,
       listProcesses: ps, getSystemInfo: true, terminateApp: ps && pgrep,
     }
     const limitations = [
-      ...(displayReason ? [displayReason] : []),
-      ...(!displayReason && !xdotool ? ["xdotool is unavailable; X11 window and pointer/keyboard operations cannot run."] : []),
+      ...(!hasDisplaySession ? ["No graphical session is available to Miki; semantic automation requires an active user session and the AT-SPI bus."] : []),
+      ...(!atspi ? ["AT-SPI Python bindings are not detected. Install python3-pyatspi and at-spi2-core to enable semantic controls in GTK/Qt/LibreOffice and other accessible applications."] : []),
+      ...(!gui ? [displayReason || "xdotool is unavailable; coordinate-based X11 input is disabled."] : []),
+      ...(waylandOnly && atspi ? ["AT-SPI semantic control is available on this Wayland session; X11 coordinate input and screenshots remain unavailable in this backend."] : []),
       ...(!xclip ? ["xclip is unavailable; clipboard actions cannot run."] : []),
-      ...(!imagemagick && !ffmpeg ? ["Neither ImageMagick import nor ffmpeg is available; screenshot capture cannot run."] : []),
-      ...(!ps ? ["ps is unavailable; process listing and process-name resolution cannot run."] : []),
-      ...(!pgrep ? ["pgrep is unavailable; process-name termination cannot run."] : []),
-      "Linux X11 exposes window metadata only; semantic control discovery, element invoke, text entry and UI-content verification are not implemented.",
-      "Linux Wayland-only sessions are unsupported by the current backend.",
+      ...(!screenshot ? ["ImageMagick import or ffmpeg plus an X11 display is required for native desktop screenshots."] : []),
+      "Applications using custom canvas rendering or not exposing accessibility controls may still require coordinate-based input and visual verification.",
     ]
     return this.formatResult({
-      ok: true,
-      action: "capabilities",
-      data: { platform, backend: "linux-x11-coordinate-window-metadata", displayAvailable: !displayReason, commands: { xdotool, xclip, imagemagick, ffmpeg, xrandr, ps, pgrep }, semanticUiAutomation: false, actions, limitations },
-      message: "Linux capabilities are derived from the current display and installed helper commands. Each action still performs its own runtime preflight.",
+      ok: true, action: "capabilities",
+      data: { platform, backend: atspi ? (waylandOnly ? "linux-at-spi+wayland" : "linux-at-spi+x11") : "linux-x11-with-atspi-optional", displayAvailable: hasDisplaySession, commands: { xdotool, xclip, imagemagick, ffmpeg, xrandr, ps, pgrep, python: pythonAvailable, atspi }, semanticUiAutomation: atspi, actions, limitations },
+      message: "Linux capabilities are detected from installed AT-SPI bindings and the active desktop session. Each action performs its own runtime preflight.",
     })
   }
 
@@ -2189,39 +2453,18 @@ export class ComputerAgent {
       }
     }
     if (process.platform === "darwin") {
-      try {
-        const script = `tell application "System Events" to get {name, title} of every process whose visible is true`;
-        const { stdout } = await execFileText("osascript", ["-e", script], {
-          timeout: 15000,
-          maxBuffer: 1024 * 1024,
-        });
-        return JSON.stringify({
-          ok: true,
-          action: "list_windows",
-          data: stdout.trim(),
-        });
-      } catch (e) {
-        return JSON.stringify({
-          ok: false,
-          action: "list_windows",
-          error: String(e),
-        });
-      }
+      try { return this.formatResult(await this.runPowerShell("list_windows", {})); }
+      catch (error) { return this.formatError("list_windows", error); }
     }
     return JSON.stringify({
       ok: false,
       action: "list_windows",
-      error: "Unsupported platform",
+      error: `Unsupported platform: ${process.platform}`,
     });
   }
 
   async verify(args: Record<string, unknown>): Promise<string> {
     try {
-      if (process.platform === "linux") {
-        throw new Error(
-          "Linux X11 observation exposes window metadata only, not accessible controls or rendered text. UI-content verification requires Windows UI Automation.",
-        );
-      }
       const contains = asString(args["contains"] ?? args["text"]);
       const notContains = asString(args["not_contains"] ?? args["notContains"]);
       if (!contains && !notContains) {

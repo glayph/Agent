@@ -57,5 +57,5 @@ metadata:
 |-------|------|
 | Unit | Vitest, Testing Library |
 | Component | Storybook, Testing Library |
-| E2E | Playwright, Cypress |
+| E2E | Cypress, WebDriver, browser-native automation |
 | Visual | Percy, Chromatic |

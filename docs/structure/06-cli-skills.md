@@ -1,32 +1,26 @@
-# 06 — CLI & Skills
+# 06 — CLI and Bundled Skill Subsystem
 
 ## packages/cli
 
-Self-contained package that publishes the `miki` binary. Can be installed globally.
+`@miki/cli` provides the supported `miki` command and runtime lifecycle controller. Its TypeScript source owns command parsing, diagnostics, gateway start/stop/restart, the interactive terminal dashboard and self-contained package assembly. The CLI consumes built Gateway/Core/Memory/UI artifacts; use the root build pipeline or the documented CLI build script before testing a distribution.
 
-```
-packages/cli/
-├── package.json                 # @miki/cli — bin: miki → dist/pack/bin/miki.js
-├── README.md                    # Usage documentation for the CLI
-├── main.go                      # Go entry for terminal dashboard (TUI)
-├── tui.go / styles.go           # Terminal UI rendering
-├── config.go / runtime.go       # Config & runtime management
-├── process_unix.go / process_windows.go  # Platform process handling
-├── terminal_selection_*.go      # Terminal selection helpers
-├── logbuffer.go                 # Log buffering
-├── help.go / plain.go           # Help and plain-output modes
-├── agent.js                     # Node-side agent helper
-├── go.mod / go.sum              # Go module definition
-├── pnpm-lock.yaml
-└── scripts/
-    └── pack-self-contained.mjs  # Builds the self-contained distribution tarball
+Common commands:
+
+```bash
+miki                 # start the runtime
+miki start           # explicit start
+miki doctor          # environment and runtime diagnostics
+miki install         # create/register runtime workspace as supported
+miki uninstall      # remove registration; retained data is not implied to be deleted
+miki help
 ```
 
-**Comments**
-- Primary user-facing command: `miki`, `miki start`, `miki doctor`, `miki install`, `miki uninstall`.
-- When a Go binary is present it shows a terminal dashboard; otherwise falls back to headless mode with web UI still available.
-- The pack script embeds a complete runtime so the published npm package does not require the full monorepo.
+Consult [packages/cli/README.md](../../packages/cli/README.md) and the CLI source for current options. Older notes describing a required Go TUI are historical; Go compatibility sources are not required for the current TypeScript CLI path.
 
-## Bundled skills catalog
+## Bundled skills location
 
-The bundled catalog lives in `packages/core/src/plugins/skills/catalog/`. Runtime discovery, loading and registry integration live in `packages/core/src/plugins/skills/manager/`; installer implementation lives in `packages/core/src/plugins/skills/installer/`. These are built together with `@miki/core`.
+There is no independent `packages/skills/` workspace in this repository. The bundled catalogue, manager/discovery, governance integration and installer implementation are all located within `packages/core/src/plugins/skills/` and are built as part of `@miki/core`.
+
+A skill is reusable procedural knowledge. Its presence does not create a worker, grant a permission, enable a tool, install an external plugin or bypass an approval requirement. Runtime tool registration and authorization remain authoritative.
+
+This structure guide is not a Skill definition. Skill catalogue files such as `SKILL.md` are a protected scope during the Agent-Miki persona/documentation upgrade and must not be modified as part of that work.

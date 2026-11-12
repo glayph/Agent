@@ -11,7 +11,10 @@ import {
 } from "@/features/monitor/store"
 
 const NODE_EXIT_TRANSITION_MS = 800
-const RUN_EXIT_TRANSITION_MS = 60_000
+// Completed runs belong to durable Activity history, not the live Monitor
+// canvas. Keep only the brief node exit transition so completed roots cannot
+// look like active work for a minute.
+const RUN_EXIT_TRANSITION_MS = NODE_EXIT_TRANSITION_MS
 const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const terminalRunIds = new Set<string>()
 const terminalRunOrder: string[] = []

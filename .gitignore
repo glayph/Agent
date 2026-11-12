@@ -69,10 +69,8 @@ Thumbs.db
 *.swo
 
 # Test and tool artifacts
-playwright-report/
 test-results/
-**/playwright-report/
-**/test-results/
+**/**/test-results/
 .nyc_output/
 **/.nyc_output/
 .eslintcache

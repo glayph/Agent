@@ -366,3 +366,7 @@ Implement the backend contract before polishing the canvas:
 8. Verify all three requested symptoms with the acceptance tests above.
 
 This order prevents a UI-only repair from appearing correct during one WebSocket session but breaking after reconnect or page reload.
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

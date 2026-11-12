@@ -364,38 +364,23 @@ async function secretVaultCheck() {
   }
 }
 
-async function playwrightChromiumCheck() {
-  try {
-    const { chromium } = await import("playwright");
-    const configured = [
-      process.env.MIKI_BROWSER_CHROME_PATH,
-      process.env.CHROME_PATH,
-      process.env.CHROMIUM_PATH,
-      "/usr/bin/google-chrome",
-      "/usr/bin/chromium",
-      "/usr/bin/chromium-browser",
-      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    ].find((candidate) => candidate && fs.existsSync(candidate));
-    const executablePath = configured || chromium.executablePath();
-    const available = Boolean(executablePath && fs.existsSync(executablePath));
-    return check(
-      "playwright_chromium",
-      "Playwright Chromium",
-      available ? "pass" : "warn",
-      available
-        ? `Chromium executable is available at ${executablePath}.`
-        : "Chromium executable is missing; run `npx playwright install chromium`.",
-      { executablePath, configured: Boolean(configured) },
-    );
-  } catch (err) {
-    return check(
-      "playwright_chromium",
-      "Playwright Chromium",
-      "warn",
-      `Could not resolve Chromium; run \`npx playwright install chromium\`. ${err.message}`,
-    );
-  }
+async function browserAgentCheck() {
+  const root = path.resolve(EFFECTIVE_WORKSPACE_DIR);
+  const source = path.join(root, "packages", "core", "src", "plugins", "browser", "extension");
+  const built = path.join(root, "packages", "core", "dist", "plugins", "browser", "extension");
+  const extensionRoot = fs.existsSync(path.join(built, "chrome", "manifest.json")) ? built : source;
+  const ready = ["chrome", "firefox", "safari"].every((target) =>
+    fs.existsSync(path.join(extensionRoot, target, "manifest.json")),
+  );
+  return check(
+    "browser_agent_extension",
+    "Miki Browser Agent",
+    ready ? "pass" : "warn",
+    ready
+      ? `Browser Agent extension targets are available at ${extensionRoot}. Pair the extension in each browser you want to control.`
+      : "Browser Agent extension files are not built. Run npm run build:all, then load the Chrome/Firefox extension or package the Safari target with Xcode.",
+    { extensionRoot, targets: ["Chrome/Edge/Brave/Opera/Vivaldi/Chromium", "Firefox", "Safari (requires Xcode conversion)"] },
+  );
 }
 
 async function runDoctor() {
@@ -490,7 +475,7 @@ async function runDoctor() {
   }
 
   checks.push(await secretVaultCheck());
-  checks.push(await playwrightChromiumCheck());
+  checks.push(await browserAgentCheck());
 
   if (process.platform === "linux") {
     const xdotool = commandVersion("xdotool", ["version"]);

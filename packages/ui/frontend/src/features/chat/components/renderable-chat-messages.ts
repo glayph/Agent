@@ -17,7 +17,9 @@ export function getRenderableChatMessages(
     (message) =>
       message.role === "user" ||
       (message.role === "assistant" &&
-        message.kind === "normal" &&
-        !message.notificationKind),
+        (message.kind === "normal" || message.kind === "error") &&
+        (!message.notificationKind ||
+          message.notificationKind === "result" ||
+          message.notificationKind === "discovery")),
   )
 }

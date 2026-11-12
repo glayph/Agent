@@ -51,7 +51,7 @@ Executed:
 
 Not executed:
 
-- Frontend build, ESLint, Vitest suite, and Playwright browser scenarios. Dependency installation did not complete in this environment; the archive does not contain `node_modules`, the install attempt timed out, and the available Node runtime is 22.16.0 while the repository root package requests Node >=22.19.0.
+- Frontend build, ESLint, Vitest suite, and native Browser Agent extension scenarios. Dependency installation did not complete in this environment; the archive does not contain `node_modules`, the install attempt timed out, and the available Node runtime is 22.16.0 while the repository root package requests Node >=22.19.0.
 - Visual screenshot review against a live Gateway. No browser result is claimed.
 
 ## Files changed
@@ -64,3 +64,7 @@ Not executed:
 - `packages/ui/frontend/src/index.css`
 - `packages/ui/frontend/public/manus-routes.json`
 - `packages/ui/frontend/src/app/layout/app-navigation.test.ts`
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](../AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

@@ -229,3 +229,10 @@ Confirm that the Node Gateway is listening on the same host/port configured for 
 - Providers: [`../docs/guides/providers.md`](../docs/guides/providers.md)
 - Troubleshooting: [`../docs/operations/troubleshooting.md`](../docs/operations/troubleshooting.md)
 - Official docs site: [docs.Miki.io](https://docs.Miki.io)
+
+
+## Chat Top Bar source of truth
+
+The Chat page derives Gateway, WebSocket and autonomy status in `frontend/src/pages/chat-page.tsx`; the presentation and accessible status interactions live in `frontend/src/features/chat/components/workspace/workspace-header.tsx`. Global Gateway lifecycle actions live in `frontend/src/app/layout/global-header-actions.tsx`. When changing status text, update the locale JSON files as well as the state tests.
+
+The top-bar working indicator is based on foreground chat activity and the live autonomy status snapshot. It must not claim background work merely because the Gateway is running. See [UI structure](../../docs/structure/07-ui-dashboard.md) and [Agent-Miki Operating Model](../../docs/AGENT_MIKI_OPERATING_MODEL.md).

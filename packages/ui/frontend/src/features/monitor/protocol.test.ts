@@ -342,7 +342,7 @@ describe("live graph lifecycle", () => {
     handleMonitorMessage(msg("node.run_end", { run_id: "r", status: "completed" }))
     expect(getMonitorState().nodes["r:root"]).toMatchObject({ status: "completed" })
     expect(Object.values(getMonitorState().edges).every((edge) => !edge.animated)).toBe(true)
-    vi.advanceTimersByTime(60_000)
+    vi.advanceTimersByTime(800)
     expect(getMonitorState().runs.r).toBeUndefined()
     expect(getMonitorState().nodes).toEqual({})
     expect(getMonitorState().edges).toEqual({})

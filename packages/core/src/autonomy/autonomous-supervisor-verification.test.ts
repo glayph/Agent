@@ -101,6 +101,20 @@ describe("AutonomousSupervisor second check, next-step goals and user-request au
       expect(run.mock.calls[1][0].model).toBe("cloud/auditor-model")
     })
 
+    it("warns once when no independent auditor model is configured", async () => {
+      goals.create({ title: "Audit model fallback visibility", replaceExisting: false })
+      run.mockResolvedValueOnce(makeResult("Work done."))
+      run.mockResolvedValueOnce(makeResult(SATISFIED))
+      await supervisor.tick("test")
+      expect(logs.filter((line) => line.includes("double_check_model is empty"))).toHaveLength(1)
+
+      goals.create({ title: "Second audit should not repeat warning", replaceExisting: false })
+      run.mockResolvedValueOnce(makeResult("Work done."))
+      run.mockResolvedValueOnce(makeResult(SATISFIED))
+      await supervisor.tick("test")
+      expect(logs.filter((line) => line.includes("double_check_model is empty"))).toHaveLength(1)
+    })
+
     it("completes the goal when the re-check is satisfied, and queues a goal that plans the owner's next step", async () => {
       const goal = goals.create({ title: "Prepare the invoice", replaceExisting: false });
       run.mockResolvedValueOnce(makeResult("Invoice prepared."));

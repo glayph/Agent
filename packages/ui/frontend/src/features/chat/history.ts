@@ -49,6 +49,7 @@ export async function loadSessionMessages(
     role: message.role,
     content: message.content,
     kind: message.role === "assistant" ? (message.kind ?? "normal") : undefined,
+    notificationKind: message.notification_kind,
     runId: message.run_id,
     replyToMessageId: message.reply_to_message_id,
     thoughtCategory: message.thought_category,

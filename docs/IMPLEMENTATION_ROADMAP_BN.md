@@ -36,3 +36,7 @@
 ## বর্তমান সীমা
 
 কোনো সফটওয়্যার বাস্তব শরীর বা মানুষের মতো অনুভূতি দিতে পারে না। প্রশিক্ষণের জ্ঞান নিজে থেকে তাৎক্ষণিকভাবে বদলায় না; live data source যোগ করে সাম্প্রতিক তথ্য পাওয়া যায়। Provider-এর quota, network outage বা sandbox বন্ধ হয়ে যাওয়া application code একা দূর করতে পারে না। “সবসময় সক্রিয়” বলতে supervisor ও event/schedule-ভিত্তিক পুনরায় জাগা বোঝাবে—অনিয়ন্ত্রিতভাবে প্রতিনিয়ত LLM call করা নয়।
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

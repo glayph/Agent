@@ -29,6 +29,7 @@ export interface SessionDetail {
     context_id?: string | null
     created_at?: string
     kind?: "normal" | "thought" | "tool_calls" | "action_update" | "error"
+    notification_kind?: string
     run_id?: string
     reply_to_message_id?: string
     thought_category?:

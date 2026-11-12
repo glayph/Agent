@@ -227,6 +227,7 @@ export class ProcessManager {
   private readonly processes = new Map<string, ManagedProcess>()
   private readonly children = new Map<string, ChildProcess>()
   private readonly waiters = new Map<string, Set<() => void>>()
+  private readonly finishedListeners = new Set<(proc: ManagedProcess) => void>()
   private readonly db?: Database.Database
   private readonly logDir?: string
   private readonly log?: ProcessManagerOptions["log"]
@@ -500,6 +501,12 @@ export class ProcessManager {
     }
   }
 
+  /** Subscribe to process completion, including exits detected by the durable-process poller. */
+  onFinished(listener: (proc: ManagedProcess) => void): () => void {
+    this.finishedListeners.add(listener)
+    return () => this.finishedListeners.delete(listener)
+  }
+
   refresh(proc: ManagedProcess): void {
     if (proc.status === "running") this.syncOutput(proc)
   }
@@ -540,6 +547,11 @@ export class ProcessManager {
     this.persist(proc)
     for (const wake of this.waiters.get(proc.id) ?? []) wake()
     this.waiters.delete(proc.id)
+    for (const listener of this.finishedListeners) {
+      try { listener(proc) } catch (error) {
+        this.log?.("process.finished_listener_failed", { processId: proc.id, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
     this.trim()
   }
 

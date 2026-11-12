@@ -1,76 +1,97 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { beforeEach, afterEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, describe, expect, it } from "@jest/globals";
+import WebSocket from "ws";
+import { BrowserTool } from "./runtime.js";
 
-const mocks = { launchPersistentContext: jest.fn() };
-jest.unstable_mockModule("playwright", () => ({ chromium: { launchPersistentContext: mocks.launchPersistentContext } }));
-const { BrowserTool } = await import("./runtime.js");
-
-function makeBrowserFixture(url = "https://example.com/") {
-  let closed = false;
-  const listeners = new Map<string, Array<(...args: any[]) => void>>();
-  const page = {
-    isClosed: () => closed,
-    url: () => url,
-    title: async () => "Example",
-    mainFrame: () => frame,
-    on: (event: string, listener: (...args: any[]) => void) => {
-      listeners.set(event, [...(listeners.get(event) ?? []), listener]);
-      return page;
-    },
-    route: jest.fn(async () => undefined),
-    evaluate: jest.fn(async () => ({ title: "Example", readyState: "complete", url })),
-    setViewportSize: jest.fn(async () => undefined),
-    close: jest.fn(async () => { closed = true; }),
-    screenshot: jest.fn(async () => undefined),
-  };
-  const frame = {};
-  const context = {
-    pages: () => closed ? [] : [page],
-    newPage: jest.fn(async () => page),
-    close: jest.fn(async () => { closed = true; }),
-    clearCookies: jest.fn(async () => undefined),
-  };
-  return { page, context, markClosed: () => { closed = true; }, listeners };
-}
-
-describe("BrowserTool persistent session reconciliation", () => {
-  let dataDir = "";
+describe("BrowserTool WebExtensions bridge reconciliation", () => {
   let browser: BrowserTool | undefined;
-
-  beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-browser-reconcile-"));
-    mocks.launchPersistentContext.mockReset();
-  });
+  let dataDir = "";
 
   afterEach(async () => {
     await browser?.close();
     browser = undefined;
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
+    dataDir = "";
   });
 
-  it("reconciles a live persistent context and records the current page without clearing cookies", async () => {
-    const fixture = makeBrowserFixture();
-    mocks.launchPersistentContext.mockResolvedValue(fixture.context);
-    browser = new BrowserTool(true, dataDir);
-    const snapshot = await browser.reconcileAfterCrash();
-    expect(snapshot).toMatchObject({ browserAvailable: true, activeUrl: "https://example.com/", title: "Example", readyState: "complete", pageCount: 1 });
-    expect(fs.existsSync(path.join(dataDir, "browser-session-state.json"))).toBe(true);
-    await browser.rotatePresentation();
-    expect(fixture.context.clearCookies).not.toHaveBeenCalled();
-    expect(fixture.context.close).not.toHaveBeenCalled();
-    expect(fixture.page.setViewportSize).toHaveBeenCalledTimes(1);
+  async function connect(browserId = "test-chrome", browserName = "Chrome", origin = "chrome-extension://miki-test") {
+    dataDir ||= fs.mkdtempSync(path.join(os.tmpdir(), "miki-browser-bridge-"));
+    browser ||= new BrowserTool(false, dataDir, undefined, { bridgePort: 0, requestTimeoutMs: 2_000 });
+    const info = await browser.getBridgeInfo();
+    const ws = new WebSocket(`${String(info.wsUrl)}?token=${String(info.token)}`, { headers: { Origin: origin } });
+    await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("bridge ready timeout")), 2_000);
+      ws.once("message", (raw) => {
+        const message = JSON.parse(raw.toString()) as { type: string };
+        clearTimeout(timeout);
+        if (message.type === "browser.ready") resolve();
+        else reject(new Error(`Unexpected bridge message ${message.type}`));
+      });
+      ws.send(JSON.stringify({ type: "browser.hello", browserId, browserName, version: "test", userAgent: `${browserName} test` }));
+    });
+    return ws;
+  }
+
+  it("authenticates a paired extension and reconciles active browser state", async () => {
+    const ws = await connect();
+    ws.send(JSON.stringify({ type: "browser.state", activeTab: { id: 7, url: "https://example.com/" }, tabs: [{ id: 7, windowId: 1, active: true, title: "Example", url: "https://example.com/", status: "complete" }] }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(browser!.listBrowsers()).toMatchObject([{ id: "test-chrome", name: "Chrome", tabCount: 1, activeUrl: "https://example.com/" }]);
+    const snapshot = await browser!.reconcileAfterCrash();
+    expect(snapshot).toMatchObject({ browserAvailable: true, connectedBrowserCount: 1, activeBrowser: "Chrome", activeUrl: "https://example.com/", tabCount: 1, restoredFromCheckpoint: true });
+    ws.close();
   });
 
-  it("reuses the existing context when the active page reference is lost", async () => {
-    const fixture = makeBrowserFixture();
-    mocks.launchPersistentContext.mockResolvedValue(fixture.context);
-    browser = new BrowserTool(true, dataDir);
-    await browser.ensureLaunched();
-    (browser as unknown as { page: null }).page = null;
-    await browser.ensureLaunched();
-    expect(mocks.launchPersistentContext).toHaveBeenCalledTimes(1);
-    expect(browser.getPage()).toBe(fixture.page as any);
+  it("uses the requested tab ID rather than overwriting it with the currently active tab", async () => {
+    const ws = await connect();
+    ws.send(JSON.stringify({ type: "browser.state", activeTab: { id: 7, url: "https://example.com/" }, tabs: [{ id: 7, active: true, title: "Example", url: "https://example.com/" }] }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    ws.on("message", (raw) => {
+      const message = JSON.parse(raw.toString()) as { type: string; id: string; method: string; params: Record<string, unknown> };
+      if (message.type === "rpc.request" && message.method === "tabs.activate") {
+        expect(message.params.tabId).toBe(22);
+        ws.send(JSON.stringify({ type: "rpc.result", id: message.id, ok: true, result: { tabId: 22, url: "https://example.org/", title: "Other" } }));
+      }
+    });
+    await expect(browser!.selectTab(22)).resolves.toContain("Selected browser tab 22");
+    ws.close();
+  });
+
+  it("waits for the requested browser instead of accepting a different connected browser", async () => {
+    const chrome = await connect();
+    const waiting = browser!.waitForBrowserConnection(2_000, undefined, "Firefox");
+    const firefox = await connect("test-firefox", "Firefox", "moz-extension://miki-test");
+    await expect(waiting).resolves.toMatchObject({ id: "test-firefox", name: "Firefox" });
+    expect(browser!.listBrowsers().map((item) => item.name)).toEqual(expect.arrayContaining(["Chrome", "Firefox"]));
+    chrome.close();
+    firefox.close();
+  });
+
+  it("rejects non-bridge WebSocket paths", async () => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "miki-browser-bridge-path-"));
+    browser = new BrowserTool(false, dataDir, undefined, { bridgePort: 0 });
+    const info = await browser.getBridgeInfo();
+    const wrongUrl = String(info.wsUrl).replace("/miki-browser", "/wrong-path");
+    const ws = new WebSocket(`${wrongUrl}?token=${String(info.token)}`, { headers: { Origin: "chrome-extension://miki-test" } });
+    const close = await new Promise<number>((resolve, reject) => {
+      ws.once("close", (code) => resolve(code));
+      ws.once("error", reject);
+      setTimeout(() => reject(new Error("bridge path rejection timeout")), 2_000);
+    });
+    expect(close).toBe(1008);
+  });
+
+  it("writes an owner-only pairing token and packages browser-extension targets", async () => {
+    const ws = await connect();
+    const tokenFile = path.join(dataDir, "browser-bridge-token");
+    expect(fs.existsSync(tokenFile)).toBe(true);
+    if (process.platform !== "win32") expect(fs.statSync(tokenFile).mode & 0o777).toBe(0o600);
+    const info = await browser!.getBridgeInfo();
+    expect(info.supportedFamilies).toContain("Firefox");
+    expect(info.extensionDirectory).toContain("extension");
+    ws.close();
   });
 });

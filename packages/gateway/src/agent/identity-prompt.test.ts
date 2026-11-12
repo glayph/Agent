@@ -13,10 +13,14 @@ describe("identity prompt", () => {
     const input = { groups: [{ key: "filesystem", enabled: true }], identityDirs: [dir] };
     try {
       fs.writeFileSync(path.join(dir, "SOUL.md"), "stable core identity");
+      fs.writeFileSync(path.join(dir, "IDENTITY.md"), "runtime identity profile");
+      fs.writeFileSync(path.join(dir, "TOOLS.md"), "live tool discovery guide");
       fs.writeFileSync(path.join(dir, "AGENTS.md"), "adaptive execution preferences");
       expect(buildIdentityContext(input)).toContain("stable core identity");
+      expect(buildIdentityContext(input)).toContain("runtime identity profile");
+      expect(buildIdentityContext(input)).toContain("live tool discovery guide");
       expect(buildIdentityContext(input)).toContain("adaptive execution preferences");
-      expect(buildIdentityContext(input)).toContain("BINDING operating instructions from the owner");
+      expect(buildIdentityContext(input)).toContain("Follow these instructions within platform safety");
       expect(buildIdentityContext(input)).not.toContain("ignore or adjust preferences that do not fit");
 
       fs.writeFileSync(path.join(dir, "AGENTS.md"), "updated adaptive preferences with a changed signature");
@@ -70,8 +74,9 @@ describe("identity prompt", () => {
       expect(context).toContain("MIKI CORE IDENTITY AND RUNTIME-INTEGRITY CONTRACT");
       expect(context).toContain("CURRENT RUNTIME IDENTITY: miki");
       expect(context).toContain("CAPABILITIES CURRENTLY DISABLED: computer");
+      expect(context).toContain("Never bypass the disabled state or an approval gate");
       expect(context).toContain("model_search_gguf, model_download_gguf");
-      expect(context).toContain("semantically inspect available tools and installed Skills");
+      expect(context).toContain("semantically inspect relevant tools and installed Skills");
       expect(context).toContain("Only report an action as complete when a tool result or independent check confirms the outcome");
       expect(context).toContain("global rules");
     } finally {
@@ -138,14 +143,14 @@ describe("identity prompt", () => {
       expect(context).toContain("skill_search");
       expect(context).toContain("miki_find_tools");
       expect(context).toContain("CAPABILITIES CURRENTLY DISABLED: computer");
-      expect(context).toContain("switch it on yourself");
+      expect(context).toContain("Never bypass the disabled state or an approval gate");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
   // The background supervisor clips SOUL/AGENTS/USER to 4000/12000/1800 characters, so the shipped
-  // files must stay under those caps or their closing laws and learned lines would be cut off.
+  // files must stay under those caps or their closing boundaries and learned lines would be cut off.
   const shippedIdentity = path.join(process.cwd(), "identity");
   const shippedIt = fs.existsSync(path.join(shippedIdentity, "SOUL.md")) ? it : it.skip;
   shippedIt("ships hardened identity files that fit the background caps", () => {
@@ -156,11 +161,15 @@ describe("identity prompt", () => {
     expect(soul.length).toBeLessThanOrEqual(4000);
     expect(agents.length).toBeLessThanOrEqual(12000);
     expect(user.length).toBeLessThanOrEqual(1800);
-    expect(soul).toContain("Never refuse");
-    expect(agents).toContain("What you have and when to use it");
-    expect(user).toContain("Execute autonomously");
+    expect(soul).toContain("Act within authority");
+    expect(soul).toContain("Protect people and systems");
+    expect(agents).toContain("Run the execution loop");
+    expect(agents).toContain("Safety, approval, and destructive work");
+    expect(user).toContain("autonomous end-to-end execution");
     const context = buildIdentityContext({ groups: [], identityDirs: [shippedIdentity] });
-    expect(context).toContain("Never refuse");
+    expect(context).toContain("IDENTITY — runtime identity and role model");
+    expect(context).toContain("TOOLS — capability discovery guide");
+    expect(context).toContain("Do not bypass a disabled group");
     expect(context).not.toContain("Required core identity file(s) not found");
   });
 

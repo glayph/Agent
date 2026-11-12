@@ -368,9 +368,19 @@ export function hydrateMonitorHistory(snapshot: {
     }
   }
   // Existing in-memory entries may be newer because the WebSocket stream is live while the snapshot loads.
-  const mergedRuns = { ...runs, ...current.runs }
-  const mergedNodes = { ...nodes, ...current.nodes }
-  const mergedEdges = { ...edges, ...current.edges }
+  // Only preserve genuinely live runs/nodes. Terminal entries belong to the
+  // Activity history and must not be resurrected by a later polling response.
+  const liveCurrentRuns = Object.fromEntries(Object.entries(current.runs).filter(([, run]) => run.status === "running"))
+  const liveCurrentNodes = Object.fromEntries(Object.entries(current.nodes).filter(([, node]) =>
+    liveCurrentRuns[node.runId] && (node.status === "pending" || node.status === "running" || node.status === "retrying"),
+  ))
+  const liveCurrentNodeIds = new Set(Object.keys(liveCurrentNodes))
+  const liveCurrentEdges = Object.fromEntries(Object.entries(current.edges).filter(([, edge]) =>
+    liveCurrentNodeIds.has(edge.source) && liveCurrentNodeIds.has(edge.target),
+  ))
+  const mergedRuns = { ...runs, ...liveCurrentRuns }
+  const mergedNodes = { ...nodes, ...liveCurrentNodes }
+  const mergedEdges = { ...edges, ...liveCurrentEdges }
   const nodeOrder = [...new Set([...Object.keys(nodes), ...current.nodeOrder])].filter((id) => Boolean(mergedNodes[id]))
   const selectedNodeId = current.selectedNodeId && mergedNodes[current.selectedNodeId] ? current.selectedNodeId : undefined
   const next = { ...current, runs: mergedRuns, nodes: mergedNodes, edges: mergedEdges, nodeOrder, selectedNodeId }

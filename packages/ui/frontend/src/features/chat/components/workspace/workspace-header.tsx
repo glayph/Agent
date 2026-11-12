@@ -9,9 +9,9 @@ import type { WorkspaceStatusPill, WorkspaceStatusTone } from "./types"
 
 const statusDotClass: Record<WorkspaceStatusTone, string> = {
   neutral: "bg-muted-foreground",
-  success: "bg-primary",
-  warning: "bg-primary",
-  info: "bg-primary",
+  success: "bg-emerald-500",
+  warning: "bg-amber-500",
+  info: "bg-sky-500",
 }
 
 interface WorkspaceHeaderProps {
@@ -21,6 +21,7 @@ interface WorkspaceHeaderProps {
   controls?: ReactNode
   isWorking?: boolean
   workingLabel?: string
+  onWorkingClick?: () => void
 }
 
 export function WorkspaceHeader({
@@ -30,6 +31,7 @@ export function WorkspaceHeader({
   controls,
   isWorking = false,
   workingLabel = "Agent is working",
+  onWorkingClick,
 }: WorkspaceHeaderProps) {
   const statusSummary = statuses.map((status) => status.label).join(", ")
 
@@ -51,12 +53,15 @@ export function WorkspaceHeader({
 
         <div
           className="flex shrink-0 items-center gap-1 sm:hidden"
+          role="group"
           aria-label={statusSummary}
+          aria-live="polite"
           title={statusSummary}
         >
           {statuses.map((status) => {
             const dot = (
               <span
+                aria-hidden="true"
                 className={cn(
                   "size-1.5 rounded-full",
                   statusDotClass[status.tone ?? "neutral"],
@@ -67,7 +72,7 @@ export function WorkspaceHeader({
               <button
                 key={status.label}
                 type="button"
-                className="rounded-full p-1"
+                className="rounded-full p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={status.onClick}
                 aria-label={status.label}
                 title={status.label}
@@ -75,55 +80,74 @@ export function WorkspaceHeader({
                 {dot}
               </button>
             ) : (
-              <span key={status.label}>{dot}</span>
+              <span
+                key={status.label}
+                aria-label={status.label}
+                title={status.label}
+              >
+                {dot}
+              </span>
             )
           })}
         </div>
 
-        <div className="hidden min-w-0 items-center gap-2 sm:flex">
-          {statuses[0] ? (
-            statuses[0].onClick ? (
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-[11px] transition-colors"
-                onClick={statuses[0].onClick}
-                aria-label={statuses[0].label}
-                title={statuses[0].label}
-              >
+        <div
+          role="group"
+          className="hidden min-w-0 items-center gap-1.5 overflow-hidden sm:flex"
+          aria-label={statusSummary}
+          aria-live="polite"
+        >
+          {statuses.map((status) => {
+            const content = (
+              <>
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "size-1.5 rounded-full",
-                    statusDotClass[statuses[0].tone ?? "neutral"],
+                    "size-1.5 shrink-0 rounded-full",
+                    statusDotClass[status.tone ?? "neutral"],
                   )}
                 />
-                <span>{statuses[0].label}</span>
+                <span className="truncate">{status.label}</span>
+              </>
+            )
+            const className =
+              "text-muted-foreground inline-flex max-w-40 shrink items-center gap-1.5 rounded-full border border-border/70 px-2 py-1 text-[10px] leading-none transition-colors"
+            return status.onClick ? (
+              <button
+                key={status.label}
+                type="button"
+                className={cn(
+                  className,
+                  "hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                onClick={status.onClick}
+                aria-label={status.label}
+                title={status.label}
+              >
+                {content}
               </button>
             ) : (
-              <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[11px]">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    statusDotClass[statuses[0].tone ?? "neutral"],
-                  )}
-                />
-                <span>{statuses[0].label}</span>
+              <span
+                key={status.label}
+                className={className}
+                aria-label={status.label}
+                title={status.label}
+              >
+                {content}
               </span>
             )
-          ) : null}
-          <span className="sr-only">{statuses.slice(1).map((status) => status.label).join(", ")}</span>
+          })}
           {subtitle ? <span className="sr-only">{subtitle}</span> : null}
         </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
-        {isWorking && (
+        {isWorking && (onWorkingClick ? (
           <button
             type="button"
             data-testid="working-indicator"
-            className="text-primary/90 hover:bg-primary/10 inline-flex size-7 items-center justify-center rounded-md transition-colors motion-reduce:transition-none"
-            onClick={statuses[0]?.onClick}
+            className="text-primary/90 hover:bg-primary/10 inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+            onClick={onWorkingClick}
             aria-label={workingLabel}
             title={workingLabel}
           >
@@ -132,7 +156,20 @@ export function WorkspaceHeader({
               className="size-3.5 motion-safe:animate-spin motion-reduce:animate-none"
             />
           </button>
-        )}
+        ) : (
+          <span
+            data-testid="working-indicator"
+            className="text-primary/90 inline-flex size-7 items-center justify-center"
+            role="status"
+            aria-label={workingLabel}
+            title={workingLabel}
+          >
+            <IconLoader2
+              aria-hidden="true"
+              className="size-3.5 motion-safe:animate-spin motion-reduce:animate-none"
+            />
+          </span>
+        ))}
         {controls}
         <GlobalHeaderActions />
       </div>

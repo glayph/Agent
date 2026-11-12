@@ -57,6 +57,8 @@
   "chat": {
     "welcome": "Como posso te ajudar hoje?",
     "welcomeDesc": "Pergunte sobre clima, configurações ou qualquer outra tarefa. Estou aqui para ajudar.",
+    "agentWorking": "Miki está trabalhando",
+    "autonomousWorking": "Miki está trabalhando de forma autônoma",
     "errors": {
       "codes": {
         "provider_api_key": "A chave de API do modelo foi rejeitada. Confira a chave na página Modelos.",
@@ -273,6 +275,23 @@
       "durationMs": "{{value}} ms",
       "durationSeconds": "{{value}} s",
       "durationMinutes": "{{minutes}} min {{seconds}} s"
+    },
+    "topbar": {
+      "gatewayOnline": "Gateway conectado",
+      "gatewayConnecting": "Conectando",
+      "gatewayDisconnected": "Desconectado",
+      "gatewayConnectionError": "Erro na conexão WebSocket",
+      "gatewayUnknown": "Status do Gateway desconhecido",
+      "gatewayStarting": "Iniciando gateway",
+      "gatewayRestarting": "Reiniciando gateway",
+      "gatewayStopping": "Parando gateway",
+      "gatewayStopped": "Gateway parado",
+      "gatewayError": "Erro no gateway",
+      "chatWorking": "Miki está respondendo",
+      "autonomyPaused": "Autonomia pausada",
+      "agentReady": "Miki pronto",
+      "activeGoals_one": "{{count}} meta ativa",
+      "activeGoals_other": "{{count}} metas ativas"
     }
   },
   "header": {
@@ -1417,7 +1436,7 @@
           "requires_worker": "Habilite a dependencia de worker em segundo plano antes que a ferramenta de spawn possa delegar trabalho.",
           "requires_mcp_discovery": "Habilite `tools.mcp.discovery` antes que as ferramentas de descoberta MCP fiquem disponíveis.",
           "requires_web_search_provider": "Configure ao menos um provedor externo de pesquisa web pronto para uso.",
-          "browser_not_installed": "O mecanismo do navegador não está instalado. Execute `npx playwright install chromium` e reinicie."
+          "browser_not_installed": "Nenhuma extensão Miki Browser Agent pareada está conectada. Instale e pareie a extensão no navegador e tente novamente."
         }
       }
     },

@@ -1,54 +1,46 @@
-# 03 — packages/core (Agent Engine)
+# 03 — packages/core (Agent Engine and Domain Runtime)
 
-`@miki/core` owns the Agent execution engine and reusable runtime/domain logic. It does not own a second memory implementation, and Agent-facing provider access is routed through `@miki/gateway`.
+`@miki/core` owns reusable Agent execution, tools, permission governance, autonomous scheduling, durable goal/task logic, plugin integration and domain services. Gateway composes these capabilities into a running application.
+
+## Main source domains
 
 ```text
-packages/core/
-├── package.json
-├── tsconfig.json
-└── src/
-    ├── api/                  # Core API routers and application composition
-    ├── autonomy/             # Goal management and autonomous supervision
-    ├── control/               # Agent control plane
-    ├── engine/               # Planning, execution, tool loop, LLM client contracts, token budgets
-    ├── hooks/                # Lifecycle event definitions and dispatch
-    ├── mcp/                  # MCP contracts and tool connectivity
-    ├── messaging/            # Message adaptation and formatting
-    ├── observability/        # Audit log, error handling and metrics
-    ├── permissions/          # Permission governance
-    ├── plugins/
-    │   ├── browser/          # Browser plugin implementation
-    │   ├── code-execution/   # Code execution plugin implementation
-    │   ├── computer-use/     # Computer control plugin implementation
-    │   └── providers/
-    │       ├── sdk/          # Provider plugin contracts, loader and registry
-    │       ├── builtin/      # Built-in provider implementations
-    │       │   ├── gemini/
-    │       │   └── llama.cpp/
-    │       │       ├── source/    # Complete vendored llama.cpp source tree
-    │       │       ├── native/    # Bundled native executable artifacts
-    │       │       ├── runtime/   # Local llama.cpp process lifecycle
-    │       │       └── index.ts   # Built-in llama.cpp provider plugin
-    │       └── openai-compatible-adapter.ts
-    ├── runtime-fetch/        # Runtime fetch helpers
-    ├── self-improvement/     # Learning and self-improvement loops
-    ├── services/             # Shared services, e.g. speech and web search
-    ├── sessions/             # Session history and session state
-    ├── plugins/skills/       # Skill catalog, manager and installer
-    └── tasks/                # Durable task state, workers and retry orchestration
-
-packages/memory/src/
-├── core/                     # Temporal Knowledge Graph and canonical memory runtime
-└── file-memory/              # File-backed notes, search, compaction and memory tools
+packages/core/src/
+├── api/                 # Core API composition/contracts
+├── autonomy/            # AutonomousSupervisor and ambient/goal orchestration
+├── control/             # Supported Agent control plane
+├── engine/              # Planning, execution loop, tool registry, model client contracts
+├── hooks/               # Lifecycle events and dispatch
+├── mcp/                 # MCP contracts and integration
+├── messaging/           # Message adaptation/formatting
+├── observability/       # Metrics, errors and audit support
+├── permissions/         # Permission policy and approval governance
+├── plugins/             # Providers, skills, tools, browser and computer-use plugins
+├── runtime-fetch/       # Runtime fetch/network helpers
+├── self-improvement/    # Evaluated learning and change-management workflow
+├── services/            # Reusable domain integrations
+├── sessions/            # Session contracts/state
+└── tasks/               # Durable task store, workers, retries and lineage
 ```
 
-## Provider communication boundary
+The plugin subtree includes provider adapters and the bundled skill subsystem. The exact inventory evolves; inspect the relevant package source and tests before adding a new module or relying on a path described in a dated report.
 
-- Provider adapters, registry and built-in implementations are owned by `packages/core/src/plugins/providers/`.
-- The Agent-facing `ProviderGateway` is owned by `packages/gateway/src/providers/` and is the Gateway boundary through which Agent runtime requests reach the provider registry.
-- Agent runtime code must not instantiate provider SDK clients or access `providerRegistry` directly.
-- The complete llama.cpp CMake source tree lives under `providers/builtin/llama.cpp/source/`. `scripts/build-llama.mjs` configures and builds the `llama-server` target from this source on every Core/Agent build; existing native binaries never skip source compilation.
+## Execution model
 
-## Memory ownership
+A meaningful request may be converted into an `AgentPlan`; the engine then executes eligible steps through the registered tool runtime. Depending on configuration, tool output can undergo semantic action verification, and durable task/run checkpoints support steering and recovery. A successful tool response is not always sufficient proof that the user-visible outcome is correct.
 
-All persistent memory implementations belong to `packages/memory/`, including the TKG runtime and the file-memory service. Core and Gateway consume these features through the `@miki/memory` package exports. Do not add memory implementation folders under `packages/core/src/`.
+The model invocation itself is finite. `AutonomousSupervisor` is host-side scheduling/orchestration; durable goal/task workers execute eligible work on their own lifecycle. Ambient decisions and tracked goal execution have different tool sets and permissions. Read [Autonomous Execution](../AUTONOMOUS-EXECUTION.md) and [Always-active Idle Mode](../always-active-idle-mode.md) for details.
+
+## Provider and memory boundaries
+
+Provider registry and implementation code is under `packages/core/src/plugins/providers/`. Agent-facing calls are mediated by `ProviderGateway` in `packages/gateway/src/providers/`; Agent runtime code must not directly instantiate provider SDK clients.
+
+Persistent memory implementations belong to `packages/memory/`, not a parallel Core memory engine. Core uses the public package boundary.
+
+## Maintenance rules
+
+- Add reusable execution/governance logic to the owning Core domain.
+- Keep ingress, session transport, and application composition in Gateway.
+- Use typed tool schemas and the live permission system; never invent capability from persona wording.
+- Preserve host/guest isolation, audit events, authorization and approval checks.
+- Add or update tests with behavior changes; architecture docs alone do not validate an integration.

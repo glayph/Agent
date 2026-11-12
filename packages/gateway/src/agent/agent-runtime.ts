@@ -1317,8 +1317,76 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       },
     }),
     {
+      name: "browser_open",
+      description: "Open a user's installed browser application (defaults to Chrome) and wait for its already-installed, paired Miki Browser Agent extension to connect. Use browser_name to choose Firefox, Edge, Brave, Opera, Vivaldi, Safari, Chromium or another installed browser name.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { browser_name: { type: "string", description: "Installed browser display name; defaults to Chrome." }, timeout_ms: { type: "integer", minimum: 1000, maximum: 120000 } }, additionalProperties: false },
+      async execute(input, context) {
+        const requested = typeof input.browser_name === "string" && input.browser_name.trim() ? input.browser_name.trim() : "Chrome"
+        const connected = browser.listBrowsers()
+        const existing = connected.find((entry) => String(entry.name || "").toLowerCase().includes(requested.toLowerCase()))
+        if (existing) {
+          await browser.selectBrowser(String(existing.id))
+          return `Selected already-open ${String(existing.name)} browser.`
+        }
+        const catalogue = JSON.parse(await computer.listApplications()) as { data?: { applications?: Array<{ id: string; name: string }> } }
+        const apps = catalogue.data?.applications || []
+        const normalized = requested.toLowerCase().replace(/[^a-z0-9]/g, "")
+        const aliases: Record<string, string[]> = {
+          chrome: ["googlechrome", "chrome"], chromium: ["chromium", "chromiumwebbrowser"],
+          edge: ["microsoftedge", "edge"], firefox: ["firefox"], brave: ["brave", "bravebrowser"],
+          opera: ["opera", "operabrowser"], vivaldi: ["vivaldi"], safari: ["safari"],
+        }
+        const candidates = aliases[normalized] || [normalized]
+        let matches = apps.filter((app) => app.name.toLowerCase().replace(/[^a-z0-9]/g, "") === normalized)
+        if (!matches.length) {
+          for (const alias of candidates) {
+            matches = apps.filter((app) => app.name.toLowerCase().replace(/[^a-z0-9]/g, "").includes(alias))
+            if (matches.length) break
+          }
+        }
+        if (!matches.length) throw new Error(`Browser '${requested}' is not present in the installed application list. Use computer_list_applications to inspect available apps.`)
+        if (matches.length > 1) throw new Error(`More than one installed app matches '${requested}': ${matches.map((app) => `${app.name} (${app.id})`).join(", ")}. Choose an exact application ID.`)
+        const launched = JSON.parse(await computer.launch({ application_id: matches[0].id })) as { ok?: boolean; error?: string }
+        if (launched.ok === false) throw new Error(launched.error || `Could not launch ${matches[0].name}.`)
+        context.heartbeat?.(`Opened ${matches[0].name}; waiting for the Miki extension to connect.`)
+        const client = await browser.waitForBrowserConnection(Number(input.timeout_ms || 30_000), context.signal, matches[0].name)
+        await browser.selectBrowser(String(client.id))
+        return `Opened ${matches[0].name} and connected to its Miki Browser Agent extension.`
+      },
+    },
+    {
+      name: "browser_list_browsers",
+      description: "List currently connected user browsers that have the Miki Browser Agent extension paired.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute() { return JSON.stringify(browser.listBrowsers(), null, 2) },
+    },
+    {
+      name: "browser_list_tabs",
+      description: "List tabs in the selected connected browser or a supplied browser ID.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: { browser_id: { type: "string" } }, additionalProperties: false },
+      async execute(input) { return browser.listTabs(typeof input.browser_id === "string" ? input.browser_id : undefined) },
+    },
+    {
+      name: "browser_select",
+      description: "Select a connected browser and/or one of its tabs before interacting with it.",
+      risk: "config_write",
+      approval: "required",
+      parameters: { type: "object", properties: { browser_id: { type: "string" }, tab_id: { type: "integer" } }, additionalProperties: false },
+      async execute(input) {
+        if (typeof input.browser_id === "string" && input.browser_id.trim()) await browser.selectBrowser(input.browser_id)
+        if (Number.isInteger(input.tab_id)) return browser.selectTab(Number(input.tab_id), typeof input.browser_id === "string" ? input.browser_id : undefined)
+        return `Selected browser ${typeof input.browser_id === "string" ? input.browser_id : "currently active"}.`
+      },
+    },
+    {
       name: "browser_navigate",
-      description: "Open an HTTP or HTTPS page in the headless browser.",
+      description: "Navigate the selected user browser tab. If no browser is connected, first use browser_open (defaults to Chrome) to launch one and wait for its paired extension; opens a new tab when no tab is selected.",
       risk: "config_write",
       approval: "required",
       parameters: { type: "object", properties: { url: { type: "string", description: "HTTP(S) URL to open." } }, required: ["url"], additionalProperties: false },
@@ -1326,7 +1394,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     },
     {
       name: "browser_click",
-      description: "Click a visible element by a Playwright selector on the current page.",
+      description: "Click a visible browser element by CSS selector or semantic target (text=, label=, placeholder=, role=).",
       risk: "config_write",
       approval: "required",
       parameters: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
@@ -1396,11 +1464,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     },
     {
       name: "computer_observe",
-      description: "Observe available desktop windows and UI metadata; element-level automation depends on the platform.",
+      description: "Observe the selected native app or desktop window and enumerate accessible controls. Windows UI Automation, Linux AT-SPI and macOS Accessibility are used when available.",
       risk: "read",
       approval: "auto",
       parameters: { type: "object", properties: { active_only: { type: "boolean" }, max_elements: { type: "integer", minimum: 1, maximum: 300 }, query: { type: "string" }, window_title: { type: "string" }, process_name: { type: "string" }, window_handle: { type: "integer" } }, additionalProperties: false },
-      async execute(input) { return computer.observe(input) },
+      async execute(input, context) { return computer.observe(input, context.signal) },
     },
     {
       name: "computer_focus",
@@ -1443,11 +1511,19 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
       async execute(input) { return computer.clipboard(input) },
     },
     {
+      name: "computer_list_applications",
+      description: "List installed desktop applications that the operating system exposes, including their exact launch IDs. Use this before launching an app by name.",
+      risk: "read",
+      approval: "auto",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute(input) { return computer.listApplications(input) },
+    },
+    {
       name: "computer_launch",
-      description: "Launch a local application without shell command interpretation.",
+      description: "Launch an installed desktop application by application_name or application_id, or run an explicit executable command. The command is never interpreted by a shell.",
       risk: "config_write",
       approval: "required",
-      parameters: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, required: ["command"], additionalProperties: false },
+      parameters: { type: "object", properties: { application_name: { type: "string" }, application_id: { type: "string" }, command: { type: "string" }, args: { type: "array", items: { type: "string" } }, working_dir: { type: "string" } }, additionalProperties: false },
       async execute(input) { return computer.launch(input) },
     },
     {
@@ -2728,6 +2804,15 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
 
   // ---- HTTP routes --------------------------------------------------------
   function mount(app: express.Express) {
+    // Pairing material is exposed only to an authenticated dashboard owner.
+    // The bridge itself binds exclusively to loopback and rejects non-extension origins.
+    app.get("/api/browser/bridge", deps.requireAuth, async (_req, res) => {
+      try {
+        return res.json(await browser.getBridgeInfo())
+      } catch (error) {
+        return res.status(503).json({ error: error instanceof Error ? error.message : String(error) })
+      }
+    })
     // Auth covers everything under /api/control, including the approval
     // endpoints, so an unauthenticated visitor can never approve a request.
     app.use("/api/control", deps.requireAuth)
@@ -2943,7 +3028,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     }
     return registry.get(toolName)?.monitor
   }
-  return { engine, control, approvals, registry, processes, llmFor, identityPrompt, resolveCurrentModel, resolveMonitorPresentation, mount, refreshExtensionTools, startRun, startBackgroundWorker, stopBackgroundWorker, steerRun, noteSteerAcknowledged, cancelRun, syncTools, setToolState, flushArtifacts: () => artifacts.flush(), acquireExecutionSlot, releaseRunInteractiveResources, resourceSnapshot: () => ({ ...hostResourceManager.snapshot(), ...globalResourceArbiter.snapshot() }), allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size, isRunActive: (runId: string) => runs.has(runId) }
+  return { engine, control, approvals, registry, processes, browserStatus: () => browser.listBrowsers(), browserBridgeInfo: () => browser.getBridgeInfo(), llmFor, identityPrompt, resolveCurrentModel, resolveMonitorPresentation, mount, refreshExtensionTools, startRun, startBackgroundWorker, stopBackgroundWorker, steerRun, noteSteerAcknowledged, cancelRun, syncTools, setToolState, flushArtifacts: () => artifacts.flush(), acquireExecutionSlot, releaseRunInteractiveResources, resourceSnapshot: () => ({ ...hostResourceManager.snapshot(), ...globalResourceArbiter.snapshot() }), allToolNames: () => allTools.map((tool) => tool.name), describePlan, activeRunCount: () => runs.size, isRunActive: (runId: string) => runs.has(runId) }
 }
 
 export type AgentRuntime = ReturnType<typeof createAgentRuntime>

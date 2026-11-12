@@ -15,7 +15,7 @@ metadata:
 
 ## Test pyramid
 ```
-E2E (10%)     — Playwright, Cypress
+E2E (10%)     — Cypress, WebDriver, browser-native automation
 Integration (20%) — supertest, Testing Library
 Unit (70%)    — Vitest, Jest
 ```

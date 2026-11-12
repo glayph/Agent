@@ -57,6 +57,8 @@
   "chat": {
     "welcome": "আজ আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
     "welcomeDesc": "আবহাওয়া, সেটিংস বা অন্য যেকোনো কাজ সম্পর্কে আমাকে জিজ্ঞেস করুন। আমি সাহায্য করতে এখানে আছি।",
+    "agentWorking": "Miki কাজ করছে",
+    "autonomousWorking": "Miki নিজে থেকেই কাজ করছে",
     "errors": {
       "codes": {
         "provider_api_key": "মডেলের API কী প্রত্যাখ্যাত হয়েছে। মডেল পেজে কী-টি যাচাই করুন।",
@@ -277,6 +279,23 @@
       "durationMs": "{{value}} মিলিসেকেন্ড",
       "durationSeconds": "{{value}} সেকেন্ড",
       "durationMinutes": "{{minutes}} মিনিট {{seconds}} সেকেন্ড"
+    },
+    "topbar": {
+      "gatewayOnline": "গেটওয়ে সংযুক্ত",
+      "gatewayConnecting": "সংযোগ হচ্ছে",
+      "gatewayDisconnected": "সংযোগ বিচ্ছিন্ন",
+      "gatewayConnectionError": "ওয়েবসকেট সংযোগে ত্রুটি",
+      "gatewayUnknown": "গেটওয়ের অবস্থা অজানা",
+      "gatewayStarting": "গেটওয়ে চালু হচ্ছে",
+      "gatewayRestarting": "গেটওয়ে পুনরায় চালু হচ্ছে",
+      "gatewayStopping": "গেটওয়ে বন্ধ হচ্ছে",
+      "gatewayStopped": "গেটওয়ে বন্ধ",
+      "gatewayError": "গেটওয়েতে সমস্যা",
+      "chatWorking": "Miki উত্তর দিচ্ছে",
+      "autonomyPaused": "স্বয়ংক্রিয় কাজ বিরতিতে",
+      "agentReady": "Miki প্রস্তুত",
+      "activeGoals_one": "{{count}}টি সক্রিয় লক্ষ্য",
+      "activeGoals_other": "{{count}}টি সক্রিয় লক্ষ্য"
     }
   },
   "models": {

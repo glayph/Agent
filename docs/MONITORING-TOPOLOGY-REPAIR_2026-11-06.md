@@ -36,3 +36,7 @@ This change set repairs monitoring graph persistence and historical inspection w
 ## Data migration
 
 The new `monitor_nodes.error` column is added idempotently at startup via `PRAGMA table_info` + `ALTER TABLE`, so existing SQLite databases are upgraded without deleting prior history.
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

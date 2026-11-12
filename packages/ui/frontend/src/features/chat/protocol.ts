@@ -198,7 +198,13 @@ export function handlemikiMessage(
       const messageId = (payload.message_id as string) || `miki-${Date.now()}`
       const { content, kind, toolCalls } =
         parseAssistantMessageCreateState(payload)
-      if (isChatLogMessage({ role: payload.role, kind, content, context_id: payload.context_id })) {
+      if (isChatLogMessage({
+        role: payload.role,
+        kind,
+        content,
+        context_id: payload.context_id,
+        notification_kind: payload.notification_kind,
+      })) {
         updateChatStore((prev) => ({
           messages: prev.messages.filter(
             (candidate) => candidate.id !== messageId,
@@ -216,6 +222,10 @@ export function handlemikiMessage(
       ].includes(kind)
       const modelName = parseModelName(payload)
       const runId = parseRunId(payload)
+      const notificationKind =
+        typeof payload.notification_kind === "string"
+          ? payload.notification_kind
+          : undefined
       const replyToMessageId =
         typeof payload.reply_to_message_id === "string"
           ? payload.reply_to_message_id
@@ -272,6 +282,7 @@ export function handlemikiMessage(
           kind,
           ...(modelName ? { modelName } : {}),
           ...(runId ? { runId } : {}),
+          ...(notificationKind ? { notificationKind } : {}),
           ...(replyToMessageId ? { replyToMessageId } : {}),
           ...(thoughtCategory ? { thoughtCategory } : {}),
           ...(inspectorOnly ? { inspectorOnly } : {}),
@@ -294,11 +305,8 @@ export function handlemikiMessage(
                   : candidate,
               )
             : [...prev.messages, nextMessage]
-        return {
-          messages:
-            kind === "normal"
-              ? messages.filter((message) => message.kind !== "error")
-              : messages,
+          return {
+            messages,
           ...(workStatusCanClear && runId && prev.workStatus?.runId === runId
             ? { workStatus: undefined }
             : {}),
@@ -330,6 +338,8 @@ export function handlemikiMessage(
           role: payload.role,
           kind: updatedKind,
           content: updatedContent,
+          context_id: payload.context_id,
+          notification_kind: payload.notification_kind,
         })
       ) {
         updateChatStore((prev) => ({
@@ -348,6 +358,10 @@ export function handlemikiMessage(
       const contextUsage = parseContextUsage(payload)
       const modelName = parseModelName(payload)
       const runId = parseRunId(payload)
+      const notificationKind =
+        typeof payload.notification_kind === "string"
+          ? payload.notification_kind
+          : undefined
       const replyToMessageId =
         typeof payload.reply_to_message_id === "string"
           ? payload.reply_to_message_id
@@ -418,6 +432,7 @@ export function handlemikiMessage(
                 toolCalls,
                 ...(modelName ? { modelName } : {}),
                 ...(runId ? { runId } : {}),
+                ...(notificationKind ? { notificationKind } : {}),
                 ...(replyToMessageId ? { replyToMessageId } : {}),
                 ...(thoughtCategory ? { thoughtCategory } : {}),
                 ...(inspectorOnly ? { inspectorOnly } : {}),
@@ -428,11 +443,7 @@ export function handlemikiMessage(
                 ...(attachments !== undefined ? { attachments } : {}),
               }
             })
-            if (found) {
-              return payload.kind === "error"
-                ? messages
-                : messages.filter((candidate) => candidate.kind !== "error")
-            }
+            if (found) return messages
 
             const { content, kind, toolCalls } =
               parseAssistantMessageUpdateState(payload)
@@ -447,6 +458,7 @@ export function handlemikiMessage(
                 toolCalls,
                 ...(modelName ? { modelName } : {}),
                 ...(runId ? { runId } : {}),
+                ...(notificationKind ? { notificationKind } : {}),
                 ...(replyToMessageId ? { replyToMessageId } : {}),
                 ...(thoughtCategory ? { thoughtCategory } : {}),
                 ...(inspectorOnly ? { inspectorOnly } : {}),
@@ -458,9 +470,7 @@ export function handlemikiMessage(
                 timestamp,
               },
             ]
-            return payload.kind === "error"
-              ? nextMessages
-              : nextMessages.filter((candidate) => candidate.kind !== "error")
+            return nextMessages
           })(),
           ...(workStatusCanClear && runId && prev.workStatus?.runId === runId
             ? { workStatus: undefined }
@@ -670,13 +680,6 @@ export function handlemikiMessage(
         const nextActiveRunId =
           runningRunIds.at(-1) ?? (runId || prev.activeRunId)
         return {
-          ...(status === "completed"
-            ? {
-                messages: prev.messages.filter(
-                  (message) => message.kind !== "error",
-                ),
-              }
-            : {}),
           ...(nextActiveRunId ? { activeRunId: nextActiveRunId } : {}),
           ...(modelName ? { activeRunModel: modelName } : {}),
           ...(modelName

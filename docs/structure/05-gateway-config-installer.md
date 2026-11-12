@@ -1,72 +1,35 @@
-# 05 — Gateway, Config & Installer
+# 05 — Gateway, Config and Skill Installer Ownership
 
 ## packages/gateway
 
-Lightweight Express gateway that fronts the core agent and serves the UI.
+The Gateway is the application composition root and primary web backend. It owns HTTP/WebSocket routes, the Agent runtime, chat turns, channel integration, provider boundary, health, monitoring, runtime process services, file routes and security policy.
 
+```text
+packages/gateway/src/
+├── agent/       # Agent runtime, identity prompt/file loading, feedback
+├── channels/    # Channel adapters, session lanes and delivery
+├── chat/        # Chat turn lifecycle, streaming, attachments and media
+├── config/      # Gateway configuration adapters
+├── files/       # File/archive operations
+├── memory/      # Memory adapters and routes
+├── monitoring/  # Health, run traces and operator notifications
+├── plugins/     # Plugin marketplace/MCP routes and tool bridges
+├── providers/   # Agent-facing ProviderGateway boundary
+├── runtime/     # Process lifecycle, recovery, locks and run artifacts
+├── security/    # Authentication, origin/cookie policy and secret scanning
+└── tools/       # Tool registration/grouping and serialization adapters
 ```
-packages/gateway/
-├── package.json                 # @miki/gateway
-├── tsconfig.json
-├── __tests__/
-└── src/
-    ├── index.ts                 # Express app setup, proxy, static, health
-    ├── websocket-relay.ts       # WebSocket relay to core
-    ├── runtime-utils.ts         # Path rewriting, MCP proxy helpers
-    ├── shutdown.ts              # Graceful shutdown & process tree termination
-    └── ...
-```
 
-**Comments**
-- Proxies HTTP and WebSocket traffic to the core API.
-- Serves the built frontend static files.
-- Handles CORS, API-key / origin / CIDR authentication, health checks.
-- Manages clean shutdown of child processes.
-
-### Self-recovery (outbox, health, replay, channel hardening)
-
-Always on:
-- `outbox.ts` — durable `channel_inbox` / `channel_outbox` tables. A channel reply is written to the outbox first and sent by a worker, so a failed send is retried (2 s doubling to 5 min, given up after 24 h; `MIKI_OUTBOX_TTL_HOURS`) and never sent twice (key `reply:<message id>:<part>`). Delivery is at-least-once: a crash between a successful send and its bookkeeping can in theory repeat one message. Long replies are split into ordered parts. A failed turn sends the user a short notice built from the recorded failure.
-- `health.ts` — `GET /gateway/live` (event loop only; used by the supervisor watchdog) and `GET /gateway/health` (database, event-loop lag, model-provider probe, channels, outbox, recovery state, run progress, host CPU/load/RAM/disk, process CPU/RSS/heap and resource-waiter starvation). Status is `ok`, `degraded` (HTTP 200, a restart would not help) or `unhealthy` (HTTP 503, database failed). Details are shown only to authenticated or local callers.
-- `monitor-history.ts` — authenticated `GET /api/monitor/trace/:runId?session_id=...` joins the source chat message/context, plan DAG, tool-call nodes, verification phases and ordered run events. `GET /api/monitor/system-health` returns bounded historical resource samples; raw chat goals, tool inputs/outputs and provider error details are not stored in these samples.
-- Discord RESUME + heartbeat-ACK watchdog, Slack stale-connection timeout (`MIKI_CHANNEL_STALE_MS`, default 90 s), and catch-up of messages missed while disconnected (per-conversation cursors in `channel_cursors`).
-- `scripts/miki-24-7.mjs` — watchdog probes `/gateway/live` every 10 s (a deep check every third probe); three failures in a row kill and restart the gateway (`MIKI_WATCHDOG_INTERVAL_MS`, `MIKI_WATCHDOG_FAILURES`). A failure to start the gateway is retried with backoff instead of exiting.
-- `deploy/systemd/miki-healthcheck.sh` — restarts a unit only after `MIKI_HEALTH_FAILURE_LIMIT` (3) failed checks in a row, and never while a young llama server reports "loading".
-
-Enabled by default; set `MIKI_RECOVERY_V2=0` to explicitly disable continuous recovery, database integrity checks/backups, controlled crash handlers and crash-loop protection:
-- `recovery-manager.ts` — one question every 10 s: are the database, model and channel hosts reachable? Recovery is declared after N consecutive good checks (3, tuned 3–6) and an incident is recorded in `recovery_incidents`.
-- `replay-sweeper.ts` — finds unanswered messages (interrupted, or failed for a temporary reason), replays them in order per conversation (2 conversations at once), at startup, after recovery and every 5 minutes. Limits: 3 attempts per message (poison-pill protection), 24 h age (`MIKI_REPLAY_MAX_ATTEMPTS`, `MIKI_REPLAY_TTL_HOURS`). Given-up messages are reported once to the user on their channel.
-- `process-safety.ts` — database `quick_check` at startup with verified restore from the newest good backup (damaged file kept); startup fails closed if the damaged database cannot be quarantined; online backups every 6 h (newest 5 kept, private `backups/` directory), crash handlers (reason written, controlled stop, supervisor restarts), unclean-exit detection and crash-loop protection (5 crashes in 10 minutes set aside the messages that were running).
-- `recovery-learning.ts` — each incident goes to the learning store and `identity/memory/<date>.md`; the only setting it changes itself (good checks needed) stays within 3–6 and each change is logged.
-
-Verification: `npm run test:recovery-chaos` (kill -9, network cut, send-time block, SIGSTOP hang, poison message, channel disconnects, model loading, corrupted database).
+`packages/gateway/src/index.ts` composes application startup and `packages/gateway/src/agent/agent-runtime.ts` constructs the interactive Agent runtime. Identity files are loaded by `agent/identity-prompt.ts`; the exact file order and permission model are documented in [the operating model](../AGENT_MIKI_OPERATING_MODEL.md).
 
 ## packages/config
 
-Shared foundation used by almost every other package.
+`@miki/config` is the shared foundation for configuration values and schemas, environment compatibility, default-model resolution, security helpers and secret-vault access. It defines contracts; Gateway/Core own their runtime consumers.
 
-```
-packages/config/
-├── package.json                 # @miki/config — exports ., ./security, ./schema
-├── tsconfig.json
-└── src/
-    ├── index.ts                 # Main re-exports
-    ├── config.ts                # Settings loading & validation
-    ├── schema.ts                # Config schema
-    ├── types.ts                 # Shared TypeScript types
-    ├── security.ts              # CORS, CIDR, API-key helpers, bind policy
-    ├── secret-vault.ts          # Secret resolution / vault
-    ├── user-config.ts           # User-level overrides
-    ├── env-compat.ts            # Environment variable compatibility layer
-    ├── default-model.ts         # Default model helpers
-    └── *.test.ts                # Unit tests
-```
+## Skill installer is Core-owned
 
-**Comments**
-- Single source of truth for runtime configuration shape.
-- Security helpers enforce public-bind policy, origin checks and timing-safe comparisons.
-- Secret vault supports loading credentials without hard-coding them.
+This checkout does **not** contain a separate `packages/installer` workspace. Skill catalogue, runtime discovery/manager, governance integration and installer implementation live under `packages/core/src/plugins/skills/`. The root build compiles/validates the Core-owned implementation. This document describes package ownership only and does not authorize changing bundled skill content.
 
-## Skill installer (core plugin)
+## Reliability and recovery
 
-Installer implementation now lives in `packages/core/src/plugins/skills/installer/`. It is built and exported by `@miki/core`; it is no longer a standalone workspace package.
+Gateway and host supervisor services include bounded health probes, durable delivery/replay, run artifact collection and process recovery paths. Their effective behavior depends on runtime flags, database state, provider access and process health. Use `/gateway/health`, `/gateway/live`, `/api/monitor/*`, and `/api/autonomy/status` as supported by the running version. A green process health check is not proof that a particular task is progressing; inspect its run/goal trace.

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Miki Browser Agent (Safari)",
+  "version": "1.0.0",
+  "description": "Connects Safari to the local Miki agent through an owner-paired Safari Web Extension.",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "background": {
+    "scripts": [
+      "service-worker.js"
+    ],
+    "service_worker": "service-worker.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "http://127.0.0.1/*"
+  ]
+}

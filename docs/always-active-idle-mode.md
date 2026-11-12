@@ -24,13 +24,11 @@ activate, upgrade, or replace the supervisor.
    message, durable memory entry, or log record.
 3. The model observes/researches and decides whether useful work exists.
 4. Useful execution work is added as a durable goal with deterministic
-   acceptance evidence. The separate goal lane performs the work and verifies
-   its result.
-5. When a goal settles or a meaningful lifecycle/configuration event arrives,
-   the supervisor is woken immediately and evaluates the next step.
+   acceptance evidence. The separate goal lane performs the work and verifies its result.
+5. When a goal settles or a meaningful lifecycle/configuration event arrives, the supervisor is woken immediately and evaluates the next step.
 6. When the environment is quiet and no event or goal completion wakes it,
-   `decision_interval_seconds` is the next observation/decision cadence. The
-   shipped default is 5 seconds. This is not a post-action delay.
+   `decision_interval_seconds` is the next observation/decision cadence. The shipped default is 5 seconds. This is not a post-action delay.
+7. When no execution work is useful, the ambient LLM may initiate a meaningful owner conversation. Miki does not use a hard-coded topic list or keyword trigger: the model chooses whether a topic is worth sharing, what to say, and when to send it. Routine heartbeat chatter and repeated messages remain suppressed.
 
 The agent engine itself continues its model/tool turn loop while a run is in
 progress. The supervisor continues polling and servicing scheduled work while
@@ -77,6 +75,11 @@ OS permissions, user permissions, and other runtime boundaries still apply.
   bypass this cadence, but not provider retry backoff.
 - `heartbeat.proactive.observe_computer`: enables ambient computer observation
   when computer use is also authorized (default: `true`).
+- `heartbeat.proactive.conversation_initiation`: allows the LLM to start a useful
+  conversation without a user turn (default: `true`). This controls capability,
+  not a fixed subject or cadence.
+- `heartbeat.proactive.curiosity.enabled`: allows self-directed exploration goals
+  when the LLM finds a useful lead (default in the shipped Miki config: `true`).
 - `idle_after_seconds: 0`: no user-inactivity activation countdown.
 
 The owner can explicitly pause or stop autonomy. The loop does not override
@@ -98,3 +101,10 @@ follow-up scheduling is enabled and whether provider backoff is active.
 The background agent still needs its normal tests and a real deployment soak
 test. A running gateway alone is not proof that ambient observations and
 follow-up goals are progressing.
+
+
+## Agent-Miki identity and limits
+
+The idle supervisor is one host-managed execution lane, not the entire Agent. Interactive chat, tracked goal workers, heartbeat/scheduled jobs and ambient decisions use different triggers and tool permissions. Do not infer that a capability available in chat is also available to the ambient decision lane. The live status endpoint and current runtime registry are authoritative.
+
+See [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) for the current identity-file loading order, capability discovery procedure, status distinctions and safety boundaries. A specialist identity profile is guidance for a selected runtime identity; it does not instantiate or route work to an independent specialist process.

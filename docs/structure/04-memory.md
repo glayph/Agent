@@ -1,51 +1,30 @@
-# 04 — packages/memory (Temporal Knowledge Graph)
+# 04 — packages/memory (Persistent Memory)
 
-Specialized package for persistent, temporal, and cognitive memory used by the 24/7 agent.
+`@miki/memory` owns Miki's persistent memory implementations and exports them through package entry points. It includes both the Temporal Knowledge Graph (TKG) subsystem and complementary file-backed memory tools.
 
-```
-packages/memory/
-├── package.json                 # @miki/memory v2.0.0 — multiple named exports
-├── src/
-│   ├── index.js                 # Public API re-exports
-│   ├── core/                    # Core bridge, global memory and shared contracts
-│   │   ├── index.ts             # Core memory boundary
-│   │   ├── runtime.ts           # TKG lifecycle, backup and restore
-│   │   ├── global-memory.ts     # Owner-scoped cross-channel memory adapter
-│   │   └── types.d.ts           # Shared memory contracts
-│   ├── temporal-knowledge-graph.js   # Core TKG implementation
-│   ├── graph-cognitive-memory.js     # Cognitive / graph memory layer
-│   ├── working-memory-anchor.js      # Working-memory anchors
-│   ├── temporary-memory.js           # Ephemeral memory region
-│   ├── multi-hop-retriever.js        # Multi-hop retrieval over the graph
-│   ├── memory-consolidation-daemon.js # Background consolidation process
-│   ├── agent-memory-integration.js   # Integration helpers for core agent
-│   ├── special-event-highlighter.js  # Highlights important events
-│   ├── selective-memory-engine.js    # Selective retention / pruning
-│   ├── learning-store.js             # Learning / procedural store
-│   ├── node-graph.js                 # Low-level graph primitives
-│   ├── regions.js                    # Memory region definitions & aliases
-│   ├── embedding-provider.js         # Embedding providers (hash, noop, real)
-│   └── test/                         # Unit & integration tests
-│       ├── tkg-test-runner.js
-│       ├── integration-phase1.test.js
-│       ├── deep-audit.test.js
-│       ├── graph-cognitive-memory.test.js
-│       ├── selective-memory-engine.test.js
-│       ├── learning-store.test.js
-│       └── memory-prompt-budget.test.js
+## Current source domains
+
+```text
+packages/memory/src/
+├── core/          # Shared memory contracts, runtime bridge and global-memory adapters
+├── file-memory/   # File-backed notes, search, compaction and memory tooling
+└── test/          # Package-level memory tests and runners
 ```
 
-**Key concepts**
-- **Temporal Knowledge Graph (TKG)** — primary long-term memory structure with temporal edges.
-- **Regions** — durable vs temporary regions; canonical region names and aliases.
-- **Consolidation daemon** — periodically consolidates and prunes memory.
-- **Multi-hop retrieval** — follows graph paths for richer context.
-- **Working-memory anchors** — keep important recent context active.
-- **Selective engine + learning store** — control what is retained and learned.
+Additional top-level implementation modules in the package provide graph storage/retrieval, temporal relationships, consolidation, embeddings, working/temporary memory, selective retention, learning, and integration helpers. The exact file inventory should be read from the current package rather than copied from an older generated tree.
 
-**Comments**
-- All persistent memory engine and core integration code is owned by `packages/memory`; core and gateway import it through `@miki/memory` and `@miki/memory/core`.
-- File-note storage, search, compaction, and memory tools live alongside TKG under `packages/memory/src/file-memory`; this is a complementary subsystem, not a second TKG engine.
-- Exported as multiple entry points so core can import only the pieces it needs.
-- Designed for long-running agents (24/7 policy scripts exist at repo root).
-- Tests cover graph integrity, consolidation, retrieval and prompt-budget limits.
+## Concepts
+
+- **Temporal Knowledge Graph:** stores time-aware entities, facts and relationships where supported by the configured memory implementation.
+- **File memory:** stores searchable, human-readable notes and related artifacts through a distinct subsystem.
+- **Working/temporary context:** supports short-lived context without treating every observation as durable truth.
+- **Consolidation and selective retention:** maintain memory according to configured retention and importance policies.
+- **Retrieval:** searches relevant memory for task context; retrieved content remains fallible and must be checked against current evidence.
+
+## Ownership and safety
+
+All persistent memory implementations belong under `packages/memory/`. Core and Gateway consume the exported API; do not create a duplicate memory store under `packages/core/src/` or `packages/gateway/src/`.
+
+Memory improves continuity but does not grant authority, prove a statement, or override the current owner request/runtime policy. Store durable, useful, non-secret facts only. Do not store credentials or sensitive information merely because it appeared in a task.
+
+Run the memory package's own tests and relevant Core/Gateway integration tests after changing storage, retrieval, retention or prompt-context behavior.

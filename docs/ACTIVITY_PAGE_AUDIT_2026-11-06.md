@@ -81,3 +81,7 @@ The feature folder contains tests for `createLiveCaptureLoop`, but no tests were
 ## Verification limits
 
 This report is based on source inspection only. It does not establish that every endpoint succeeds in a live deployment, that the user has permissions for every action, or that a specific UI bug was reproduced. No build, browser test, or live API test was run during this audit.
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

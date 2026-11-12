@@ -28,3 +28,7 @@ Also, removing the LLM timeout means a provider request that never resolves and 
 - TypeScript transpile/syntax checks passed for all four changed TypeScript files.
 - Full typecheck and test suite were not run: dependencies are not installed in this extracted source tree, the runtime Node version is 22.16.0 while package.json requires >=22.19.0, and prior install attempts in this environment encountered npm registry DNS errors.
 - No live LLM/provider or terminal process end-to-end test was possible here.
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

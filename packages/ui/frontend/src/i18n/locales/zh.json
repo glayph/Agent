@@ -57,6 +57,8 @@
   "chat": {
     "welcome": "今天我能为您做些什么？",
     "welcomeDesc": "您可以询问我天气、设置或其他任何任务，我随时为您效劳。",
+    "agentWorking": "Miki 正在工作",
+    "autonomousWorking": "Miki 正在自主工作",
     "errors": {
       "codes": {
         "provider_api_key": "模型 API 密钥被拒绝。请在“模型”页面检查密钥。",
@@ -273,6 +275,23 @@
       "durationMs": "{{value}} 毫秒",
       "durationSeconds": "{{value}} 秒",
       "durationMinutes": "{{minutes}} 分 {{seconds}} 秒"
+    },
+    "topbar": {
+      "gatewayOnline": "网关已连接",
+      "gatewayConnecting": "正在连接",
+      "gatewayDisconnected": "连接已断开",
+      "gatewayConnectionError": "WebSocket 连接错误",
+      "gatewayUnknown": "网关状态未知",
+      "gatewayStarting": "网关正在启动",
+      "gatewayRestarting": "网关正在重启",
+      "gatewayStopping": "网关正在停止",
+      "gatewayStopped": "网关已停止",
+      "gatewayError": "网关错误",
+      "chatWorking": "Miki 正在回复",
+      "autonomyPaused": "自主运行已暂停",
+      "agentReady": "Miki 已就绪",
+      "activeGoals_one": "{{count}} 个活动目标",
+      "activeGoals_other": "{{count}} 个活动目标"
     }
   },
   "header": {
@@ -1417,7 +1436,7 @@
           "requires_worker": "需要先启用后台 worker 依赖，`spawn` 才能委派任务。",
           "requires_mcp_discovery": "需要先启用 `tools.mcp.discovery`，MCP 发现工具才会可用。",
           "requires_web_search_provider": "请至少配置一个可用的外部网络搜索 provider。",
-          "browser_not_installed": "未安装浏览器引擎。请运行 `npx playwright install chromium` 并重启。"
+          "browser_not_installed": "未连接已配对的 Miki Browser Agent 扩展。请在浏览器中安装并配对扩展，然后重试。"
         }
       }
     },

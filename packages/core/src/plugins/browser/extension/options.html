@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Miki Browser Agent</title>
+<style>body{font:14px system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;color:#202124}label{display:block;margin:18px 0 6px;font-weight:600}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #bbb;border-radius:6px}button{margin-top:18px;padding:10px 16px;border:0;border-radius:6px;background:#2156d8;color:white;font-weight:600}#status{margin-top:16px;white-space:pre-wrap}</style></head>
+<body><h1>Miki Browser Agent</h1><p>Pair this browser with your local Miki Gateway. Find the WebSocket URL and token in the authenticated Miki dashboard under <code>/api/browser/bridge</code>.</p>
+<label for="url">Miki bridge WebSocket URL</label><input id="url" placeholder="ws://127.0.0.1:18765/miki-browser">
+<label for="token">Pairing token</label><input id="token" type="password" autocomplete="off" placeholder="64-character token">
+<button id="save">Save and connect</button><p id="status" role="status"></p><script src="options.js"></script></body></html>

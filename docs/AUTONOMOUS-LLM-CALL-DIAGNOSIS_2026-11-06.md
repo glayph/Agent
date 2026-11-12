@@ -100,3 +100,7 @@ context/output limit, OS permission, resource availability ও cancellation
 `npm install`, `npm run build:all` বা Jest suite সফল হয়েছে বলে দাবি করা হচ্ছে না।
 সঠিক Node version ও dependency install করা deployment environment-এ build/test
 চালাতে হবে।
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

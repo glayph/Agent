@@ -5,7 +5,7 @@ import type { EngineEvent, EngineLLMClient, EngineMessage, EngineTool } from "./
 
 const user = (content: string): EngineMessage[] => [{ role: "user", content }];
 const unavailable = () => Object.assign(new Error("Service unavailable"), { status: 503 });
-const fast = { baseDelayMs: 5, maxDelayMs: 10 };
+const fast = { baseDelayMs: 5, maxDelayMs: 10, jitter: false };
 
 function reply(text: string | null, calls?: Array<{ name: string; id: string }>) {
   return {

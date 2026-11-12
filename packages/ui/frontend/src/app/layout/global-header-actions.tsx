@@ -105,7 +105,7 @@ export function GlobalHeaderActions() {
     }
   }
 
-  const handleShutdownBackend = () => {
+  const requestGatewayStop = () => {
     setShowStopDialog(true)
   }
 
@@ -287,7 +287,17 @@ export function GlobalHeaderActions() {
                 </span>
               </DropdownMenuItem>
             )}
-            {!isRunning && (
+            {isRunning ? (
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={requestGatewayStop}
+                className="h-8 px-2 py-1.5 text-xs"
+                disabled={gwLoading || isRestarting || isStopping}
+              >
+                <IconPower className="size-3.5" />
+                <span className="truncate">{t("header.gateway.action.stop")}</span>
+              </DropdownMenuItem>
+            ) : (
               <DropdownMenuItem
                 onSelect={handleGatewayToggle}
                 className="h-8 px-2 py-1.5 text-xs"
@@ -361,15 +371,6 @@ export function GlobalHeaderActions() {
             )}
 
             <div className="bg-border/70 my-1 h-px" />
-
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() => void handleShutdownBackend()}
-              className="h-8 px-2 py-1.5 text-xs"
-            >
-              <IconPower className="size-3.5" />
-              <span className="truncate">Shutdown backend</span>
-            </DropdownMenuItem>
 
             <DropdownMenuItem
               variant="destructive"

@@ -35,6 +35,20 @@ describe("ProcessManager", () => {
     for (let waited = 0; calls < 3 && waited < 5000; waited += 25) await new Promise((resolve) => setTimeout(resolve, 25))
     expect(calls).toBe(3)
   })
+  it("notifies subscribers when a durable managed process finishes", async () => {
+    const pm = new ProcessManager()
+    const finished: string[] = []
+    const unsubscribe = pm.onFinished((proc) => finished.push(`${proc.id}:${proc.status}:${proc.exitCode}`))
+    const proc = pm.start({ command: "echo done", cwd: cwd(), env: process.env, detached: true })
+    expect(await pm.waitForExit(proc.id, 5000)).toBe(true)
+    expect(finished).toEqual([`${proc.id}:exited:0`])
+    unsubscribe()
+    const another = pm.start({ command: "echo ignored", cwd: cwd(), env: process.env, detached: true })
+    await pm.waitForExit(another.id, 5000)
+    expect(finished).toHaveLength(1)
+    await pm.close()
+  })
+
   it("resolves waits the moment the process exits (event-driven), not at the deadline", async () => {
     const pm = new ProcessManager()
     const proc = pm.start({ command: "sleep 0.3; echo done", cwd: cwd(), env: process.env })

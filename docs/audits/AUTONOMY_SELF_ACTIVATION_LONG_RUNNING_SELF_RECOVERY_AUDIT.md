@@ -143,3 +143,7 @@ Not executed / not verified:
 **Yes, conditionally:** it is designed to run for multiple days or longer while the host and OS-level supervisor remain active.  
 **Partially:** it can self-recover from several software/runtime/provider interruptions and replan some failed work, but it cannot autonomously repair every external/system-level problem.  
 **Not yet proven:** no real one-day or two-day soak test was run in this review environment.
+
+## Maintenance and status note
+
+This is a dated investigation, plan, or implementation snapshot. Its findings and status labels describe the code and test evidence available when it was written; they are not a live assertion that every item remains current. Preserve this report as historical context. For present behavior, check the current source, the adjacent tests, and [Agent-Miki Operating Model](../AGENT_MIKI_OPERATING_MODEL.md) where applicable. Do not treat an unverified recommendation or an old checklist as proof of an enabled capability.

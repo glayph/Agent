@@ -11,6 +11,7 @@ import {
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "@tanstack/react-router"
 import { uploadChatAttachment } from "@/api/chat-attachments"
 import { type VoiceCloudAudioResult, transcribeVoiceAudio } from "@/api/voice"
 import { getAutonomyStatus, type AutonomyStatus } from "@/features/activity/activity-api"
@@ -172,42 +173,132 @@ export function buildStatusPills({
   connectionState,
   gatewayState,
   isTyping,
+  autonomyStatus,
   labels,
+  onOpenActivity,
+  onOpenHealth,
 }: {
   connectionState: ConnectionState
   gatewayState: GatewayState
   isTyping: boolean
+  autonomyStatus: AutonomyStatus | null
   labels: {
-    activeAgents: (count: number) => string
-    paused: string
-    ready: string
-    running: string
+    gatewayOnline: string
+    gatewayConnecting: string
+    gatewayDisconnected: string
+    gatewayConnectionError: string
+    gatewayUnknown: string
+    gatewayStarting: string
+    gatewayRestarting: string
+    gatewayStopping: string
+    gatewayStopped: string
+    gatewayError: string
+    chatWorking: string
+    autonomousWorking: string
+    autonomyPaused: string
+    agentReady: string
+    activeGoals: (count: number) => string
   }
+  onOpenActivity: () => void
+  onOpenHealth: () => void
 }): WorkspaceStatusPill[] {
-  const isOnline = gatewayState === "running" && connectionState === "connected"
-  // Connectivity is not equivalent to active work. The previous implementation
-  // reported one active agent whenever the socket was online, even while idle.
-  const activeAgents = isTyping ? 1 : 0
-  const statusLabel = isTyping
-    ? labels.running
-    : isOnline
-      ? labels.ready
-      : labels.paused
+  let gatewayLabel: string
+  let gatewayTone: WorkspaceStatusPill["tone"] = "neutral"
+  switch (gatewayState) {
+    case "running":
+      if (connectionState === "connected") {
+        gatewayLabel = labels.gatewayOnline
+        gatewayTone = "success"
+      } else if (connectionState === "connecting") {
+        gatewayLabel = labels.gatewayConnecting
+        gatewayTone = "info"
+      } else if (connectionState === "error") {
+        gatewayLabel = labels.gatewayConnectionError
+        gatewayTone = "warning"
+      } else {
+        gatewayLabel = labels.gatewayDisconnected
+        gatewayTone = "warning"
+      }
+      break
+    case "starting":
+      gatewayLabel = labels.gatewayStarting
+      gatewayTone = "info"
+      break
+    case "restarting":
+      gatewayLabel = labels.gatewayRestarting
+      gatewayTone = "info"
+      break
+    case "stopping":
+      gatewayLabel = labels.gatewayStopping
+      gatewayTone = "warning"
+      break
+    case "stopped":
+      gatewayLabel = labels.gatewayStopped
+      gatewayTone = "warning"
+      break
+    case "error":
+      gatewayLabel = labels.gatewayError
+      gatewayTone = "warning"
+      break
+    default:
+      gatewayLabel = labels.gatewayUnknown
+      gatewayTone = "neutral"
+      break
+  }
 
-  return [
+  const activeGoalCount =
+    autonomyStatus?.running_goals?.filter(
+      (goal) => goal.status === "active" || goal.status === "running",
+    ).length ?? 0
+  const autonomousWork = Boolean(
+    autonomyStatus?.proactive_loop?.ambient_in_flight ||
+      autonomyStatus?.in_flight ||
+      activeGoalCount > 0,
+  )
+  const autonomyPaused = Boolean(
+    autonomyStatus && (!autonomyStatus.enabled || autonomyStatus.paused),
+  )
+  const agentLabel = isTyping
+    ? labels.chatWorking
+    : autonomousWork
+      ? labels.autonomousWorking
+      : autonomyPaused
+        ? labels.autonomyPaused
+        : labels.agentReady
+  const agentTone: WorkspaceStatusPill["tone"] =
+    isTyping || autonomousWork
+      ? "success"
+      : autonomyPaused
+        ? "warning"
+        : "neutral"
+
+  const statuses: WorkspaceStatusPill[] = [
     {
-      label: statusLabel,
-      tone: isTyping ? "success" : isOnline ? "neutral" : "warning",
+      label: gatewayLabel,
+      tone: gatewayTone,
+      onClick: onOpenHealth,
     },
     {
-      label: labels.activeAgents(activeAgents),
-      tone: activeAgents > 0 ? "info" : "neutral",
+      label: agentLabel,
+      tone: agentTone,
+      onClick: onOpenActivity,
     },
   ]
+
+  if (activeGoalCount > 0) {
+    statuses.push({
+      label: labels.activeGoals(activeGoalCount),
+      tone: "info",
+      onClick: onOpenActivity,
+    })
+  }
+
+  return statuses
 }
 
 export function ChatPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const scrollRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const audioInputRef = useRef<HTMLInputElement>(null)
@@ -305,6 +396,67 @@ export function ChatPage() {
       ),
   )
   const isMikiWorking = isTyping || autonomousWorking
+  const openActivity = useCallback(() => {
+    void navigate({ to: "/agent/activity" })
+  }, [navigate])
+  const openHealth = useCallback(() => {
+    void navigate({ to: "/health" })
+  }, [navigate])
+  const headerStatuses = buildStatusPills({
+    connectionState,
+    gatewayState: gwState,
+    isTyping,
+    autonomyStatus,
+    onOpenActivity: openActivity,
+    onOpenHealth: openHealth,
+    labels: {
+      gatewayOnline: t("chat.topbar.gatewayOnline", {
+        defaultValue: "Gateway connected",
+      }),
+      gatewayConnecting: t("chat.topbar.gatewayConnecting", {
+        defaultValue: "Connecting",
+      }),
+      gatewayDisconnected: t("chat.topbar.gatewayDisconnected", {
+        defaultValue: "Disconnected",
+      }),
+      gatewayConnectionError: t("chat.topbar.gatewayConnectionError", {
+        defaultValue: "WebSocket error",
+      }),
+      gatewayUnknown: t("chat.topbar.gatewayUnknown", {
+        defaultValue: "Gateway status unknown",
+      }),
+      gatewayStarting: t("chat.topbar.gatewayStarting", {
+        defaultValue: "Gateway starting",
+      }),
+      gatewayRestarting: t("chat.topbar.gatewayRestarting", {
+        defaultValue: "Gateway restarting",
+      }),
+      gatewayStopping: t("chat.topbar.gatewayStopping", {
+        defaultValue: "Gateway stopping",
+      }),
+      gatewayStopped: t("chat.topbar.gatewayStopped", {
+        defaultValue: "Gateway stopped",
+      }),
+      gatewayError: t("chat.topbar.gatewayError", {
+        defaultValue: "Gateway error",
+      }),
+      chatWorking: t("chat.topbar.chatWorking", {
+        defaultValue: "Miki is responding",
+      }),
+      autonomousWorking: t("chat.autonomousWorking", {
+        defaultValue: "Miki is working autonomously",
+      }),
+      autonomyPaused: t("chat.topbar.autonomyPaused", {
+        defaultValue: "Autonomy paused",
+      }),
+      agentReady: t("chat.topbar.agentReady", { defaultValue: "Miki ready" }),
+      activeGoals: (count) =>
+        t("chat.topbar.activeGoals", {
+          count,
+          defaultValue: "{{count}} active goals",
+        }),
+    },
+  })
 
   const {
     defaultModelName,
@@ -915,23 +1067,40 @@ export function ChatPage() {
     window.dispatchEvent(new Event("Miki:command"))
   }, [])
 
+  const thinkingModeLabel = t(`chat.thinkingMode.${thinkingMode}`, {
+    defaultValue: thinkingMode[0].toUpperCase() + thinkingMode.slice(1),
+  })
+  const assistantDetailLabel = t(
+    `chat.assistantDetailVisibility.${assistantDetailVisibility === "tool_calls" ? "toolCalls" : assistantDetailVisibility}`,
+    {
+      defaultValue:
+        assistantDetailVisibility === "none"
+          ? "Hide details"
+          : assistantDetailVisibility === "thought"
+            ? "Reasoning"
+            : assistantDetailVisibility === "tool_calls"
+              ? "Tool calls"
+              : "All details",
+    },
+  )
+
   const headerControls = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1 sm:gap-1.5">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             size="sm"
             variant="ghost"
-            className="text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground size-8 px-0"
-            aria-label={t("chat.thinkingMenuTitle", {
-              defaultValue: "Thinking",
-            })}
-            title={t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
+            data-active={thinkingMode !== "auto"}
+            data-testid="thinking-mode-trigger"
+            className={`text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground size-8 px-0 ${thinkingMode !== "auto" ? "bg-accent/70 text-foreground" : ""}`}
+            aria-label={`${t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}: ${thinkingModeLabel}`}
+            title={`${t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}: ${thinkingModeLabel}`}
           >
             <IconBrain className="size-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="w-56">
+        <DropdownMenuContent align="center" className="w-48">
           <div className="text-muted-foreground px-2 py-1.5 text-[11px] font-medium">
             {t("chat.thinkingMenuTitle", { defaultValue: "Thinking" })}
           </div>
@@ -940,6 +1109,7 @@ export function ChatPage() {
               key={option}
               onSelect={() => setThinkingMode(option)}
               className="gap-2"
+              aria-current={thinkingMode === option ? "true" : undefined}
             >
               <span className="flex size-4 items-center justify-center">
                 {thinkingMode === option && (
@@ -953,9 +1123,25 @@ export function ChatPage() {
               </span>
             </DropdownMenuItem>
           ))}
-          <div className="border-border my-1 border-t" />
-          <div className="text-muted-foreground flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium">
-            <IconEye className="size-3.5" />
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            data-active={assistantDetailVisibility !== "none"}
+            data-testid="assistant-display-trigger"
+            className={`text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground size-8 px-0 ${assistantDetailVisibility !== "none" ? "bg-accent/70 text-foreground" : ""}`}
+            aria-label={`${t("chat.assistantDetailMenuTitle", { defaultValue: "Display" })}: ${assistantDetailLabel}`}
+            title={`${t("chat.assistantDetailMenuTitle", { defaultValue: "Display" })}: ${assistantDetailLabel}`}
+          >
+            <IconEye className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-48">
+          <div className="text-muted-foreground px-2 py-1.5 text-[11px] font-medium">
             {t("chat.assistantDetailMenuTitle", { defaultValue: "Display" })}
           </div>
           {(["none", "thought", "tool_calls", "all"] as const).map((option) => (
@@ -963,6 +1149,7 @@ export function ChatPage() {
               key={option}
               onSelect={() => setAssistantDetailVisibility(option)}
               className="gap-2"
+              aria-current={assistantDetailVisibility === option ? "true" : undefined}
             >
               <span className="flex size-4 items-center justify-center">
                 {assistantDetailVisibility === option && (
@@ -988,6 +1175,7 @@ export function ChatPage() {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+
       {(hasAvailableModels || hasAnyModels) && (
         <ModelSelector
           defaultModelName={defaultModelName}
@@ -998,6 +1186,7 @@ export function ChatPage() {
           unavailableModels={unavailableModels}
           onValueChange={handleSetDefault}
           compact={isMobile}
+          disabled={!hasAnyModels}
         />
       )}
     </div>
@@ -1009,9 +1198,10 @@ export function ChatPage() {
         header={
           <WorkspaceHeader
             title="Miki"
-            statuses={[]}
+            statuses={headerStatuses}
             controls={headerControls}
             isWorking={isMikiWorking}
+            onWorkingClick={openActivity}
             workingLabel={
               autonomousWorking && !isTyping
                 ? t("chat.autonomousWorking", {

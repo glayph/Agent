@@ -96,7 +96,7 @@ function main() {
   const [nodeMajor, nodeMinor, nodePatch] = process.versions.node.split(".").map(Number);
   const nodeSupported = nodeMajor > 22 || (nodeMajor === 22 && (nodeMinor > 19 || (nodeMinor === 19 && nodePatch >= 0)));
   if (!nodeSupported) fatal(`Node.js ${process.versions.node} is unsupported; Node.js >=22.19.0 is required for release verification.`);
-  for (const dependency of ["eslint", "jest", "vitest", "better-sqlite3", "playwright"]) {
+  for (const dependency of ["eslint", "jest", "vitest", "better-sqlite3"]) {
     const dependencyPath = path.join(root, "node_modules", dependency, "package.json");
     if (!fs.existsSync(dependencyPath)) {
       fatal(`Release dependency '${dependency}' is missing. Run npm ci on a supported Node.js runtime before release verification.`);

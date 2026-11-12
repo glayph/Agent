@@ -106,6 +106,43 @@ describe("AutonomousSupervisor", () => {
     (supervisor as any).running = false;
   });
 
+  it("wakes autonomy when a detached background process finishes", () => {
+    let listener: ((proc: { id: string; command: string; detached: boolean; status: string; startedAt: number; stdout: { tail(n: number): string }; stderr: { tail(n: number): string } }) => void) | undefined
+    const processes = {
+      list: () => [],
+      kill: () => false,
+      onFinished: (next: typeof listener) => { listener = next; return () => { listener = undefined } },
+    }
+    supervisor = new AutonomousSupervisor({
+      db,
+      agent: { run },
+      tools: makeTools(),
+      activeRunCount,
+      processes,
+      getConfig: () => withLegacyProactive(config),
+      log: (message) => logs.push(message),
+      now: () => "2026-01-01T00:00:00.000Z",
+    });
+    const wake = jest.spyOn(supervisor, "wake")
+    const process = { id: "proc_bg", command: "npm run build", detached: true, status: "exited", startedAt: Date.now(), stdout: { tail: () => "" }, stderr: { tail: () => "" } }
+    listener?.(process)
+    expect(wake).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses max_poll_seconds for idle sleep while preserving faster active and due-task polling", () => {
+    config = {
+      autonomy: { enabled: true, tool_policy: { require_acceptance_contract: false } },
+      heartbeat: { enabled: true, proactive: { enabled: true, llm_when_idle: false, min_poll_seconds: 5, max_poll_seconds: 20 } },
+    };
+    const resolved = (supervisor as any).config();
+    expect((supervisor as any).nextLoopSleepMs(resolved, false)).toBe(20_000);
+    expect((supervisor as any).nextLoopSleepMs(resolved, true)).toBe(5_000);
+    supervisor.enqueueTask({ title: "Due later", dueAt: "2026-01-01T00:00:15.000Z" });
+    expect((supervisor as any).nextLoopSleepMs(resolved, false)).toBe(15_000);
+    supervisor.enqueueTask({ title: "Due shortly", dueAt: "2026-01-01T00:00:03.000Z" });
+    expect((supervisor as any).nextLoopSleepMs(resolved, false)).toBe(3_000);
+  });
+
   it("restarts its supervisor loop after an unexpected exit and cancels recovery on stop", async () => {
     jest.useFakeTimers();
     try {
@@ -1080,7 +1117,12 @@ describe("AutonomousSupervisor", () => {
       };
       const decide = (trigger: "startup" | "idle") => (supervisor as any).runAmbientDecision(trigger) as Promise<boolean>;
       const lastPrompt = () => String((run.mock.calls[run.mock.calls.length - 1][0] as { goal: string }).goal);
-      const proactive = (extra: Record<string, unknown> = {}) => ({ enabled: true, decision_interval_seconds: 100, ...extra });
+      const proactive = (extra: Record<string, unknown> = {}) => ({
+        enabled: true,
+        decision_interval_seconds: 100,
+        ...extra,
+        curiosity: { enabled: true, ...((extra.curiosity ?? {}) as Record<string, unknown>) },
+      });
       const setConfig = (proactiveConfig: Record<string, unknown>, tool_policy: Record<string, unknown> = {}) => {
         config = { autonomy: { enabled: true, tool_policy: { require_acceptance_contract: false, ...tool_policy } }, heartbeat: { enabled: true, auto_actions: { enabled: true }, proactive: proactiveConfig } };
       };
@@ -1113,6 +1155,19 @@ describe("AutonomousSupervisor", () => {
         expect(prompt).toMatch(/identity\/memory\/discoveries\//);
         expect(prompt).toMatch(/autonomy_share_discovery/);
         expect(prompt).not.toMatch(/Do not generate routine chatter/);
+      });
+
+      it("does not solicit or accept curiosity work when curiosity is disabled", async () => {
+        setConfig(proactive({ curiosity: { enabled: false } }));
+        write("identity/INTERESTS.md", "# INTERESTS\n\n- Quantum error correction\n");
+        build();
+        await decide("startup");
+        expect(lastPrompt()).toContain("Curiosity is disabled by configuration");
+        expect(lastPrompt()).not.toContain("consider a curiosity cycle");
+        const go = propose(curiosityGoal(9));
+        const { error } = await go();
+        expect(error?.message).toContain("Curiosity goals are disabled");
+        expect(db.prepare("SELECT COUNT(*) AS c FROM pursue_goals WHERE source='curiosity'").get()).toEqual({ c: 0 });
       });
 
       it("creates curiosity goals with source curiosity at priority 9", async () => {
@@ -1667,6 +1722,31 @@ describe("AutonomousSupervisor", () => {
         expect(notes).toEqual(expect.arrayContaining([
           expect.objectContaining({ text: "আমি একটি গুরুত্বপূর্ণ আপডেট পেয়েছি।", kind: "result" }),
         ]));
+      });
+
+      it("reports a proactive message as unsent when no destination acknowledges delivery", async () => {
+        notify.mockResolvedValueOnce({
+          delivered: 0,
+          dashboard: { attempted: 1, delivered: 0, failed: 1 },
+          channels: { attempted: 1, delivered: 0, queued: 1, failed: 0 },
+          queued: 1,
+          failures: ["Telegram: connection refused"],
+        });
+        let out: unknown;
+        run.mockImplementationOnce(async (request: { tools: ToolRegistry }) => {
+          const tool = request.tools.get("autonomy_send_message");
+          expect(tool).toBeDefined();
+          out = await tool!.execute({ message: "A delivery check that should remain pending." }, {} as never);
+          return makeResult("Attempted the owner update.");
+        });
+        nowMs += 1_300_000;
+        await (supervisor as any).runAmbientDecision("idle");
+        expect(out).toMatchObject({
+          delivered: false,
+          sent: false,
+          reason: "Telegram: connection refused",
+          delivery: { delivered: 0, queued: 1 },
+        });
       });
 
       it("can send multiple useful messages in one autonomous decision", async () => {

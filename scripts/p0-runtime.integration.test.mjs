@@ -51,10 +51,9 @@ const ctx = () => ({ runId:'r1', callId:'c1', signal:new AbortController().signa
   const browser = new BrowserTool(true, fs.mkdtempSync(path.join(os.tmpdir(),'miki-p0-browser-')))
   browser.setAllowedDomains(['example.com'])
   browser.setBypassRestrictions(true)
-  assert.equal(browser._allowPrivateNetworks,true)
-  assert.deepEqual(browser._allowedDomains,[])
+  assert.deepEqual(browser.getSecurityPolicySnapshot(), {allowPrivateNetworks:true,allowedDomains:[]})
   browser.setBypassRestrictions(false)
-  assert.equal(browser._allowPrivateNetworks,false)
+  assert.deepEqual(browser.getSecurityPolicySnapshot(), {allowPrivateNetworks:false,allowedDomains:[]})
 }
 
 // Session scope semantics

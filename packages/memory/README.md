@@ -190,3 +190,10 @@ The memory database also owns the bounded self-improvement persistence boundary.
 This subsystem is a contextual-bandit foundation rather than model-weight reinforcement learning. It stores redacted experience context, bounded rewards, action statistics, policy versions, and auditable draft proposals. It does not permit arbitrary code mutation, credential persistence, or unapproved external side effects. `observe` and `draft` modes never alter runtime routing; only an explicit, allow-listed `apply` mode can consume an approved policy decision.
 
 The durable tables are created additively at startup. Existing memory databases are not dropped or rewritten, and the learning store shares the already-open `better-sqlite3` connection rather than creating an ephemeral `:memory:` database.
+
+
+## Agent integration and authority
+
+Memory provides continuity and retrieval, not authorization or proof. Retrieved notes may be stale or mistaken and should be checked against current evidence for consequential tasks. Do not persist credentials or sensitive facts merely because they appear in a prompt. The Gateway/Agent runtime controls which memory operations are exposed in each execution lane.
+
+See [Agent-Miki Operating Model](../../docs/AGENT_MIKI_OPERATING_MODEL.md) for how memory fits into interactive and autonomous execution.

@@ -2127,28 +2127,6 @@ app.use("/api/skills", requireAuth, createSkillsRouter({
     }
   },
 }))
-let browserReadyCache: { ready: boolean; at: number } | undefined
-const browserReady = async (): Promise<boolean> => {
-  if (browserReadyCache && Date.now() - browserReadyCache.at < 60_000) return browserReadyCache.ready
-  let ready = false
-  try {
-    const moduleName = "playwright"
-    const pw = (await import(moduleName)) as { chromium?: { executablePath(): string } }
-    const candidates = [
-      process.env.MIKI_BROWSER_CHROME_PATH,
-      pw.chromium?.executablePath(),
-      "/usr/bin/chromium",
-      "/usr/bin/chromium-browser",
-      "/usr/bin/google-chrome",
-      "/opt/google/chrome/chrome",
-    ].filter((value): value is string => Boolean(value))
-    ready = candidates.some((executable) => existsSync(executable))
-  } catch {
-    ready = false
-  }
-  browserReadyCache = { ready, at: Date.now() }
-  return ready
-}
 app.get("/api/tools", async (_req, res) => {
   const appConfig = getAppConfig()
   const state = (appConfig.tools as { tool_state?: Record<string, boolean> } | undefined)?.tool_state ?? {}
@@ -2164,7 +2142,7 @@ app.get("/api/tools", async (_req, res) => {
     const status = policyReason && configEnabled ? "blocked" : enabled ? "enabled" : "disabled"
     return { name, description, category, config_key: key, status, config_enabled: configEnabled, ...(policyReason ? { reason_code: policyReason } : {}), tools: members.filter((m) => known.has(m)) }
   }
-  const browserBlocked = (await browserReady()) ? undefined : "browser_not_installed"
+  const browserBlocked = undefined
   res.json({ tools: [
     group("filesystem", "filesystem", "Read, search, organize and (with approval) write, delete or run files inside the workspace.", "workspace", true, ["workspace_list", "file_read", "workspace_search", "file_write", "file_info", "file_mkdir", "file_rename", "file_move", "file_copy", "file_delete", "file_run", "chat_send_file"]),
     group("memory", "memory", "Search and store long-term memory notes.", "memory", true, allToolNames.filter((name) => name.startsWith("memory_"))),
@@ -2173,7 +2151,7 @@ app.get("/api/tools", async (_req, res) => {
     group("models", "model-management", "Search public model metadata and install verified GGUF files as selectable local models; installation does not switch the active model.", "models", true, allToolNames.filter((name) => name.startsWith("model_"))),
     group("goals", "goals", "Create, inspect, update, pause and complete persistent user goals.", "autonomy", true, allToolNames.filter((name) => name.startsWith("goal_"))),
     group("web_search", "web-search", "Search the web through the configured local or cloud provider.", "network", true, ["web_search"]),
-    group("browser", "browser", "Playwright browser tools: open pages, click, type, extract and screenshot like a human.", "browser", true, allToolNames.filter((name) => name.startsWith("browser_")), browserBlocked),
+    group("browser", "browser", "Operate connected user browsers through the Miki WebExtension bridge (Chrome, Edge, Brave, Opera, Vivaldi and Firefox). Install and pair the extension in each browser.", "browser", true, allToolNames.filter((name) => name.startsWith("browser_")), browserBlocked),
     group("terminal", "terminal", "Run any shell command like a human at a terminal (set MIKI_TERMINAL_SAFE=true to block catastrophic commands, keep the working directory in the workspace and hide secrets from the environment).", "system", true, allToolNames.filter((name) => name.startsWith("terminal_") || name === "delegate_coding_agent")),
     group("computer", "computer-use", "Operate desktop windows with platform-supported screenshots, mouse, keyboard, clipboard and app controls; element-level automation varies by platform.", "system", computerAllowed, allToolNames.filter((name) => name.startsWith("computer_"))),
     group("plugins", "plugins", "Manage and invoke installed contract and isolated ZIP plugins; installation, enablement and invocation remain permission-gated.", "extensions", true, allToolNames.filter((name) => name.startsWith("plugin_"))),

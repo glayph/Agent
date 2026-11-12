@@ -1,130 +1,49 @@
-# identity/ — Workspace-Identity Files (upgrade step 01)
+# Identity files — Miki runtime context
 
-> Note: some source paths cited below (`packages/core/src/identity/`, `packages/core/src/tools/executor/`,
-> `packages/core/src/agent.ts`) are not present in this tree; identity loading now lives in
-> `packages/gateway/src/agent/identity-prompt.ts`. Treat those references as historical.
+The `identity/` directory contains the human-editable identity and operating instructions used by Miki. It is not a separate agent engine and it does not grant tools or permissions.
 
-This is Miki's version of OpenClaw's SOUL/AGENTS/IDENTITY/USER/TOOLS
-convention: plain, human-editable files that give every agent run the same
-starting context, loaded once per turn and assembled into a prompt prefix.
+## Runtime loading
 
-## Why "identity/" and not "workspace/"
+Interactive model requests assemble identity context in:
 
-The upgrade plan's own spec names this directory `workspace/`. It was
-renamed here because "workspace" already means two other things in this
-codebase:
+- `packages/gateway/src/agent/identity-prompt.ts`
+- `packages/gateway/src/agent/agent-runtime.ts`
 
-- `RuntimePaths.sourceDir` / `MIKI_WORKSPACE_DIR` — the install root in an
-  OS-installed release.
-- `workspace-folders` (`packages/core/src/workspace-folders/`) — the
-  user-managed project folders Miki indexes and works within, each of which
-  can carry its own `.miki/rules.md`.
+The core prompt includes the runtime integrity contract, current tool-group status, live autonomy snapshot when supplied, configured `agent.persona`, and the readable identity files. Identity files are resolved individually across configured identity directories; a missing optional file does not hide valid files in a fallback directory. The current load order is:
 
-Reusing "workspace" a third time would make all three easy to confuse.
-Behavior and file layout otherwise follow the plan as written.
+1. `SOUL.md` — core identity (required)
+2. `IDENTITY.md` — system identity and role model
+3. `TOOLS.md` — capability map; runtime tool list remains authoritative
+4. `AGENTS.md` — global operating manual
+5. `agents/<specialistId>/AGENTS.md` — optional identity-specific preferences
+6. `USER.md` — owner-stated preferences
 
-## Files
+The exact order is implemented in `identityFilesFor()` in `identity-prompt.ts`. `config/agent.yaml` supplies the configured persona; it does not replace the live runtime checks.
 
-| File | Loaded for | Notes |
+The autonomous supervisor assembles a separate, smaller identity brief in `packages/core/src/autonomy/autonomous-supervisor.ts`. It has a narrower observe/research/decide tool policy than an interactive execution turn. Do not assume that an interactive capability is also available in the ambient lane.
+
+## Files and their owners
+
+| File | Purpose | Runtime use |
 |---|---|---|
-| `SOUL.md` | every run | Read-only to agent tools — see below. |
-| `AGENTS.md` | every run | Global operating rules. |
-| `agents/<specialistId>/AGENTS.md` | that specialist only | Optional override, layered after the global file. `miki`/`sage`/`forge`/`scout` are seeded; any other specialist id added later works the same way. |
-| `IDENTITY.md` | every run | Name/persona notes. |
-| `USER.md` | every run | Operator & project context. Optional — fine to leave blank. |
-| `TOOLS.md` | every run | Capability registry snapshot. Optional. |
+| `SOUL.md` | Stable identity, core behavior, and non-negotiable boundaries | Every interactive run; also included in ambient context |
+| `IDENTITY.md` | Name, operating model, and specialist identity profiles | Interactive run; compact ambient context |
+| `TOOLS.md` | Tool-family map and discovery procedure | Interactive run; compact ambient context |
+| `AGENTS.md` | Task loop, tool use, safety, recovery, and verification manual | Interactive run; also included in ambient context |
+| `USER.md` | Explicit owner preferences and safe adaptation rules | Interactive run and ambient context |
+| `agents/*/AGENTS.md` | Optional specialist-specific working preferences | Only when the runtime selects the matching identity ID |
+| `DRIVES.md` | Structured YAML-front-matter drives for autonomous idle decisions | Parsed by the autonomous supervisor |
+| `INTERESTS.md` | Research topics for curiosity cycles | Used only when curiosity is enabled in runtime configuration |
+| `HEARTBEAT.md` | Recurring heartbeat checklist | Parsed by the heartbeat/scheduled-task mechanism when configured |
 
-Load order (fixed, see `packages/core/src/identity/loader.ts`):
-`SOUL → AGENTS (global) → AGENTS (role) → IDENTITY → USER → TOOLS`.
+`README.md` explains the system to maintainers; it is not injected as an instruction on every turn.
 
-A missing file just means that section is skipped — nothing crashes, and
-nothing falls back to old behavior on a per-file basis. Fallback to the
-legacy `agent.persona` string in `config/agent.yaml` only happens when this
-entire directory doesn't exist yet (i.e., before step 01 was adopted).
+## Authority and safe editing
 
-## Systemwide scope (no workspace confinement)
+The actual tool registry, runtime configuration, platform policy, OS permissions, and approval gates are authoritative. A line in an identity file cannot enable a tool, grant access, bypass a confirmation requirement, or start a stopped supervisor.
 
-Miki is a systemwide agent. `RuntimePaths.sourceDir` (the install root) is
-Miki's home for its own config/data and the default base for relative
-paths and shell cwd — it is **not** a permission boundary. File and shell
-tools are confined to it only if an operator explicitly sets
-`agent.security.system_access` to `workspace_only` or `isolated` in
-`config/agent.yaml` (default: `full`). Read by
-`packages/core/src/tools/executor/system-access.ts` and applied through
-`ToolRegistry.applySystemAccessMode()`. Destructive actions are gated by
-approval (`tools.require_confirm_*`), independent of scope.
+Keep SOUL/identity/operating instructions internally consistent. Never add blanket rules such as “never refuse” or “never ask permission”; Miki should act autonomously within authority and explain real safety or platform blockers clearly. Preserve the learned-preference and agent-proposed-additions sections when editing files maintained by helper code.
 
-## SOUL.md is read-only to agent tools
+## Installation paths
 
-Enforced in code, not just by convention: `file_write`/`file_delete`
-(`packages/core/src/tools/executor/file-security.ts`) refuse any call that
-resolves to this directory's `SOUL.md`, logging the refusal the same way
-other denied file operations are logged. Edit it directly, as a human,
-outside of any agent tool call.
-
-This does not stop a raw shell command from editing the file — that gap
-closes with step 04's tool-exec-permissions layer, not this one.
-
-## Adding to AGENTS.md / TOOLS.md programmatically
-
-Never via a raw file write. Use the controlled helpers in
-`packages/core/src/identity/propose-update.ts`:
-
-- `proposeAgentsUpdate(identityDir, note, specialistId?)` — appends one
-  timestamped bullet under `## Agent-Proposed Additions` in the global or a
-  role's `AGENTS.md`.
-- `proposeToolsUpdate(identityDir, { tool, role?, note })` — appends one
-  structured row under `## Learned Capabilities` in `TOOLS.md`.
-
-Both are append-only and validate their input; neither is wired up as a
-callable LLM tool yet. That's intentionally left for step 04/05, once
-there's a permission-gated tool layer to register them against.
-
-## Where this plugs in
-
-- `RuntimePaths.identityDir` (`packages/core/src/paths.ts`) — defaults to
-  `<sourceDir>/identity` in dev mode, `<config root>/Miki/identity` in an
-  OS-installed release. Overridable per-run via `agent.identity.path` in
-  `config/agent.yaml`.
-- `Agent._buildSystemContent` (`packages/core/src/agent.ts`) — calls
-  `loadIdentityContext(identityDir, routeDecision.selected.id, fileMemoryBlock)`
-  once per turn and uses the assembled text as the system persona block.
-
-## Memory lives here too (step 02)
-
-`packages/memory/src/file-memory/` implements OpenClaw-style file memory,
-rooted at this same `identityDir` (one memory for the whole agent —
-systemwide, not per workspace folder):
-
-- `MEMORY.md` — curated long-term facts/decisions, appended to by the
-  `memory_note` tool (`scope: long_term`) or directly by a human. Read-only
-  to the agent's own file tools in the same sense `SOUL.md` is (see above);
-  the agent writes to it only through `memory_note`, never `file_write`.
-- `memory/YYYY-MM-DD.md` — a running daily note (`memory_note` with
-  `scope: daily`, and the silent pre-compaction "flush").
-- `memory/YYYY-MM-DD-HHMM-<slug>.md` — one file per finished session,
-  written in the background when a session ends, goes idle, or the process
-  shuts down.
-- `memory/compactions/*.md` — archives of context that was folded into a
-  rolling summary when a session's context window filled up. Nothing is
-  deleted; the full session history stays in the session store, and the
-  compacted turns are also kept here in full.
-
-Agent-facing tools: `memory_search` (BM25 over all of the above),
-`memory_get` (read one file / line range), `memory_note` (write). All three
-refuse to touch anything outside `MEMORY.md` / `memory/**.md`.
-
-This is independent of the older SQLite/TKG memory (`packages/memory/`),
-which keeps running unchanged — its writes just move to a background queue
-(`AgentOrchestrator.fileMemory.background(...)`) so they can never delay a
-turn. Config: `agent.memory.files.*` in `config/agent.yaml`.
-
-## Autonomy files (idle loop)
-
-| File | Used by | Notes |
-|---|---|---|
-| `INTERESTS.md` | idle decision (curiosity cycle) | Topics Miki researches in free time. Editable by you and by Miki. Results go to `identity/memory/discoveries/<date>-<slug>.md`. |
-| `DRIVES.md` | idle decision | Miki's own motivations (YAML front-matter: `name`, `description`, `urge_per_hour`, `max_urge`). The highest urge decides what an idle cycle works on. |
-| `USER.md` | idle decision, chat | What Miki knows about you. A template ships with the install. |
-| `memory/environment.md` | idle decision | Written once by the first-run "Explore my environment" goal (empty memory and no drive history); not shipped. |
-
+The runtime identity directory is resolved through `packages/core/src/paths.ts`. In development it may use the project source root; in an OS-installed release it follows the configured Miki config root. Do not hard-code a developer's checkout path in operational documentation.

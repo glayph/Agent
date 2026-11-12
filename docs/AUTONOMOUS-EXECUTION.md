@@ -37,7 +37,7 @@ The existing Turbo Mode remains enabled for ordinary registered tools when the c
 ## Verification commands
 
 ```bash
-npm install
+npm ci
 npm run build:all
 npm run test:agent-core
 npm run test:gateway
@@ -45,3 +45,10 @@ npm run dev
 ```
 
 The repository requires Node.js `>=22.19.0`. The implementation environment should use a matching Node.js release before the full build/test suite is considered authoritative.
+
+
+## Agent identity and capability authority
+
+The interactive identity prompt is assembled by `packages/gateway/src/agent/identity-prompt.ts`. It loads the stable identity, runtime role, capability-discovery guide, global operating manual, optional runtime-selected specialist profile and owner preferences. The live tool registry, exact schemas, enabled/disabled tool groups, credentials, permission checks and approval gates remain authoritative; Markdown describes how to use capabilities but never creates them.
+
+For the complete model/runtime distinction, specialist-profile semantics, capability matrix and execution-lane boundaries, see [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md). In particular, ambient supervisor decisions are narrower than tracked goal execution, and no model invocation can schedule a later invocation by itself.

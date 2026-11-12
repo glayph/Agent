@@ -1,104 +1,84 @@
 # Miki Architecture and Module Boundaries
 
-## Runtime communication
+This document describes the current code layout. For the operational identity, capability discovery, autonomous execution lanes, and permission boundaries, read [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md).
 
-The Gateway package is the application composition root. The Agent runtime is created by
-`packages/gateway/src/agent/agent-runtime.ts`, while the HTTP/WebSocket server and process
-startup remain in `packages/gateway/src/index.ts`.
+## Runtime composition
 
-Model providers have one Agent-facing entry point:
+The Gateway package is the application composition root. `packages/gateway/src/index.ts` starts the HTTP/WebSocket server and runtime services; `packages/gateway/src/agent/agent-runtime.ts` builds and manages the Agent runtime. Core owns reusable agent execution and domain logic. Memory owns persistent-memory implementations.
 
 ```text
-Agent runtime
-    |
-    v
-packages/gateway/src/providers/ProviderGateway
-    |
-    v
-packages/core/src/plugins/providers/ProviderRegistry
-    |
-    v
-provider adapters / built-in provider plugins / local llama.cpp runtime
+React UI / CLI / channels
+          |
+          v
+       Gateway  -----> Agent runtime / chat / channels / health / auth
+          |                         |
+          |                         v
+          +-----------------> ProviderGateway
+          |                         |
+          v                         v
+         Core <-------------- Provider registry / adapters
+          |
+          +------> Memory package
+          +------> Config contracts
 ```
 
-`AgentRuntime` must not import `providerRegistry`, provider SDK implementations, or transport
-factories directly. It asks `ProviderGateway` to create an `EngineLLMClient`, determine whether
-a provider is local, and resolve provider credential failover candidates. The gateway owns
-transport selection and keeps registry/plugin details private to the provider boundary.
+## Provider boundary
 
-The HTTP model-settings and health endpoints may perform provider probes for administration;
-Agent inference and local-provider lifecycle changes go through `ProviderGateway`.
+Agent-facing provider access is routed through `packages/gateway/src/providers/ProviderGateway`. It resolves provider capabilities, credentials/failover candidates, and the `EngineLLMClient` boundary. Provider registry and adapter implementations live under `packages/core/src/plugins/providers/`. Agent runtime code must not instantiate provider SDK clients or import the registry directly. Administrative model/health endpoints may perform their own guarded probes.
 
-## Package responsibility
+## Workspace responsibilities
 
 ```text
 packages/
-├── gateway/       Application composition, HTTP/WS, Agent runtime, runtime services
-├── core/          Agent engine, plugin contracts, tools, governance and core services
-├── memory/        Canonical persistent memory and retrieval system
-├── config/        Shared config schemas, validation, secrets and vault adapters
-├── skills/        Bundled skill catalogue and metadata
-├── installer/     Skill/plugin package installation contracts
-├── cli/           Command-line client
-└── ui/            Frontend and desktop/backend UI integration
+├── cli/       # TypeScript CLI, lifecycle controller, terminal dashboard, package assembly
+├── config/    # Shared schemas, environment/config loading, security and vault contracts
+├── core/      # Agent engine, tools, permissions, autonomy, plugins, tasks and services
+├── gateway/   # HTTP/WS composition, Agent runtime, channels, chat, providers and monitoring
+├── memory/    # Canonical TKG and file-backed persistent memory
+└── ui/        # React frontend plus legacy Go compatibility sources
 ```
 
-The intended dependency direction is:
-
-```text
-UI / CLI / channels
-        |
-        v
-     Gateway
-        |
-        +------> Core
-        +------> Memory
-        +------> Config / Skills / Installer
-```
-
-Core modules do not import the Gateway package. The Gateway supplies runtime dependencies to
-Core through typed interfaces and service objects.
+There is no independent `packages/skills` or `packages/installer` workspace in this tree. Skill catalogue, manager, governance integration, and installer implementation are housed under `packages/core/src/plugins/skills/`. The root `package.json` declares the actual workspace/build topology; do not infer a package from an old diagram.
 
 ## Gateway source domains
 
-`packages/gateway/src/index.ts` is kept as the composition root. Other files are grouped by
-responsibility:
-
-- `agent/`: Agent runtime, identity prompt, feedback, learned behavior and supervision.
-- `providers/`: the Agent-to-provider gateway plus model resolution, retry and provider errors.
-- `chat/`: chat turn handling, attachments, media, streaming and message traces.
-- `channels/`: channel runtime, session lanes, outbound delivery and webhook ingress.
-- `tools/`: tool naming, grouping, terminal tools, result presentation and tool wire formats.
-- `plugins/`: marketplace plugin management and MCP proxy routes.
-- `memory/`: memory indexing, ranking and governance.
-- `runtime/`: process lifecycle, recovery, locking, resource arbitration and run artifacts.
+- `agent/`: prompt construction, identity file loading, runtime integration, feedback and learned behavior.
+- `providers/`: Agent-facing provider boundary, model resolution, retry and provider error handling.
+- `chat/`: chat turns, streaming, attachments, media and message traces.
+- `channels/`: channel runtime, session lanes, delivery and webhook ingress.
+- `tools/`: tool names, groups, terminal integration and tool wire formats.
+- `plugins/`: marketplace and MCP proxy routes.
+- `memory/`: Gateway-side memory adapters and routes.
+- `runtime/`: process lifecycle, recovery, locking, artifacts and resource arbitration.
 - `security/`: authentication, cookies, origin checks, request policy and secret scanning.
-- `monitoring/`: health, monitor history, dashboard extensions and user-facing notices.
-- `config/`, `files/`: Gateway configuration adapters and archive/file helpers.
+- `monitoring/`: health, historical monitor data and dashboard notices.
+- `config/`, `files/`: configuration adapters and file/archive utilities.
 
 ## Core source domains
 
-- `engine/`: planning, Agent execution loop, tool registry, LLM client contracts and token budgets.
-- `plugins/providers/`: provider registry, SDK/plugin contracts, adapters and local llama.cpp runtime.
-- `tasks/`: durable task state, store, worker, retry classification and lineage coordinator.
-- `plugins/skills/`: bundled skill catalog, runtime skills manager, and installer implementation in one core-owned plugin module.
-- `messaging/`, `sessions/`: message formatting/adaptation and persisted session history.
-- `observability/`: audit log, error handler and metrics collection.
-- `services/`: web search and speech-to-text integrations.
-- `hooks/`, `control/`, `permissions/`, `autonomy/`, `self-improvement/`, `api/`, `mcp/`:
-  lifecycle events, control plane, permission governance, autonomous supervision, API routing
-  and external-tool connectivity.
+- `engine/`: planning, execution loop, tool registry, model-client contracts and context/token budgets.
+- `autonomy/`: autonomous supervisor, durable goal and ambient-decision orchestration.
+- `tasks/`: durable task store, worker, retries and lineage coordination.
+- `plugins/providers/`: provider interfaces, registry, adapters, local provider integration.
+- `plugins/skills/`: bundled catalogue, skill manager and installer.
+- `plugins/tools/`, `plugins/browser/`, `plugins/computer-use/`, `plugins/code-execution/`: supported tool integrations.
+- `permissions/`, `control/`: permission governance and supported runtime control surfaces.
+- `hooks/`, `observability/`, `services/`, `sessions/`, `messaging/`, `mcp/`, `self-improvement/`, `api/`: lifecycle and domain support.
+
+## Identity and autonomy boundaries
+
+`identity-prompt.ts` is the source of truth for interactive identity loading. It loads the configured identity documents and combines them with the current tool registry, capability state, autonomy status, persona configuration, and runtime contract. The live tool registry and permission gates always override descriptive documentation.
+
+`AutonomousSupervisor` is host-side scheduling/orchestration. A model call is finite; the supervisor or durable worker initiates later calls. The ambient decision lane has narrower permissions than the tracked goal-execution lane. See [Always-active idle mode](always-active-idle-mode.md).
+
+The Chat Top Bar is implemented by `packages/ui/frontend/src/features/chat/components/workspace/workspace-header.tsx` and the state/handlers passed from `packages/ui/frontend/src/pages/chat-page.tsx`. Global Gateway lifecycle controls live in `packages/ui/frontend/src/app/layout/global-header-actions.tsx`.
 
 ## Maintenance rules
 
-1. Add new provider implementations under `packages/core/src/plugins/providers/`; do not let
-   Agent runtime files instantiate provider adapters directly.
-2. Add new Agent-facing provider behavior to `ProviderGateway`, not to `AgentEngine`.
-3. Keep network/API ingress in Gateway and reusable business/domain logic in Core or its
-   dedicated package.
-4. Keep the complete memory implementation (TKG, file-backed notes, compaction, and memory tools) under `packages/memory/`; Core and Gateway consume it through package exports.
-5. Add new files to the domain folder that owns their lifecycle; avoid returning to flat
-   `gateway/src` or `core/src` directories.
-6. Keep public package subpath exports in sync when a module's output path changes.
-
-The Core build runs `scripts/build-skill-catalog.mjs` after TypeScript compilation to copy non-code skill assets into `packages/core/dist/plugins/skills/catalog/`.
+1. Keep provider SDK and registry details behind `ProviderGateway`.
+2. Keep persistent memory implementations in `packages/memory/`.
+3. Keep reusable execution/governance logic in Core, transport/composition in Gateway, and presentation in UI.
+4. Update public package exports when source/build paths move.
+5. Treat runtime schemas, exact tool registrations, tests, and permission checks as authoritative; documentation cannot enable tools.
+6. Keep historical audit reports as dated records and link them to current source/tests rather than rewriting historical observations.
+7. Do not modify the bundled skill definitions when making identity/documentation improvements unless the task explicitly includes skill content.

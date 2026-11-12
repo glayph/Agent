@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Miki Browser Agent",
+  "version": "1.0.0",
+  "description": "Connects a user's Firefox browser to their local Miki agent for permission-gated automation.",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "scripting",
+    "http://127.0.0.1/*"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "scripts": [
+      "service-worker.js"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "miki-browser-agent@local.miki",
+      "strict_min_version": "128.0"
+    }
+  }
+}

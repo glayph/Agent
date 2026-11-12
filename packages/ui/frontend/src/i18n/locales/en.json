@@ -57,6 +57,8 @@
   "chat": {
     "welcome": "How can I help you today?",
     "welcomeDesc": "Ask me about weather, settings, or any other tasks. I'm here to assist you.",
+    "agentWorking": "Miki is working",
+    "autonomousWorking": "Miki is working autonomously",
     "errors": {
       "codes": {
         "provider_api_key": "The model API key was rejected. Check the key on the Models page.",
@@ -278,6 +280,23 @@
       "durationMs": "{{value}} ms",
       "durationSeconds": "{{value}} s",
       "durationMinutes": "{{minutes}} min {{seconds}} s"
+    },
+    "topbar": {
+      "gatewayOnline": "Gateway connected",
+      "gatewayConnecting": "Connecting",
+      "gatewayDisconnected": "Disconnected",
+      "gatewayConnectionError": "WebSocket error",
+      "gatewayUnknown": "Gateway status unknown",
+      "gatewayStarting": "Gateway starting",
+      "gatewayRestarting": "Gateway restarting",
+      "gatewayStopping": "Gateway stopping",
+      "gatewayStopped": "Gateway stopped",
+      "gatewayError": "Gateway error",
+      "chatWorking": "Miki is responding",
+      "autonomyPaused": "Autonomy paused",
+      "agentReady": "Miki ready",
+      "activeGoals_one": "{{count}} active goal",
+      "activeGoals_other": "{{count}} active goals"
     }
   },
   "header": {
@@ -1422,7 +1441,7 @@
           "requires_worker": "Enable the background worker dependency before the spawn tool can delegate work.",
           "requires_mcp_discovery": "Enable `tools.mcp.discovery` before MCP discovery tools become available.",
           "requires_web_search_provider": "Configure at least one ready external web-search provider.",
-          "browser_not_installed": "The browser engine is not installed. Run `npx playwright install chromium` and restart."
+          "browser_not_installed": "No paired Miki Browser Agent extension is connected. Install and pair the extension in your browser, then retry."
         }
       }
     },

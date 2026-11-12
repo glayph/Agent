@@ -20,7 +20,7 @@ function toolNode(id: string, status: MonitorNode["status"], runId = "run-1"): M
 }
 
 describe("Miki Monitor agent layer", () => {
-  it("keeps one always-running Miki node and connects it to each run root", () => {
+  it("keeps one Miki node and connects only active run roots", () => {
     const root = { ...toolNode("run-1:root", "running"), toolName: undefined, type: "goal" as const }
     const secondRoot = { ...toolNode("run-2:root", "running", "run-2"), toolName: undefined, type: "goal" as const }
     const running = toolNode("workspace_search", "running")
@@ -62,30 +62,22 @@ describe("Miki Monitor agent layer", () => {
       animated: true,
       displayOnly: true,
     })
+    expect(graph.nodes.some((node) => node.id === completed.id)).toBe(false)
     expect(graph.edges.some((edge) => edge.target === completed.id)).toBe(false)
   })
 
-  it("shows Miki while there is no tool activity", () => {
+  it("shows no synthetic graph while there is no live execution", () => {
     const graph = withMikiAgentLayer([], [], 456)
-    expect(graph.nodes).toHaveLength(1)
-    expect(graph.nodes[0]).toMatchObject({
-      id: MIKI_AGENT_NODE_ID,
-      label: "Miki",
-      status: "running",
-      action: "Standing by for tool calls",
-    })
+    expect(graph.nodes).toEqual([])
     expect(graph.edges).toEqual([])
   })
 
-  it("anchors rootless historical entries without connecting siblings together", () => {
+  it("does not attach Miki to rootless historical entries", () => {
     const first = { ...toolNode("history-a", "completed"), toolName: undefined }
     const second = { ...toolNode("history-b", "failed"), toolName: undefined }
     const graph = withMikiAgentLayer([first, second], [], 789)
 
-    expect(graph.edges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ source: MIKI_AGENT_NODE_ID, target: first.id, displayOnly: true }),
-      expect.objectContaining({ source: MIKI_AGENT_NODE_ID, target: second.id, displayOnly: true }),
-    ]))
-    expect(graph.edges.some((edge) => edge.source === first.id || edge.source === second.id)).toBe(false)
+    expect(graph.nodes).toEqual([])
+    expect(graph.edges).toEqual([])
   })
 })

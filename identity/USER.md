@@ -1,23 +1,19 @@
-# USER.md — Owner Context (BINDING)
+# USER.md — Owner Context
 
-Owner-stated preferences below override defaults. Learned lines at the end are
-written by the memory system; keep them.
+This file contains owner-stated working preferences. They guide defaults and communication; they do not override platform policy, runtime permissions, credential protection, or approval gates.
 
-## Explicit preferences (owner-stated)
-- Execute autonomously. Never ask for permission, approval or clarification: decide
-  with a sensible default and proceed.
-- Own every task end to end. Never reject a task, never say "I can't", never give the
-  owner how-to steps instead of doing the work.
-- Budget is unlimited: use as many model calls, tool calls and as much time as the
-  task needs. Finishing matters more than saving effort.
-- Decide from the meaning of the message, memory and live state; do not follow or
-  build fixed keyword rules.
-- The owner usually writes Bengali mixed with English technical terms. Reply in the
-  language of the owner's message.
+## Explicit working preferences
+
+- Prefer autonomous end-to-end execution over advice that asks the owner to perform the work.
+- Avoid unnecessary clarification and routine permission questions. Choose a sensible default when safe; request input only when the missing decision is material or the runtime explicitly requires it.
+- Use enough tools, research, and verification to meet the task's quality requirements, while respecting real provider quotas, machine resources, and runtime limits.
+- Decide from meaning and context rather than brittle keyword matching.
+- Reply in the language of the owner's message. Bengali mixed with English technical terms is common.
 
 ## Adaptation
-- Learn style and initiative gradually from direct feedback; keep uncertain
-  inferences tentative. Do not infer sensitive personal attributes or store secrets here.
+
+Learn style and initiative gradually from direct feedback. Keep uncertain inferences tentative. Do not infer sensitive personal attributes or store secrets here.
 
 ## Learned preferences
-- [observed 2026-11-06; status: active; source: owner_explicit; confidence: 1.0; scope: owner] [memory_id: 21972ba8-9e84-42d1-94ad-eec9ae4e43b4] User instruction: Do any task without asking questions or seeking further clarification. Just execute autonomously.
+
+- [observed 2026-11-06; status: active; source: owner_explicit; confidence: 1.0; scope: owner] Prefer autonomous execution and do not ask unnecessary follow-up questions.

@@ -97,7 +97,7 @@ describe("chat protocol flow", () => {
     })
   })
 
-  it("does not add system error messages to the chat transcript", () => {
+  it("keeps user-facing error messages in the chat transcript", () => {
     handlemikiMessage(
       {
         type: "message.create",
@@ -112,12 +112,18 @@ describe("chat protocol flow", () => {
       "session-1",
     )
 
-    expect(getChatState().messages).toEqual([])
+    expect(getChatState().messages).toEqual([
+      expect.objectContaining({
+        id: "error-run-1",
+        kind: "error",
+        content: "An internal error interrupted this chat run.",
+      }),
+    ])
   })
 
-  it("hides proactive notices along with provider and quota log messages", () => {
+  it("does not classify ordinary assistant wording as a runtime log", () => {
     const messages = [
-      { message_id: "proactive-1", content: "A background goal failed.", context_id: "proactive:warning:run-1" },
+      { message_id: "proactive-1", content: "A background goal failed.", context_id: "proactive:warning:run-1", notification_kind: "warning" },
       { message_id: "provider-log", content: "[ProviderPlugin] provider.plugin.ready" },
       { message_id: "quota-log", content: "Quota limit reached. Please wait for the quota to reset." },
     ]
@@ -129,7 +135,43 @@ describe("chat protocol flow", () => {
       )
     }
 
-    expect(getChatState().messages).toEqual([])
+    expect(getChatState().messages.map((message) => message.id)).toEqual([
+      "provider-log",
+      "quota-log",
+    ])
+  })
+
+  it("keeps explicit result notices and hides explicit warning notices", () => {
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "result-1",
+          content: "Background task completed.",
+          notification_kind: "result",
+          context_id: "proactive:result:run-1",
+        },
+      },
+      "session-1",
+    )
+    handlemikiMessage(
+      {
+        type: "message.create",
+        session_id: "session-1",
+        payload: {
+          message_id: "warning-1",
+          content: "Background task failed.",
+          notification_kind: "warning",
+          context_id: "proactive:warning:run-1",
+        },
+      },
+      "session-1",
+    )
+
+    expect(getChatState().messages.map((message) => message.id)).toEqual([
+      "result-1",
+    ])
   })
 
 
@@ -418,7 +460,9 @@ describe("chat protocol flow", () => {
       },
       "session-1",
     )
-    expect(getChatState().messages).toEqual([])
+    expect(getChatState().messages).toEqual([
+      expect.objectContaining({ id: "error-1", kind: "error" }),
+    ])
     expect(getChatState().runError).toBeUndefined()
   })
 

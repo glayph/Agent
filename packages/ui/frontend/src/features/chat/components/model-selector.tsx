@@ -22,6 +22,7 @@ interface ModelSelectorProps {
   unavailableModels?: ModelInfo[]
   onValueChange: (modelIndex: number) => void
   compact?: boolean
+  disabled?: boolean
 }
 
 export function ModelSelector({
@@ -32,6 +33,8 @@ export function ModelSelector({
   localModels,
   unavailableModels = [],
   onValueChange,
+  compact = false,
+  disabled = false,
 }: ModelSelectorProps) {
   const { t } = useTranslation()
   const allModels = [...apiKeyModels, ...oauthModels, ...localModels, ...unavailableModels]
@@ -46,14 +49,25 @@ export function ModelSelector({
   }
 
   return (
-    <Select value={defaultModelIndex} onValueChange={(value) => onValueChange(Number(value))}>
+    <Select
+      value={defaultModelIndex}
+      onValueChange={(value) => onValueChange(Number(value))}
+      disabled={disabled}
+    >
       <SelectTrigger
         size="sm"
         aria-label={defaultModelName || t("chat.noModel")}
         title={defaultModelName || t("chat.noModel")}
-        className="text-muted-foreground hover:text-foreground hover:bg-accent/25 size-8 min-w-8 shrink-0 justify-center border-transparent bg-transparent p-0 shadow-none focus-visible:border-transparent focus-visible:ring-0 [&>svg:last-child]:hidden"
+        className={compact
+          ? "text-muted-foreground hover:text-foreground hover:bg-accent/25 size-8 min-w-8 shrink-0 justify-center border-transparent bg-transparent p-0 shadow-none focus-visible:border-transparent focus-visible:ring-0 [&>svg:last-child]:hidden"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent/25 h-8 min-w-8 max-w-44 shrink-0 justify-start border-transparent bg-transparent px-2 shadow-none focus-visible:border-transparent focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60"}
       >
         <IconAtom className="size-4" />
+        {!compact && (
+          <span className="max-w-32 truncate text-xs">
+            {defaultModelName || t("chat.noModel")}
+          </span>
+        )}
       </SelectTrigger>
       <SelectContent position="popper" align="start">
         {apiKeyModels.length > 0 && (

@@ -49,7 +49,6 @@ for (const [id, relative] of [
   ["jest", "node_modules/jest/package.json"],
   ["vitest", "node_modules/vitest/package.json"],
   ["better-sqlite3", "node_modules/better-sqlite3/package.json"],
-  ["playwright", "node_modules/playwright/package.json"],
 ]) {
   const present = fs.existsSync(path.join(root, relative));
   checks.push(item(id, present ? "PASS" : "BLOCKED", present ? "Project dependency is installed." : `Missing ${relative}.`));
@@ -68,14 +67,18 @@ if (process.platform === "win32") {
     computerStatus = "READY_FOR_TARGET_TEST";
     computerDetail = "Linux X11 display and helper prerequisites are present; Miki action and screenshot-to-model tests are still required.";
   } else if (process.env.WAYLAND_DISPLAY && !hasDisplay) {
-    computerStatus = "UNSUPPORTED";
-    computerDetail = "Wayland-only sessions are not a supported ComputerAgent backend in this source tree.";
+    const python = commandExists("python3");
+    const atspi = python && spawnSync("python3", ["-c", "import pyatspi"], { stdio: "ignore" }).status === 0;
+    computerStatus = atspi ? "READY_FOR_TARGET_TEST" : "PARTIAL";
+    computerDetail = atspi
+      ? "Wayland session has AT-SPI bindings for semantic application controls; X11 coordinate input/screenshots are unavailable without XWayland. Live application tests are still required."
+      : "Wayland-only session can use semantic controls after python3-pyatspi and at-spi2-core are installed; coordinate input and screenshots need a supported XWayland/session backend.";
   } else {
-    computerDetail = `Linux X11 prerequisites incomplete (DISPLAY=${hasDisplay ? "set" : "unset"}, X11 probe=${displayConnected ? "connected" : "unavailable"}, xdotool=${xdotool}, xclip=${xclip}).`;
+    computerDetail = `Linux X11 prerequisites incomplete (DISPLAY=${hasDisplay ? "set" : "unset"}, X11 probe=${displayConnected ? "connected" : "unavailable"}, xdotool=${xdotool}, xclip=${xclip}). AT-SPI semantic controls may still work when the accessibility bus is available.`;
   }
 } else if (process.platform === "darwin") {
-  computerStatus = "PARTIAL";
-  computerDetail = "macOS ComputerAgent action backend is incomplete; do not claim full desktop qualification.";
+  computerStatus = "READY_FOR_TARGET_TEST";
+  computerDetail = "The source includes a macOS System Events Accessibility backend; target tests still require Accessibility permission and, for screenshots, Screen Recording permission.";
 } else {
   computerStatus = "UNSUPPORTED";
   computerDetail = `No ComputerAgent capability matrix is declared for ${process.platform}.`;
@@ -107,7 +110,7 @@ if (jsonOutput) {
 }
 
 const requiredChecks = checks.filter((check) => [
-  "node-runtime", "workspace-dependencies", "eslint", "jest", "vitest", "better-sqlite3", "playwright",
+  "node-runtime", "workspace-dependencies", "eslint", "jest", "vitest", "better-sqlite3",
 ].includes(check.id));
 const failedRequired = requiredChecks.some((check) => check.status !== "PASS");
 const failedComputer = requireComputer && !["PASS", "READY_FOR_TARGET_TEST"].includes(computerStatus);

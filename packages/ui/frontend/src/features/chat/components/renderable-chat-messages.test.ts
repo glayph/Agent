@@ -63,10 +63,14 @@ describe("getRenderableChatMessages", () => {
     expect(result.map((item) => item.id)).toEqual(["assistant-1", "user-2"])
   })
 
-  it("does not expose runtime and notification messages in the conversation", () => {
-    const notification = {
+  it("shows result notifications but not runtime progress or internal thoughts", () => {
+    const resultNotification = {
       ...message("notice", "assistant", "Background notice"),
       notificationKind: "result",
+    }
+    const progressNotification = {
+      ...message("progress", "assistant", "Working in background"),
+      notificationKind: "progress",
     }
     const thought = {
       ...message("thought", "assistant", "Internal thought"),
@@ -76,9 +80,10 @@ describe("getRenderableChatMessages", () => {
     expect(
       getRenderableChatMessages([
         message("user-1", "user", "Visible"),
-        notification,
+        resultNotification,
+        progressNotification,
         thought,
       ]).map((item) => item.id),
-    ).toEqual(["user-1"])
+    ).toEqual(["user-1", "notice"])
   })
 })

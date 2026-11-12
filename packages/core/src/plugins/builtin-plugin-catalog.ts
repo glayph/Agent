@@ -264,11 +264,11 @@ const capabilities: Seed[] = [
     permissions: ["network"],
   },
   {
-    id: "browser.playwright",
+    id: "browser.webextension-bridge",
     name: "Browser automation",
     capability: "browser",
     status: "partial",
-    description: "Playwright-based browser sessions.",
+    description: "Connected user browsers controlled through the Miki WebExtension bridge.",
     permissions: ["browser", "network"],
   },
   {

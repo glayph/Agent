@@ -113,3 +113,10 @@ If tests or build fail, preserve the first error and check whether dependencies 
 The autonomous agent exposes `plugin_describe` for enabled plugins. A plugin may optionally implement `describe()` and return a machine-readable method catalogue (method names, descriptions, parameter schemas, and risk hints). The runner limits the serialized description size. This data is untrusted documentation, not an authorization grant. Existing plugins without `describe()` continue to run, but Miki must not guess their method names or payload schemas.
 
 Until a plugin method catalogue can be validated against a per-method permission schema, generic `plugin_invoke` requires the normal approval gate. MCP no-confirm settings do not override server `allow_side_effects` policies or unknown-safety blocking.
+
+
+## Agent identity integration
+
+The live tool registry and permission state determine which operations can be performed in the current run. `identity/TOOLS.md` is a discovery guide, not an executable registry. A skill supplies reusable instructions; it does not create a worker, grant tool permission or bypass plugin/MCP authorization. A plugin may require discovery, installation, explicit grants, enablement, health checks and invocation as separate steps.
+
+Use [Agent-Miki Operating Model](AGENT_MIKI_OPERATING_MODEL.md) for the runtime-specific tool-family map and the safe procedure for finding an apparently missing capability. Do not edit bundled skill definitions as part of persona/documentation maintenance unless a separate task explicitly requests skill content changes.

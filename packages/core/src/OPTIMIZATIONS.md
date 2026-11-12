@@ -14,11 +14,11 @@
 > - `gateway/src/session-lane.ts` - one serialized chat run per conversation.
 
 ## Overview
-This directory contains complete implementation of the Ultra-Advance Optimization Plan for Miki, delivering **40% reduction in LLM calls, 60% cost reduction, and 62% latency improvement**.
+This is a historical proposal/checklist, not a verified implementation inventory or benchmark report. The percentage claims below are not measured acceptance results and must not be used for capacity planning. Check the current source and tests before importing or relying on any named module.
 
 ## Phase Breakdown
 
-### Phase 1: LLM & Memory Optimization (✓ COMPLETE)
+### Phase 1: LLM & Memory Optimization (historical status; not verified)
 
 #### LLM Client Ultra-Optimization
 - **`llm-cache.ts`** - Semantic Response Caching with multi-layer approach (exact, semantic, partial)
@@ -32,21 +32,21 @@ This directory contains complete implementation of the Ultra-Advance Optimizatio
 - **`memory/importance-scorer.ts`** - Temporal decay and importance calculation
 - **`memory/session-learner.ts`** - Cross-session learning and skill profiling
 
-### Phase 2: Tool Execution Optimization (✓ COMPLETE)
+### Phase 2: Tool Execution Optimization (historical status; not verified)
 
 - **`tools/dependency-resolver.ts`** - Topological sort for parallel tool execution
 - **`tools/resource-pool.ts`** - Connection pooling and resource reuse
 - **`tools/retry-manager.ts`** - Exponential backoff with jitter
 - **`tools/tool-warmer.ts`** - Preemptive tool initialization
 
-### Phase 3: Agent Intelligence Enhancement (✓ COMPLETE)
+### Phase 3: Agent Intelligence Enhancement (historical status; not verified)
 
 - **`agent-tot.ts`** - Tree-of-Thought reasoning with path exploration
 - **`agent-planner.ts`** - Multi-strategy planning with backtracking
 - **`contextual-tool-pruner.ts`** - Context-aware tool selection
 - **`agent-confidence.ts`** - Confidence scoring with calibration
 
-### Phase 4: Performance & Observability (✓ COMPLETE)
+### Phase 4: Performance & Observability (historical status; not verified)
 
 - **`cache-manager.ts`** - Multi-layer caching (L1/L2/L3)
 - **`request-deduplicator.ts`** - Request coalescing for duplicate work
@@ -54,12 +54,12 @@ This directory contains complete implementation of the Ultra-Advance Optimizatio
 - **`metrics-collector.ts`** - Performance metrics and anomaly detection
 - **`execution-tracer.ts`** - Execution tracing and flamegraph generation
 
-### Phase 5: Self-Improvement (✓ COMPLETE)
+### Phase 5: Self-Improvement (historical status; not verified)
 
 - **`self-improvement/ab-test-framework.ts`** - A/B testing with statistical analysis
 - **`self-improvement/change-audit.ts`** - Change tracking and auto-rollback
 
-### Phase 6: Reliability & Quality (✓ COMPLETE)
+### Phase 6: Reliability & Quality (historical status; not verified)
 
 - **`error-handler.ts`** - Circuit breaker and advanced error handling
 - **`health-checker.ts`** - Comprehensive system health monitoring
@@ -299,3 +299,8 @@ const changeReport = globalChangeAudit.generateReport();
 ## Support
 
 For issues or questions about specific optimizations, refer to inline documentation in each component file.
+
+
+## Current source-of-truth note
+
+For the actual Agent execution model, consult `packages/core/src/engine/`, `packages/core/src/tasks/`, `packages/core/src/autonomy/`, the Gateway integration under `packages/gateway/src/`, and their adjacent tests. Persistent memory implementations live in `packages/memory/`. This proposal intentionally remains available as historical context, but its example import names and integration snippets must not be copied without verifying that the referenced exports exist in the current package.

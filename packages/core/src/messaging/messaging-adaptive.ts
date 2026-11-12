@@ -186,7 +186,8 @@ export function chooseMessagingStrategy(
     return "streaming";
   }
 
-  // A message is never split automatically: one reply stays one message at any length.
+  // Keep one logical assistant reply intact here so its context and ordering are preserved.
+  // Transports with hard payload limits split only at their delivery boundary (for example, Telegram/Discord).
   return "single";
 }
 
