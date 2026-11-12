@@ -1,0 +1,85 @@
+Agent-Miki Upgrade Manifest
+============================
+
+Project files updated or added: 67
+- Markdown: 54 (53 existing Miki-owned files updated; 1 new operating-model guide)
+- TypeScript: 4
+- TSX: 4
+- Locale JSON: 4
+- YAML persona/config: 1
+
+Changed project files:
+- README.md
+- config/agent.yaml
+- deploy/firewall/agent-miki-firewall-examples.md
+- docs/ACTIVITY_PAGE_AUDIT_2026-11-06.md
+- docs/ACTIVITY_PAGE_REPAIR_2026-11-06.md
+- docs/AGENT_MIKI_OPERATING_MODEL.md
+- docs/ARCHITECTURE.md
+- docs/AUAE-IMPLEMENTATION-REPORT.md
+- docs/AUTONOMOUS-EXECUTION.md
+- docs/AUTONOMOUS-LLM-CALL-DIAGNOSIS_2026-11-06.md
+- docs/IMPLEMENTATION-REPORT.md
+- docs/IMPLEMENTATION_ROADMAP_BN.md
+- docs/MIKI_AGENT_AND_CHAT_TOPBAR_UPGRADE_TODO.md
+- docs/MONITORING-GRAPH-DIAGNOSIS-AND-REPAIR_2026-11-06.md
+- docs/MONITORING-GRAPH-IMPLEMENTATION-REPORT.md
+- docs/MONITORING-GRAPH-REPAIR-PLAN.md
+- docs/MONITORING-TOPOLOGY-REPAIR_2026-11-06.md
+- docs/REMAINING_TASKS_IMPLEMENTATION_REPORT_2026-11-12.md
+- docs/SANDBOX-NO-CONFIRM-MODE.md
+- docs/TOOL_PLUGIN_SKILLS_OPERATIONS.md
+- docs/WORKFLOW_RELIABILITY_REPAIR_2026-11-06.md
+- docs/always-active-idle-mode.md
+- docs/architecture/UNIVERSAL_BROWSER_AND_DESKTOP_AGENT.md
+- docs/audits/AGENTIC_RELIABILITY_REPAIR_REPORT_2026-11-12.md
+- docs/audits/AGENTIC_RELIABILITY_REPAIR_REPORT_2026-11-12_PHASE2.md
+- docs/audits/AUTONOMY_SELF_ACTIVATION_LONG_RUNNING_SELF_RECOVERY_AUDIT.md
+- docs/audits/UNIVERSAL_BROWSER_DESKTOP_AGENT_PHASE3_2026-11-12.md
+- docs/structure/00-index.md
+- docs/structure/01-root-and-top-level.md
+- docs/structure/02-packages-overview.md
+- docs/structure/03-core-engine.md
+- docs/structure/04-memory.md
+- docs/structure/05-gateway-config-installer.md
+- docs/structure/06-cli-skills.md
+- docs/structure/07-ui-dashboard.md
+- docs/structure/08-build-and-ci.md
+- docs/ui/WEB_UI_REDESIGN_REPORT.md
+- identity/AGENTS.md
+- identity/DRIVES.md
+- identity/HEARTBEAT.md
+- identity/IDENTITY.md
+- identity/INTERESTS.md
+- identity/README.md
+- identity/SOUL.md
+- identity/TOOLS.md
+- identity/USER.md
+- identity/agents/forge/AGENTS.md
+- identity/agents/miki/AGENTS.md
+- identity/agents/sage/AGENTS.md
+- identity/agents/scout/AGENTS.md
+- packages/cli/README.md
+- packages/core/src/OPTIMIZATIONS.md
+- packages/core/src/autonomy/autonomous-supervisor.ts
+- packages/gateway/src/agent/identity-prompt.test.ts
+- packages/gateway/src/agent/identity-prompt.ts
+- packages/memory/README.md
+- packages/ui/README.md
+- packages/ui/frontend/src/app/layout/global-header-actions.tsx
+- packages/ui/frontend/src/features/chat/components/model-selector.tsx
+- packages/ui/frontend/src/features/chat/components/workspace/workspace-header.tsx
+- packages/ui/frontend/src/i18n/locales/bn.json
+- packages/ui/frontend/src/i18n/locales/en.json
+- packages/ui/frontend/src/i18n/locales/pt-br.json
+- packages/ui/frontend/src/i18n/locales/zh.json
+- packages/ui/frontend/src/pages/chat-page-status.test.ts
+- packages/ui/frontend/src/pages/chat-page.tsx
+- scripts/ui-verify/README.md
+
+Protected scope verified unchanged:
+- Skills.md / SKILL.md
+- packages/core/src/plugins/skills/** Markdown
+- packages/core/src/plugins/providers/builtin/llama.cpp/source/** Markdown
+
+UPGRADE_MANIFEST.txt is delivery metadata and is not included in the 67 project-file count.
