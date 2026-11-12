@@ -56,6 +56,8 @@ export interface SteerInput {
   imageUrls?: string[];
   /** Id of the stored chat message, so the caller learns when the run actually read it. */
   messageId?: string;
+  /** New work this message adds to the running task, as short step titles. Applied when the run reads it. */
+  addSteps?: string[];
 }
 
 /** A steered message waiting in a run's inbox. */
@@ -67,6 +69,8 @@ export interface SteerItem {
   receivedAt: number;
   /** What the user was already told about this message while the run was busy, so the run does not repeat it. */
   acknowledgedWith?: string;
+  /** Plan steps this message adds to the run. */
+  addSteps?: string[];
 }
 
 export interface EngineToolSchema {

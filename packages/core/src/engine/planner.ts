@@ -202,3 +202,36 @@ export function describePlan(plan: AgentPlan): string {
 }
 
 export type { PlanStep };
+
+/** Steps a steered message may add to a running task. Bounded so one message cannot rewrite the plan. */
+export const MAX_ADDED_PLAN_STEPS = 5;
+export const MAX_ADDED_PLAN_STEP_CHARS = 200;
+
+/** Keep only short, non-empty step titles from untrusted (model or client) input. */
+export function sanitizeAddedSteps(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((title): title is string => typeof title === "string")
+    .map((title) => title.trim().slice(0, MAX_ADDED_PLAN_STEP_CHARS))
+    .filter((title) => title.length > 0)
+    .slice(0, MAX_ADDED_PLAN_STEPS);
+}
+
+/**
+ * Append pending steps to the run's plan. A missing or trivial plan becomes a multi-step plan
+ * for the same goal. Existing steps keep their status, so finished work is not reopened.
+ */
+export function appendPlanSteps(plan: AgentPlan | undefined, goal: string, titles: string[], now: string): AgentPlan {
+  const next: AgentPlan = plan
+    ? structuredClone(plan)
+    : { id: newPlanId(), goal, source: "llm", complexity: "multi_step", steps: [], createdAt: now };
+  if (next.source === "none") {
+    next.source = "llm";
+    next.complexity = "multi_step";
+  }
+  const stamp = Date.now().toString(36);
+  titles.forEach((title, index) => {
+    next.steps.push({ id: `added_${stamp}_${index}`, title, status: "pending" });
+  });
+  return next;
+}

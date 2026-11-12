@@ -21,7 +21,7 @@ import type {
 } from "./types.js";
 import { toolEffectConfirmation } from "./tool-effect.js";
 import { resolveToolApproval, ToolRegistry, type ToolApprovalSettings } from "./tool-registry.js";
-import { createPlan } from "./planner.js";
+import { appendPlanSteps, createPlan, sanitizeAddedSteps } from "./planner.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { verifyAnswer } from "./verifier.js";
 import { verifyToolAction } from "./action-verifier.js";
@@ -427,6 +427,8 @@ interface ActiveModelCall {
 
 interface RunState {
   runId: string;
+  /** The run's objective, used when a steered message adds steps to a run that has no plan yet. */
+  goal?: string;
   sessionId?: string;
   signal: AbortSignal;
   emit: (event: EngineEvent) => void;
@@ -620,7 +622,14 @@ export class AgentEngine {
     if (!inbox || (!text && imageUrls.length === 0)) return false;
     // Assign the identity before persistence so the in-memory inbox and SQLite
     // inbox always refer to exactly the same message after a restart.
-    const item: SteerItem = { text, imageUrls, receivedAt: Date.now(), messageId: raw.messageId?.trim() || randomUUID() };
+    const addSteps = sanitizeAddedSteps(raw.addSteps);
+    const item: SteerItem = {
+      text,
+      imageUrls,
+      receivedAt: Date.now(),
+      messageId: raw.messageId?.trim() || randomUUID(),
+      ...(addSteps.length ? { addSteps } : {}),
+    };
     try { this.options.steerPersistence?.enqueue(runId, item); }
     catch (error) { this.options.logger?.("steer.persistence_failed", { runId, error: errorMessage(error) }); }
     inbox.push(item);
@@ -686,6 +695,13 @@ export class AgentEngine {
     const inbox = this.steerInboxes.get(state.runId);
     if (!inbox?.length) return 0;
     const items = inbox.splice(0);
+    // Work a steered message adds becomes pending steps of the plan, so the model's
+    // next turn context lists it as unfinished, the same as any other step.
+    const addedTitles = items.flatMap((item) => item.addSteps ?? []);
+    if (addedTitles.length) {
+      state.plan = appendPlanSteps(state.plan, state.goal ?? "", addedTitles, new Date().toISOString());
+      state.emit({ type: "plan.updated", runId: state.runId, plan: structuredClone(state.plan) });
+    }
     // Preserve each follow-up as its own user message. Joining them into one numbered
     // paragraph made unrelated instructions, corrections and attachments lose their
     // original message boundaries and made the model treat the whole batch as one prompt.
@@ -715,6 +731,7 @@ export class AgentEngine {
         receivedAt: new Date(item.receivedAt).toISOString(),
         text: item.text,
         imageCount: item.imageUrls.length,
+        ...(item.addSteps?.length ? { addSteps: item.addSteps } : {}),
       })),
     });
     return items.length;
@@ -819,6 +836,7 @@ export class AgentEngine {
     const runToolTimeoutMs = Number.isFinite(configuredToolTimeoutMs) ? Math.max(0, Math.floor(configuredToolTimeoutMs)) : 0;
     const state: RunState = {
       runId,
+      goal,
       sessionId: request.sessionId,
       signal,
       emit,

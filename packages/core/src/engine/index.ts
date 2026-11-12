@@ -12,9 +12,12 @@ export type {
   ApprovalStoreOptions,
 } from "./approval-store.js";
 export {
+  appendPlanSteps,
   createPlan,
   describePlan,
   parsePlanJson,
+  sanitizeAddedSteps,
+  MAX_ADDED_PLAN_STEPS,
 } from "./planner.js";
 export { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt } from "./prompt.js";
 export {
