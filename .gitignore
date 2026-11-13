@@ -101,3 +101,7 @@ identity/memory/20*.md
 # Runtime agent state (personal, regenerated at runtime)
 identity/memory/
 identity/learned-rules.json
+
+# Local secret vault (never commit)
+config/data/secret-vault.json
+config/data/secret-vault.key

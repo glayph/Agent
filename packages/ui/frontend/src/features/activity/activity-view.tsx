@@ -687,7 +687,7 @@ export function ActivityView() {
     <div className="flex h-full min-h-0 flex-col" data-miki-page="activity">
       <PageHeader title={t("pages.activity.title", { defaultValue: "Activity" })} titleLevel={1} />
       <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-screen-2xl flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-3 sm:p-5 lg:p-6" data-miki-page-body="true">
-      <section className="border-border/60 from-primary/[0.12] via-card/80 to-card/50 relative overflow-hidden rounded-2xl border bg-gradient-to-br p-5 shadow-sm">
+      <section className="border-border/60 from-primary/[0.12] via-card/80 to-card/50 relative shrink-0 overflow-hidden rounded-2xl border bg-gradient-to-br p-5 shadow-sm">
         <div className="bg-primary/20 absolute -top-16 -right-12 size-40 rounded-full blur-3xl" aria-hidden="true" />
         <div className="relative flex min-w-0 flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">

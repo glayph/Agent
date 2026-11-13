@@ -27,8 +27,9 @@ describe("chat_send_file tool", () => {
 
   it("delivers one file with the model's caption as a single message", async () => {
     fs.writeFileSync(path.join(workspace, "voice.mp3"), "audio");
-    const result = await makeTool().execute({ path: "voice.mp3", caption: "  এই নিন  " }, context()) as { delivered: boolean; files: Array<{ type: string }> };
+    const result = await makeTool().execute({ path: "voice.mp3", caption: "  এই নিন  " }, context()) as { delivered: boolean; confirmed: boolean; files: Array<{ type: string }> };
     expect(result.delivered).toBe(true);
+    expect(result.confirmed).toBe(true);
     expect(result.files[0].type).toBe("audio");
     expect(delivered).toHaveLength(1);
     expect(delivered[0]).toMatchObject({ runId: "run-1", sessionId: "session-1", caption: "এই নিন" });

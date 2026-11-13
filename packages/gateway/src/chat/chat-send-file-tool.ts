@@ -102,6 +102,7 @@ export function createChatSendFileTool(options: ChatSendFileToolOptions): Engine
 
       return {
         delivered: true,
+        confirmed: true,
         files: staged.map((item) => ({
           filename: item.attachment.filename,
           type: item.attachment.type,

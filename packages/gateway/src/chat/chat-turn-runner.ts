@@ -1463,8 +1463,9 @@ export function createChatTurnRunner(deps: ChatTurnRunnerDeps): ChatTurnRunner {
           // until this turn knows its real outcome. Otherwise a watchdog timeout or an automatic retry
           // would show the client a premature "cancelled"/"failed" end followed by a second one.
           // A network/provider outage pauses the run at the failed step and resumes it there.
-          // Retry transient provider failures with backoff until recovery or explicit cancellation.
-          // Retry logic is inside the engine's single model step, before any tool side effects.
+          // Keep the run recoverable indefinitely. The supervisor/checkpoint layer preserves
+          // unfinished work so a later model turn can inspect state and continue it; no finite
+          // retry budget is imposed on user-facing work.
           retryTransient: neverStopRetryOptions(),
           ...(persistedUserMessageId ? {
             onCheckpoint: (checkpoint: EngineRunCheckpoint) => {
